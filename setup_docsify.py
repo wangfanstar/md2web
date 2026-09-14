@@ -2,21 +2,49 @@
 
 import argparse
 import hashlib
+import html
 import json
 import re
 import shutil
 import sys
 import urllib.request
+from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).parent
-MD_DIR = ROOT / "md"
 DOCS_DIR = ROOT / "docs"
 LIB_DIR = DOCS_DIR / "lib"
 
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico"}
+RESERVED_GROUP_DIRS = {"lib"}
+
+
+class BuildError(Exception):
+    """构建期间的致命错误，由 main 统一打印并退出。"""
+
+
+@dataclass
+class SourceSpec:
+    raw_path: str
+    base_dir: Path
+    label: str = ""
+    dir: str = ""
+    explicit_dir: bool = False
+    origin: str = "cli"
+
+
+@dataclass
+class Source:
+    root: Path
+    label: str
+    dir: str
+    spec: SourceSpec
+    md_files: list = field(default_factory=list)
+    asset_files: list = field(default_factory=list)
+
 
 def parse_args(argv=None):
-    """解析命令行参数，兼容默认路径、命名参数和位置参数。"""
+    """解析命令行参数：配置文件 + 可重复 --source-md + 兼容旧位置参数。"""
     parser = argparse.ArgumentParser(
         description="将 Markdown 文件夹转成离线可用的 Docsify 文档站。"
     )
@@ -37,9 +65,12 @@ def parse_args(argv=None):
     parser.add_argument(
         "--source-md",
         "--md-dir",
-        dest="source_md_dir_opt",
+        dest="source_md_dirs",
+        action="append",
         type=Path,
-        help="源 Markdown 根目录",
+        default=[],
+        metavar="源md文件夹",
+        help="追加一个源 Markdown 目录，可重复；与 md_sources.json 叠加",
     )
     parser.add_argument(
         "--output-docs",
@@ -49,24 +80,103 @@ def parse_args(argv=None):
         help="输出 Docsify 站点目录",
     )
     parser.add_argument(
+        "--config",
+        dest="config_path",
+        type=Path,
+        help="源文件夹配置文件，默认读取脚本同级的 md_sources.json",
+    )
+    parser.add_argument(
+        "--no-config",
+        action="store_true",
+        dest="no_config",
+        help="忽略 md_sources.json",
+    )
+    parser.add_argument(
         "--index-only",
         "--refresh-index-only",
         action="store_true",
         dest="index_only",
-        help="仅同步文档并重新生成搜索索引与离线数据，跳过 CDN 资源下载和站点文件生成",
+        help="仅同步文档并重新生成搜索索引与离线数据，跳过依赖下载和站点文件生成",
     )
 
     args = parser.parse_args(argv)
-    if args.source_md_dir_pos and args.source_md_dir_opt:
-        parser.error("源 Markdown 目录请只使用位置参数或 --source-md 其中一种")
     if args.output_docs_dir_pos and args.output_docs_dir_opt:
         parser.error("输出目录请只使用位置参数或 --output-docs 其中一种")
 
+    source_dirs = []
+    if args.source_md_dir_pos:
+        source_dirs.append(args.source_md_dir_pos)
+    source_dirs.extend(args.source_md_dirs)
     return argparse.Namespace(
-        source_md_dir=args.source_md_dir_opt or args.source_md_dir_pos,
+        source_md_dirs=source_dirs,
         output_docs_dir=args.output_docs_dir_opt or args.output_docs_dir_pos,
+        config_path=args.config_path,
+        no_config=args.no_config,
         index_only=args.index_only,
     )
+
+
+def load_config_file(config_path: Path):
+    """读取 md_sources.json，返回 (title, specs)。"""
+    try:
+        raw = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise BuildError(f"配置文件不是合法 JSON: {config_path} ({error})")
+    if isinstance(raw, list):
+        raw = {"sources": raw}
+    if not isinstance(raw, dict):
+        raise BuildError(f"配置文件根节点必须是对象或数组: {config_path}")
+    entries = raw.get("sources")
+    if not isinstance(entries, list):
+        raise BuildError(f"配置文件缺少 sources 数组: {config_path}")
+    base_dir = Path(config_path).resolve().parent
+    specs = []
+    for index, entry in enumerate(entries, 1):
+        if isinstance(entry, str):
+            specs.append(SourceSpec(raw_path=entry, base_dir=base_dir, origin="config"))
+            continue
+        if not isinstance(entry, dict):
+            raise BuildError(f"sources[{index}] 必须是字符串或对象: {config_path}")
+        path = entry.get("path")
+        if not path or not isinstance(path, str):
+            raise BuildError(f"sources[{index}] 缺少字符串字段 path: {config_path}")
+        dir_value = entry.get("dir")
+        specs.append(
+            SourceSpec(
+                raw_path=path,
+                base_dir=base_dir,
+                label=str(entry.get("label") or ""),
+                dir=str(dir_value) if dir_value else "",
+                explicit_dir=bool(dir_value),
+                origin="config",
+            )
+        )
+    return (raw.get("title") or None), specs
+
+
+def load_source_specs(args):
+    """合并配置文件与命令行源，返回 (title, specs)。"""
+    specs = []
+    title = "文档中心"
+    config_path = None
+    if not args.no_config:
+        config_path = args.config_path
+        if config_path is None:
+            candidate = ROOT / "md_sources.json"
+            config_path = candidate if candidate.exists() else None
+    if config_path is not None:
+        config_path = Path(config_path).expanduser()
+        if not config_path.exists():
+            raise BuildError(f"配置文件不存在: {config_path}")
+        config_title, config_specs = load_config_file(config_path)
+        if config_title:
+            title = str(config_title)
+        specs.extend(config_specs)
+    for raw in args.source_md_dirs:
+        specs.append(SourceSpec(raw_path=str(raw), base_dir=Path.cwd(), origin="cli"))
+    if not specs:
+        specs.append(SourceSpec(raw_path="md", base_dir=ROOT, origin="default"))
+    return title, specs
 
 
 def _resolve_config_path(path: Path = None, default: Path = None) -> Path:
