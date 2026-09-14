@@ -232,3 +232,37 @@ class SourceTests(TempDirTestCase):
         root = self.make_source("lib", {"x.md": "x"})
         sources = self.resolve([self.make_spec(root)])
         self.assertEqual(sources[0].dir, "lib-2")
+
+    def test_assign_dirs_explicit_invalid_dir_error(self):
+        root = self.make_source("src", {"x.md": "x"})
+        for bad in ["../escape", "a/b", "***", "."]:
+            with self.assertRaises(self.module.BuildError):
+                self.resolve([self.make_spec(root, dir=bad, explicit=True)])
+
+    def test_assign_dirs_explicit_reserved_names_error(self):
+        root = self.make_source("src", {"x.md": "x"})
+        for bad in ["lib", "nul", "COM1"]:
+            with self.assertRaises(self.module.BuildError):
+                self.resolve([self.make_spec(root, dir=bad, explicit=True)])
+
+    def test_assign_dirs_case_insensitive_collision(self):
+        first = self.make_source("a/Notes", {"x.md": "x"})
+        second = self.make_source("b/notes", {"y.md": "y"})
+        sources = self.resolve([self.make_spec(first), self.make_spec(second)])
+        self.assertEqual([item.dir for item in sources], ["Notes", "notes-2"])
+
+    def test_scan_uppercase_md_and_images_dir(self):
+        root = self.make_source(
+            "src",
+            {"A.MD": "# A", "Images/data.bin": "x", "sub/IMG.PNG": "x"},
+        )
+        sources = self.resolve([self.make_spec(root)])
+        self.assertEqual(sources[0].md_files, ["A.MD"])
+        self.assertEqual(sources[0].asset_files, ["Images/data.bin", "sub/IMG.PNG"])
+
+    def test_resolve_docs_inside_source_error(self):
+        root = self.make_source("src", {"a.md": "# A"})
+        docs_inside = root / "out"
+        with self.assertRaises(self.module.BuildError):
+            with redirect_stdout(io.StringIO()):
+                self.module.resolve_sources([self.make_spec(root)], docs_inside)

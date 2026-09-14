@@ -17,6 +17,11 @@ LIB_DIR = DOCS_DIR / "lib"
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico"}
 RESERVED_GROUP_DIRS = {"lib"}
+WINDOWS_RESERVED_NAMES = {
+    "con", "prn", "aux", "nul",
+    *(f"com{number}" for number in range(1, 10)),
+    *(f"lpt{number}" for number in range(1, 10)),
+}
 
 
 class BuildError(Exception):
@@ -192,8 +197,8 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
 
 
 def sanitize_dir_name(name: str) -> str:
-    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "-", str(name))
-    cleaned = re.sub(r"\s+", "-", cleaned)
+    cleaned = re.sub(r"[^\w.-]", "-", str(name), flags=re.UNICODE)
+    cleaned = re.sub(r"-{2,}", "-", cleaned)
     return cleaned.strip("-. ")
 
 
@@ -209,7 +214,7 @@ def scan_source(source: Source) -> None:
         rel_posix = rel.as_posix()
         if path.suffix.lower() == ".md":
             md_files.append(rel_posix)
-        elif "images" in rel.parts[:-1] or path.suffix.lower() in IMAGE_EXTENSIONS:
+        elif any(part.casefold() == "images" for part in rel.parts[:-1]) or path.suffix.lower() in IMAGE_EXTENSIONS:
             asset_files.append(rel_posix)
     source.md_files = md_files
     source.asset_files = asset_files
@@ -233,16 +238,24 @@ def resolve_sources(specs, docs_dir):
 
     for index, source in enumerate(sources):
         for other in sources[index + 1:]:
-            if _is_relative_to(source.root, other.root) or _is_relative_to(other.root, source.root):
+            if _is_relative_to(source.root, other.root):
                 raise BuildError(
-                    f"源目录不能互相嵌套: {display_path(source.root)} 与 {display_path(other.root)}"
+                    f"源目录不能互相嵌套: {display_path(source.root)} 位于 {display_path(other.root)} 内"
+                )
+            if _is_relative_to(other.root, source.root):
+                raise BuildError(
+                    f"源目录不能互相嵌套: {display_path(other.root)} 位于 {display_path(source.root)} 内"
                 )
 
     docs_resolved = Path(docs_dir).resolve()
     for source in sources:
-        if _is_relative_to(source.root, docs_resolved) or _is_relative_to(docs_resolved, source.root):
+        if _is_relative_to(source.root, docs_resolved):
             raise BuildError(
-                f"源目录与输出目录不能互相嵌套: {display_path(source.root)} 与 {display_path(docs_resolved)}"
+                f"源目录不能位于输出目录内: {display_path(source.root)} 位于 {display_path(docs_resolved)} 内"
+            )
+        if _is_relative_to(docs_resolved, source.root):
+            raise BuildError(
+                f"输出目录不能位于源目录内: {display_path(docs_resolved)} 位于 {display_path(source.root)} 内"
             )
 
     for source in sources:
@@ -261,9 +274,18 @@ def resolve_sources(specs, docs_dir):
 
 def assign_group_dirs(sources) -> None:
     """为每个源分配站点内分组目录，处理冲突与保留名。"""
-    used = set(RESERVED_GROUP_DIRS)
+    used = set(RESERVED_GROUP_DIRS) | WINDOWS_RESERVED_NAMES
     for index, source in enumerate(sources, 1):
-        candidate = source.spec.dir or sanitize_dir_name(source.root.name) or f"source-{index}"
+        if source.spec.explicit_dir:
+            raw = source.spec.dir
+            candidate = sanitize_dir_name(raw)
+            if not candidate or candidate != raw.strip():
+                raise BuildError(
+                    f"分组目录名包含非法字符或为空: {raw}（源: {display_path(source.root)}），"
+                    "请只使用中英文、数字、-_. 组成的名称"
+                )
+        else:
+            candidate = sanitize_dir_name(source.root.name) or f"source-{index}"
         if candidate.casefold() in used:
             if source.spec.explicit_dir:
                 raise BuildError(
