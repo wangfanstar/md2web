@@ -2026,7 +2026,7 @@ md/
 | 指定配置文件 | `python setup_docsify.py --config other.json` |
 | 忽略配置文件 | `python setup_docsify.py --no-config` |
 | 指定输出目录 | `python setup_docsify.py --output-docs site` |
-| 仅刷新搜索索引 | `python setup_docsify.py --index-only` |
+| 仅同步并刷新索引 | `python setup_docsify.py --index-only` |
 
 > 兼容旧用法：`python setup_docsify.py path/to/md path/to/docs`（位置参数指定源与输出）。
 > `--index-only` 会镜像同步文档并刷新搜索索引与离线数据，但不会重建侧边栏与首页；新增文件要出现在导航中需执行一次完整构建。
@@ -2086,7 +2086,7 @@ Set-Content "$env:TEMP\md2web-smoke\src1\a.md" "# A" -Encoding ASCII
 Set-Content "$env:TEMP\md2web-smoke\src1\子目录\b.md" "# B" -Encoding ASCII
 Set-Content "$env:TEMP\md2web-smoke\src2\c.md" "# C" -Encoding ASCII
 Copy-Item docs\lib "$env:TEMP\md2web-smoke\out" -Recurse -Force
-python setup_docsify.py --source-md "$env:TEMP\md2web-smoke\src1" --source-md "$env:TEMP\md2web-smoke\src2" --output-docs "$env:TEMP\md2web-smoke\out"
+python setup_docsify.py --no-config --source-md "$env:TEMP\md2web-smoke\src1" --source-md "$env:TEMP\md2web-smoke\src2" --output-docs "$env:TEMP\md2web-smoke\out"
 Get-ChildItem "$env:TEMP\md2web-smoke\out" | Select-Object Name
 ```
 

@@ -79,7 +79,7 @@ md/
 | 指定配置文件 | `python setup_docsify.py --config other.json` |
 | 忽略配置文件 | `python setup_docsify.py --no-config` |
 | 指定输出目录 | `python setup_docsify.py --output-docs site` |
-| 仅刷新搜索索引 | `python setup_docsify.py --index-only` |
+| 仅同步并刷新索引 | `python setup_docsify.py --index-only` |
 
 > 兼容旧用法：`python setup_docsify.py path/to/md path/to/docs`（位置参数指定源与输出）。
 > `--index-only` 会镜像同步文档并刷新搜索索引与离线数据，但不会重建侧边栏与首页；新增文件要出现在导航中需执行一次完整构建。

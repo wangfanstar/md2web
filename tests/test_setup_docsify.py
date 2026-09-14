@@ -149,8 +149,9 @@ class ConfigTests(TempDirTestCase):
         self.assertFalse(args.index_only)
 
     def test_parse_args_output_conflict(self):
-        with self.assertRaises(SystemExit):
-            self.module.parse_args(["src", "--output-docs", "out1", "out2"])
+        with redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                self.module.parse_args(["src", "--output-docs", "out1", "out2"])
 
 
 class SourceTests(TempDirTestCase):
@@ -757,10 +758,15 @@ class ServeTests(unittest.TestCase):
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
-                with urllib.request.urlopen(
-                    f"http://127.0.0.1:{port}/index.html"
-                ) as response:
-                    self.assertEqual(response.read().decode("utf-8"), "ok")
+                with mock.patch.object(
+                    serve.http.server.SimpleHTTPRequestHandler,
+                    "log_message",
+                    lambda *args, **kwargs: None,
+                ):
+                    with urllib.request.urlopen(
+                        f"http://127.0.0.1:{port}/index.html"
+                    ) as response:
+                        self.assertEqual(response.read().decode("utf-8"), "ok")
             finally:
                 server.shutdown()
                 server.server_close()
