@@ -332,6 +332,26 @@ class SyncTests(TempDirTestCase):
                 with self.assertRaises(self.module.BuildError):
                     self.module.sync_sources(sources, self.docs)
 
+    def test_sync_wraps_cleanup_oserror(self):
+        (self.docs / "src").mkdir(parents=True)
+        (self.docs / "src" / "old.md").write_text("# old", encoding="utf-8")
+        (self.docs / "stale").mkdir()
+        root = self.make_source("src", {"a.md": "# A"})
+        sources = self.resolve([self.make_spec(root)])
+        real_rmtree = self.module.shutil.rmtree
+        calls = {"count": 0}
+
+        def flaky_rmtree(path, *args, **kwargs):
+            calls["count"] += 1
+            if calls["count"] > 1:
+                raise OSError("locked")
+            return real_rmtree(path, *args, **kwargs)
+
+        with mock.patch.object(self.module.shutil, "rmtree", flaky_rmtree):
+            with redirect_stdout(io.StringIO()):
+                with self.assertRaises(self.module.BuildError):
+                    self.module.sync_sources(sources, self.docs)
+
 
 class AssetTests(TempDirTestCase):
     def test_ensure_assets_reuses_existing(self):
@@ -569,3 +589,66 @@ class GenerationTests(TempDirTestCase):
         self.assertNotIn("</script><script>alert(1)", html_text)
         self.assertIn("\\u003c/script", html_text)
         self.assertIn("&lt;/script&gt;", html_text)
+
+
+class EndToEndTests(TempDirTestCase):
+    def test_full_build_offline(self):
+        root = self.make_source(
+            "src", {"a.md": "# A\n\n```python\nprint(1)\n```", "sub/b.md": "# B"}
+        )
+        components = self.docs / "lib" / "components"
+        components.mkdir(parents=True)
+        for filename in self.module.ASSETS:
+            (self.docs / "lib" / filename).write_text("x", encoding="utf-8")
+        (components / "prism-python.min.js").write_text("x", encoding="utf-8")
+        config = self.tmp / "md_sources.json"
+        config.write_text(
+            json.dumps({"title": "E2E", "sources": [{"path": str(root), "label": "文档"}]}),
+            encoding="utf-8",
+        )
+        with mock.patch.object(self.module, "_download") as download:
+            with redirect_stdout(io.StringIO()):
+                self.module.main(
+                    ["--config", str(config), "--output-docs", str(self.docs)]
+                )
+        download.assert_not_called()
+        self.assertTrue((self.docs / "index.html").exists())
+        self.assertTrue((self.docs / "_sidebar.md").exists())
+        self.assertTrue((self.docs / "README.md").exists())
+        self.assertTrue((self.docs / "search-index.json").exists())
+        self.assertTrue((self.docs / "src" / "a.md").exists())
+        self.assertIn(
+            "<title>E2E</title>", (self.docs / "index.html").read_text(encoding="utf-8")
+        )
+
+    def test_index_only_skips_site_files(self):
+        root = self.make_source("src", {"a.md": "# A"})
+        config = self.tmp / "md_sources.json"
+        config.write_text(
+            json.dumps({"sources": [{"path": str(root)}]}), encoding="utf-8"
+        )
+        with redirect_stdout(io.StringIO()):
+            self.module.main(
+                [
+                    "--config",
+                    str(config),
+                    "--output-docs",
+                    str(self.docs),
+                    "--index-only",
+                ]
+            )
+        self.assertTrue((self.docs / "search-index.json").exists())
+        self.assertFalse((self.docs / "index.html").exists())
+
+    def test_empty_sources_raises(self):
+        empty = self.tmp / "empty"
+        empty.mkdir()
+        config = self.tmp / "md_sources.json"
+        config.write_text(
+            json.dumps({"sources": [{"path": str(empty)}]}), encoding="utf-8"
+        )
+        with redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                self.module.main(
+                    ["--config", str(config), "--output-docs", str(self.docs)]
+                )

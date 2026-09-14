@@ -332,7 +332,12 @@ def sync_sources(sources, docs_dir) -> None:
         if not entry.is_dir() or entry.name.startswith(".") or entry.name.casefold() in reserved:
             continue
         if entry.name not in active:
-            shutil.rmtree(entry)
+            try:
+                shutil.rmtree(entry)
+            except OSError as error:
+                raise BuildError(
+                    f"清理过期分组失败: {display_path(entry)}/ ({error})"
+                ) from error
             print(f"  [清理] 移除过期分组 {display_path(entry)}/")
 
 
@@ -340,10 +345,9 @@ def _resolve_config_path(path: Path = None, default: Path = None) -> Path:
     return (Path(path).expanduser() if path else default).resolve()
 
 
-def configure_paths(source_md_dir: Path = None, output_docs_dir: Path = None):
-    """根据命令行参数更新输入、输出和离线资源目录。"""
-    global MD_DIR, DOCS_DIR, LIB_DIR
-    MD_DIR = _resolve_config_path(source_md_dir, ROOT / "md")
+def configure_paths(output_docs_dir: Path = None):
+    """根据命令行参数更新输出目录与离线资源目录。"""
+    global DOCS_DIR, LIB_DIR
     DOCS_DIR = _resolve_config_path(output_docs_dir, ROOT / "docs")
     LIB_DIR = DOCS_DIR / "lib"
 
@@ -354,11 +358,6 @@ def display_path(path: Path) -> str:
         return str(path.relative_to(ROOT))
     except ValueError:
         return str(path)
-
-
-def preview_server_command(docs_dir):
-    """返回可从局域网 IP 访问的本地预览命令。"""
-    return f"cd {docs_dir} && python -m http.server 3000 --bind 0.0.0.0"
 
 
 # ---- 离线资源（jsdelivr CDN）----
@@ -3720,55 +3719,61 @@ def generate_index_html(search_paths, namespace, title="文档中心"):
 
 def main(argv=None):
     args = parse_args(argv)
-    configure_paths(args.source_md_dir, args.output_docs_dir)
+    configure_paths(args.output_docs_dir)
 
     print("=== Docsify 离线文档站 构建工具 ===\n")
-    print(f"源 Markdown 目录: {MD_DIR}")
-    print(f"输出文档站目录: {DOCS_DIR}\n")
-
-    DOCS_DIR.mkdir(parents=True, exist_ok=True)
-
-    if not MD_DIR.exists():
-        print(f"  错误: 源 Markdown 目录不存在: {MD_DIR}")
-        print("  请检查 --source-md 路径是否正确，或先创建该目录并放入文档。")
+    try:
+        title, specs = load_source_specs(args)
+        sources = resolve_sources(specs, DOCS_DIR)
+        assign_group_dirs(sources)
+    except BuildError as error:
+        print(f"  错误: {error}")
         sys.exit(1)
 
+    print(f"输出文档站目录: {display_path(DOCS_DIR)}")
+    print(f"站点标题: {title}")
+    print("有效源:")
+    for source in sources:
+        print(
+            f"  - {display_path(source.root)} -> /{source.dir}/ "
+            f"({len(source.md_files)} 个文档, 标签: {source.label})"
+        )
+    print()
+
     if args.index_only:
-        print("=== 仅刷新搜索索引（跳过资源下载与站点文件生成） ===\n")
+        print("=== 仅刷新搜索索引（跳过依赖与站点文件生成） ===\n")
         print("1. 同步 Markdown 文件和图片...")
-        subfolders = sync_md_files()
+        sync_sources(sources, DOCS_DIR)
         print("2. 重新生成搜索索引与离线数据...")
-        if subfolders:
-            generate_search_index(subfolders)
+        generate_search_index(sources, title)
         LIB_DIR.mkdir(parents=True, exist_ok=True)
         generate_offline_data()
         print("\n=== 搜索索引刷新完成 ===")
         return
 
-    print("1. 下载离线资源...")
-    download_assets()
-    patch_docsify_file_router()
-    patch_docsify_css()
+    print("1. 检查离线依赖...")
+    try:
+        ensure_assets()
+        patch_docsify_file_router()
+        patch_docsify_css()
+        ensure_prism_components(sources)
+    except BuildError as error:
+        print(f"  错误: {error}")
+        sys.exit(1)
     generate_custom_search_assets()
 
     print("2. 同步 Markdown 文件和图片...")
-    subfolders = sync_md_files()
+    sync_sources(sources, DOCS_DIR)
 
-    print("3. 下载 Prism 语言组件（离线高亮）...")
-    download_prism_components()
-
-    print("4. 生成配置文件和首页...")
-    search_paths = collect_search_paths(subfolders) if subfolders else ["/"]
-    namespace = compute_search_namespace(subfolders) if subfolders else "docs-empty"
-    if subfolders:
-        generate_sidebar(subfolders)
-        generate_readme(subfolders)
-        generate_search_index(subfolders)
+    print("3. 生成导航、首页与搜索索引...")
+    generate_sidebar(sources)
+    generate_readme(sources, title)
+    generate_search_index(sources, title)
     generate_offline_data()
-    generate_index_html(search_paths, namespace)
+    generate_index_html(collect_search_paths(sources), compute_search_namespace(sources), title)
 
     print("\n=== 构建完成 ===")
-    print(f"\n启动本地预览: {preview_server_command(DOCS_DIR)}")
+    print("\n启动本地预览: python serve.py")
     print("本机打开: http://localhost:3000")
     print("局域网访问: http://<这台机器的IP>:3000")
 
