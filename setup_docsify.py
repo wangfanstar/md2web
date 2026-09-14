@@ -3208,20 +3208,38 @@ OFFLINE_FILE_JS = r"""(function () {
 """
 
 
-def download_assets():
-    """下载所有离线资源到 docs/lib/"""
+def _download(url: str, dest: Path) -> bool:
+    """下载到 .part 临时文件后原子替换，失败返回 False。"""
+    tmp = dest.with_name(dest.name + ".part")
+    try:
+        urllib.request.urlretrieve(url, tmp)
+        tmp.replace(dest)
+        return True
+    except Exception as error:
+        print(f"  [错误] 下载 {dest.name} 失败: {error}")
+        if tmp.exists():
+            tmp.unlink()
+        return False
+
+
+def ensure_assets() -> None:
+    """确保 docs/lib 下离线依赖齐全：存在即复用，缺失才下载。"""
     LIB_DIR.mkdir(parents=True, exist_ok=True)
+    missing = []
     for filename, url in ASSETS.items():
         dest = LIB_DIR / filename
-        if dest.exists():
-            print(f"  [跳过] {filename} (已存在)")
+        if dest.exists() and dest.stat().st_size > 0:
+            print(f"  [复用] {filename}")
             continue
         print(f"  [下载] {filename} <- {url}")
-        try:
-            urllib.request.urlretrieve(url, dest)
-        except Exception as e:
-            print(f"  [错误] 下载 {filename} 失败: {e}")
-    print("  离线资源下载完成。\n")
+        if not _download(url, dest):
+            missing.append(filename)
+    if missing:
+        raise BuildError(
+            "以下离线依赖缺失且下载失败:\n    - "
+            + "\n    - ".join(missing)
+            + f"\n  请联网后重新运行，或将完整依赖复制到 {display_path(LIB_DIR)}/"
+        )
 
 
 def patch_docsify_file_router():

@@ -331,3 +331,32 @@ class SyncTests(TempDirTestCase):
             with redirect_stdout(io.StringIO()):
                 with self.assertRaises(self.module.BuildError):
                     self.module.sync_sources(sources, self.docs)
+
+
+class AssetTests(TempDirTestCase):
+    def test_ensure_assets_reuses_existing(self):
+        (self.docs / "lib").mkdir(parents=True)
+        for filename in self.module.ASSETS:
+            (self.docs / "lib" / filename).write_text("x", encoding="utf-8")
+        with mock.patch.object(self.module, "_download") as download:
+            with redirect_stdout(io.StringIO()):
+                self.module.ensure_assets()
+        download.assert_not_called()
+
+    def test_ensure_assets_reports_missing(self):
+        with mock.patch.object(self.module, "_download", return_value=False):
+            with redirect_stdout(io.StringIO()):
+                with self.assertRaises(self.module.BuildError) as ctx:
+                    self.module.ensure_assets()
+        self.assertIn("docsify.min.js", str(ctx.exception))
+
+    def test_download_writes_file(self):
+        dest = self.tmp / "out.js"
+
+        def fake_urlretrieve(url, filename):
+            Path(filename).write_bytes(b"data")
+
+        with mock.patch.object(self.module.urllib.request, "urlretrieve", fake_urlretrieve):
+            self.assertTrue(self.module._download("https://example.invalid/x.js", dest))
+        self.assertEqual(dest.read_bytes(), b"data")
+        self.assertFalse((self.tmp / "out.js.part").exists())
