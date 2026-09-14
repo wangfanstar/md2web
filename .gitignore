@@ -1,12 +1,3 @@
 # Python
 __pycache__/
 *.pyc
-
-# 构建产物：docs/ 由 setup_docsify.py 生成
-/docs/
-
-# webtool 中的构建生成物（每次构建由脚本重新生成，版本库只保留第三方离线依赖）
-webtool/lib/offline-data.js
-webtool/lib/offline-file.js
-webtool/lib/custom-search.js
-webtool/lib/custom-search.css
