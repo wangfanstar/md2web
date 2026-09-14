@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>文档中心</title>
+  <link rel="stylesheet" href="lib/prism.min.css">
+  <link rel="stylesheet" href="lib/docsify.min.css">
+  <link rel="stylesheet" href="lib/custom-search.css">
+</head>
+<body>
+  <script src="lib/offline-data.js"></script>
+  <script src="lib/offline-file.js"></script>
+  <div id="app">加载中...</div>
+  <script>
+    window.$docsify = {
+      name: "文档中心",
+      repo: '',
+      loadSidebar: true,
+      coverpage: false,
+      subMaxLevel: 0,
+      auto2top: true,
+      noEmoji: true,
+      plugins: [function (hook) {
+        // Prism 无对应组件的语言（cuda/p4/asm 等）改用近似语法高亮，源 md 不受影响
+        var langMap = {"cuda": "cpp", "p4": "c", "asm": "nasm"};
+        hook.beforeEach(function (content) {
+          var inFence = false, fenceChar = '';
+          return content.split('\n').map(function (line) {
+            var m = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+            if (m) {
+              var marker = m[1].charAt(0);
+              if (!inFence) {
+                inFence = true; fenceChar = marker;
+                var lm = m[2].match(/^\s*([A-Za-z0-9_+#.-]+)/);
+                if (lm) {
+                  var target = langMap[lm[1].toLowerCase()];
+                  if (target) {
+                    return line.replace(lm[1], target);
+                  }
+                }
+              } else if (marker === fenceChar) {
+                inFence = false; fenceChar = '';
+              }
+            }
+            return line;
+          }).join('\n');
+        });
+      }],
+      customSearch: {
+        indexPath: 'search-index.json',
+        maxSidebarResults: 8,
+        maxDialogResults: 50,
+        minQueryLength: 2,
+      },
+      customToc: {
+        enabled: true,
+        minLevel: 2,
+        maxLevel: 4,
+        title: '本文目录',
+      },
+    }
+  </script>
+  <script src="lib/prism.min.js"></script>
+  <script src="lib/prism-autoloader.min.js"></script>
+  <script>
+    // 语言组件改从本地 lib/components/ 加载，运行时不请求 CDN
+    if (window.Prism && Prism.plugins && Prism.plugins.autoloader) {
+      Prism.plugins.autoloader.languages_path = 'lib/components/';
+    }
+  </script>
+  <script src="lib/docsify.min.js?v=file-router-3"></script>
+  <script src="lib/zoom-image.min.js"></script>
+  <script src="lib/front-matter.min.js"></script>
+  <script src="lib/custom-search.js"></script>
+</body>
+</html>

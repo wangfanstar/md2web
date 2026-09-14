@@ -3409,35 +3409,24 @@ def generate_index_html(title="文档中心"):
 
 def main(argv=None):
     args = parse_args(argv)
-    configure_paths(args.output_docs_dir)
 
     print("=== Docsify 离线文档站 构建工具 ===\n")
+    print(f"源文档目录: {display_path(MD_DIR)}")
+    print(f"输出目录: {display_path(DOCS_DIR)}")
+    print(f"站点标题: {args.title}\n")
+
     try:
-        title, specs = load_source_specs(args)
-        sources = resolve_sources(specs, DOCS_DIR)
-        assign_group_dirs(sources)
+        md_files = scan_markdown(MD_DIR)
     except (BuildError, OSError, UnicodeDecodeError) as error:
         print(f"  错误: {error}")
         sys.exit(1)
 
-    print(f"输出文档站目录: {display_path(DOCS_DIR)}")
-    print(f"站点标题: {title}")
-    print("有效源:")
-    for source in sources:
-        print(
-            f"  - {display_path(source.root)} -> /{source.dir}/ "
-            f"({len(source.md_files)} 个文档, 标签: {source.label})"
-        )
-    print()
+    print(f"共 {len(md_files)} 个文档\n")
 
     try:
         if args.index_only:
             print("=== 仅刷新搜索索引（跳过依赖与站点文件生成） ===\n")
-            print("1. 同步 Markdown 文件和图片...")
-            sync_sources(sources, DOCS_DIR)
-            print("2. 重新生成搜索索引与离线数据...")
-            generate_search_index(sources, title)
-            LIB_DIR.mkdir(parents=True, exist_ok=True)
+            generate_search_index(md_files, args.title)
             generate_offline_data()
             print("\n=== 搜索索引刷新完成 ===")
             return
@@ -3446,22 +3435,15 @@ def main(argv=None):
         ensure_assets()
         patch_docsify_file_router()
         patch_docsify_css()
-        ensure_prism_components(sources)
+        ensure_prism_components(MD_DIR, md_files)
         generate_custom_search_assets()
 
-        print("2. 同步 Markdown 文件和图片...")
-        sync_sources(sources, DOCS_DIR)
-
-        print("3. 生成导航、首页与搜索索引...")
-        generate_sidebar(sources)
-        generate_readme(sources, title)
-        generate_search_index(sources, title)
+        print("2. 生成导航、首页与搜索索引...")
+        generate_sidebar(md_files)
+        generate_readme(md_files, args.title)
+        generate_search_index(md_files, args.title)
         generate_offline_data()
-        generate_index_html(
-            collect_search_paths(sources),
-            compute_search_namespace(sources),
-            title,
-        )
+        generate_index_html(args.title)
 
         print("\n=== 构建完成 ===")
         print("\n启动本地预览: python serve.py")

@@ -373,3 +373,78 @@ class PrismTests(TempDirTestCase):
         self.assertIn("prism-cpp.min.js", requested)
         self.assertIn("prism-c.min.js", requested)
         self.assertNotIn("prism-cuda", requested)
+
+
+class EndToEndTests(TempDirTestCase):
+    def seed_assets(self):
+        components = self.docs / "lib" / "components"
+        components.mkdir(parents=True)
+        for filename in self.module.ASSETS:
+            (self.docs / "lib" / filename).write_text("x", encoding="utf-8")
+        (components / "prism-python.min.js").write_text("x", encoding="utf-8")
+
+    def test_full_build_offline(self):
+        self.write_doc("a.md", "# A\n\n```python\nprint(1)\n```")
+        self.write_doc("sub/b.md", "# B")
+        self.seed_assets()
+        with mock.patch.object(self.module, "_download") as download:
+            with redirect_stdout(io.StringIO()):
+                self.module.main([])
+        download.assert_not_called()
+        self.assertTrue((self.docs / "index.html").exists())
+        self.assertTrue((self.docs / "_sidebar.md").exists())
+        self.assertTrue((self.docs / "README.md").exists())
+        self.assertTrue((self.docs / "search-index.json").exists())
+        self.assertTrue((self.md / "a.md").exists())
+        self.assertIn(
+            "<title>文档中心</title>",
+            (self.docs / "index.html").read_text(encoding="utf-8"),
+        )
+
+    def test_full_build_custom_title(self):
+        self.write_doc("a.md", "# A")
+        self.seed_assets()
+        with redirect_stdout(io.StringIO()):
+            self.module.main(["--title", "E2E"])
+        self.assertIn(
+            "<title>E2E</title>",
+            (self.docs / "index.html").read_text(encoding="utf-8"),
+        )
+        self.assertIn("# E2E", (self.docs / "README.md").read_text(encoding="utf-8"))
+
+    def test_index_only_skips_site_files(self):
+        self.write_doc("a.md", "# A")
+        with redirect_stdout(io.StringIO()):
+            self.module.main(["--index-only"])
+        self.assertTrue((self.docs / "search-index.json").exists())
+        self.assertFalse((self.docs / "index.html").exists())
+
+    def test_missing_source_exits(self):
+        shutil.rmtree(self.md)
+        with redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                self.module.main([])
+
+    def test_empty_source_exits(self):
+        with redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                self.module.main([])
+
+    def test_dependency_failure_exits(self):
+        self.write_doc("a.md", "# A")
+        with mock.patch.object(self.module, "_download", return_value=False):
+            with redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    self.module.main([])
+
+    def test_build_does_not_touch_user_files(self):
+        self.write_doc("a.md", "# A")
+        (self.md / "images").mkdir()
+        (self.md / "images" / "pic.png").write_bytes(b"img")
+        (self.md / "notes.txt").write_text("keep", encoding="utf-8")
+        self.seed_assets()
+        with redirect_stdout(io.StringIO()):
+            self.module.main([])
+        self.assertEqual((self.md / "images" / "pic.png").read_bytes(), b"img")
+        self.assertEqual((self.md / "notes.txt").read_text(encoding="utf-8"), "keep")
+        self.assertTrue((self.md / "a.md").exists())
