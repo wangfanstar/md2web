@@ -3212,13 +3212,17 @@ def _download(url: str, dest: Path) -> bool:
     """下载到 .part 临时文件后原子替换，失败返回 False。"""
     tmp = dest.with_name(dest.name + ".part")
     try:
-        urllib.request.urlretrieve(url, tmp)
+        with urllib.request.urlopen(url, timeout=30) as response, tmp.open("wb") as handle:
+            shutil.copyfileobj(response, handle)
         tmp.replace(dest)
         return True
     except Exception as error:
-        print(f"  [错误] 下载 {dest.name} 失败: {error}")
-        if tmp.exists():
-            tmp.unlink()
+        print(f"  [错误] 下载 {dest.name} 失败: {error} ({url})")
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
         return False
 
 

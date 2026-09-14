@@ -857,13 +857,45 @@ class AssetTests(TempDirTestCase):
     def test_download_writes_file(self):
         dest = self.tmp / "out.js"
 
-        def fake_urlretrieve(url, filename):
-            Path(filename).write_bytes(b"data")
+        class FakeResponse(io.BytesIO):
+            def __enter__(self):
+                return self
 
-        with mock.patch.object(self.module.urllib.request, "urlretrieve", fake_urlretrieve):
+            def __exit__(self, *args):
+                return False
+
+        def fake_urlopen(url, timeout=None):
+            self.assertEqual(timeout, 30)
+            return FakeResponse(b"data")
+
+        with mock.patch.object(self.module.urllib.request, "urlopen", fake_urlopen):
             self.assertTrue(self.module._download("https://example.invalid/x.js", dest))
         self.assertEqual(dest.read_bytes(), b"data")
         self.assertFalse((self.tmp / "out.js.part").exists())
+
+    def test_download_failure_keeps_existing_file(self):
+        dest = self.tmp / "out.js"
+        dest.write_bytes(b"old")
+
+        def fake_urlopen(url, timeout=None):
+            raise self.module.urllib.error.URLError("boom")
+
+        with mock.patch.object(self.module.urllib.request, "urlopen", fake_urlopen):
+            with redirect_stdout(io.StringIO()):
+                self.assertFalse(self.module._download("https://example.invalid/x.js", dest))
+        self.assertEqual(dest.read_bytes(), b"old")
+        self.assertFalse((self.tmp / "out.js.part").exists())
+
+    def test_ensure_assets_redownloads_empty_file(self):
+        (self.docs / "lib").mkdir(parents=True)
+        for filename in self.module.ASSETS:
+            (self.docs / "lib" / filename).write_text("x", encoding="utf-8")
+        (self.docs / "lib" / "docsify.min.js").write_text("", encoding="utf-8")
+        with mock.patch.object(self.module, "_download", return_value=True) as download:
+            with redirect_stdout(io.StringIO()):
+                self.module.ensure_assets()
+        self.assertEqual(download.call_count, 1)
+        self.assertEqual(download.call_args.args[1].name, "docsify.min.js")
 ```
 
 - [ ] **Step 2: 运行测试，确认失败**
@@ -880,13 +912,17 @@ def _download(url: str, dest: Path) -> bool:
     """下载到 .part 临时文件后原子替换，失败返回 False。"""
     tmp = dest.with_name(dest.name + ".part")
     try:
-        urllib.request.urlretrieve(url, tmp)
+        with urllib.request.urlopen(url, timeout=30) as response, tmp.open("wb") as handle:
+            shutil.copyfileobj(response, handle)
         tmp.replace(dest)
         return True
     except Exception as error:
-        print(f"  [错误] 下载 {dest.name} 失败: {error}")
-        if tmp.exists():
-            tmp.unlink()
+        print(f"  [错误] 下载 {dest.name} 失败: {error} ({url})")
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
         return False
 
 
