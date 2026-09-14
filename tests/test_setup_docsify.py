@@ -150,3 +150,85 @@ class ConfigTests(TempDirTestCase):
     def test_parse_args_output_conflict(self):
         with self.assertRaises(SystemExit):
             self.module.parse_args(["src", "--output-docs", "out1", "out2"])
+
+
+class SourceTests(TempDirTestCase):
+    def test_sanitize_dir_name(self):
+        sanitize = self.module.sanitize_dir_name
+        self.assertEqual(sanitize("a b:c/d"), "a-b-c-d")
+        self.assertEqual(sanitize("  .name. "), "name")
+        self.assertEqual(sanitize("***"), "")
+        self.assertEqual(sanitize("中文 目录"), "中文-目录")
+
+    def test_scan_collects_md_and_assets(self):
+        root = self.make_source(
+            "src",
+            {
+                "a.md": "# A",
+                "sub/b.md": "# B",
+                "sub/images/pic.png": "x",
+                "sub/images/data.bin": "x",
+                "loose.jpg": "x",
+                ".hidden/c.md": "# C",
+                "note.txt": "x",
+            },
+        )
+        sources = self.resolve([self.make_spec(root)])
+        self.assertEqual(sources[0].dir, "src")
+        self.assertEqual(sources[0].md_files, ["a.md", "sub/b.md"])
+        self.assertEqual(
+            sources[0].asset_files,
+            ["loose.jpg", "sub/images/data.bin", "sub/images/pic.png"],
+        )
+
+    def test_resolve_skips_missing_and_duplicate(self):
+        root = self.make_source("keep", {"a.md": "# A"})
+        specs = [
+            self.make_spec(root),
+            self.make_spec(root),
+            self.make_spec(self.tmp / "nope"),
+        ]
+        sources = self.resolve(specs)
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].root, root.resolve())
+
+    def test_resolve_nested_sources_error(self):
+        outer = self.make_source("outer", {"a.md": "# A"})
+        inner = outer / "inner"
+        (inner / "b.md").parent.mkdir(parents=True, exist_ok=True)
+        (inner / "b.md").write_text("# B", encoding="utf-8")
+        with self.assertRaises(self.module.BuildError):
+            self.resolve([self.make_spec(outer), self.make_spec(inner)])
+
+    def test_resolve_docs_nesting_error(self):
+        inside = self.docs / "inner"
+        inside.mkdir(parents=True)
+        (inside / "x.md").write_text("# x", encoding="utf-8")
+        with self.assertRaises(self.module.BuildError):
+            self.resolve([self.make_spec(inside)])
+
+    def test_resolve_all_empty_error(self):
+        root = self.make_source("empty", {"images/pic.png": "x"})
+        with self.assertRaises(self.module.BuildError):
+            self.resolve([self.make_spec(root)])
+
+    def test_assign_dirs_collision_suffix(self):
+        first = self.make_source("a/notes", {"x.md": "x"})
+        second = self.make_source("b/notes", {"y.md": "y"})
+        sources = self.resolve([self.make_spec(first), self.make_spec(second)])
+        self.assertEqual([item.dir for item in sources], ["notes", "notes-2"])
+
+    def test_assign_dirs_explicit_collision_error(self):
+        first = self.make_source("a/one", {"x.md": "x"})
+        second = self.make_source("b/two", {"y.md": "y"})
+        specs = [
+            self.make_spec(first, dir="same", explicit=True),
+            self.make_spec(second, dir="same", explicit=True),
+        ]
+        with self.assertRaises(self.module.BuildError):
+            self.resolve(specs)
+
+    def test_assign_dirs_reserved_lib_suffix(self):
+        root = self.make_source("lib", {"x.md": "x"})
+        sources = self.resolve([self.make_spec(root)])
+        self.assertEqual(sources[0].dir, "lib-2")

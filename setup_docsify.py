@@ -183,6 +183,103 @@ def load_source_specs(args):
     return title, specs
 
 
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def sanitize_dir_name(name: str) -> str:
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "-", str(name))
+    cleaned = re.sub(r"\s+", "-", cleaned)
+    return cleaned.strip("-. ")
+
+
+def scan_source(source: Source) -> None:
+    md_files = []
+    asset_files = []
+    for path in sorted(source.root.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(source.root)
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        rel_posix = rel.as_posix()
+        if path.suffix.lower() == ".md":
+            md_files.append(rel_posix)
+        elif "images" in rel.parts[:-1] or path.suffix.lower() in IMAGE_EXTENSIONS:
+            asset_files.append(rel_posix)
+    source.md_files = md_files
+    source.asset_files = asset_files
+
+
+def resolve_sources(specs, docs_dir):
+    """解析、去重、校验并扫描源，返回可用源列表。"""
+    seen = set()
+    sources = []
+    for spec in specs:
+        raw = Path(spec.raw_path).expanduser()
+        root = (raw if raw.is_absolute() else spec.base_dir / raw).resolve()
+        if root in seen:
+            print(f"  [跳过] 重复源: {display_path(root)}")
+            continue
+        seen.add(root)
+        if not root.is_dir():
+            print(f"  [警告] 源目录不存在或不是文件夹，已跳过: {display_path(root)}")
+            continue
+        sources.append(Source(root=root, label=spec.label or root.name, dir="", spec=spec))
+
+    for index, source in enumerate(sources):
+        for other in sources[index + 1:]:
+            if _is_relative_to(source.root, other.root) or _is_relative_to(other.root, source.root):
+                raise BuildError(
+                    f"源目录不能互相嵌套: {display_path(source.root)} 与 {display_path(other.root)}"
+                )
+
+    docs_resolved = Path(docs_dir).resolve()
+    for source in sources:
+        if _is_relative_to(source.root, docs_resolved) or _is_relative_to(docs_resolved, source.root):
+            raise BuildError(
+                f"源目录与输出目录不能互相嵌套: {display_path(source.root)} 与 {display_path(docs_resolved)}"
+            )
+
+    for source in sources:
+        scan_source(source)
+
+    kept = []
+    for source in sources:
+        if not source.md_files:
+            print(f"  [警告] 源中没有 .md 文件，已跳过: {display_path(source.root)}")
+            continue
+        kept.append(source)
+    if not kept:
+        raise BuildError("没有可用的源文档：请检查源目录是否存在并包含 .md 文件")
+    return kept
+
+
+def assign_group_dirs(sources) -> None:
+    """为每个源分配站点内分组目录，处理冲突与保留名。"""
+    used = set(RESERVED_GROUP_DIRS)
+    for index, source in enumerate(sources, 1):
+        candidate = source.spec.dir or sanitize_dir_name(source.root.name) or f"source-{index}"
+        if candidate.casefold() in used:
+            if source.spec.explicit_dir:
+                raise BuildError(
+                    f"分组目录名冲突或为保留名: {candidate}（源: {display_path(source.root)}），"
+                    "请在配置中更换 dir"
+                )
+            base = candidate
+            number = 2
+            while f"{base}-{number}".casefold() in used:
+                number += 1
+            candidate = f"{base}-{number}"
+            print(f"  [警告] 分组目录名 {base} 已占用，改用 {candidate}")
+        used.add(candidate.casefold())
+        source.dir = candidate
+
+
 def _resolve_config_path(path: Path = None, default: Path = None) -> Path:
     return (Path(path).expanduser() if path else default).resolve()
 
