@@ -354,6 +354,8 @@ class AssetTests(TempDirTestCase):
         dest = self.tmp / "out.js"
 
         class FakeResponse(io.BytesIO):
+            headers = {}
+
             def __enter__(self):
                 return self
 
@@ -375,6 +377,28 @@ class AssetTests(TempDirTestCase):
 
         def fake_urlopen(url, timeout=None):
             raise self.module.urllib.error.URLError("boom")
+
+        with mock.patch.object(self.module.urllib.request, "urlopen", fake_urlopen):
+            with redirect_stdout(io.StringIO()):
+                self.assertFalse(self.module._download("https://example.invalid/x.js", dest))
+        self.assertEqual(dest.read_bytes(), b"old")
+        self.assertFalse((self.tmp / "out.js.part").exists())
+
+    def test_download_rejects_truncated_response(self):
+        dest = self.tmp / "out.js"
+        dest.write_bytes(b"old")
+
+        class TruncatedResponse(io.BytesIO):
+            headers = {"Content-Length": "100"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def fake_urlopen(url, timeout=None):
+            return TruncatedResponse(b"0123456789")
 
         with mock.patch.object(self.module.urllib.request, "urlopen", fake_urlopen):
             with redirect_stdout(io.StringIO()):

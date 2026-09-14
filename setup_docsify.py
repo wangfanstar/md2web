@@ -7,6 +7,7 @@ import json
 import re
 import shutil
 import sys
+import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -3214,6 +3215,9 @@ def _download(url: str, dest: Path) -> bool:
     try:
         with urllib.request.urlopen(url, timeout=30) as response, tmp.open("wb") as handle:
             shutil.copyfileobj(response, handle)
+            expected = response.headers.get("Content-Length")
+            if expected is not None and handle.tell() != int(expected):
+                raise OSError(f"下载不完整: {handle.tell()}/{expected} 字节")
         tmp.replace(dest)
         return True
     except Exception as error:
