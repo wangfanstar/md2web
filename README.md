@@ -73,7 +73,7 @@ Windows 可双击 `start_windows.bat`，Linux 可执行 `sh start_linux.sh`。�
 
 拷贝整个 `docs/` 目录即可：接收方双击 `docs/index.html` 或用任意静态服务器打开即可浏览、搜索、代码高亮。`docs/` 同时包含源文档，因此它也是唯一的备份对象。
 
-> `docs/` 下由构建生成的文件为 `index.html`、`README.md`、`_sidebar.md`、`search-index.json` 以及 `lib/` 中的生成资源（`custom-search.*`、`offline-*.js`），请勿手工维护；`docs/md/` 与 `lib/` 中的第三方依赖不会被构建修改。
+> `docs/` 下由构建生成的文件为 `index.html`、`README.md`、`_sidebar.md`、`search-index.json` 以及 `lib/` 中的生成资源（`custom-search.*`、`offline-*.js`），请勿手工维护；`docs/md/` 不会被构建修改，`lib/` 中第三方依赖首次构建会就地打补丁（幂等），无需手工维护。
 
 ## 测试
 

@@ -925,7 +925,7 @@ def main(argv=None):
 - [x] **Step 4: 运行测试，确认通过**
 
 Run: `python -m unittest discover -s tests -v`
-Expected: 41 个用例通过。
+Expected: 37 个用例通过（原 30 + EndToEndTests 7）。
 
 - [x] **Step 5: 真实构建冒烟（离线）**
 
