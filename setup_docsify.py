@@ -309,20 +309,26 @@ def sync_sources(sources, docs_dir) -> None:
     active = {source.dir for source in sources}
     for source in sources:
         dest_root = docs_path / source.dir
-        if dest_root.exists():
-            shutil.rmtree(dest_root)
-        dest_root.mkdir(parents=True, exist_ok=True)
-        for rel in source.md_files + source.asset_files:
-            dest_path = dest_root / rel
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source.root / rel, dest_path)
+        try:
+            if dest_root.exists():
+                shutil.rmtree(dest_root)
+            dest_root.mkdir(parents=True, exist_ok=True)
+            for rel in source.md_files + source.asset_files:
+                dest_path = dest_root / rel
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source.root / rel, dest_path)
+        except OSError as error:
+            raise BuildError(
+                f"同步源失败: {display_path(source.root)} -> {display_path(dest_root)}/ ({error})"
+            ) from error
         print(
             f"  [同步] {display_path(source.root)} -> {display_path(dest_root)}/ "
             f"({len(source.md_files)} 个文档)"
         )
 
+    reserved = {name.casefold() for name in RESERVED_GROUP_DIRS}
     for entry in sorted(docs_path.iterdir()):
-        if not entry.is_dir() or entry.name in RESERVED_GROUP_DIRS:
+        if not entry.is_dir() or entry.name.startswith(".") or entry.name.casefold() in reserved:
             continue
         if entry.name not in active:
             shutil.rmtree(entry)

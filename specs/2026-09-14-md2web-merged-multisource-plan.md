@@ -702,7 +702,7 @@ git commit -m "feat: 多源解析、分组目录与递归扫描"
 
 - [ ] **Step 1: 写失败测试**
 
-追加：
+在文件头部导入区补充 `from unittest import mock`，然后追加：
 
 ```python
 class SyncTests(TempDirTestCase):
@@ -735,6 +735,38 @@ class SyncTests(TempDirTestCase):
             self.module.sync_sources(sources, self.docs)
         self.assertFalse((self.docs / "old").exists())
         self.assertTrue((self.docs / "lib" / "keep.js").exists())
+
+    def test_sync_multiple_sources_and_stale_cleanup(self):
+        first = self.make_source("one", {"a.md": "# A"})
+        second = self.make_source("two", {"b.md": "# B"})
+        (self.docs / "stale").mkdir(parents=True)
+        (self.docs / "stale" / "old.md").write_text("# old", encoding="utf-8")
+        (self.docs / "keep.txt").write_text("keep", encoding="utf-8")
+        sources = self.resolve([self.make_spec(first), self.make_spec(second)])
+        with redirect_stdout(io.StringIO()):
+            self.module.sync_sources(sources, self.docs)
+        self.assertTrue((self.docs / "one" / "a.md").exists())
+        self.assertTrue((self.docs / "two" / "b.md").exists())
+        self.assertFalse((self.docs / "stale").exists())
+        self.assertTrue((self.docs / "keep.txt").exists())
+
+    def test_sync_keeps_hidden_directories(self):
+        (self.docs / ".git").mkdir(parents=True)
+        (self.docs / ".git" / "config").write_text("x", encoding="utf-8")
+        root = self.make_source("src", {"a.md": "# A"})
+        sources = self.resolve([self.make_spec(root)])
+        with redirect_stdout(io.StringIO()):
+            self.module.sync_sources(sources, self.docs)
+        self.assertTrue((self.docs / ".git" / "config").exists())
+
+    def test_sync_wraps_oserror(self):
+        (self.docs / "src").mkdir(parents=True)
+        root = self.make_source("src", {"a.md": "# A"})
+        sources = self.resolve([self.make_spec(root)])
+        with mock.patch.object(self.module.shutil, "rmtree", side_effect=OSError("locked")):
+            with redirect_stdout(io.StringIO()):
+                with self.assertRaises(self.module.BuildError):
+                    self.module.sync_sources(sources, self.docs)
 ```
 
 - [ ] **Step 2: 运行测试，确认失败**
@@ -754,20 +786,26 @@ def sync_sources(sources, docs_dir) -> None:
     active = {source.dir for source in sources}
     for source in sources:
         dest_root = docs_path / source.dir
-        if dest_root.exists():
-            shutil.rmtree(dest_root)
-        dest_root.mkdir(parents=True, exist_ok=True)
-        for rel in source.md_files + source.asset_files:
-            dest_path = dest_root / rel
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source.root / rel, dest_path)
+        try:
+            if dest_root.exists():
+                shutil.rmtree(dest_root)
+            dest_root.mkdir(parents=True, exist_ok=True)
+            for rel in source.md_files + source.asset_files:
+                dest_path = dest_root / rel
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source.root / rel, dest_path)
+        except OSError as error:
+            raise BuildError(
+                f"同步源失败: {display_path(source.root)} -> {display_path(dest_root)}/ ({error})"
+            ) from error
         print(
             f"  [同步] {display_path(source.root)} -> {display_path(dest_root)}/ "
             f"({len(source.md_files)} 个文档)"
         )
 
+    reserved = {name.casefold() for name in RESERVED_GROUP_DIRS}
     for entry in sorted(docs_path.iterdir()):
-        if not entry.is_dir() or entry.name in RESERVED_GROUP_DIRS:
+        if not entry.is_dir() or entry.name.startswith(".") or entry.name.casefold() in reserved:
             continue
         if entry.name not in active:
             shutil.rmtree(entry)

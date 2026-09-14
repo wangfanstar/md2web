@@ -9,6 +9,7 @@ import unittest
 import urllib.request
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -298,3 +299,35 @@ class SyncTests(TempDirTestCase):
             self.module.sync_sources(sources, self.docs)
         self.assertFalse((self.docs / "old").exists())
         self.assertTrue((self.docs / "lib" / "keep.js").exists())
+
+    def test_sync_multiple_sources_and_stale_cleanup(self):
+        first = self.make_source("one", {"a.md": "# A"})
+        second = self.make_source("two", {"b.md": "# B"})
+        (self.docs / "stale").mkdir(parents=True)
+        (self.docs / "stale" / "old.md").write_text("# old", encoding="utf-8")
+        (self.docs / "keep.txt").write_text("keep", encoding="utf-8")
+        sources = self.resolve([self.make_spec(first), self.make_spec(second)])
+        with redirect_stdout(io.StringIO()):
+            self.module.sync_sources(sources, self.docs)
+        self.assertTrue((self.docs / "one" / "a.md").exists())
+        self.assertTrue((self.docs / "two" / "b.md").exists())
+        self.assertFalse((self.docs / "stale").exists())
+        self.assertTrue((self.docs / "keep.txt").exists())
+
+    def test_sync_keeps_hidden_directories(self):
+        (self.docs / ".git").mkdir(parents=True)
+        (self.docs / ".git" / "config").write_text("x", encoding="utf-8")
+        root = self.make_source("src", {"a.md": "# A"})
+        sources = self.resolve([self.make_spec(root)])
+        with redirect_stdout(io.StringIO()):
+            self.module.sync_sources(sources, self.docs)
+        self.assertTrue((self.docs / ".git" / "config").exists())
+
+    def test_sync_wraps_oserror(self):
+        (self.docs / "src").mkdir(parents=True)
+        root = self.make_source("src", {"a.md": "# A"})
+        sources = self.resolve([self.make_spec(root)])
+        with mock.patch.object(self.module.shutil, "rmtree", side_effect=OSError("locked")):
+            with redirect_stdout(io.StringIO()):
+                with self.assertRaises(self.module.BuildError):
+                    self.module.sync_sources(sources, self.docs)

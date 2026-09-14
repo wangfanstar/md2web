@@ -118,7 +118,7 @@ md2web/
 5. 依赖：确保 `docs/lib/` 下资源齐全（见第 7 节）；失败则报错退出，此时尚未修改 `docs/` 中的文档与页面。
 6. Prism 语言组件：按步骤 3 收集的代码围栏语言解析依赖闭包，缺失组件按需下载（失败仅警告）。
 7. 同步（镜像语义）：对每个源，先删除 `docs/<dir>`，再按相对路径复制 `.md` 与图片，保证产物与源一致，删除源中文件后产物不会残留。
-8. 清理：删除 `docs/` 下不属于当前分组集合的顶层目录（保留 `lib/`）。
+8. 清理：删除 `docs/` 下不属于当前分组集合的顶层目录（跳过隐藏目录，保留 `lib/`）。
 9. 生成 `custom-search.js/css`、`search-index.json`、`offline-data.js`、`offline-file.js`、`_sidebar.md`、`README.md`、`index.html`。
 10. 打印完成信息与预览命令（`python serve.py`）。
 
