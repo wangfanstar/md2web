@@ -1759,6 +1759,40 @@ class ServeTests(unittest.TestCase):
                 server.server_close()
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_parse_args_rejects_out_of_range_port(self):
+        serve = load_module("serve", "serve.py")
+        with self.assertRaises(SystemExit):
+            serve.parse_args(["--port", "65536"])
+        with self.assertRaises(SystemExit):
+            serve.parse_args(["--port", "-1"])
+
+    def test_make_server_falls_back_to_next_port(self):
+        serve = load_module("serve", "serve.py")
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-serve-"))
+        try:
+            (tmp / "index.html").write_text("ok", encoding="utf-8")
+            blocker, port = serve.make_server(tmp, "127.0.0.1", 0)
+            self.assertEqual(port, blocker.server_address[1])
+            try:
+                server, actual = serve.make_server(tmp, "127.0.0.1", port)
+                try:
+                    self.assertEqual(actual, port + 1)
+                finally:
+                    server.server_close()
+            finally:
+                blocker.server_close()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_main_requires_index_html(self):
+        serve = load_module("serve", "serve.py")
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-serve-"))
+        try:
+            with self.assertRaises(SystemExit):
+                serve.main(["--dir", str(tmp), "--no-browser"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 ```
 
 - [ ] **Step 2: 运行测试，确认失败**
@@ -1774,8 +1808,10 @@ Expected: `ServeTests` ERROR（`No module named 'serve'` / 文件不存在）。
 """跨平台本地预览服务器：python serve.py [--port 3000] [--no-browser]"""
 
 import argparse
+import errno
 import functools
 import http.server
+import os
 import socket
 import threading
 import webbrowser
@@ -1784,16 +1820,27 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 
 
+class PreviewServer(http.server.ThreadingHTTPServer):
+    # Windows 的 SO_REUSEADDR 允许重复绑定同一端口，会掩盖端口占用检测
+    allow_reuse_address = os.name != "nt"
+
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="启动 docs/ 本地预览服务")
     parser.add_argument(
         "--dir", dest="directory", type=Path, default=ROOT / "docs",
         help="要预览的目录，默认脚本同级的 docs/",
     )
-    parser.add_argument("--port", type=int, default=3000, help="起始端口，默认 3000")
-    parser.add_argument("--bind", default="0.0.0.0", help="监听地址，默认 0.0.0.0")
+    parser.add_argument("--port", type=int, default=3000, help="起始端口，默认 3000（0-65535）")
+    parser.add_argument(
+        "--bind", default="0.0.0.0",
+        help="监听地址，默认 0.0.0.0（局域网可见；仅本机用 127.0.0.1）",
+    )
     parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if not 0 <= args.port <= 65535:
+        parser.error("端口必须在 0-65535 之间")
+    return args
 
 
 def lan_ip():
@@ -1806,16 +1853,20 @@ def lan_ip():
 
 
 def make_server(directory, bind, port):
-    """在 port 起连续尝试 20 个端口，返回 (server, 实际端口)。"""
+    """从 port 起连续尝试 20 个端口，返回 (server, 实际端口)。"""
     handler = functools.partial(
         http.server.SimpleHTTPRequestHandler, directory=str(directory)
     )
-    for candidate in range(port, port + 20):
+    last = min(port + 20, 65536)
+    for candidate in range(port, last):
         try:
-            return http.server.ThreadingHTTPServer((bind, candidate), handler), candidate
-        except OSError:
+            server = PreviewServer((bind, candidate), handler)
+        except OSError as error:
+            if error.errno != errno.EADDRINUSE:
+                raise SystemExit(f"错误: 无法监听 {bind}:{candidate} ({error})")
             continue
-    raise SystemExit(f"错误: 端口 {port}-{port + 19} 都被占用")
+        return server, server.server_address[1]
+    raise SystemExit(f"错误: 端口 {port}-{last - 1} 都被占用")
 
 
 def main(argv=None):
@@ -1831,7 +1882,9 @@ def main(argv=None):
         print(f"局域网访问: http://{ip}:{port}")
     print("按 Ctrl+C 停止")
     if not args.no_browser:
-        threading.Timer(0.5, webbrowser.open, args=(f"http://localhost:{port}",)).start()
+        timer = threading.Timer(0.5, webbrowser.open, args=(f"http://localhost:{port}",))
+        timer.daemon = True
+        timer.start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -1849,7 +1902,8 @@ if __name__ == "__main__":
 ```bat
 @echo off
 cd /d "%~dp0"
-python serve.py %* || py serve.py %*
+python serve.py %*
+if %errorlevel% equ 9009 py serve.py %*
 ```
 
 创建 `start_linux.sh`：
@@ -1867,7 +1921,7 @@ exec python serve.py "$@"
 - [ ] **Step 4: 运行测试，确认通过**
 
 Run: `python -m unittest discover -s tests -v`
-Expected: 全部 `ok`。
+Expected: 全部 `ok`（62 个用例）。
 
 - [ ] **Step 5: 提交**
 

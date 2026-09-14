@@ -766,3 +766,37 @@ class ServeTests(unittest.TestCase):
                 server.server_close()
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_parse_args_rejects_out_of_range_port(self):
+        serve = load_module("serve", "serve.py")
+        with self.assertRaises(SystemExit):
+            serve.parse_args(["--port", "65536"])
+        with self.assertRaises(SystemExit):
+            serve.parse_args(["--port", "-1"])
+
+    def test_make_server_falls_back_to_next_port(self):
+        serve = load_module("serve", "serve.py")
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-serve-"))
+        try:
+            (tmp / "index.html").write_text("ok", encoding="utf-8")
+            blocker, port = serve.make_server(tmp, "127.0.0.1", 0)
+            self.assertEqual(port, blocker.server_address[1])
+            try:
+                server, actual = serve.make_server(tmp, "127.0.0.1", port)
+                try:
+                    self.assertEqual(actual, port + 1)
+                finally:
+                    server.server_close()
+            finally:
+                blocker.server_close()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_main_requires_index_html(self):
+        serve = load_module("serve", "serve.py")
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-serve-"))
+        try:
+            with self.assertRaises(SystemExit):
+                serve.main(["--dir", str(tmp), "--no-browser"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)

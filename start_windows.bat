@@ -1,3 +1,4 @@
 @echo off
 cd /d "%~dp0"
-python serve.py %* || py serve.py %*
+python serve.py %*
+if %errorlevel% equ 9009 py serve.py %*
