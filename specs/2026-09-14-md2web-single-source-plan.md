@@ -1,6 +1,6 @@
 # md2web 单源就地架构 实现计划（v2）
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 把 md2web 从"多源 + 复制同步"重构为"单源就地"：源文档位于 `docs/md/`，构建只生成导航/首页/搜索索引/离线数据/入口，不复制、不删除源文档。
 
@@ -28,7 +28,7 @@
 - Create: `docs/md/使用说明/快速开始.md`
 - Delete: `md/`（仅含 `.gitkeep`）、`md_sources.json`
 
-- [ ] **Step 1: 创建示例文档**
+- [x] **Step 1: 创建示例文档**
 
 创建 `docs/md/使用说明/快速开始.md`：
 
@@ -59,14 +59,14 @@ print("hello md2web")
 ```
 ````
 
-- [ ] **Step 2: 删除旧目录与配置**
+- [x] **Step 2: 删除旧目录与配置**
 
 ```powershell
 Remove-Item md -Recurse -Force
 Remove-Item md_sources.json -Force
 ```
 
-- [ ] **Step 3: 验证**
+- [x] **Step 3: 验证**
 
 ```powershell
 Get-ChildItem docs\md -Recurse -File | Select-Object FullName
@@ -75,7 +75,7 @@ Test-Path md; Test-Path md_sources.json
 
 Expected: 列出 `docs\md\使用说明\快速开始.md`；两个 `Test-Path` 均为 `False`。
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```powershell
 git add -A
@@ -90,7 +90,7 @@ git commit -m "迁移：源文档改为 docs/md 就地维护"
 - Modify: `setup_docsify.py`
 - Rewrite: `tests/test_setup_docsify.py`（新基类 + `ScanTests` + `CLITests`，保留 `AssetTests`、`ServeTests`，删除 `ConfigTests`/`SourceTests`/`SyncTests`）
 
-- [ ] **Step 1: 重写测试文件**
+- [x] **Step 1: 重写测试文件**
 
 用下面的完整内容**覆盖** `tests/test_setup_docsify.py`（后续任务会追加类）：
 
@@ -352,12 +352,12 @@ class ServeTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 ```
 
-- [ ] **Step 2: 运行测试，确认失败**
+- [x] **Step 2: 运行测试，确认失败**
 
 Run: `python -m unittest discover -s tests -v`
 Expected: `ScanTests`/`CLITests` 失败（`module has no attribute 'scan_markdown'`、`parse_args` 不认识 `--title`），`AssetTests`/`ServeTests` 通过。
 
-- [ ] **Step 3: 实现核心精简**
+- [x] **Step 3: 实现核心精简**
 
 3a. 替换文件头导入与常量：
 
@@ -431,12 +431,12 @@ def scan_markdown(md_dir) -> list:
     return files
 ```
 
-- [ ] **Step 4: 运行测试，确认通过**
+- [x] **Step 4: 运行测试，确认通过**
 
 Run: `python -m unittest discover -s tests -v`
 Expected: 18 个用例通过（CLITests 2 + ScanTests 6 + AssetTests 6 + ServeTests 4）。注意：此时 `main` 与生成函数仍是旧签名（中间态），测试不调用它们。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```powershell
 git add -A
@@ -451,7 +451,7 @@ git commit -m "refactor: 单源扫描与 CLI 精简"
 - Modify: `setup_docsify.py`
 - Modify: `tests/test_setup_docsify.py`（追加 `GenerationTests`、`PrismTests`）
 
-- [ ] **Step 1: 追加失败测试**
+- [x] **Step 1: 追加失败测试**
 
 在 `tests/test_setup_docsify.py` 末尾追加：
 
@@ -576,12 +576,12 @@ class PrismTests(TempDirTestCase):
         self.assertNotIn("prism-cuda", requested)
 ```
 
-- [ ] **Step 2: 运行测试，确认失败**
+- [x] **Step 2: 运行测试，确认失败**
 
 Run: `python -m unittest discover -s tests -v`
 Expected: `GenerationTests`/`PrismTests` 失败（旧签名不接受 `md_files`/`title`）。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 3a. 用下面实现整体替换 `collect_fence_languages`：
 
@@ -765,12 +765,12 @@ def generate_index_html(title="文档中心"):
     print("  [生成] index.html")
 ```
 
-- [ ] **Step 4: 运行测试，确认通过**
+- [x] **Step 4: 运行测试，确认通过**
 
 Run: `python -m unittest discover -s tests -v`
 Expected: 30 个用例通过（原 18 + GenerationTests 7 + PrismTests 5）。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```powershell
 git add -A
@@ -785,7 +785,7 @@ git commit -m "refactor: 单源导航与搜索生成"
 - Modify: `setup_docsify.py`
 - Modify: `tests/test_setup_docsify.py`（追加 `EndToEndTests`）
 
-- [ ] **Step 1: 追加失败测试**
+- [x] **Step 1: 追加失败测试**
 
 在末尾追加：
 
@@ -865,12 +865,12 @@ class EndToEndTests(TempDirTestCase):
         self.assertTrue((self.md / "a.md").exists())
 ```
 
-- [ ] **Step 2: 运行测试，确认失败**
+- [x] **Step 2: 运行测试，确认失败**
 
 Run: `python -m unittest discover -s tests -v`
 Expected: `EndToEndTests` 失败（旧 `main` 使用 `args.source_md_dirs` 等已删除字段）。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 用下面实现整体替换 `main`：
 
@@ -922,12 +922,12 @@ def main(argv=None):
         sys.exit(1)
 ```
 
-- [ ] **Step 4: 运行测试，确认通过**
+- [x] **Step 4: 运行测试，确认通过**
 
 Run: `python -m unittest discover -s tests -v`
 Expected: 37 个用例通过（原 30 + EndToEndTests 7）。
 
-- [ ] **Step 5: 真实构建冒烟（离线）**
+- [x] **Step 5: 真实构建冒烟（离线）**
 
 ```powershell
 python setup_docsify.py
@@ -935,7 +935,7 @@ python setup_docsify.py
 
 Expected: 输出 `构建完成`；依赖全部 `[复用]`（`docs/lib` 已存在），无 `[下载]`；生成 `docs/index.html`、`docs/README.md`、`docs/_sidebar.md`、`docs/search-index.json`，并把 `docs/lib/offline-data.js` 从 18MB 旧快照替换为当前小文件。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```powershell
 git add -A
@@ -951,7 +951,7 @@ git commit -m "refactor: 单源构建主流程"
 - Modify: `specs/2026-09-14-md2web-single-source-design.md`（状态改为"已实现"）
 - Modify: `specs/2026-09-14-md2web-single-source-plan.md`（文末追加执行记录）
 
-- [ ] **Step 1: 重写 README.md**
+- [x] **Step 1: 重写 README.md**
 
 用下面内容整体覆盖（可小幅润色，事实与命令必须一致）：
 
@@ -1052,16 +1052,16 @@ python -m unittest discover -s tests -v
 - **想彻底重建**：删除 `docs/` 中除 `md/` 外的生成文件后重新构建（依赖缺失时需要联网一次）
 ````
 
-- [ ] **Step 2: 更新设计文档状态**
+- [x] **Step 2: 更新设计文档状态**
 
 `specs/2026-09-14-md2web-single-source-design.md` 第 4 行「状态：已确认」改为「状态：已实现（2026-09-14）」。
 
-- [ ] **Step 3: 运行完整测试**
+- [x] **Step 3: 运行完整测试**
 
 Run: `python -m unittest discover -s tests -v`
 Expected: 37 个用例全部通过。
 
-- [ ] **Step 4: 最终检查**
+- [x] **Step 4: 最终检查**
 
 ```powershell
 git status --short
@@ -1071,7 +1071,7 @@ python setup_docsify.py
 
 Expected: 工作区仅 README/设计文档变更；三个 `Test-Path` 为 `False`；构建成功且无 `[下载]`。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```powershell
 git add -A

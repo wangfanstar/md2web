@@ -66,6 +66,11 @@ class ScanTests(TempDirTestCase):
         self.write_doc("note.txt", "x")
         self.assertEqual(self.scan(), ["a.md", "sub/b.md"])
 
+    def test_scan_markdown_skips_hidden_file(self):
+        self.write_doc("a.md", "# A")
+        self.write_doc(".draft.md", "# D")
+        self.assertEqual(self.scan(), ["a.md"])
+
     def test_scan_markdown_uppercase_extension(self):
         self.write_doc("A.MD", "# A")
         self.assertEqual(self.scan(), ["A.MD"])
@@ -94,6 +99,19 @@ class ScanTests(TempDirTestCase):
                 "    - [入门](/md/指南/入门.md)",
                 "    - [进阶](/md/指南/进阶.md)",
                 "  - [FAQ](/md/FAQ.md)",
+            ],
+        )
+
+    def test_build_doc_tree_three_levels(self):
+        tree = self.module.build_doc_tree(["a/b/c/深.md"])
+        lines = []
+        self.module.render_doc_tree(tree, "/md", "", lines, lambda route: route)
+        self.assertEqual(
+            lines,
+            [
+                "- **a**",
+                "  - **b**",
+                "    - [深](/md/a/b/c/深.md)",
             ],
         )
 
@@ -233,6 +251,7 @@ class ServeTests(unittest.TestCase):
         try:
             (tmp / "index.html").write_text("ok", encoding="utf-8")
             blocker, port = serve.make_server(tmp, "127.0.0.1", 0)
+            self.assertEqual(port, blocker.server_address[1])
             try:
                 server, actual = serve.make_server(tmp, "127.0.0.1", port)
                 try:
