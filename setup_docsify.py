@@ -3740,42 +3740,46 @@ def main(argv=None):
         )
     print()
 
-    if args.index_only:
-        print("=== 仅刷新搜索索引（跳过依赖与站点文件生成） ===\n")
-        print("1. 同步 Markdown 文件和图片...")
-        sync_sources(sources, DOCS_DIR)
-        print("2. 重新生成搜索索引与离线数据...")
-        generate_search_index(sources, title)
-        LIB_DIR.mkdir(parents=True, exist_ok=True)
-        generate_offline_data()
-        print("\n=== 搜索索引刷新完成 ===")
-        return
-
-    print("1. 检查离线依赖...")
     try:
+        if args.index_only:
+            print("=== 仅刷新搜索索引（跳过依赖与站点文件生成） ===\n")
+            print("1. 同步 Markdown 文件和图片...")
+            sync_sources(sources, DOCS_DIR)
+            print("2. 重新生成搜索索引与离线数据...")
+            generate_search_index(sources, title)
+            LIB_DIR.mkdir(parents=True, exist_ok=True)
+            generate_offline_data()
+            print("\n=== 搜索索引刷新完成 ===")
+            return
+
+        print("1. 检查离线依赖...")
         ensure_assets()
         patch_docsify_file_router()
         patch_docsify_css()
         ensure_prism_components(sources)
-    except BuildError as error:
+        generate_custom_search_assets()
+
+        print("2. 同步 Markdown 文件和图片...")
+        sync_sources(sources, DOCS_DIR)
+
+        print("3. 生成导航、首页与搜索索引...")
+        generate_sidebar(sources)
+        generate_readme(sources, title)
+        generate_search_index(sources, title)
+        generate_offline_data()
+        generate_index_html(
+            collect_search_paths(sources),
+            compute_search_namespace(sources),
+            title,
+        )
+
+        print("\n=== 构建完成 ===")
+        print("\n启动本地预览: python serve.py")
+        print("本机打开: http://localhost:3000")
+        print("局域网访问: http://<这台机器的IP>:3000")
+    except (BuildError, OSError, UnicodeDecodeError) as error:
         print(f"  错误: {error}")
         sys.exit(1)
-    generate_custom_search_assets()
-
-    print("2. 同步 Markdown 文件和图片...")
-    sync_sources(sources, DOCS_DIR)
-
-    print("3. 生成导航、首页与搜索索引...")
-    generate_sidebar(sources)
-    generate_readme(sources, title)
-    generate_search_index(sources, title)
-    generate_offline_data()
-    generate_index_html(collect_search_paths(sources), compute_search_namespace(sources), title)
-
-    print("\n=== 构建完成 ===")
-    print("\n启动本地预览: python serve.py")
-    print("本机打开: http://localhost:3000")
-    print("局域网访问: http://<这台机器的IP>:3000")
 
 
 if __name__ == "__main__":

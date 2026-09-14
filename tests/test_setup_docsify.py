@@ -339,11 +339,9 @@ class SyncTests(TempDirTestCase):
         root = self.make_source("src", {"a.md": "# A"})
         sources = self.resolve([self.make_spec(root)])
         real_rmtree = self.module.shutil.rmtree
-        calls = {"count": 0}
 
         def flaky_rmtree(path, *args, **kwargs):
-            calls["count"] += 1
-            if calls["count"] > 1:
+            if Path(path) == self.docs / "stale":
                 raise OSError("locked")
             return real_rmtree(path, *args, **kwargs)
 
@@ -646,6 +644,86 @@ class EndToEndTests(TempDirTestCase):
         config = self.tmp / "md_sources.json"
         config.write_text(
             json.dumps({"sources": [{"path": str(empty)}]}), encoding="utf-8"
+        )
+        with redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                self.module.main(
+                    ["--config", str(config), "--output-docs", str(self.docs)]
+                )
+
+    def test_full_build_multi_source(self):
+        first = self.make_source("one", {"a.md": "# A"})
+        second = self.make_source("two", {"sub/b.md": "# B"})
+        components = self.docs / "lib" / "components"
+        components.mkdir(parents=True)
+        for filename in self.module.ASSETS:
+            (self.docs / "lib" / filename).write_text("x", encoding="utf-8")
+        config = self.tmp / "md_sources.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "sources": [
+                        {"path": str(first), "label": "甲"},
+                        {"path": str(second), "label": "乙"},
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        with redirect_stdout(io.StringIO()):
+            self.module.main(["--config", str(config), "--output-docs", str(self.docs)])
+        self.assertTrue((self.docs / "one" / "a.md").exists())
+        self.assertTrue((self.docs / "two" / "sub" / "b.md").exists())
+        sidebar = (self.docs / "_sidebar.md").read_text(encoding="utf-8")
+        self.assertIn("- **甲**", sidebar)
+        self.assertIn("- **乙**", sidebar)
+        index = json.loads((self.docs / "search-index.json").read_text(encoding="utf-8"))
+        self.assertIn("/one/a.md", index)
+        self.assertIn("/two/sub/b.md", index)
+
+    def test_dependency_failure_exits(self):
+        root = self.make_source("src", {"a.md": "# A"})
+        config = self.tmp / "md_sources.json"
+        config.write_text(
+            json.dumps({"sources": [{"path": str(root)}]}), encoding="utf-8"
+        )
+        with mock.patch.object(self.module, "_download", return_value=False):
+            with redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    self.module.main(
+                        ["--config", str(config), "--output-docs", str(self.docs)]
+                    )
+
+    def test_sync_failure_exits(self):
+        root = self.make_source("src", {"a.md": "# A"})
+        components = self.docs / "lib" / "components"
+        components.mkdir(parents=True)
+        for filename in self.module.ASSETS:
+            (self.docs / "lib" / filename).write_text("x", encoding="utf-8")
+        config = self.tmp / "md_sources.json"
+        config.write_text(
+            json.dumps({"sources": [{"path": str(root)}]}), encoding="utf-8"
+        )
+        with mock.patch.object(
+            self.module, "sync_sources", side_effect=self.module.BuildError("同步失败")
+        ):
+            with redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    self.module.main(
+                        ["--config", str(config), "--output-docs", str(self.docs)]
+                    )
+
+    def test_unicode_error_exits(self):
+        root = self.make_source("src", {"a.md": "# A"})
+        (root / "bad.md").write_bytes(b"\xff\xfe\x00bad")
+        components = self.docs / "lib" / "components"
+        components.mkdir(parents=True)
+        for filename in self.module.ASSETS:
+            (self.docs / "lib" / filename).write_text("x", encoding="utf-8")
+        config = self.tmp / "md_sources.json"
+        config.write_text(
+            json.dumps({"sources": [{"path": str(root)}]}), encoding="utf-8"
         )
         with redirect_stdout(io.StringIO()):
             with self.assertRaises(SystemExit):
