@@ -1021,6 +1021,34 @@ class PrismTests(TempDirTestCase):
         self.assertIn("prism-rust.min.js", requested)
         self.assertNotIn("prism-python.min.js", requested)
         self.assertIn("警告", output.getvalue())
+
+    def test_collect_fence_languages_from_multiple_sources(self):
+        first = self.make_source("one", {"a.md": "```python\nprint(1)\n```"})
+        second = self.make_source("two", {"b.md": "```go\npackage main\n```"})
+        sources = self.resolve([self.make_spec(first), self.make_spec(second)])
+        self.assertEqual(
+            self.module.collect_fence_languages(sources), {"python", "go"}
+        )
+
+    def test_ensure_prism_components_skips_without_languages(self):
+        root = self.make_source("src", {"a.md": "# 无代码块"})
+        sources = self.resolve([self.make_spec(root)])
+        with mock.patch.object(self.module, "_download") as download:
+            with redirect_stdout(io.StringIO()) as output:
+                self.module.ensure_prism_components(sources)
+        download.assert_not_called()
+        self.assertIn("跳过", output.getvalue())
+
+    def test_ensure_prism_components_resolves_fallback_closure(self):
+        root = self.make_source("src", {"a.md": "```cuda\nx\n```"})
+        sources = self.resolve([self.make_spec(root)])
+        with mock.patch.object(self.module, "_download", return_value=True) as download:
+            with redirect_stdout(io.StringIO()):
+                self.module.ensure_prism_components(sources)
+        requested = " ".join(str(call.args[0]) for call in download.call_args_list)
+        self.assertIn("prism-cpp.min.js", requested)
+        self.assertIn("prism-c.min.js", requested)
+        self.assertNotIn("prism-cuda", requested)
 ```
 
 - [ ] **Step 2: 运行测试，确认失败**
