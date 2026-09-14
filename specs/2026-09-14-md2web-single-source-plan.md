@@ -1,6 +1,6 @@
 # md2web 单源就地架构 实现计划（v2）
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把 md2web 从"多源 + 复制同步"重构为"单源就地"：源文档位于 `docs/md/`，构建只生成导航/首页/搜索索引/离线数据/入口，不复制、不删除源文档。
 
@@ -925,7 +925,7 @@ def main(argv=None):
 - [x] **Step 4: 运行测试，确认通过**
 
 Run: `python -m unittest discover -s tests -v`
-Expected: 37 个用例通过（原 30 + EndToEndTests 7）。
+Expected: 41 个用例通过。
 
 - [x] **Step 5: 真实构建冒烟（离线）**
 
@@ -1059,7 +1059,7 @@ python -m unittest discover -s tests -v
 - [x] **Step 3: 运行完整测试**
 
 Run: `python -m unittest discover -s tests -v`
-Expected: 37 个用例全部通过。
+Expected: 41 个用例全部通过。
 
 - [x] **Step 4: 最终检查**
 
@@ -1103,3 +1103,5 @@ Task 4 实现后的代码审查加固，提交 `fix: 预校验编码并收紧离
    - 加强 `test_full_build_offline`/`test_full_build_custom_title`：断言首页索引 `pageTitle` 与标题参数一致。
    - 加强 `test_build_does_not_touch_user_files`：源 `a.md` 构建前后逐字节一致。
    - 三个失败路径用例（缺目录/空目录/依赖失败）统一断言退出码为 1。
+
+- 2026-09-14 Task 5：README 重写；测试补强（隐藏文件、三级嵌套、端口断言）；端口回退用例改为确定性 mock 并新增非 EADDRINUSE 分支用例（41→42 个用例）

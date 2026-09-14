@@ -1,3 +1,4 @@
+import errno
 import importlib.util
 import io
 import json
@@ -226,7 +227,10 @@ class ServeTests(unittest.TestCase):
                     "log_message",
                     lambda *args, **kwargs: None,
                 ):
-                    with urllib.request.urlopen(
+                    opener = urllib.request.build_opener(
+                        urllib.request.ProxyHandler({})
+                    )
+                    with opener.open(
                         f"http://127.0.0.1:{port}/index.html"
                     ) as response:
                         self.assertEqual(response.read().decode("utf-8"), "ok")
@@ -247,21 +251,35 @@ class ServeTests(unittest.TestCase):
 
     def test_make_server_falls_back_to_next_port(self):
         serve = load_module("serve", "serve.py")
-        tmp = Path(tempfile.mkdtemp(prefix="md2web-serve-"))
-        try:
-            (tmp / "index.html").write_text("ok", encoding="utf-8")
-            blocker, port = serve.make_server(tmp, "127.0.0.1", 0)
-            self.assertEqual(port, blocker.server_address[1])
-            try:
-                server, actual = serve.make_server(tmp, "127.0.0.1", port)
-                try:
-                    self.assertGreater(actual, port)
-                finally:
-                    server.server_close()
-            finally:
-                blocker.server_close()
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+        attempts = []
+
+        class FakeServer:
+            def __init__(self, address, handler):
+                attempts.append(address[1])
+                if len(attempts) == 1:
+                    raise OSError(errno.EADDRINUSE, "in use")
+                self.server_address = address
+
+            def server_close(self):
+                pass
+
+        with mock.patch.object(serve, "PreviewServer", FakeServer):
+            server, port = serve.make_server(Path("."), "127.0.0.1", 3000)
+        self.assertEqual(port, 3001)
+        self.assertEqual(attempts, [3000, 3001])
+
+    def test_make_server_reports_bind_error(self):
+        serve = load_module("serve", "serve.py")
+
+        class FakeServer:
+            def __init__(self, address, handler):
+                raise PermissionError(13, "denied")
+
+        with mock.patch.object(serve, "PreviewServer", FakeServer):
+            with redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit) as ctx:
+                    serve.make_server(Path("."), "0.0.0.0", 3000)
+        self.assertIn("无法监听", str(ctx.exception))
 
     def test_main_requires_index_html(self):
         serve = load_module("serve", "serve.py")
