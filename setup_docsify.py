@@ -302,6 +302,33 @@ def assign_group_dirs(sources) -> None:
         source.dir = candidate
 
 
+def sync_sources(sources, docs_dir) -> None:
+    """镜像同步：先删分组目录再复制，保证产物与源一致；清理过期分组。"""
+    docs_path = Path(docs_dir)
+    docs_path.mkdir(parents=True, exist_ok=True)
+    active = {source.dir for source in sources}
+    for source in sources:
+        dest_root = docs_path / source.dir
+        if dest_root.exists():
+            shutil.rmtree(dest_root)
+        dest_root.mkdir(parents=True, exist_ok=True)
+        for rel in source.md_files + source.asset_files:
+            dest_path = dest_root / rel
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source.root / rel, dest_path)
+        print(
+            f"  [同步] {display_path(source.root)} -> {display_path(dest_root)}/ "
+            f"({len(source.md_files)} 个文档)"
+        )
+
+    for entry in sorted(docs_path.iterdir()):
+        if not entry.is_dir() or entry.name in RESERVED_GROUP_DIRS:
+            continue
+        if entry.name not in active:
+            shutil.rmtree(entry)
+            print(f"  [清理] 移除过期分组 {display_path(entry)}/")
+
+
 def _resolve_config_path(path: Path = None, default: Path = None) -> Path:
     return (Path(path).expanduser() if path else default).resolve()
 
@@ -3343,40 +3370,6 @@ def generate_custom_search_assets():
     (LIB_DIR / "custom-search.js").write_text(CUSTOM_SEARCH_JS, encoding="utf-8")
     (LIB_DIR / "custom-search.css").write_text(CUSTOM_SEARCH_CSS, encoding="utf-8")
     print("  [生成] custom-search.js / custom-search.css")
-
-
-def sync_md_files():
-    """将 md/ 下的 .md 和 images/ 同步到 docs/"""
-    if not MD_DIR.exists():
-        print(f"  错误: 源 Markdown 目录不存在: {MD_DIR}")
-        print("  请检查 --source-md 路径是否正确，或先创建该目录并放入文档。")
-        sys.exit(1)
-
-    subfolders = sorted([d for d in MD_DIR.iterdir() if d.is_dir()])
-    if not subfolders:
-        print(f"  错误: 源目录 {MD_DIR} 下没有子文件夹，已中止（旧站点保持不变）。")
-        sys.exit(1)
-
-    for sub in subfolders:
-        dest_sub = DOCS_DIR / sub.name
-        dest_sub.mkdir(parents=True, exist_ok=True)
-
-        # 复制 .md 文件
-        for md_file in sub.glob("*.md"):
-            shutil.copy2(md_file, dest_sub / md_file.name)
-            print(f"  [复制] {display_path(md_file)} -> {display_path(dest_sub)}/")
-
-        # 复制 images 文件夹
-        images_src = sub / "images"
-        images_dst = dest_sub / "images"
-        if images_src.exists() and images_src.is_dir():
-            if images_dst.exists():
-                shutil.rmtree(images_dst)
-            shutil.copytree(images_src, images_dst)
-            print(f"  [复制] {display_path(images_src)} -> {display_path(images_dst)}/")
-
-    print(f"  同步完成，共 {len(subfolders)} 个子文件夹。\n")
-    return subfolders
 
 
 def collect_search_paths(subfolders):

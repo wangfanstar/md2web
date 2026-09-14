@@ -266,3 +266,35 @@ class SourceTests(TempDirTestCase):
         with self.assertRaises(self.module.BuildError):
             with redirect_stdout(io.StringIO()):
                 self.module.resolve_sources([self.make_spec(root)], docs_inside)
+
+
+class SyncTests(TempDirTestCase):
+    def test_sync_copies_tree_and_assets_and_removes_deleted(self):
+        root = self.make_source(
+            "src",
+            {"a.md": "# A", "sub/b.md": "# B", "sub/images/pic.png": "img"},
+        )
+        sources = self.resolve([self.make_spec(root)])
+        with redirect_stdout(io.StringIO()):
+            self.module.sync_sources(sources, self.docs)
+        self.assertTrue((self.docs / "src" / "a.md").exists())
+        self.assertTrue((self.docs / "src" / "sub" / "b.md").exists())
+        self.assertTrue((self.docs / "src" / "sub" / "images" / "pic.png").exists())
+
+        (root / "sub" / "b.md").unlink()
+        self.module.scan_source(sources[0])
+        with redirect_stdout(io.StringIO()):
+            self.module.sync_sources(sources, self.docs)
+        self.assertFalse((self.docs / "src" / "sub" / "b.md").exists())
+
+    def test_sync_removes_stale_group_keeps_lib(self):
+        (self.docs / "lib").mkdir(parents=True)
+        (self.docs / "lib" / "keep.js").write_text("x", encoding="utf-8")
+        (self.docs / "old").mkdir(parents=True)
+        (self.docs / "old" / "x.md").write_text("# x", encoding="utf-8")
+        root = self.make_source("src", {"a.md": "# A"})
+        sources = self.resolve([self.make_spec(root)])
+        with redirect_stdout(io.StringIO()):
+            self.module.sync_sources(sources, self.docs)
+        self.assertFalse((self.docs / "old").exists())
+        self.assertTrue((self.docs / "lib" / "keep.js").exists())
