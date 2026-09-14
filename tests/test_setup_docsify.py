@@ -134,6 +134,21 @@ class ConfigTests(TempDirTestCase):
         with self.assertRaises(self.module.BuildError):
             self.module.load_config_file(self.tmp)
 
+    def test_load_config_bom(self):
+        config = self.tmp / "bom.json"
+        config.write_bytes(
+            b"\xef\xbb\xbf" + json.dumps({"sources": ["a"]}).encode("utf-8")
+        )
+        title, specs = self.module.load_config_file(config)
+        self.assertEqual([item.raw_path for item in specs], ["a"])
+
+    def test_load_source_specs_empty_config_error(self):
+        config = self.tmp / "empty.json"
+        config.write_text(json.dumps({"sources": []}), encoding="utf-8")
+        args = self.make_args(config=config, no_config=False)
+        with self.assertRaises(self.module.BuildError):
+            self.module.load_source_specs(args)
+
     def test_parse_args_repeatable_sources(self):
         args = self.module.parse_args(["a", "--source-md", "b", "--md-dir", "c"])
         self.assertEqual(
@@ -588,6 +603,23 @@ class GenerationTests(TempDirTestCase):
         self.assertNotIn("</script><script>alert(1)", html_text)
         self.assertIn("\\u003c/script", html_text)
         self.assertIn("&lt;/script&gt;", html_text)
+
+    def test_search_index_reports_non_utf8_path(self):
+        root = self.make_source("src", {"a.md": "# A"})
+        (root / "bad.md").write_bytes(b"\xff\xfe\x00bad")
+        sources = self.resolve([self.make_spec(root)])
+        with redirect_stdout(io.StringIO()):
+            with self.assertRaises(self.module.BuildError) as ctx:
+                self.module.generate_search_index(sources, "T")
+        self.assertIn("bad.md", str(ctx.exception))
+
+    def test_offline_data_reports_non_utf8_path(self):
+        (self.docs / "src").mkdir(parents=True)
+        (self.docs / "src" / "bad.md").write_bytes(b"\xff\xfe\x00bad")
+        with redirect_stdout(io.StringIO()):
+            with self.assertRaises(self.module.BuildError) as ctx:
+                self.module.generate_offline_data()
+        self.assertIn("bad.md", str(ctx.exception))
 
 
 class EndToEndTests(TempDirTestCase):

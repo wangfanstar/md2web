@@ -125,7 +125,7 @@ def parse_args(argv=None):
 def load_config_file(config_path: Path):
     """读取 md_sources.json，返回 (title, specs)。"""
     try:
-        text = Path(config_path).read_text(encoding="utf-8")
+        text = Path(config_path).read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError) as error:
         raise BuildError(f"配置文件读取失败: {config_path} ({error})") from error
     try:
@@ -174,7 +174,8 @@ def load_source_specs(args):
         if config_path is None:
             candidate = ROOT / "md_sources.json"
             config_path = candidate if candidate.exists() else None
-    if config_path is not None:
+    config_loaded = config_path is not None
+    if config_loaded:
         config_path = Path(config_path).expanduser()
         if not config_path.exists():
             raise BuildError(f"配置文件不存在: {config_path}")
@@ -185,6 +186,8 @@ def load_source_specs(args):
     for raw in args.source_md_dirs:
         specs.append(SourceSpec(raw_path=str(raw), base_dir=Path.cwd(), origin="cli"))
     if not specs:
+        if config_loaded:
+            raise BuildError(f"配置文件中 sources 为空: {config_path}")
         specs.append(SourceSpec(raw_path="md", base_dir=ROOT, origin="default"))
     return title, specs
 
@@ -358,6 +361,16 @@ def display_path(path: Path) -> str:
         return str(path.relative_to(ROOT))
     except ValueError:
         return str(path)
+
+
+def read_markdown(path: Path) -> str:
+    """读取 Markdown 文档，失败时抛出带文件路径的 BuildError。"""
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise BuildError(f"文档不是 UTF-8 编码: {display_path(path)} ({error})") from error
+    except OSError as error:
+        raise BuildError(f"读取文档失败: {display_path(path)} ({error})") from error
 
 
 # ---- 离线资源（jsdelivr CDN）----
@@ -3523,14 +3536,12 @@ def generate_search_index(sources, title="文档中心", depth=SEARCH_DEPTH):
     index = {}
     readme = DOCS_DIR / "README.md"
     if readme.exists():
-        index["/"] = build_page_index(
-            "/", readme.read_text(encoding="utf-8"), depth, title
-        )
+        index["/"] = build_page_index("/", read_markdown(readme), depth, title)
 
     for source in sources:
         for rel in source.md_files:
             route = f"/{source.dir}/{rel}"
-            content = (source.root / rel).read_text(encoding="utf-8")
+            content = read_markdown(source.root / rel)
             index[route] = build_page_index(route, content, depth, Path(rel).stem)
 
     index_path = DOCS_DIR / "search-index.json"
@@ -3551,7 +3562,7 @@ def generate_offline_data():
         key=lambda path: path.relative_to(DOCS_DIR).as_posix(),
     ):
         relative = md_file.relative_to(DOCS_DIR).as_posix()
-        content[relative] = md_file.read_text(encoding="utf-8")
+        content[relative] = read_markdown(md_file)
 
     search_index = {}
     search_index_path = DOCS_DIR / "search-index.json"

@@ -2116,3 +2116,12 @@ git commit -m "docs: 重写 README 适配合并架构与多源用法"
 5. 依赖存在时构建零网络；缺失且下载失败时明确报错并列出清单。
 6. `python serve.py` 在 Windows/Linux 均可预览；`docs/index.html` 可直接双击使用。
 7. README 描述与实际行为一致。
+
+---
+
+## 实现后加固记录（2026-09-14）
+
+- `read_markdown`：非 UTF-8 文档报错带文件路径（搜索索引、离线数据）
+- `load_config_file`：兼容 UTF-8 BOM
+- `load_source_specs`：配置文件 sources 为空时报错，不再静默回退默认源
+- README：补充 `docs/` 托管说明、文档编码要求、高亮措辞修正
