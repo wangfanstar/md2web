@@ -3726,7 +3726,7 @@ def main(argv=None):
         title, specs = load_source_specs(args)
         sources = resolve_sources(specs, DOCS_DIR)
         assign_group_dirs(sources)
-    except BuildError as error:
+    except (BuildError, OSError, UnicodeDecodeError) as error:
         print(f"  错误: {error}")
         sys.exit(1)
 

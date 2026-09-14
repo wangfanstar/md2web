@@ -730,3 +730,39 @@ class EndToEndTests(TempDirTestCase):
                 self.module.main(
                     ["--config", str(config), "--output-docs", str(self.docs)]
                 )
+
+    def test_source_scan_error_exits(self):
+        root = self.make_source("src", {"a.md": "# A"})
+        config = self.tmp / "md_sources.json"
+        config.write_text(
+            json.dumps({"sources": [{"path": str(root)}]}), encoding="utf-8"
+        )
+        with mock.patch.object(
+            self.module, "scan_source", side_effect=OSError("permission denied")
+        ):
+            with redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    self.module.main(
+                        ["--config", str(config), "--output-docs", str(self.docs)]
+                    )
+
+
+class ServeTests(unittest.TestCase):
+    def test_server_serves_index(self):
+        serve = load_module("serve", "serve.py")
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-serve-"))
+        try:
+            (tmp / "index.html").write_text("ok", encoding="utf-8")
+            server, port = serve.make_server(tmp, "127.0.0.1", 0)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/index.html"
+                ) as response:
+                    self.assertEqual(response.read().decode("utf-8"), "ok")
+            finally:
+                server.shutdown()
+                server.server_close()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
