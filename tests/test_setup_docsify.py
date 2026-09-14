@@ -416,3 +416,28 @@ class AssetTests(TempDirTestCase):
                 self.module.ensure_assets()
         self.assertEqual(download.call_count, 1)
         self.assertEqual(download.call_args.args[1].name, "docsify.min.js")
+
+
+class PrismTests(TempDirTestCase):
+    def test_collect_fence_languages_from_sources(self):
+        root = self.make_source(
+            "src", {"a.md": "```python\nprint(1)\n```\n\n```cuda\nx\n```"}
+        )
+        sources = self.resolve([self.make_spec(root)])
+        self.assertEqual(self.module.collect_fence_languages(sources), {"python", "cuda"})
+
+    def test_ensure_prism_components_reuses_and_warns(self):
+        components = self.docs / "lib" / "components"
+        components.mkdir(parents=True)
+        (components / "prism-python.min.js").write_text("x", encoding="utf-8")
+        root = self.make_source(
+            "src", {"a.md": "```python\nprint(1)\n```\n\n```rust\nx\n```"}
+        )
+        sources = self.resolve([self.make_spec(root)])
+        with mock.patch.object(self.module, "_download", return_value=False) as download:
+            with redirect_stdout(io.StringIO()) as output:
+                self.module.ensure_prism_components(sources)
+        requested = " ".join(str(call.args[0]) for call in download.call_args_list)
+        self.assertIn("prism-rust.min.js", requested)
+        self.assertNotIn("prism-python.min.js", requested)
+        self.assertIn("警告", output.getvalue())

@@ -3333,16 +3333,15 @@ def extract_autoloader_maps():
         return dict(FALLBACK_PRISM_DEPS), dict(FALLBACK_PRISM_ALIASES)
 
 
-def collect_fence_languages():
-    """扫描源 Markdown，收集代码围栏中出现的语言名。"""
+def collect_fence_languages(sources) -> set:
+    """扫描所有源的 Markdown，收集代码围栏中出现的语言名。"""
     langs = set()
-    if not MD_DIR.exists():
-        return langs
     fence_re = re.compile(r"^[ \t]*(?:`{3,}|~{3,})[ \t]*([A-Za-z0-9_+#.-]+)", re.M)
-    for md_file in MD_DIR.rglob("*.md"):
-        text = md_file.read_text(encoding="utf-8", errors="ignore")
-        for match in fence_re.finditer(text):
-            langs.add(match.group(1).lower())
+    for source in sources:
+        for rel in source.md_files:
+            text = (source.root / rel).read_text(encoding="utf-8", errors="ignore")
+            for match in fence_re.finditer(text):
+                langs.add(match.group(1).lower())
     return langs
 
 
@@ -3368,11 +3367,11 @@ def resolve_prism_languages(fence_langs, deps, aliases):
     return resolved
 
 
-def download_prism_components():
-    """下载文档用到的 Prism 语言组件到 docs/lib/components/，实现离线高亮。"""
-    fence_langs = collect_fence_languages()
+def ensure_prism_components(sources) -> None:
+    """按文档实际用到的语言准备 Prism 组件，缺失才下载，失败仅警告。"""
+    fence_langs = collect_fence_languages(sources)
     if not fence_langs:
-        print("  [跳过] 未发现代码块语言，无需下载语言组件")
+        print("  [跳过] 未发现代码块语言，无需语言组件")
         return
 
     deps, aliases = extract_autoloader_maps()
@@ -3383,16 +3382,12 @@ def download_prism_components():
     for name in sorted(components):
         dest = components_dir / f"prism-{name}.min.js"
         if dest.exists() and dest.stat().st_size > 0:
-            print(f"  [跳过] prism-{name}.min.js (已存在)")
+            print(f"  [复用] prism-{name}.min.js")
             continue
         url = f"{PRISM_COMPONENTS_CDN}prism-{name}.min.js"
         print(f"  [下载] prism-{name}.min.js <- {url}")
-        try:
-            urllib.request.urlretrieve(url, dest)
-        except Exception as e:
-            if dest.exists():
-                dest.unlink()
-            print(f"  [警告] 下载 prism-{name}.min.js 失败: {e}（该语言将无高亮）")
+        if not _download(url, dest):
+            print(f"  [警告] prism-{name}.min.js 下载失败，该语言暂不高亮（联网后重跑可重试）")
     print("  Prism 语言组件处理完成。\n")
 
 
