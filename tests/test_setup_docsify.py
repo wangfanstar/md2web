@@ -57,6 +57,10 @@ class CLITests(TempDirTestCase):
         self.assertEqual(args.title, "E2E")
         self.assertTrue(args.index_only)
 
+    def test_parse_args_refresh_index_alias(self):
+        args = self.module.parse_args(["--refresh-index-only"])
+        self.assertTrue(args.index_only)
+
 
 class ScanTests(TempDirTestCase):
     def test_scan_markdown_collects_nested_and_skips_hidden(self):
@@ -72,9 +76,13 @@ class ScanTests(TempDirTestCase):
         self.write_doc(".draft.md", "# D")
         self.assertEqual(self.scan(), ["a.md"])
 
-    def test_scan_markdown_uppercase_extension(self):
-        self.write_doc("A.MD", "# A")
-        self.assertEqual(self.scan(), ["A.MD"])
+    def test_scan_markdown_skips_uppercase_extension(self):
+        self.write_doc("UP.MD", "# A")
+        self.write_doc("a.md", "# A")
+        with redirect_stdout(io.StringIO()) as output:
+            files = self.module.scan_markdown(self.md)
+        self.assertEqual(files, ["a.md"])
+        self.assertIn("警告", output.getvalue())
 
     def test_scan_markdown_missing_dir(self):
         shutil.rmtree(self.md)
@@ -328,6 +336,15 @@ class GenerationTests(TempDirTestCase):
         entry = index["/md/指南/入门.md"]["/md/指南/入门.md?id=安装"]
         self.assertEqual(entry["route"], "/md/指南/入门.md")
 
+    def test_search_index_has_no_empty_shell_entry(self):
+        self.build_site()
+        index = json.loads(
+            (self.docs / "search-index.json").read_text(encoding="utf-8")
+        )
+        page = index["/md/指南/入门.md"]
+        self.assertNotIn("/md/指南/入门.md", page)
+        self.assertIn("/md/指南/入门.md?id=入门", page)
+
     def test_offline_data_contains_all_md(self):
         self.build_site()
         text = (self.docs / "lib" / "offline-data.js").read_text(encoding="utf-8")
@@ -454,7 +471,9 @@ class EndToEndTests(TempDirTestCase):
         index = json.loads(
             (self.docs / "search-index.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(index["/"]["/"]["pageTitle"], "文档中心")
+        self.assertTrue(
+            any(entry["pageTitle"] == "文档中心" for entry in index["/"].values())
+        )
 
     def test_full_build_custom_title(self):
         self.write_doc("a.md", "# A")
@@ -469,7 +488,9 @@ class EndToEndTests(TempDirTestCase):
         index = json.loads(
             (self.docs / "search-index.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(index["/"]["/"]["pageTitle"], "E2E")
+        self.assertTrue(
+            any(entry["pageTitle"] == "E2E" for entry in index["/"].values())
+        )
 
     def test_index_only_skips_site_files(self):
         self.write_doc("a.md", "# A")

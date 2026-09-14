@@ -90,7 +90,7 @@ md2web/
 
 **新增/调整**：
 - 常量 `MD_DIR = DOCS_DIR / "md"`
-- `scan_markdown(md_dir) -> list[str]`：递归收集 `.md` 相对路径，跳过隐藏路径，`.md` 大小写不敏感
+- `scan_markdown(md_dir) -> list[str]`：递归收集小写 `.md` 相对路径，跳过隐藏路径；其他大小写变体（如 `.MD`）打印警告并跳过（docsify 按大小写敏感匹配扩展名）
 - `generate_index_html(title)`：去掉 `search_paths`/`namespace` 参数
 - `main`：单源流程，捕获 `(BuildError, OSError, UnicodeDecodeError)`
 

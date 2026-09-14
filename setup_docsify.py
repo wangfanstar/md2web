@@ -45,7 +45,11 @@ def display_path(path: Path) -> str:
 
 
 def scan_markdown(md_dir) -> list:
-    """递归收集 docs/md 下的 .md 相对路径（posix），跳过隐藏路径。"""
+    """递归收集 docs/md 下的 .md 相对路径（posix），跳过隐藏路径。
+
+    仅收集小写 .md 扩展名：docsify 按大小写敏感匹配扩展名，
+    .MD 等变体虽可收集但页面会 404，因此打印警告并跳过。
+    """
     root = Path(md_dir)
     if not root.is_dir():
         raise BuildError(
@@ -53,12 +57,15 @@ def scan_markdown(md_dir) -> list:
         )
     files = []
     for path in sorted(root.rglob("*")):
-        if not path.is_file() or path.suffix.lower() != ".md":
+        if not path.is_file():
             continue
         rel = path.relative_to(root)
         if any(part.startswith(".") for part in rel.parts):
             continue
-        files.append(rel.as_posix())
+        if path.suffix == ".md":
+            files.append(rel.as_posix())
+        elif path.suffix.lower() == ".md":
+            print(f"  [警告] 跳过非小写扩展名文档: {display_path(path)}（请重命名为 .md）")
     if not files:
         raise BuildError(
             f"源文档目录中没有 .md 文件: {display_path(root)}，请放入文档后重试"
@@ -3196,7 +3203,8 @@ def build_page_index(route_path: str, content: str, depth: int, page_title: str 
                 # 超出索引深度的标题仅同步重复计数，正文保留原文以便搜索
                 current_body.append(line)
                 continue
-            flush_section()
+            if current_body or saw_heading:
+                flush_section()
             saw_heading = True
             current_title = match.group(2).strip()
             current_slug = (
