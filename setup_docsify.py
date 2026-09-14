@@ -1,7 +1,6 @@
 """将 Markdown 文件夹转成 Docsify 离线文档站。"""
 
 import argparse
-import hashlib
 import html
 import json
 import re
@@ -9,350 +8,32 @@ import shutil
 import sys
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).parent
 DOCS_DIR = ROOT / "docs"
 LIB_DIR = DOCS_DIR / "lib"
-
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico"}
-RESERVED_GROUP_DIRS = {"lib"}
-WINDOWS_RESERVED_NAMES = {
-    "con", "prn", "aux", "nul",
-    *(f"com{number}" for number in range(1, 10)),
-    *(f"lpt{number}" for number in range(1, 10)),
-}
+MD_DIR = DOCS_DIR / "md"
 
 
 class BuildError(Exception):
     """构建期间的致命错误，由 main 统一打印并退出。"""
 
 
-@dataclass
-class SourceSpec:
-    raw_path: str
-    base_dir: Path
-    label: str = ""
-    dir: str = ""
-    explicit_dir: bool = False
-    origin: str = "cli"
-
-
-@dataclass
-class Source:
-    root: Path
-    label: str
-    dir: str
-    spec: SourceSpec
-    md_files: list = field(default_factory=list)
-    asset_files: list = field(default_factory=list)
-
-
 def parse_args(argv=None):
-    """解析命令行参数：配置文件 + 可重复 --source-md + 兼容旧位置参数。"""
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(
-        description="将 Markdown 文件夹转成离线可用的 Docsify 文档站。"
+        description="将 docs/md 下的 Markdown 转成离线可用的 Docsify 文档站。"
     )
-    parser.add_argument(
-        "source_md_dir_pos",
-        nargs="?",
-        type=Path,
-        metavar="源md文件夹",
-        help="源 Markdown 根目录，默认使用脚本同级的 md/",
-    )
-    parser.add_argument(
-        "output_docs_dir_pos",
-        nargs="?",
-        type=Path,
-        metavar="输出docs文件夹",
-        help="输出 Docsify 站点目录，默认使用脚本同级的 docs/",
-    )
-    parser.add_argument(
-        "--source-md",
-        "--md-dir",
-        dest="source_md_dirs",
-        action="append",
-        type=Path,
-        default=[],
-        metavar="源md文件夹",
-        help="追加一个源 Markdown 目录，可重复；与 md_sources.json 叠加",
-    )
-    parser.add_argument(
-        "--output-docs",
-        "--docs-dir",
-        dest="output_docs_dir_opt",
-        type=Path,
-        help="输出 Docsify 站点目录",
-    )
-    parser.add_argument(
-        "--config",
-        dest="config_path",
-        type=Path,
-        help="源文件夹配置文件，默认读取脚本同级的 md_sources.json",
-    )
-    parser.add_argument(
-        "--no-config",
-        action="store_true",
-        dest="no_config",
-        help="忽略 md_sources.json",
-    )
+    parser.add_argument("--title", default="文档中心", help="站点标题，默认「文档中心」")
     parser.add_argument(
         "--index-only",
         "--refresh-index-only",
         action="store_true",
         dest="index_only",
-        help="仅同步文档并重新生成搜索索引与离线数据，跳过依赖下载和站点文件生成",
+        help="仅重建搜索索引与离线数据，跳过依赖检查与站点文件生成",
     )
-
-    args = parser.parse_args(argv)
-    if args.output_docs_dir_pos and args.output_docs_dir_opt:
-        parser.error("输出目录请只使用位置参数或 --output-docs 其中一种")
-
-    source_dirs = []
-    if args.source_md_dir_pos:
-        source_dirs.append(args.source_md_dir_pos)
-    source_dirs.extend(args.source_md_dirs)
-    return argparse.Namespace(
-        source_md_dirs=source_dirs,
-        output_docs_dir=args.output_docs_dir_opt or args.output_docs_dir_pos,
-        config_path=args.config_path,
-        no_config=args.no_config,
-        index_only=args.index_only,
-    )
-
-
-def load_config_file(config_path: Path):
-    """读取 md_sources.json，返回 (title, specs)。"""
-    try:
-        text = Path(config_path).read_text(encoding="utf-8-sig")
-    except (OSError, UnicodeDecodeError) as error:
-        raise BuildError(f"配置文件读取失败: {config_path} ({error})") from error
-    try:
-        raw = json.loads(text)
-    except json.JSONDecodeError as error:
-        raise BuildError(f"配置文件不是合法 JSON: {config_path} ({error})") from error
-    if isinstance(raw, list):
-        raw = {"sources": raw}
-    if not isinstance(raw, dict):
-        raise BuildError(f"配置文件根节点必须是对象或数组: {config_path}")
-    entries = raw.get("sources")
-    if not isinstance(entries, list):
-        raise BuildError(f"配置文件缺少 sources 数组: {config_path}")
-    base_dir = Path(config_path).resolve().parent
-    specs = []
-    for index, entry in enumerate(entries, 1):
-        if isinstance(entry, str):
-            specs.append(SourceSpec(raw_path=entry, base_dir=base_dir, origin="config"))
-            continue
-        if not isinstance(entry, dict):
-            raise BuildError(f"sources[{index}] 必须是字符串或对象: {config_path}")
-        path = entry.get("path")
-        if not path or not isinstance(path, str):
-            raise BuildError(f"sources[{index}] 缺少字符串字段 path: {config_path}")
-        dir_value = entry.get("dir")
-        specs.append(
-            SourceSpec(
-                raw_path=path,
-                base_dir=base_dir,
-                label=str(entry.get("label") or ""),
-                dir=str(dir_value) if dir_value else "",
-                explicit_dir=bool(dir_value),
-                origin="config",
-            )
-        )
-    return (raw.get("title") or None), specs
-
-
-def load_source_specs(args):
-    """合并配置文件与命令行源，返回 (title, specs)。"""
-    specs = []
-    title = "文档中心"
-    config_path = None
-    if not args.no_config:
-        config_path = args.config_path
-        if config_path is None:
-            candidate = ROOT / "md_sources.json"
-            config_path = candidate if candidate.exists() else None
-    config_loaded = config_path is not None
-    if config_loaded:
-        config_path = Path(config_path).expanduser()
-        if not config_path.exists():
-            raise BuildError(f"配置文件不存在: {config_path}")
-        config_title, config_specs = load_config_file(config_path)
-        if config_title:
-            title = str(config_title)
-        specs.extend(config_specs)
-    for raw in args.source_md_dirs:
-        specs.append(SourceSpec(raw_path=str(raw), base_dir=Path.cwd(), origin="cli"))
-    if not specs:
-        if config_loaded:
-            raise BuildError(f"配置文件中 sources 为空: {config_path}")
-        specs.append(SourceSpec(raw_path="md", base_dir=ROOT, origin="default"))
-    return title, specs
-
-
-def _is_relative_to(path: Path, parent: Path) -> bool:
-    try:
-        path.relative_to(parent)
-        return True
-    except ValueError:
-        return False
-
-
-def sanitize_dir_name(name: str) -> str:
-    cleaned = re.sub(r"[^\w.-]", "-", str(name), flags=re.UNICODE)
-    cleaned = re.sub(r"-{2,}", "-", cleaned)
-    return cleaned.strip("-. ")
-
-
-def scan_source(source: Source) -> None:
-    md_files = []
-    asset_files = []
-    for path in sorted(source.root.rglob("*")):
-        if not path.is_file():
-            continue
-        rel = path.relative_to(source.root)
-        if any(part.startswith(".") for part in rel.parts):
-            continue
-        rel_posix = rel.as_posix()
-        if path.suffix.lower() == ".md":
-            md_files.append(rel_posix)
-        elif any(part.casefold() == "images" for part in rel.parts[:-1]) or path.suffix.lower() in IMAGE_EXTENSIONS:
-            asset_files.append(rel_posix)
-    source.md_files = md_files
-    source.asset_files = asset_files
-
-
-def resolve_sources(specs, docs_dir):
-    """解析、去重、校验并扫描源，返回可用源列表。"""
-    seen = set()
-    sources = []
-    for spec in specs:
-        raw = Path(spec.raw_path).expanduser()
-        root = (raw if raw.is_absolute() else spec.base_dir / raw).resolve()
-        if root in seen:
-            print(f"  [跳过] 重复源: {display_path(root)}")
-            continue
-        seen.add(root)
-        if not root.is_dir():
-            print(f"  [警告] 源目录不存在或不是文件夹，已跳过: {display_path(root)}")
-            continue
-        sources.append(Source(root=root, label=spec.label or root.name, dir="", spec=spec))
-
-    for index, source in enumerate(sources):
-        for other in sources[index + 1:]:
-            if _is_relative_to(source.root, other.root):
-                raise BuildError(
-                    f"源目录不能互相嵌套: {display_path(source.root)} 位于 {display_path(other.root)} 内"
-                )
-            if _is_relative_to(other.root, source.root):
-                raise BuildError(
-                    f"源目录不能互相嵌套: {display_path(other.root)} 位于 {display_path(source.root)} 内"
-                )
-
-    docs_resolved = Path(docs_dir).resolve()
-    for source in sources:
-        if _is_relative_to(source.root, docs_resolved):
-            raise BuildError(
-                f"源目录不能位于输出目录内: {display_path(source.root)} 位于 {display_path(docs_resolved)} 内"
-            )
-        if _is_relative_to(docs_resolved, source.root):
-            raise BuildError(
-                f"输出目录不能位于源目录内: {display_path(docs_resolved)} 位于 {display_path(source.root)} 内"
-            )
-
-    for source in sources:
-        scan_source(source)
-
-    kept = []
-    for source in sources:
-        if not source.md_files:
-            print(f"  [警告] 源中没有 .md 文件，已跳过: {display_path(source.root)}")
-            continue
-        kept.append(source)
-    if not kept:
-        raise BuildError("没有可用的源文档：请检查源目录是否存在并包含 .md 文件")
-    return kept
-
-
-def assign_group_dirs(sources) -> None:
-    """为每个源分配站点内分组目录，处理冲突与保留名。"""
-    used = set(RESERVED_GROUP_DIRS) | WINDOWS_RESERVED_NAMES
-    for index, source in enumerate(sources, 1):
-        if source.spec.explicit_dir:
-            raw = source.spec.dir
-            candidate = sanitize_dir_name(raw)
-            if not candidate or candidate != raw.strip():
-                raise BuildError(
-                    f"分组目录名包含非法字符或为空: {raw}（源: {display_path(source.root)}），"
-                    "请只使用中英文、数字、-_. 组成的名称"
-                )
-        else:
-            candidate = sanitize_dir_name(source.root.name) or f"source-{index}"
-        if candidate.casefold() in used:
-            if source.spec.explicit_dir:
-                raise BuildError(
-                    f"分组目录名冲突或为保留名: {candidate}（源: {display_path(source.root)}），"
-                    "请在配置中更换 dir"
-                )
-            base = candidate
-            number = 2
-            while f"{base}-{number}".casefold() in used:
-                number += 1
-            candidate = f"{base}-{number}"
-            print(f"  [警告] 分组目录名 {base} 已占用，改用 {candidate}")
-        used.add(candidate.casefold())
-        source.dir = candidate
-
-
-def sync_sources(sources, docs_dir) -> None:
-    """镜像同步：先删分组目录再复制，保证产物与源一致；清理过期分组。"""
-    docs_path = Path(docs_dir)
-    docs_path.mkdir(parents=True, exist_ok=True)
-    active = {source.dir for source in sources}
-    for source in sources:
-        dest_root = docs_path / source.dir
-        try:
-            if dest_root.exists():
-                shutil.rmtree(dest_root)
-            dest_root.mkdir(parents=True, exist_ok=True)
-            for rel in source.md_files + source.asset_files:
-                dest_path = dest_root / rel
-                dest_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source.root / rel, dest_path)
-        except OSError as error:
-            raise BuildError(
-                f"同步源失败: {display_path(source.root)} -> {display_path(dest_root)}/ ({error})"
-            ) from error
-        print(
-            f"  [同步] {display_path(source.root)} -> {display_path(dest_root)}/ "
-            f"({len(source.md_files)} 个文档)"
-        )
-
-    reserved = {name.casefold() for name in RESERVED_GROUP_DIRS}
-    for entry in sorted(docs_path.iterdir()):
-        if not entry.is_dir() or entry.name.startswith(".") or entry.name.casefold() in reserved:
-            continue
-        if entry.name not in active:
-            try:
-                shutil.rmtree(entry)
-            except OSError as error:
-                raise BuildError(
-                    f"清理过期分组失败: {display_path(entry)}/ ({error})"
-                ) from error
-            print(f"  [清理] 移除过期分组 {display_path(entry)}/")
-
-
-def _resolve_config_path(path: Path = None, default: Path = None) -> Path:
-    return (Path(path).expanduser() if path else default).resolve()
-
-
-def configure_paths(output_docs_dir: Path = None):
-    """根据命令行参数更新输出目录与离线资源目录。"""
-    global DOCS_DIR, LIB_DIR
-    DOCS_DIR = _resolve_config_path(output_docs_dir, ROOT / "docs")
-    LIB_DIR = DOCS_DIR / "lib"
+    return parser.parse_args(argv)
 
 
 def display_path(path: Path) -> str:
@@ -361,6 +42,28 @@ def display_path(path: Path) -> str:
         return str(path.relative_to(ROOT))
     except ValueError:
         return str(path)
+
+
+def scan_markdown(md_dir) -> list:
+    """递归收集 docs/md 下的 .md 相对路径（posix），跳过隐藏路径。"""
+    root = Path(md_dir)
+    if not root.is_dir():
+        raise BuildError(
+            f"源文档目录不存在: {display_path(root)}，请创建该目录并放入 .md 文档"
+        )
+    files = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.suffix.lower() != ".md":
+            continue
+        rel = path.relative_to(root)
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        files.append(rel.as_posix())
+    if not files:
+        raise BuildError(
+            f"源文档目录中没有 .md 文件: {display_path(root)}，请放入文档后重试"
+        )
+    return files
 
 
 def read_markdown(path: Path) -> str:
@@ -3409,25 +3112,6 @@ def generate_custom_search_assets():
     (LIB_DIR / "custom-search.js").write_text(CUSTOM_SEARCH_JS, encoding="utf-8")
     (LIB_DIR / "custom-search.css").write_text(CUSTOM_SEARCH_CSS, encoding="utf-8")
     print("  [生成] custom-search.js / custom-search.css")
-
-
-def collect_search_paths(sources):
-    """收集所有可搜索的 Docsify 路由路径。"""
-    paths = ["/"]
-    for source in sources:
-        for rel in source.md_files:
-            paths.append(f"/{source.dir}/{rel}")
-    return paths
-
-
-def compute_search_namespace(sources):
-    """根据文档列表生成 namespace，重建时自动失效旧缓存。"""
-    parts = []
-    for source in sources:
-        for rel in source.md_files:
-            parts.append(f"{source.dir}/{rel}:{(source.root / rel).stat().st_size}")
-    digest = hashlib.md5("\n".join(parts).encode("utf-8")).hexdigest()[:10]
-    return f"docs-{digest}"
 
 
 # Docsify 4.13.1 slugify 实际删除的标点集合（docsify.min.js 中的 En 正则），
