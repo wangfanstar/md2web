@@ -469,3 +469,62 @@ class PrismTests(TempDirTestCase):
         self.assertIn("prism-cpp.min.js", requested)
         self.assertIn("prism-c.min.js", requested)
         self.assertNotIn("prism-cuda", requested)
+
+
+class GenerationTests(TempDirTestCase):
+    def build_site(self):
+        root = self.make_source(
+            "src",
+            {
+                "指南/入门.md": "# 入门\n\n## 安装\n\n内容",
+                "指南/进阶.md": "# 进阶",
+                "常见问题.md": "# FAQ",
+            },
+        )
+        sources = self.resolve([self.make_spec(root, label="文档")])
+        with redirect_stdout(io.StringIO()):
+            self.module.sync_sources(sources, self.docs)
+            self.module.generate_sidebar(sources)
+            self.module.generate_readme(sources, "测试站点")
+            self.module.generate_search_index(sources, "测试站点")
+            self.module.generate_offline_data()
+        return sources
+
+    def test_sidebar_tree(self):
+        self.build_site()
+        sidebar = (self.docs / "_sidebar.md").read_text(encoding="utf-8")
+        self.assertIn("- **文档**", sidebar)
+        self.assertIn("- **指南**", sidebar)
+        self.assertIn("[入门](/src/指南/入门.md)", sidebar)
+        self.assertIn("[常见问题](/src/常见问题.md)", sidebar)
+
+    def test_readme_index(self):
+        self.build_site()
+        readme = (self.docs / "README.md").read_text(encoding="utf-8")
+        self.assertIn("# 测试站点", readme)
+        self.assertIn("[入门](src/指南/入门.md)", readme)
+
+    def test_search_index_routes(self):
+        self.build_site()
+        index = json.loads((self.docs / "search-index.json").read_text(encoding="utf-8"))
+        self.assertIn("/", index)
+        self.assertIn("/src/指南/入门.md", index)
+        entry = index["/src/指南/入门.md"]["/src/指南/入门.md?id=安装"]
+        self.assertEqual(entry["route"], "/src/指南/入门.md")
+
+    def test_offline_data_contains_all_md(self):
+        self.build_site()
+        text = (self.docs / "lib" / "offline-data.js").read_text(encoding="utf-8")
+        payload = json.loads(text.split("=", 1)[1].rstrip().rstrip(";"))
+        self.assertIn("src/指南/入门.md", payload["content"])
+        self.assertIn("_sidebar.md", payload["content"])
+        self.assertIn("searchIndex", payload)
+
+    def test_namespace_changes_with_files(self):
+        root = self.make_source("src", {"a.md": "# A"})
+        sources = self.resolve([self.make_spec(root)])
+        first = self.module.compute_search_namespace(sources)
+        (root / "b.md").write_text("# B", encoding="utf-8")
+        self.module.scan_source(sources[0])
+        second = self.module.compute_search_namespace(sources)
+        self.assertNotEqual(first, second)

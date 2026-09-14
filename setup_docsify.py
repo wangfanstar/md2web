@@ -3399,22 +3399,21 @@ def generate_custom_search_assets():
     print("  [生成] custom-search.js / custom-search.css")
 
 
-def collect_search_paths(subfolders):
+def collect_search_paths(sources):
     """收集所有可搜索的 Docsify 路由路径。"""
     paths = ["/"]
-    for sub in subfolders:
-        for md_file in sorted(sub.glob("*.md")):
-            paths.append(f"/{sub.name}/{md_file.name}")
+    for source in sources:
+        for rel in source.md_files:
+            paths.append(f"/{source.dir}/{rel}")
     return paths
 
 
-def compute_search_namespace(subfolders):
+def compute_search_namespace(sources):
     """根据文档列表生成 namespace，重建时自动失效旧缓存。"""
     parts = []
-    for sub in subfolders:
-        for md_file in sorted(sub.glob("*.md")):
-            rel = md_file.relative_to(MD_DIR).as_posix()
-            parts.append(f"{rel}:{md_file.stat().st_size}")
+    for source in sources:
+        for rel in source.md_files:
+            parts.append(f"{source.dir}/{rel}:{(source.root / rel).stat().st_size}")
     digest = hashlib.md5("\n".join(parts).encode("utf-8")).hexdigest()[:10]
     return f"docs-{digest}"
 
@@ -3520,20 +3519,20 @@ def build_page_index(route_path: str, content: str, depth: int, page_title: str 
     return index
 
 
-def generate_search_index(subfolders, depth=SEARCH_DEPTH):
+def generate_search_index(sources, title="文档中心", depth=SEARCH_DEPTH):
     """在构建时生成 search-index.json，避免浏览器 localStorage 配额限制。"""
     index = {}
     readme = DOCS_DIR / "README.md"
     if readme.exists():
         index["/"] = build_page_index(
-            "/", readme.read_text(encoding="utf-8"), depth, "文档中心"
+            "/", readme.read_text(encoding="utf-8"), depth, title
         )
 
-    for sub in subfolders:
-        for md_file in sorted(sub.glob("*.md")):
-            route = f"/{sub.name}/{md_file.name}"
-            content = md_file.read_text(encoding="utf-8")
-            index[route] = build_page_index(route, content, depth, md_file.stem)
+    for source in sources:
+        for rel in source.md_files:
+            route = f"/{source.dir}/{rel}"
+            content = (source.root / rel).read_text(encoding="utf-8")
+            index[route] = build_page_index(route, content, depth, Path(rel).stem)
 
     index_path = DOCS_DIR / "search-index.json"
     index_path.write_text(
@@ -3546,6 +3545,7 @@ def generate_search_index(subfolders, depth=SEARCH_DEPTH):
 
 def generate_offline_data():
     """内嵌 Markdown 和搜索索引，使 file:// 直接打开时绕过 XHR/fetch 限制。"""
+    LIB_DIR.mkdir(parents=True, exist_ok=True)
     content = {}
     for md_file in sorted(
         DOCS_DIR.rglob("*.md"),
@@ -3572,57 +3572,75 @@ def generate_offline_data():
     print(f"  [生成] offline-data.js / offline-file.js ({size_mb:.1f} MB)")
 
 
-def generate_sidebar(subfolders):
+def build_doc_tree(rel_paths):
+    """把相对路径列表构造成 {files, dirs} 嵌套树。"""
+    root = {"files": [], "dirs": {}}
+    for rel in rel_paths:
+        parts = rel.split("/")
+        node = root
+        for part in parts[:-1]:
+            node = node["dirs"].setdefault(part, {"files": [], "dirs": {}})
+        node["files"].append(parts[-1])
+    return root
+
+
+def render_doc_tree(node, route_prefix, indent, lines, link):
+    """递归渲染文档树；单文件叶子目录折叠为直接链接。"""
+    for name in sorted(node["dirs"]):
+        child = node["dirs"][name]
+        child_files = child["files"]
+        if len(child_files) == 1 and not child["dirs"]:
+            filename = child_files[0]
+            lines.append(
+                f"{indent}- [{Path(filename).stem}]"
+                f"({link(route_prefix + '/' + name + '/' + filename)})"
+            )
+            continue
+        lines.append(f"{indent}- **{name}**")
+        render_doc_tree(child, route_prefix + "/" + name, indent + "  ", lines, link)
+    for filename in sorted(node["files"]):
+        lines.append(
+            f"{indent}- [{Path(filename).stem}]({link(route_prefix + '/' + filename)})"
+        )
+
+
+def generate_sidebar(sources):
     """生成 _sidebar.md 侧边栏文件"""
     lines = ["- **文档列表**"]
-    for sub in subfolders:
-        md_files = sorted(sub.glob("*.md"))
-        if not md_files:
-            continue
-        if len(md_files) == 1:
-            # 单文件：直接链接
-            mdf = md_files[0]
-            lines.append(f"  - [{mdf.stem}](/{sub.name}/{mdf.name})")
-        else:
-            # 多文件：分组标题 + 平列所有文档
-            lines.append(f"  - **{sub.name}**")
-            for mdf in md_files:
-                lines.append(f"    - [{mdf.stem}](/{sub.name}/{mdf.name})")
+    for source in sources:
+        lines.append(f"  - **{source.label}**")
+        tree = build_doc_tree(source.md_files)
+        render_doc_tree(tree, f"/{source.dir}", "    ", lines, lambda route: route)
 
     sidebar_path = DOCS_DIR / "_sidebar.md"
     sidebar_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"  [生成] _sidebar.md ({len(lines) - 1} 项)")
 
 
-def generate_readme(subfolders):
+def generate_readme(sources, title="文档中心"):
     """生成 README.md 作为首页索引"""
-    lines = ["# 文档中心", "", "## 文档列表", ""]
-    for sub in subfolders:
-        md_files = sorted(sub.glob("*.md"))
-        if not md_files:
-            continue
-        if len(md_files) == 1:
-            mdf = md_files[0]
-            lines.append(f"- [{mdf.stem}]({sub.name}/{mdf.name})")
-        else:
-            lines.append(f"- **{sub.name}**")
-            for mdf in md_files:
-                lines.append(f"  - [{mdf.stem}]({sub.name}/{mdf.name})")
+    lines = [f"# {title}", "", "## 文档列表", ""]
+    for source in sources:
+        lines.append(f"- **{source.label}**")
+        tree = build_doc_tree(source.md_files)
+        render_doc_tree(tree, source.dir, "  ", lines, lambda route: route)
 
     readme_path = DOCS_DIR / "README.md"
     readme_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"  [生成] README.md (首页索引)")
+    print("  [生成] README.md (首页索引)")
 
 
-def generate_index_html(search_paths, namespace):
+def generate_index_html(search_paths, namespace, title="文档中心"):
     """生成 index.html"""
     prism_lang_map_js = json.dumps(PRISM_LANG_FALLBACK, ensure_ascii=False)
-    html = f"""<!DOCTYPE html>
+    title_html = html.escape(title)
+    title_js = json.dumps(title, ensure_ascii=False)
+    html_text = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>文档中心</title>
+  <title>{title_html}</title>
   <link rel="stylesheet" href="lib/prism.min.css">
   <link rel="stylesheet" href="lib/docsify.min.css">
   <link rel="stylesheet" href="lib/custom-search.css">
@@ -3633,7 +3651,7 @@ def generate_index_html(search_paths, namespace):
   <div id="app">加载中...</div>
   <script>
     window.$docsify = {{
-      name: '文档中心',
+      name: {title_js},
       repo: '',
       loadSidebar: true,
       coverpage: false,
@@ -3696,8 +3714,8 @@ def generate_index_html(search_paths, namespace):
 </html>
 """
     index_path = DOCS_DIR / "index.html"
-    index_path.write_text(html, encoding="utf-8")
-    print(f"  [生成] index.html (搜索路径 {len(search_paths)} 条)")
+    index_path.write_text(html_text, encoding="utf-8")
+    print(f"  [生成] index.html (搜索路径 {len(search_paths)} 条, namespace {namespace})")
 
 
 def main(argv=None):
