@@ -253,3 +253,123 @@ class ServeTests(unittest.TestCase):
                     serve.main(["--dir", str(tmp), "--no-browser"])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class GenerationTests(TempDirTestCase):
+    def build_site(self):
+        self.write_doc("指南/入门.md", "# 入门\n\n## 安装\n\n内容")
+        self.write_doc("指南/进阶.md", "# 进阶")
+        self.write_doc("常见问题.md", "# FAQ")
+        md_files = self.scan()
+        with redirect_stdout(io.StringIO()):
+            self.module.generate_sidebar(md_files)
+            self.module.generate_readme(md_files, "测试站点")
+            self.module.generate_search_index(md_files, "测试站点")
+            self.module.generate_offline_data()
+        return md_files
+
+    def test_sidebar_tree(self):
+        self.build_site()
+        sidebar = (self.docs / "_sidebar.md").read_text(encoding="utf-8")
+        self.assertIn("- **指南**", sidebar)
+        self.assertIn("[入门](/md/指南/入门.md)", sidebar)
+        self.assertIn("[常见问题](/md/常见问题.md)", sidebar)
+
+    def test_readme_index(self):
+        self.build_site()
+        readme = (self.docs / "README.md").read_text(encoding="utf-8")
+        self.assertIn("# 测试站点", readme)
+        self.assertIn("[入门](md/指南/入门.md)", readme)
+
+    def test_search_index_routes(self):
+        self.build_site()
+        index = json.loads(
+            (self.docs / "search-index.json").read_text(encoding="utf-8")
+        )
+        self.assertIn("/", index)
+        self.assertIn("/md/指南/入门.md", index)
+        entry = index["/md/指南/入门.md"]["/md/指南/入门.md?id=安装"]
+        self.assertEqual(entry["route"], "/md/指南/入门.md")
+
+    def test_offline_data_contains_all_md(self):
+        self.build_site()
+        text = (self.docs / "lib" / "offline-data.js").read_text(encoding="utf-8")
+        payload = json.loads(text.split("=", 1)[1].rstrip().rstrip(";"))
+        self.assertIn("md/指南/入门.md", payload["content"])
+        self.assertIn("_sidebar.md", payload["content"])
+        self.assertIn("searchIndex", payload)
+
+    def test_index_html_title_and_escaping(self):
+        title = "文档</script><script>alert(1)</script>"
+        with redirect_stdout(io.StringIO()):
+            self.module.generate_index_html(title)
+        html_text = (self.docs / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn("</script><script>alert(1)", html_text)
+        self.assertIn("\\u003c/script", html_text)
+        self.assertIn("&lt;/script&gt;", html_text)
+
+    def test_search_index_reports_non_utf8_path(self):
+        self.write_doc("a.md", "# A")
+        (self.md / "bad.md").write_bytes(b"\xff\xfe\x00bad")
+        md_files = self.scan()
+        with redirect_stdout(io.StringIO()):
+            with self.assertRaises(self.module.BuildError) as ctx:
+                self.module.generate_search_index(md_files, "T")
+        self.assertIn("bad.md", str(ctx.exception))
+
+    def test_offline_data_reports_non_utf8_path(self):
+        (self.md / "bad.md").write_bytes(b"\xff\xfe\x00bad")
+        with redirect_stdout(io.StringIO()):
+            with self.assertRaises(self.module.BuildError) as ctx:
+                self.module.generate_offline_data()
+        self.assertIn("bad.md", str(ctx.exception))
+
+
+class PrismTests(TempDirTestCase):
+    def test_collect_fence_languages_from_markdown(self):
+        self.write_doc("a.md", "```python\nprint(1)\n```\n\n```cuda\nx\n```")
+        self.assertEqual(
+            self.module.collect_fence_languages(self.md, ["a.md"]), {"python", "cuda"}
+        )
+
+    def test_collect_fence_languages_multiple_files(self):
+        self.write_doc("a.md", "```python\nprint(1)\n```")
+        self.write_doc("sub/b.md", "```go\npackage main\n```")
+        md_files = self.scan()
+        self.assertEqual(
+            self.module.collect_fence_languages(self.md, md_files), {"python", "go"}
+        )
+
+    def test_ensure_prism_components_reuses_and_warns(self):
+        components = self.docs / "lib" / "components"
+        components.mkdir(parents=True)
+        (components / "prism-python.min.js").write_text("x", encoding="utf-8")
+        self.write_doc("a.md", "```python\nprint(1)\n```\n\n```rust\nx\n```")
+        md_files = self.scan()
+        with mock.patch.object(self.module, "_download", return_value=False) as download:
+            with redirect_stdout(io.StringIO()) as output:
+                self.module.ensure_prism_components(self.md, md_files)
+        requested = " ".join(str(call.args[0]) for call in download.call_args_list)
+        self.assertIn("prism-rust.min.js", requested)
+        self.assertNotIn("prism-python.min.js", requested)
+        self.assertIn("警告", output.getvalue())
+
+    def test_ensure_prism_components_skips_without_languages(self):
+        self.write_doc("a.md", "# 无代码块")
+        md_files = self.scan()
+        with mock.patch.object(self.module, "_download") as download:
+            with redirect_stdout(io.StringIO()) as output:
+                self.module.ensure_prism_components(self.md, md_files)
+        download.assert_not_called()
+        self.assertIn("跳过", output.getvalue())
+
+    def test_ensure_prism_components_resolves_fallback_closure(self):
+        self.write_doc("a.md", "```cuda\nx\n```")
+        md_files = self.scan()
+        with mock.patch.object(self.module, "_download", return_value=True) as download:
+            with redirect_stdout(io.StringIO()):
+                self.module.ensure_prism_components(self.md, md_files)
+        requested = " ".join(str(call.args[0]) for call in download.call_args_list)
+        self.assertIn("prism-cpp.min.js", requested)
+        self.assertIn("prism-c.min.js", requested)
+        self.assertNotIn("prism-cuda", requested)

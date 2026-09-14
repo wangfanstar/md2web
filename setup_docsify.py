@@ -3048,15 +3048,14 @@ def extract_autoloader_maps():
         return dict(FALLBACK_PRISM_DEPS), dict(FALLBACK_PRISM_ALIASES)
 
 
-def collect_fence_languages(sources) -> set:
-    """扫描所有源的 Markdown，收集代码围栏中出现的语言名。"""
+def collect_fence_languages(md_dir, md_files) -> set:
+    """扫描 docs/md 下的 Markdown，收集代码围栏中出现的语言名。"""
     langs = set()
     fence_re = re.compile(r"^[ \t]*(?:`{3,}|~{3,})[ \t]*([A-Za-z0-9_+#.-]+)", re.M)
-    for source in sources:
-        for rel in source.md_files:
-            text = (source.root / rel).read_text(encoding="utf-8", errors="ignore")
-            for match in fence_re.finditer(text):
-                langs.add(match.group(1).lower())
+    for rel in md_files:
+        text = (Path(md_dir) / rel).read_text(encoding="utf-8", errors="ignore")
+        for match in fence_re.finditer(text):
+            langs.add(match.group(1).lower())
     return langs
 
 
@@ -3082,9 +3081,9 @@ def resolve_prism_languages(fence_langs, deps, aliases):
     return resolved
 
 
-def ensure_prism_components(sources) -> None:
+def ensure_prism_components(md_dir, md_files) -> None:
     """按文档实际用到的语言准备 Prism 组件，缺失才下载，失败仅警告。"""
-    fence_langs = collect_fence_languages(sources)
+    fence_langs = collect_fence_languages(md_dir, md_files)
     if not fence_langs:
         print("  [跳过] 未发现代码块语言，无需语言组件")
         return
@@ -3215,18 +3214,18 @@ def build_page_index(route_path: str, content: str, depth: int, page_title: str 
     return index
 
 
-def generate_search_index(sources, title="文档中心", depth=SEARCH_DEPTH):
+def generate_search_index(md_files, title="文档中心", depth=SEARCH_DEPTH):
     """在构建时生成 search-index.json，避免浏览器 localStorage 配额限制。"""
     index = {}
     readme = DOCS_DIR / "README.md"
     if readme.exists():
         index["/"] = build_page_index("/", read_markdown(readme), depth, title)
 
-    for source in sources:
-        for rel in source.md_files:
-            route = f"/{source.dir}/{rel}"
-            content = read_markdown(source.root / rel)
-            index[route] = build_page_index(route, content, depth, Path(rel).stem)
+    for rel in md_files:
+        route = f"/md/{rel}"
+        index[route] = build_page_index(
+            route, read_markdown(MD_DIR / rel), depth, Path(rel).stem
+        )
 
     index_path = DOCS_DIR / "search-index.json"
     index_path.write_text(
@@ -3298,33 +3297,29 @@ def render_doc_tree(node, route_prefix, indent, lines, link):
         )
 
 
-def generate_sidebar(sources):
+def generate_sidebar(md_files):
     """生成 _sidebar.md 侧边栏文件"""
     lines = ["- **文档列表**"]
-    for source in sources:
-        lines.append(f"  - **{source.label}**")
-        tree = build_doc_tree(source.md_files)
-        render_doc_tree(tree, f"/{source.dir}", "    ", lines, lambda route: route)
+    tree = build_doc_tree(md_files)
+    render_doc_tree(tree, "/md", "  ", lines, lambda route: route)
 
     sidebar_path = DOCS_DIR / "_sidebar.md"
     sidebar_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"  [生成] _sidebar.md ({len(lines) - 1} 项)")
 
 
-def generate_readme(sources, title="文档中心"):
+def generate_readme(md_files, title="文档中心"):
     """生成 README.md 作为首页索引"""
     lines = [f"# {title}", "", "## 文档列表", ""]
-    for source in sources:
-        lines.append(f"- **{source.label}**")
-        tree = build_doc_tree(source.md_files)
-        render_doc_tree(tree, source.dir, "  ", lines, lambda route: route)
+    tree = build_doc_tree(md_files)
+    render_doc_tree(tree, "md", "", lines, lambda route: route)
 
     readme_path = DOCS_DIR / "README.md"
     readme_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("  [生成] README.md (首页索引)")
 
 
-def generate_index_html(search_paths, namespace, title="文档中心"):
+def generate_index_html(title="文档中心"):
     """生成 index.html"""
     prism_lang_map_js = json.dumps(PRISM_LANG_FALLBACK, ensure_ascii=False)
     title_html = html.escape(title)
@@ -3409,7 +3404,7 @@ def generate_index_html(search_paths, namespace, title="文档中心"):
 """
     index_path = DOCS_DIR / "index.html"
     index_path.write_text(html_text, encoding="utf-8")
-    print(f"  [生成] index.html (搜索路径 {len(search_paths)} 条, namespace {namespace})")
+    print("  [生成] index.html")
 
 
 def main(argv=None):
