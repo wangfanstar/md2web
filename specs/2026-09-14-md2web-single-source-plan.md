@@ -1087,3 +1087,19 @@ git commit -m "docs: 重写 README 适配单源就地架构"
 3. 构建前后 `docs/md` 内容逐字节不变（`test_build_does_not_touch_user_files` 覆盖）
 4. 仓库不再包含 `md/`、`md_sources.json`、`webtool/`
 5. README 与实际行为一致
+
+---
+
+## 实现后加固记录（2026-09-14）
+
+Task 4 实现后的代码审查加固，提交 `fix: 预校验编码并收紧离线数据范围`：
+
+1. **离线数据显式白名单**：`generate_offline_data(md_files)` 不再 `rglob("*.md")` 扫描 `docs/`，只内嵌 `README.md`、`_sidebar.md` 与 `scan_markdown` 返回的 `md/<rel>`。隐藏目录（如 `docs/md/.hidden/`）和 `docs/` 下用户自建的 `.md` 不再进入发布产物，非 UTF-8 的隐藏文档也不会在部分写入后才报错。
+2. **扫描后编码预校验**：`main` 在 `scan_markdown` 之后立即逐个 `read_markdown` 校验，编码/读取错误在 `ensure_assets`、`generate_sidebar`、`generate_readme` 等任何写入之前以退出码 1 结束，避免留下半成品（`_sidebar.md`/`README.md`/`search-index.json` 均不产生）。
+3. **新增/加强的测试**（37 → 39 个用例）：
+   - 新增 `GenerationTests.test_offline_data_ignores_files_outside_scan`：断言隐藏目录与 `docs/` 根下的 `.md` 不进入 `content`。
+   - 新增 `EndToEndTests.test_invalid_encoding_fails_before_writes`：非 UTF-8 文档使 `main` 退出码为 1，且不生成站点文件。
+   - 加强 `test_index_only_skips_site_files`：预置 `_sidebar.md` 哨兵，验证 `--index-only` 不改写站点文件且索引包含源文档。
+   - 加强 `test_full_build_offline`/`test_full_build_custom_title`：断言首页索引 `pageTitle` 与标题参数一致。
+   - 加强 `test_build_does_not_touch_user_files`：源 `a.md` 构建前后逐字节一致。
+   - 三个失败路径用例（缺目录/空目录/依赖失败）统一断言退出码为 1。

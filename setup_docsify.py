@@ -3236,16 +3236,16 @@ def generate_search_index(md_files, title="文档中心", depth=SEARCH_DEPTH):
     print(f"  [生成] search-index.json ({len(index)} 页, {size_mb:.1f} MB)")
 
 
-def generate_offline_data():
+def generate_offline_data(md_files):
     """内嵌 Markdown 和搜索索引，使 file:// 直接打开时绕过 XHR/fetch 限制。"""
     LIB_DIR.mkdir(parents=True, exist_ok=True)
     content = {}
-    for md_file in sorted(
-        DOCS_DIR.rglob("*.md"),
-        key=lambda path: path.relative_to(DOCS_DIR).as_posix(),
-    ):
-        relative = md_file.relative_to(DOCS_DIR).as_posix()
-        content[relative] = read_markdown(md_file)
+    for name in ("README.md", "_sidebar.md"):
+        path = DOCS_DIR / name
+        if path.exists():
+            content[name] = read_markdown(path)
+    for rel in md_files:
+        content[f"md/{rel}"] = read_markdown(MD_DIR / rel)
 
     search_index = {}
     search_index_path = DOCS_DIR / "search-index.json"
@@ -3417,6 +3417,8 @@ def main(argv=None):
 
     try:
         md_files = scan_markdown(MD_DIR)
+        for rel in md_files:
+            read_markdown(MD_DIR / rel)
     except (BuildError, OSError, UnicodeDecodeError) as error:
         print(f"  错误: {error}")
         sys.exit(1)
@@ -3427,7 +3429,7 @@ def main(argv=None):
         if args.index_only:
             print("=== 仅刷新搜索索引（跳过依赖与站点文件生成） ===\n")
             generate_search_index(md_files, args.title)
-            generate_offline_data()
+            generate_offline_data(md_files)
             print("\n=== 搜索索引刷新完成 ===")
             return
 
@@ -3442,7 +3444,7 @@ def main(argv=None):
         generate_sidebar(md_files)
         generate_readme(md_files, args.title)
         generate_search_index(md_files, args.title)
-        generate_offline_data()
+        generate_offline_data(md_files)
         generate_index_html(args.title)
 
         print("\n=== 构建完成 ===")

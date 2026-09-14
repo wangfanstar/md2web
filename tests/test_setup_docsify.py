@@ -265,7 +265,7 @@ class GenerationTests(TempDirTestCase):
             self.module.generate_sidebar(md_files)
             self.module.generate_readme(md_files, "测试站点")
             self.module.generate_search_index(md_files, "测试站点")
-            self.module.generate_offline_data()
+            self.module.generate_offline_data(md_files)
         return md_files
 
     def test_sidebar_tree(self):
@@ -321,8 +321,22 @@ class GenerationTests(TempDirTestCase):
         (self.md / "bad.md").write_bytes(b"\xff\xfe\x00bad")
         with redirect_stdout(io.StringIO()):
             with self.assertRaises(self.module.BuildError) as ctx:
-                self.module.generate_offline_data()
+                self.module.generate_offline_data(["bad.md"])
         self.assertIn("bad.md", str(ctx.exception))
+
+    def test_offline_data_ignores_files_outside_scan(self):
+        self.write_doc("a.md", "# A")
+        (self.md / ".hidden").mkdir()
+        (self.md / ".hidden" / "h.md").write_text("# H", encoding="utf-8")
+        (self.docs / "extra.md").write_text("# X", encoding="utf-8")
+        md_files = self.scan()
+        with redirect_stdout(io.StringIO()):
+            self.module.generate_offline_data(md_files)
+        text = (self.docs / "lib" / "offline-data.js").read_text(encoding="utf-8")
+        payload = json.loads(text.split("=", 1)[1].rstrip().rstrip(";"))
+        self.assertIn("md/a.md", payload["content"])
+        self.assertNotIn("extra.md", payload["content"])
+        self.assertNotIn(".hidden", payload["content"])
 
 
 class PrismTests(TempDirTestCase):
@@ -400,6 +414,10 @@ class EndToEndTests(TempDirTestCase):
             "<title>文档中心</title>",
             (self.docs / "index.html").read_text(encoding="utf-8"),
         )
+        index = json.loads(
+            (self.docs / "search-index.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(index["/"]["/"]["pageTitle"], "文档中心")
 
     def test_full_build_custom_title(self):
         self.write_doc("a.md", "# A")
@@ -411,31 +429,57 @@ class EndToEndTests(TempDirTestCase):
             (self.docs / "index.html").read_text(encoding="utf-8"),
         )
         self.assertIn("# E2E", (self.docs / "README.md").read_text(encoding="utf-8"))
+        index = json.loads(
+            (self.docs / "search-index.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(index["/"]["/"]["pageTitle"], "E2E")
 
     def test_index_only_skips_site_files(self):
         self.write_doc("a.md", "# A")
+        (self.docs / "_sidebar.md").write_text("SENTINEL", encoding="utf-8")
         with redirect_stdout(io.StringIO()):
             self.module.main(["--index-only"])
-        self.assertTrue((self.docs / "search-index.json").exists())
+        self.assertEqual(
+            (self.docs / "_sidebar.md").read_text(encoding="utf-8"), "SENTINEL"
+        )
+        index = json.loads(
+            (self.docs / "search-index.json").read_text(encoding="utf-8")
+        )
+        self.assertIn("/md/a.md", index)
         self.assertFalse((self.docs / "index.html").exists())
 
     def test_missing_source_exits(self):
         shutil.rmtree(self.md)
         with redirect_stdout(io.StringIO()):
-            with self.assertRaises(SystemExit):
+            with self.assertRaises(SystemExit) as ctx:
                 self.module.main([])
+        self.assertEqual(ctx.exception.code, 1)
 
     def test_empty_source_exits(self):
         with redirect_stdout(io.StringIO()):
-            with self.assertRaises(SystemExit):
+            with self.assertRaises(SystemExit) as ctx:
                 self.module.main([])
+        self.assertEqual(ctx.exception.code, 1)
 
     def test_dependency_failure_exits(self):
         self.write_doc("a.md", "# A")
         with mock.patch.object(self.module, "_download", return_value=False):
             with redirect_stdout(io.StringIO()):
-                with self.assertRaises(SystemExit):
+                with self.assertRaises(SystemExit) as ctx:
                     self.module.main([])
+        self.assertEqual(ctx.exception.code, 1)
+
+    def test_invalid_encoding_fails_before_writes(self):
+        self.write_doc("a.md", "# A")
+        (self.md / "bad.md").write_bytes(b"\xff\xfe\x00bad")
+        self.seed_assets()
+        with redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as ctx:
+                self.module.main([])
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertFalse((self.docs / "_sidebar.md").exists())
+        self.assertFalse((self.docs / "README.md").exists())
+        self.assertFalse((self.docs / "search-index.json").exists())
 
     def test_build_does_not_touch_user_files(self):
         self.write_doc("a.md", "# A")
@@ -443,8 +487,10 @@ class EndToEndTests(TempDirTestCase):
         (self.md / "images" / "pic.png").write_bytes(b"img")
         (self.md / "notes.txt").write_text("keep", encoding="utf-8")
         self.seed_assets()
+        before = (self.md / "a.md").read_bytes()
         with redirect_stdout(io.StringIO()):
             self.module.main([])
+        self.assertEqual((self.md / "a.md").read_bytes(), before)
         self.assertEqual((self.md / "images" / "pic.png").read_bytes(), b"img")
         self.assertEqual((self.md / "notes.txt").read_text(encoding="utf-8"), "keep")
         self.assertTrue((self.md / "a.md").exists())
