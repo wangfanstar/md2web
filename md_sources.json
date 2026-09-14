@@ -1,6 +1,0 @@
-{
-  "title": "文档中心",
-  "sources": [
-    { "path": "md", "label": "文档", "dir": "md" }
-  ]
-}
