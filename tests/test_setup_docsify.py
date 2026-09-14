@@ -528,3 +528,44 @@ class GenerationTests(TempDirTestCase):
         self.module.scan_source(sources[0])
         second = self.module.compute_search_namespace(sources)
         self.assertNotEqual(first, second)
+
+    def test_sidebar_single_file_dir_folds_to_link(self):
+        root = self.make_source("src", {"单独/只有一篇.md": "# 只有一篇"})
+        sources = self.resolve([self.make_spec(root)])
+        with redirect_stdout(io.StringIO()):
+            self.module.sync_sources(sources, self.docs)
+            self.module.generate_sidebar(sources)
+        sidebar = (self.docs / "_sidebar.md").read_text(encoding="utf-8")
+        self.assertIn("[只有一篇](/src/单独/只有一篇.md)", sidebar)
+        self.assertNotIn("- **单独**", sidebar)
+
+    def test_multi_source_navigation_and_search(self):
+        first = self.make_source("one", {"a.md": "# A"})
+        second = self.make_source("two", {"sub/b.md": "# B"})
+        sources = self.resolve(
+            [self.make_spec(first, label="甲"), self.make_spec(second, label="乙")]
+        )
+        with redirect_stdout(io.StringIO()):
+            self.module.sync_sources(sources, self.docs)
+            self.module.generate_sidebar(sources)
+            self.module.generate_readme(sources, "多源站点")
+            self.module.generate_search_index(sources, "多源站点")
+        sidebar = (self.docs / "_sidebar.md").read_text(encoding="utf-8")
+        self.assertIn("- **甲**", sidebar)
+        self.assertIn("- **乙**", sidebar)
+        self.assertIn("[b](/two/sub/b.md)", sidebar)
+        readme = (self.docs / "README.md").read_text(encoding="utf-8")
+        self.assertIn("[b](two/sub/b.md)", readme)
+        index = json.loads((self.docs / "search-index.json").read_text(encoding="utf-8"))
+        self.assertIn("/one/a.md", index)
+        self.assertIn("/two/sub/b.md", index)
+
+    def test_index_html_escapes_title(self):
+        self.docs.mkdir(parents=True, exist_ok=True)
+        title = "文档</script><script>alert(1)</script>"
+        with redirect_stdout(io.StringIO()):
+            self.module.generate_index_html(["/"], "docs-test", title)
+        html_text = (self.docs / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn("</script><script>alert(1)", html_text)
+        self.assertIn("\\u003c/script", html_text)
+        self.assertIn("&lt;/script&gt;", html_text)

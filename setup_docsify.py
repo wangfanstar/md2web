@@ -3634,7 +3634,7 @@ def generate_index_html(search_paths, namespace, title="文档中心"):
     """生成 index.html"""
     prism_lang_map_js = json.dumps(PRISM_LANG_FALLBACK, ensure_ascii=False)
     title_html = html.escape(title)
-    title_js = json.dumps(title, ensure_ascii=False)
+    title_js = json.dumps(title, ensure_ascii=False).replace("<", "\\u003c")
     html_text = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
