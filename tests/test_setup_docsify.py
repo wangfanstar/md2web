@@ -128,3 +128,25 @@ class ConfigTests(TempDirTestCase):
         args = self.make_args(config=self.tmp / "nope.json", no_config=False)
         with self.assertRaises(self.module.BuildError):
             self.module.load_source_specs(args)
+
+    def test_load_config_read_error(self):
+        with self.assertRaises(self.module.BuildError):
+            self.module.load_config_file(self.tmp)
+
+    def test_parse_args_repeatable_sources(self):
+        args = self.module.parse_args(["a", "--source-md", "b", "--md-dir", "c"])
+        self.assertEqual(
+            args.source_md_dirs, [Path("a"), Path("b"), Path("c")]
+        )
+
+    def test_parse_args_defaults(self):
+        args = self.module.parse_args([])
+        self.assertEqual(args.source_md_dirs, [])
+        self.assertIsNone(args.output_docs_dir)
+        self.assertIsNone(args.config_path)
+        self.assertFalse(args.no_config)
+        self.assertFalse(args.index_only)
+
+    def test_parse_args_output_conflict(self):
+        with self.assertRaises(SystemExit):
+            self.module.parse_args(["src", "--output-docs", "out1", "out2"])

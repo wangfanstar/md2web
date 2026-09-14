@@ -119,9 +119,13 @@ def parse_args(argv=None):
 def load_config_file(config_path: Path):
     """读取 md_sources.json，返回 (title, specs)。"""
     try:
-        raw = json.loads(Path(config_path).read_text(encoding="utf-8"))
+        text = Path(config_path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise BuildError(f"配置文件读取失败: {config_path} ({error})") from error
+    try:
+        raw = json.loads(text)
     except json.JSONDecodeError as error:
-        raise BuildError(f"配置文件不是合法 JSON: {config_path} ({error})")
+        raise BuildError(f"配置文件不是合法 JSON: {config_path} ({error})") from error
     if isinstance(raw, list):
         raw = {"sources": raw}
     if not isinstance(raw, dict):
