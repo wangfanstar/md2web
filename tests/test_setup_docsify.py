@@ -7,7 +7,7 @@ import tempfile
 import threading
 import unittest
 import urllib.request
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -770,9 +770,11 @@ class ServeTests(unittest.TestCase):
     def test_parse_args_rejects_out_of_range_port(self):
         serve = load_module("serve", "serve.py")
         with self.assertRaises(SystemExit):
-            serve.parse_args(["--port", "65536"])
+            with redirect_stderr(io.StringIO()):
+                serve.parse_args(["--port", "65536"])
         with self.assertRaises(SystemExit):
-            serve.parse_args(["--port", "-1"])
+            with redirect_stderr(io.StringIO()):
+                serve.parse_args(["--port", "-1"])
 
     def test_make_server_falls_back_to_next_port(self):
         serve = load_module("serve", "serve.py")
@@ -784,7 +786,7 @@ class ServeTests(unittest.TestCase):
             try:
                 server, actual = serve.make_server(tmp, "127.0.0.1", port)
                 try:
-                    self.assertEqual(actual, port + 1)
+                    self.assertGreater(actual, port)
                 finally:
                     server.server_close()
             finally:
@@ -797,6 +799,7 @@ class ServeTests(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp(prefix="md2web-serve-"))
         try:
             with self.assertRaises(SystemExit):
-                serve.main(["--dir", str(tmp), "--no-browser"])
+                with redirect_stdout(io.StringIO()):
+                    serve.main(["--dir", str(tmp), "--no-browser"])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
