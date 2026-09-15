@@ -8,7 +8,7 @@
   var state = { filter: '', observer: null, timer: 0, lastRoute: null };
 
   function all(selector, root) { return Array.prototype.slice.call((root || document).querySelectorAll(selector)); }
-  function text(node) { return (node && (node.textContent || '')).replace(/\s+/g, ' ').trim(); }
+  function text(node) { return String((node && node.textContent) || '').replace(/\s+/g, ' ').trim(); }
   function routeOf(href) {
     var value = String(href || '');
     if (value.indexOf('#') !== -1) value = value.slice(value.indexOf('#') + 1);

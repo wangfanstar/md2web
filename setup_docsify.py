@@ -762,6 +762,7 @@ def generate_index_html(title="文档中心"):
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{title_html}</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f6feb'/%3E%3Cpath d='M9 8.5h14v2.6H9zm0 6h14v2.6H9zm0 6h9v2.6H9z' fill='%23fff'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="lib/prism.min.css">
   <link rel="stylesheet" href="lib/docsify.min.css">
   <link rel="stylesheet" href="lib/custom-search.css">
@@ -776,6 +777,9 @@ def generate_index_html(title="文档中心"):
       name: {title_js},
       repo: '',
       loadSidebar: true,
+      alias: {{
+        '/.*/_sidebar.md': '/_sidebar.md',
+      }},
       coverpage: false,
       subMaxLevel: 0,
       auto2top: true,

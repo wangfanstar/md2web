@@ -477,6 +477,13 @@ class GenerationTests(TempDirTestCase):
         self.assertIn("\\u003c/script", html_text)
         self.assertIn("&lt;/script&gt;", html_text)
 
+    def test_index_html_has_sidebar_alias_and_favicon(self):
+        with redirect_stdout(io.StringIO()):
+            self.module.generate_index_html("T")
+        html_text = (self.docs / "index.html").read_text(encoding="utf-8")
+        self.assertIn("'/.*/_sidebar.md': '/_sidebar.md'", html_text)
+        self.assertIn('rel="icon"', html_text)
+
     def test_search_index_reports_non_utf8_path(self):
         self.write_doc("a.md", "# A")
         (self.md / "bad.md").write_bytes(b"\xff\xfe\x00bad")
