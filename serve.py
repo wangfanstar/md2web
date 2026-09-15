@@ -6,6 +6,8 @@ import functools
 import http.server
 import os
 import socket
+import subprocess
+import sys
 import threading
 import webbrowser
 from pathlib import Path
@@ -30,6 +32,11 @@ def parse_args(argv=None):
         help="监听地址，默认 0.0.0.0（局域网可见；仅本机用 127.0.0.1）",
     )
     parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
+    parser.add_argument(
+        "--no-build",
+        action="store_true",
+        help="不自动重建，直接预览现有产物",
+    )
     args = parser.parse_args(argv)
     if not 0 <= args.port <= 65535:
         parser.error("端口必须在 0-65535 之间")
@@ -43,6 +50,44 @@ def lan_ip():
             return sock.getsockname()[0]
     except OSError:
         return None
+
+
+def needs_rebuild(directory):
+    """判断默认 docs/ 目录是否需要重新构建。
+
+    仅当脚本同级存在 setup_docsify.py、预览目录就是默认 docs/、
+    且 docs/md 下有比 search-index.json 更新的 Markdown 时返回 True。
+    """
+    setup_script = ROOT / "setup_docsify.py"
+    docs_dir = (ROOT / "docs").resolve()
+    if not setup_script.exists() or Path(directory).resolve() != docs_dir:
+        return False
+    md_dir = docs_dir / "md"
+    if not md_dir.is_dir():
+        return False
+    index_path = docs_dir / "search-index.json"
+    if not index_path.exists():
+        return True
+    index_mtime = index_path.stat().st_mtime
+    for path in md_dir.rglob("*"):
+        if not path.is_file() or path.suffix.lower() != ".md":
+            continue
+        rel = path.relative_to(md_dir)
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        if path.stat().st_mtime > index_mtime:
+            return True
+    return False
+
+
+def rebuild():
+    """调用 setup_docsify.py 重新构建；失败时提示并继续使用现有产物。"""
+    print("检测到 docs/md 有更新，正在重新构建...")
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "setup_docsify.py")], cwd=str(ROOT)
+    )
+    if result.returncode != 0:
+        print("警告: 重新构建失败，将使用现有产物预览。")
 
 
 def make_server(directory, bind, port):
@@ -65,6 +110,8 @@ def make_server(directory, bind, port):
 def main(argv=None):
     args = parse_args(argv)
     directory = args.directory.expanduser().resolve()
+    if not args.no_build and needs_rebuild(directory):
+        rebuild()
     if not (directory / "index.html").exists():
         raise SystemExit(f"错误: {directory} 下没有 index.html，请先运行 python setup_docsify.py")
     server, port = make_server(directory, args.bind, args.port)

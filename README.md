@@ -61,10 +61,11 @@ python serve.py             # 打开 http://localhost:3000
 | 完整构建 | `python setup_docsify.py` |
 | 自定义标题 | `python setup_docsify.py --title "我的文档"` |
 | 仅刷新索引与离线数据 | `python setup_docsify.py --index-only` |
-| 预览 | `python serve.py`（`--port 8080`、`--bind 127.0.0.1`、`--no-browser`） |
+| 预览 | `python serve.py`（`--port 8080`、`--bind 127.0.0.1`、`--no-browser`、`--no-build`） |
 
 Windows 可双击 `start_windows.bat`，Linux 可执行 `sh start_linux.sh`。也可以直接双击 `docs/index.html`（file:// 模式，内容与索引内嵌）。
 
+> `python serve.py` 启动时会检测 `docs/md` 是否有比生成物更新的文档，如有则自动重新构建后再预览（可用 `--no-build` 关闭）；双击 `docs/index.html` 前需先手动构建一次。
 > `--index-only` 只重建搜索索引与离线数据，不重新生成侧边栏与首页；新增文件要出现在导航中需执行一次完整构建。
 
 预览服务默认绑定 `0.0.0.0`，同一局域网内可访问，请勿在含敏感内容的文档站上使用；仅本机访问可执行 `python serve.py --bind 127.0.0.1`。

@@ -2,9 +2,11 @@ import errno
 import importlib.util
 import io
 import json
+import os
 import shutil
 import tempfile
 import threading
+import time
 import unittest
 import urllib.request
 from contextlib import redirect_stderr, redirect_stdout
@@ -296,6 +298,56 @@ class ServeTests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 with self.assertRaises(SystemExit):
                     serve.main(["--dir", str(tmp), "--no-browser"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_parse_args_no_build_flag(self):
+        serve = load_module("serve", "serve.py")
+        self.assertFalse(serve.parse_args([]).no_build)
+        self.assertTrue(serve.parse_args(["--no-build"]).no_build)
+
+    def test_needs_rebuild_detects_newer_markdown(self):
+        serve = load_module("serve", "serve.py")
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-serve-"))
+        try:
+            docs = tmp / "docs"
+            (docs / "md").mkdir(parents=True)
+            (tmp / "setup_docsify.py").write_text("", encoding="utf-8")
+            index_path = docs / "search-index.json"
+            index_path.write_text("{}", encoding="utf-8")
+            doc_path = docs / "md" / "a.md"
+            doc_path.write_text("# A", encoding="utf-8")
+            old = time.time() - 100
+            os.utime(index_path, (old, old))
+            with mock.patch.object(serve, "ROOT", tmp):
+                self.assertTrue(serve.needs_rebuild(docs))
+                os.utime(doc_path, (old, old))
+                self.assertFalse(serve.needs_rebuild(docs))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_needs_rebuild_without_index(self):
+        serve = load_module("serve", "serve.py")
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-serve-"))
+        try:
+            docs = tmp / "docs"
+            (docs / "md").mkdir(parents=True)
+            (tmp / "setup_docsify.py").write_text("", encoding="utf-8")
+            (docs / "md" / "a.md").write_text("# A", encoding="utf-8")
+            with mock.patch.object(serve, "ROOT", tmp):
+                self.assertTrue(serve.needs_rebuild(docs))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_needs_rebuild_skips_custom_directory(self):
+        serve = load_module("serve", "serve.py")
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-serve-"))
+        try:
+            docs = tmp / "docs"
+            (docs / "md").mkdir(parents=True)
+            (tmp / "setup_docsify.py").write_text("", encoding="utf-8")
+            with mock.patch.object(serve, "ROOT", tmp):
+                self.assertFalse(serve.needs_rebuild(tmp / "elsewhere"))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
