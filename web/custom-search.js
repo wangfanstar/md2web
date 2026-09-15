@@ -1276,6 +1276,7 @@
     query: '',
     route: '',
     matches: [],
+    marks: [],
     current: -1,
     wrapped: [],
     foldedNonHits: false,
@@ -1309,6 +1310,7 @@
         toolbar.parentNode.removeChild(toolbar);
       }
     }
+    clearReadingMarks();
     reading.wrapped.forEach(function (entry) {
       var wrapper = entry.wrapper;
       if (wrapper.isConnected && wrapper.parentNode) {
@@ -1389,10 +1391,58 @@
     return ranges;
   }
 
+  function supportsHighlightApi() {
+    return !!(window.CSS && CSS.highlights && window.Highlight);
+  }
+
+  function wrapReadingMatches() {
+    reading.marks = [];
+    for (var i = reading.matches.length - 1; i >= 0; i -= 1) {
+      var range = reading.matches[i];
+      var mark = document.createElement('mark');
+      mark.className = 'search-reading-mark';
+      try {
+        range.surroundContents(mark);
+        reading.marks[i] = mark;
+      } catch (error) {
+        reading.marks[i] = null;
+      }
+    }
+  }
+
+  function clearReadingMarks() {
+    (reading.marks || []).forEach(function (mark) {
+      if (!mark || !mark.isConnected || !mark.parentNode) {
+        return;
+      }
+      var parent = mark.parentNode;
+      while (mark.firstChild) {
+        parent.insertBefore(mark.firstChild, mark);
+      }
+      parent.removeChild(mark);
+      parent.normalize();
+    });
+    reading.marks = [];
+  }
+
+  function updateCurrentMark() {
+    (reading.marks || []).forEach(function (mark) {
+      if (mark) {
+        mark.classList.remove('is-current');
+      }
+    });
+    var current = reading.marks && reading.marks[reading.current];
+    if (current) {
+      current.classList.add('is-current');
+    }
+  }
+
   function applyReadingHighlight() {
-    if (!(window.CSS && CSS.highlights)) {
+    if (!supportsHighlightApi()) {
+      updateCurrentMark();
       return;
     }
+    CSS.highlights.delete('docsify-search-hl');
     CSS.highlights.delete('docsify-search-current');
     if (reading.matches.length) {
       var highlight = new Highlight();
@@ -1657,6 +1707,10 @@
     reading.query = query;
     reading.route = route;
     reading.matches = collectReadingRanges(section, query, tokens);
+    reading.marks = [];
+    if (!supportsHighlightApi()) {
+      wrapReadingMatches();
+    }
     reading.current = -1;
     reading.wrapped = [];
     reading.foldedNonHits = false;
