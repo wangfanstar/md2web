@@ -31,6 +31,7 @@ body { color: var(--workspace-ink); background: #f7f9fb; }
 .workspace-page-actions { display: flex; gap: 6px; justify-content: flex-end; margin: -31px 0 15px; }
 .workspace-wide .markdown-section { max-width: none; }
 .workspace-wide .content { right: 0 !important; }
+.workspace-wide .docs-page-toc { display: none; }
 .markdown-section pre { position: relative; }
 .workspace-copy-code { position: absolute; top: 7px; right: 8px; border: 1px solid rgba(255,255,255,.25); border-radius: 4px; background: rgba(18,28,40,.7); color: #e8eef5; cursor: pointer; font-size: 11px; opacity: .75; padding: 3px 7px; }
 .workspace-copy-code:hover { opacity: 1; }
