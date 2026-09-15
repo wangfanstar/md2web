@@ -27,7 +27,7 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | 路径 | 职责 |
 |------|------|
 | `setup_docsify.py` | 构建：扫描、编码校验、依赖复用/下载、Prism 组件、生成导航/首页/索引/离线数据/入口 |
-| `serve.py` | 跨平台预览：端口回退、自动替换旧实例、运行期每 2s 检测 `docs/md` 变化并自动重建 |
+| `serve.py` | 跨平台预览：端口回退、自动替换旧实例、运行期每 2s 检测 `docs/md` 变化并自动重建；提供 `/__md/meta`、`/__md/save` 源文档读写接口（仅本机，sha256 冲突检测、EOL 保持、原子写入） |
 | `web/custom-search.js` / `.css` | 搜索算法与界面、结果列表、搜索/目录视图切换、正文命中高亮、右侧本文目录 |
 | `web/workspace.js` / `.css` | 目录树（折叠/过滤/计数/定位）、面包屑、首页卡片、复制、编辑/下载 MD、宽屏、章节序号、Mermaid 样式 |
 | `web/mermaid-init.js` | docsify 插件：把 ```mermaid 围栏渲染为图形（离线） |
@@ -35,7 +35,9 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `web/packetdiag-init.js` | docsify 插件：把 ```packetdiag 围栏渲染为报文图，失败回退源码 |
 | `web/media-viewer.js` | 图片、Mermaid 图形与 PacketDiag 图形的全屏放大查看（缩放、平移、适应窗口、1:1、滚轮/触屏）与下载（Mermaid 导出 SVG/PNG，PacketDiag 导出 PNG；导出时把 foreignObject 转为 SVG 文本，保证 PNG 可导出、SVG 通用） |
 | `web/page-export.js` | 「下载本页」：把当前文档导出为自包含 HTML（样式内联、Canvas/图片转 data URL、生成目录） |
-| `web/md-editor.js` | 「编辑 MD / 下载 MD」：读取当前路由对应的源文档（HTTP 用 fetch，file:// 回退内嵌快照），提供全屏编辑器、保存到文件（File System Access API）、下载、复制、还原；`window.MdEditor = { open, download }` |
+| `web/md-editor.js` | 「编辑 MD / 下载 MD」：双栏编辑器（左：可拖拽分栏的 Markdown 高亮源码；右：marked + Prism + Mermaid + PacketDiag + KaTeX 实时预览）、工具栏与快捷键、`Ctrl+S` 直连写回（HTTP 走 `/__md/save`，file:// 走 File System Access/下载）；`window.MdEditor = { open, download, save, close }` |
+| `web/math-init.js` | docsify 插件：`$...$` / `$$...$$` 等分隔符的 KaTeX 离线渲染；暴露 `window.MathRender.render` 供编辑器预览复用 |
+| `web/prism-init.js` | docsify 插件：`beforeEach` 阶段按围栏语言预载 Prism 组件，保证 docsify 渲染期即可高亮（docsify 内置 Prism 覆盖了 `window.Prism`，autoloader 必须在其之后加载） |
 | `web/plot-playground.html` | 独立绘图在线预览页（Mermaid 全部类型模板 + PacketDiag 增强控件与完整语法说明、下载），构建复制到 `docs/lib/` |
 | `docs/md/` | 唯一需要人工维护的源文档目录 |
 | `docs/lib/` | 离线依赖 + 生成资源，不要手工修改 |
@@ -56,15 +58,15 @@ python serve.py                         # 预览 http://localhost:3000
 python -m unittest discover -s tests -v
 node --test tests/test_search.js
 node --test tests/test_packetdiag.js
-node --check web/custom-search.js       # 前端语法检查（workspace/mermaid-init/media-viewer/packetdiag/page-export/md-editor 同理）
+node --check web/custom-search.js       # 前端语法检查（workspace/mermaid-init/media-viewer/packetdiag/page-export/md-editor/math-init/prism-init 同理）
 ```
 
 ## 不可破坏的约定
 
-1. **构建绝不修改 `docs/md/`**：不删除、不移动、不重写源文档；新增/删除文档由用户操作。
+1. **构建绝不修改 `docs/md/`**：不删除、不移动、不重写源文档；新增/删除文档由用户操作。编辑器的 `Ctrl+S` 是用户主动触发（经本机预览服务写回），不属于构建行为。
 2. **生成物不手工维护**：`docs/index.html`、`docs/README.md`、`docs/_sidebar.md`、`docs/search-index.json`、`docs/lib/` 下生成资源都会被构建覆盖。
 3. **前端源码在 `web/`**：改搜索/工作台/样式要改 `web/`，再运行构建同步到 `docs/lib/`；不要直接改 `docs/lib/`。
-4. **完全离线**：运行时不得请求 CDN；新增第三方库必须保存到 `docs/lib/` 并登记到 `setup_docsify.py` 的 `ASSETS`（含固定版本 URL）。
+4. **完全离线**：运行时不得请求 CDN；新增第三方库必须保存到 `docs/lib/` 并登记到 `setup_docsify.py` 的 `ASSETS`（含固定版本 URL）。KaTeX 含 `katex/fonts/*.woff2` 共 20 个字体文件，`ensure_assets` 会自动创建嵌套目录。
 5. **失败要早、要清楚**：`docs/md` 缺失/为空、非 UTF-8 文档等应在写任何文件前抛 `BuildError`，错误信息带路径。
 6. **索引语义一致**：Python 预构建 `build_page_index` 与浏览器重读 `buildSearchPage` 必须一致——代码围栏内容进入正文、代码内 `#` 不生成标题、首个标题前不落空壳条目。
 7. **绘图围栏不交给 Prism**：`collect_fence_languages` 必须忽略 `mermaid` 与 `packetdiag`（`IGNORED_FENCE_LANGS`），分别由 `web/mermaid-init.js`、`web/packetdiag-init.js` 渲染。
@@ -86,6 +88,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - `docs/md` 仅支持 UTF-8；大写扩展名（`.MD`）会被跳过并警告（docsify 按大小写敏感匹配）。
 - 文件名含 `#`、`?`、`%`、`[`、`]` 会破坏链接或路由，文档中应提示用户避免。
 - 修改 `web/*.js|css` 后必须重新构建，`docs/lib/` 才会更新；`serve.py` 的自动重建只监视 `docs/md`。
+- docsify 会覆盖 `window.Prism`（内置核心 + markup/css/clike/javascript），`prism-autoloader.min.js` 与 `prism-init.js` 必须放在 `docsify.min.js` 之后，否则代码块不会按需加载语言组件。
 - `docsify` 会逐目录请求 `_sidebar.md`，已在 `index.html` 用 `alias` 回落到根侧栏；不要移除。
 - 搜索的排除词语法为 `-词`，短语为 `"词 组"`；改动 `parseQuery` 时注意与 UI 提示保持一致。
 
@@ -93,6 +96,6 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 
 1. `python -m unittest discover -s tests -v` 全绿
 2. `node --test tests/test_search.js`、`node --test tests/test_packetdiag.js` 全绿
-3. `node --check web/custom-search.js`、`web/workspace.js`、`web/mermaid-init.js`、`web/media-viewer.js`、`web/packetdiag.js`、`web/packetdiag-init.js`、`web/page-export.js`、`web/md-editor.js` 通过
+3. `node --check web/custom-search.js`、`web/workspace.js`、`web/mermaid-init.js`、`web/media-viewer.js`、`web/packetdiag.js`、`web/packetdiag-init.js`、`web/page-export.js`、`web/md-editor.js`、`web/math-init.js`、`web/prism-init.js` 通过
 4. `python setup_docsify.py` 后 `git status` 无意外生成物差异（构建幂等）
 5. `docs/md` 内容逐字节未变

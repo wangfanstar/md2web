@@ -134,10 +134,15 @@ class ScanTests(TempDirTestCase):
 
 
 class AssetTests(TempDirTestCase):
+    def write_all_assets(self):
+        for filename in self.module.ASSETS:
+            path = self.docs / "lib" / filename
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x", encoding="utf-8")
+
     def test_ensure_assets_reuses_existing(self):
         (self.docs / "lib").mkdir(parents=True)
-        for filename in self.module.ASSETS:
-            (self.docs / "lib" / filename).write_text("x", encoding="utf-8")
+        self.write_all_assets()
         with mock.patch.object(self.module, "_download") as download:
             with redirect_stdout(io.StringIO()):
                 self.module.ensure_assets()
@@ -212,14 +217,52 @@ class AssetTests(TempDirTestCase):
 
     def test_ensure_assets_redownloads_empty_file(self):
         (self.docs / "lib").mkdir(parents=True)
-        for filename in self.module.ASSETS:
-            (self.docs / "lib" / filename).write_text("x", encoding="utf-8")
+        self.write_all_assets()
         (self.docs / "lib" / "docsify.min.js").write_text("", encoding="utf-8")
         with mock.patch.object(self.module, "_download", return_value=True) as download:
             with redirect_stdout(io.StringIO()):
                 self.module.ensure_assets()
         self.assertEqual(download.call_count, 1)
         self.assertEqual(download.call_args.args[1].name, "docsify.min.js")
+
+    def test_marked_and_katex_assets_registered(self):
+        assets = self.module.ASSETS
+        self.assertIn("marked.min.js", assets)
+        self.assertIn("katex/katex.min.js", assets)
+        self.assertIn("katex/katex.min.css", assets)
+        self.assertIn("katex/auto-render.min.js", assets)
+        fonts = [name for name in assets if name.startswith("katex/fonts/") and name.endswith(".woff2")]
+        self.assertEqual(len(fonts), 20)
+        for name, url in assets.items():
+            self.assertTrue(url.startswith("https://cdn.jsdelivr.net/npm/"), name)
+            self.assertIn("@", url.split("/npm/")[1].split("/")[0], name)
+
+    def test_ensure_assets_creates_nested_directories(self):
+        def fake_download(url, dest):
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(b"x")
+            return True
+
+        with mock.patch.object(self.module, "_download", side_effect=fake_download):
+            with redirect_stdout(io.StringIO()):
+                self.module.ensure_assets()
+        self.assertTrue((self.docs / "lib" / "katex" / "fonts" / "KaTeX_Main-Regular.woff2").exists())
+
+    def test_index_html_includes_math_tools(self):
+        with redirect_stdout(io.StringIO()):
+            self.module.generate_index_html("T")
+        html_text = (self.docs / "index.html").read_text(encoding="utf-8")
+        for marker in ("lib/marked.min.js", "lib/katex/katex.min.css", "lib/katex/katex.min.js",
+                       "lib/katex/auto-render.min.js", "lib/math-init.js", "lib/prism-init.js"):
+            self.assertIn(marker, html_text)
+        self.assertLess(html_text.index("lib/docsify.min.js"), html_text.index("lib/prism-autoloader.min.js"))
+        self.assertNotIn("lib/prism.min.js", html_text)
+
+    def test_generate_assets_copies_math_init(self):
+        with redirect_stdout(io.StringIO()):
+            self.module.generate_custom_search_assets()
+        self.assertTrue((self.docs / "lib" / "math-init.js").exists())
+        self.assertTrue((self.docs / "lib" / "prism-init.js").exists())
 
 
 class ServeTests(unittest.TestCase):
@@ -305,6 +348,173 @@ class ServeTests(unittest.TestCase):
         serve = load_module("serve", "serve.py")
         self.assertFalse(serve.parse_args([]).no_build)
         self.assertTrue(serve.parse_args(["--no-build"]).no_build)
+
+    def test_normalize_md_path_accepts_nested_docs(self):
+        serve = load_module("serve", "serve.py")
+        self.assertEqual(
+            serve.normalize_md_path("md/硬件设计/时钟树设计.md"),
+            "md/硬件设计/时钟树设计.md",
+        )
+        self.assertEqual(serve.normalize_md_path("/md/a.md"), "md/a.md")
+        self.assertEqual(serve.normalize_md_path("md//a.md"), "md/a.md")
+
+    def test_normalize_md_path_rejects_illegal(self):
+        serve = load_module("serve", "serve.py")
+        for value in ("", "/etc/passwd", "README.md", "docs/README.md", "md/../a.md",
+                      "md/.hidden/a.md", "md/a.txt", "md/a.md.exe"):
+            with self.assertRaises(serve.MdSaveError, msg=value):
+                serve.normalize_md_path(value)
+
+    def test_text_hash_ignores_line_endings(self):
+        serve = load_module("serve", "serve.py")
+        self.assertEqual(serve.text_hash("# A\r\n\r\nB"), serve.text_hash("# A\n\nB"))
+
+    def test_save_md_writes_file_and_reports_hash(self):
+        serve = load_module("serve", "serve.py")
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-save-"))
+        try:
+            md_dir = tmp / "md"
+            md_dir.mkdir()
+            target = md_dir / "a.md"
+            target.write_text("# A\n", encoding="utf-8")
+            result = serve.save_md(md_dir, "md/a.md", "# A\n\n新增内容\n", base_hash=serve.text_hash("# A\n"))
+            self.assertEqual(result["path"], "md/a.md")
+            self.assertEqual(result["hash"], serve.text_hash("# A\n\n新增内容\n"))
+            self.assertIsInstance(result["mtime"], int)
+            self.assertEqual(target.read_text(encoding="utf-8"), "# A\n\n新增内容\n")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_save_md_preserves_crlf(self):
+        serve = load_module("serve", "serve.py")
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-save-"))
+        try:
+            md_dir = tmp / "md"
+            md_dir.mkdir()
+            target = md_dir / "a.md"
+            target.write_bytes("# A\r\n\r\nB\r\n".encode("utf-8"))
+            serve.save_md(md_dir, "md/a.md", "# A\n\nB2\n", base_hash=serve.text_hash("# A\n\nB\n"))
+            self.assertEqual(target.read_bytes().decode("utf-8"), "# A\r\n\r\nB2\r\n")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_save_md_detects_conflict(self):
+        serve = load_module("serve", "serve.py")
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-save-"))
+        try:
+            md_dir = tmp / "md"
+            md_dir.mkdir()
+            target = md_dir / "a.md"
+            target.write_text("# 外部修改\n", encoding="utf-8")
+            with self.assertRaises(serve.MdSaveError) as ctx:
+                serve.save_md(md_dir, "md/a.md", "# 我的修改\n", base_hash=serve.text_hash("# 旧内容\n"))
+            self.assertEqual(ctx.exception.status, 409)
+            self.assertEqual(target.read_text(encoding="utf-8"), "# 外部修改\n")
+            serve.save_md(md_dir, "md/a.md", "# 强制覆盖\n", base_hash=None, force=True)
+            self.assertEqual(target.read_text(encoding="utf-8"), "# 强制覆盖\n")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_save_md_missing_file(self):
+        serve = load_module("serve", "serve.py")
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-save-"))
+        try:
+            md_dir = tmp / "md"
+            md_dir.mkdir()
+            with self.assertRaises(serve.MdSaveError) as ctx:
+                serve.save_md(md_dir, "md/没有.md", "# X\n")
+            self.assertEqual(ctx.exception.status, 404)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_read_md_meta(self):
+        serve = load_module("serve", "serve.py")
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-save-"))
+        try:
+            md_dir = tmp / "md"
+            md_dir.mkdir()
+            (md_dir / "a.md").write_text("# A\n", encoding="utf-8")
+            meta = serve.read_md_meta(md_dir, "md/a.md")
+            self.assertTrue(meta["exists"])
+            self.assertEqual(meta["hash"], serve.text_hash("# A\n"))
+            missing = serve.read_md_meta(md_dir, "md/b.md")
+            self.assertFalse(missing["exists"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_md_api_roundtrip_over_http(self):
+        serve = load_module("serve", "serve.py")
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-serve-"))
+        try:
+            docs = tmp / "docs"
+            md_dir = docs / "md"
+            md_dir.mkdir(parents=True)
+            (docs / "index.html").write_text("ok", encoding="utf-8")
+            target = md_dir / "a.md"
+            target.write_text("# A\n", encoding="utf-8")
+            server, port = serve.make_server(docs, "127.0.0.1", 0)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            try:
+                base = serve.text_hash("# A\n")
+                req = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/__md/meta?path=md%2Fa.md"
+                )
+                with opener.open(req) as response:
+                    meta = json.loads(response.read().decode("utf-8"))
+                self.assertTrue(meta["ok"])
+                self.assertEqual(meta["hash"], base)
+
+                payload = json.dumps(
+                    {"path": "md/a.md", "content": "# A\n\nB\n", "baseHash": base}
+                ).encode("utf-8")
+                req = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/__md/save",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                )
+                with opener.open(req) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                self.assertTrue(result["ok"])
+                self.assertEqual(target.read_text(encoding="utf-8"), "# A\n\nB\n")
+
+                stale = json.dumps(
+                    {"path": "md/a.md", "content": "# 过期\n", "baseHash": base}
+                ).encode("utf-8")
+                req = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/__md/save",
+                    data=stale,
+                    headers={"Content-Type": "application/json"},
+                )
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    opener.open(req)
+                self.assertEqual(ctx.exception.code, 409)
+                conflict = json.loads(ctx.exception.read().decode("utf-8"))
+                self.assertIn("currentHash", conflict)
+
+                bad = json.dumps(
+                    {"path": "../secret.md", "content": "x"}
+                ).encode("utf-8")
+                req = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/__md/save",
+                    data=bad,
+                    headers={"Content-Type": "application/json"},
+                )
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    opener.open(req)
+                self.assertEqual(ctx.exception.code, 400)
+            finally:
+                server.shutdown()
+                server.server_close()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_is_loopback_host(self):
+        serve = load_module("serve", "serve.py")
+        self.assertTrue(serve.is_loopback_host("127.0.0.1"))
+        self.assertTrue(serve.is_loopback_host("::1"))
+        self.assertFalse(serve.is_loopback_host("192.168.1.8"))
 
     def test_needs_rebuild_detects_newer_markdown(self):
         serve = load_module("serve", "serve.py")
@@ -612,7 +822,9 @@ class EndToEndTests(TempDirTestCase):
         components = self.docs / "lib" / "components"
         components.mkdir(parents=True)
         for filename in self.module.ASSETS:
-            (self.docs / "lib" / filename).write_text("x", encoding="utf-8")
+            path = self.docs / "lib" / filename
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x", encoding="utf-8")
         (components / "prism-python.min.js").write_text("x", encoding="utf-8")
 
     def test_full_build_offline(self):

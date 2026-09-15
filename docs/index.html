@@ -6,6 +6,7 @@
   <title>文档中心</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f6feb'/%3E%3Cpath d='M9 8.5h14v2.6H9zm0 6h14v2.6H9zm0 6h9v2.6H9z' fill='%23fff'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="lib/prism.min.css">
+  <link rel="stylesheet" href="lib/katex/katex.min.css">
   <link rel="stylesheet" href="lib/docsify.min.css">
   <link rel="stylesheet" href="lib/custom-search.css">
   <link rel="stylesheet" href="lib/workspace.css">
@@ -66,16 +67,21 @@
       },
     }
   </script>
-  <script src="lib/prism.min.js"></script>
+  <script src="lib/docsify.min.js?v=file-router-3"></script>
   <script src="lib/prism-autoloader.min.js"></script>
   <script>
+    // docsify 会覆盖 window.Prism，因此 autoloader 必须在 docsify 之后加载；
     // 语言组件改从本地 lib/components/ 加载，运行时不请求 CDN
     if (window.Prism && Prism.plugins && Prism.plugins.autoloader) {
       Prism.plugins.autoloader.languages_path = 'lib/components/';
     }
   </script>
-  <script src="lib/docsify.min.js?v=file-router-3"></script>
+  <script src="lib/prism-init.js"></script>
   <script src="lib/front-matter.min.js"></script>
+  <script src="lib/marked.min.js"></script>
+  <script src="lib/katex/katex.min.js"></script>
+  <script src="lib/katex/auto-render.min.js"></script>
+  <script src="lib/math-init.js"></script>
   <script src="lib/custom-search.js"></script>
   <script src="lib/workspace.js"></script>
   <script src="lib/mermaid.min.js"></script>

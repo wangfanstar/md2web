@@ -1,9 +1,16 @@
-"""跨平台本地预览服务器：python serve.py [--port 3000] [--no-browser]"""
+"""跨平台本地预览服务器：python serve.py [--port 3000] [--no-browser]
+
+额外提供源文档保存接口（仅本机可调用）：
+  GET  /__md/meta?path=md/a.md       读取源文档 hash 与 mtime
+  POST /__md/save                    {path, content, baseHash?, force?} 写回 docs/md
+"""
 
 import argparse
 import errno
 import functools
+import hashlib
 import http.server
+import io
 import json
 import os
 import signal
@@ -12,15 +19,196 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import webbrowser
 from pathlib import Path
 
 ROOT = Path(__file__).parent
+MD_API_PREFIX = "/__md/"
+MD_MAX_BODY = 8 * 1024 * 1024
+
+
+class MdSaveError(Exception):
+    """源文档读写失败：status 为建议的 HTTP 状态码。"""
+
+    def __init__(self, status, message, **extra):
+        super().__init__(message)
+        self.status = status
+        self.message = message
+        self.extra = extra
+
+
+def is_loopback_host(host):
+    host = str(host or "")
+    return host in ("::1", "localhost") or host.startswith("127.")
+
+
+def normalize_md_path(raw):
+    """规范化 md/<相对路径>.md；非法路径抛 MdSaveError(400)。"""
+    value = str(raw or "").strip().replace("\\", "/")
+    while value.startswith("./"):
+        value = value[2:]
+    value = value.lstrip("/")
+    if not value:
+        raise MdSaveError(400, "缺少 path 参数")
+    parts = [part for part in value.split("/") if part not in ("", ".")]
+    if not parts or parts[0] != "md":
+        raise MdSaveError(400, "仅允许编辑 docs/md 下的 Markdown 源文档")
+    if any(part == ".." for part in parts):
+        raise MdSaveError(400, "path 不能包含 ..")
+    if any(part.startswith(".") for part in parts):
+        raise MdSaveError(400, "path 不能包含隐藏目录")
+    if Path(*parts).suffix.lower() != ".md":
+        raise MdSaveError(400, "仅支持 .md 文件")
+    return "/".join(parts)
+
+
+def resolve_md_file(md_dir, raw):
+    rel = normalize_md_path(raw)
+    root = Path(md_dir).resolve()
+    candidate = (root / rel.split("/", 1)[1]).resolve()
+    if candidate != root and root not in candidate.parents:
+        raise MdSaveError(400, "path 越界，超出 docs/md 目录")
+    return candidate
+
+
+def normalize_eol(text):
+    return str(text).replace("\r\n", "\n").replace("\r", "\n")
+
+
+def text_hash(text):
+    return hashlib.sha256(normalize_eol(text).encode("utf-8")).hexdigest()
+
+
+def detect_eol(text, default="\n"):
+    crlf = text.count("\r\n")
+    lf = text.count("\n") - crlf
+    if crlf and crlf >= lf:
+        return "\r\n"
+    if lf:
+        return "\n"
+    return default
+
+
+def read_md_meta(md_dir, raw):
+    path = resolve_md_file(md_dir, raw)
+    if not path.is_file():
+        return {"path": normalize_md_path(raw), "exists": False, "mtime": None, "hash": None}
+    with io.open(path, "r", encoding="utf-8", newline="") as handle:
+        text = handle.read()
+    return {
+        "path": normalize_md_path(raw),
+        "exists": True,
+        "mtime": int(path.stat().st_mtime),
+        "hash": text_hash(text),
+    }
+
+
+def save_md(md_dir, raw, content, base_hash=None, force=False):
+    """写回源文档：EOL 与现有文件一致、原子替换、可选冲突检测。"""
+    path = resolve_md_file(md_dir, raw)
+    rel = normalize_md_path(raw)
+    if not path.is_file():
+        raise MdSaveError(404, "源文件不存在：" + rel)
+    if content is None:
+        raise MdSaveError(400, "缺少 content")
+    with io.open(path, "r", encoding="utf-8", newline="") as handle:
+        existing = handle.read()
+    current_hash = text_hash(existing)
+    if not force and base_hash is not None and base_hash != current_hash:
+        raise MdSaveError(
+            409,
+            "文件已在外部被修改，请重新加载后再保存",
+            currentHash=current_hash,
+            current=existing,
+        )
+    eol = detect_eol(existing)
+    text = normalize_eol(content)
+    if eol != "\n":
+        text = text.replace("\n", eol)
+    tmp = path.with_name(path.name + ".md2web-save.tmp")
+    with io.open(tmp, "w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
+    os.replace(tmp, path)
+    return {
+        "path": rel,
+        "hash": text_hash(content),
+        "mtime": int(path.stat().st_mtime),
+        "bytes": path.stat().st_size,
+    }
 
 
 class PreviewServer(http.server.ThreadingHTTPServer):
     # Windows 的 SO_REUSEADDR 允许重复绑定同一端口，会掩盖端口占用检测
     allow_reuse_address = os.name != "nt"
+
+
+class PreviewHandler(http.server.SimpleHTTPRequestHandler):
+    """静态文件 + /__md/ 源文档读写接口（仅本机）。"""
+
+    def __init__(self, *args, directory=None, md_dir=None, **kwargs):
+        self.md_dir = Path(md_dir)
+        super().__init__(*args, directory=directory, **kwargs)
+
+    def _send_json(self, status, payload):
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _client_is_local(self):
+        return is_loopback_host(self.client_address[0])
+
+    def _handle_md_api(self, method):
+        if not self._client_is_local():
+            self._send_json(403, {"ok": False, "error": "仅允许本机保存源文档"})
+            return
+        try:
+            if method == "GET":
+                params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                meta = read_md_meta(self.md_dir, params.get("path", [""])[0])
+                self._send_json(200, dict(meta, ok=True))
+                return
+            length = int(self.headers.get("Content-Length") or 0)
+            if length <= 0 or length > MD_MAX_BODY:
+                raise MdSaveError(400, "请求体为空或超过 8 MB 限制")
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise MdSaveError(400, "请求体必须是 JSON 对象")
+            result = save_md(
+                self.md_dir,
+                payload.get("path"),
+                payload.get("content"),
+                base_hash=payload.get("baseHash"),
+                force=bool(payload.get("force")),
+            )
+            self._send_json(200, dict(result, ok=True))
+        except MdSaveError as error:
+            self._send_json(error.status, dict(error.extra, ok=False, error=error.message))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._send_json(400, {"ok": False, "error": "请求体不是有效的 JSON"})
+        except OSError as error:
+            self._send_json(500, {"ok": False, "error": f"写入失败: {error}"})
+
+    def do_GET(self):
+        if self.path.startswith(MD_API_PREFIX):
+            self._handle_md_api("GET")
+            return
+        super().do_GET()
+
+    def do_POST(self):
+        if self.path.startswith(MD_API_PREFIX):
+            self._handle_md_api("POST")
+            return
+        self.send_error(405, "Method Not Allowed")
+
+    def log_message(self, fmt, *args):
+        if self.path.startswith(MD_API_PREFIX):
+            return
+        super().log_message(fmt, *args)
 
 
 def parse_args(argv=None):
@@ -215,7 +403,9 @@ def stop_other_servers():
 def make_server(directory, bind, port):
     """从 port 起连续尝试 20 个端口，返回 (server, 实际端口)。"""
     handler = functools.partial(
-        http.server.SimpleHTTPRequestHandler, directory=str(directory)
+        PreviewHandler,
+        directory=str(directory),
+        md_dir=Path(directory) / "md",
     )
     last = min(port + 20, 65536)
     for candidate in range(port, last):
@@ -244,6 +434,7 @@ def main(argv=None):
     server, port = make_server(directory, args.bind, args.port)
     print(f"预览目录: {directory}")
     print(f"本机访问: http://localhost:{port}")
+    print("编辑保存: 已启用（仅本机页面可写回 docs/md 源文件）")
     ip = lan_ip()
     if ip and args.bind == "0.0.0.0":
         print(f"局域网访问: http://{ip}:{port}")

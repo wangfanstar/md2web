@@ -93,17 +93,47 @@ ASSETS = {
     # 插件
     "zoom-image.min.js": "https://cdn.jsdelivr.net/npm/docsify@4.13.1/lib/plugins/zoom-image.min.js",
     "front-matter.min.js": "https://cdn.jsdelivr.net/npm/docsify@4.13.1/lib/plugins/front-matter.min.js",
-    # Prism 代码高亮
-    "prism.min.js": "https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js",
+    # Prism 代码高亮（Prism 核心由 docsify 内置，只需样式与按需加载插件）
     "prism.min.css": "https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism.min.css",
     "prism-autoloader.min.js": "https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/autoloader/prism-autoloader.min.js",
     # Mermaid 图形渲染（离线）
     "mermaid.min.js": "https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js",
+    # Markdown 渲染（编辑器实时预览，离线）
+    "marked.min.js": "https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js",
+    # KaTeX 数学公式（离线，含 20 个 woff2 字体）
+    "katex/katex.min.js": "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js",
+    "katex/katex.min.css": "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css",
+    "katex/auto-render.min.js": "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js",
+    **{
+        f"katex/fonts/{name}.woff2": f"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/fonts/{name}.woff2"
+        for name in (
+            "KaTeX_AMS-Regular",
+            "KaTeX_Caligraphic-Bold",
+            "KaTeX_Caligraphic-Regular",
+            "KaTeX_Fraktur-Bold",
+            "KaTeX_Fraktur-Regular",
+            "KaTeX_Main-Bold",
+            "KaTeX_Main-BoldItalic",
+            "KaTeX_Main-Italic",
+            "KaTeX_Main-Regular",
+            "KaTeX_Math-BoldItalic",
+            "KaTeX_Math-Italic",
+            "KaTeX_SansSerif-Bold",
+            "KaTeX_SansSerif-Italic",
+            "KaTeX_SansSerif-Regular",
+            "KaTeX_Script-Regular",
+            "KaTeX_Size1-Regular",
+            "KaTeX_Size2-Regular",
+            "KaTeX_Size3-Regular",
+            "KaTeX_Size4-Regular",
+            "KaTeX_Typewriter-Regular",
+        )
+    },
 }
 
 # Prism 语言组件（autoloader 运行时按需加载，需下载到本地实现离线）
 PRISM_COMPONENTS_CDN = "https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/"
-PRISM_CORE_LANGS = {"markup", "css", "clike", "javascript"}  # 已内置于 prism.min.js
+PRISM_CORE_LANGS = {"markup", "css", "clike", "javascript"}  # docsify 内置的 Prism 已包含
 
 # autoloader 内置依赖表（1.29.0）的缺漏补充：这些组件依赖其他组件但表里没有
 PRISM_EXTRA_DEPS = {
@@ -346,6 +376,7 @@ def ensure_assets(offline=False) -> None:
         if dest.exists() and dest.stat().st_size > 0:
             print(f"  [复用] {filename}")
             continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
         if not offline:
             print(f"  [下载] {filename} <- {url}")
         if offline or not _download(url, dest):
@@ -519,9 +550,11 @@ def generate_custom_search_assets():
         "page-export.js",
         "plot-playground.html",
         "md-editor.js",
+        "math-init.js",
+        "prism-init.js",
     ):
         shutil.copyfile(WEB_DIR / name, LIB_DIR / name)
-    print("  [生成] custom-search.* / workspace.* / mermaid-init.js / media-viewer.js / packetdiag* / page-export.js / plot-playground.html / md-editor.js")
+    print("  [生成] custom-search.* / workspace.* / mermaid-init.js / media-viewer.js / packetdiag* / page-export.js / plot-playground.html / md-editor.js / math-init.js / prism-init.js")
 
 
 # Docsify 4.13.1 slugify 实际删除的标点集合（docsify.min.js 中的 En 正则），
@@ -786,6 +819,7 @@ def generate_index_html(title="文档中心"):
   <title>{title_html}</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f6feb'/%3E%3Cpath d='M9 8.5h14v2.6H9zm0 6h14v2.6H9zm0 6h9v2.6H9z' fill='%23fff'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="lib/prism.min.css">
+  <link rel="stylesheet" href="lib/katex/katex.min.css">
   <link rel="stylesheet" href="lib/docsify.min.css">
   <link rel="stylesheet" href="lib/custom-search.css">
   <link rel="stylesheet" href="lib/workspace.css">
@@ -846,16 +880,21 @@ def generate_index_html(title="文档中心"):
       }},
     }}
   </script>
-  <script src="lib/prism.min.js"></script>
+  <script src="lib/docsify.min.js?v=file-router-3"></script>
   <script src="lib/prism-autoloader.min.js"></script>
   <script>
+    // docsify 会覆盖 window.Prism，因此 autoloader 必须在 docsify 之后加载；
     // 语言组件改从本地 lib/components/ 加载，运行时不请求 CDN
     if (window.Prism && Prism.plugins && Prism.plugins.autoloader) {{
       Prism.plugins.autoloader.languages_path = 'lib/components/';
     }}
   </script>
-  <script src="lib/docsify.min.js?v=file-router-3"></script>
+  <script src="lib/prism-init.js"></script>
   <script src="lib/front-matter.min.js"></script>
+  <script src="lib/marked.min.js"></script>
+  <script src="lib/katex/katex.min.js"></script>
+  <script src="lib/katex/auto-render.min.js"></script>
+  <script src="lib/math-init.js"></script>
   <script src="lib/custom-search.js"></script>
   <script src="lib/workspace.js"></script>
   <script src="lib/mermaid.min.js"></script>
