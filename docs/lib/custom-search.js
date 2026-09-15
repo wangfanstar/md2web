@@ -93,7 +93,7 @@
     var positive = [];
     var negative = [];
     var match;
-    var re = /(-?)\s*(?:"([^"]+)"|'([^']+)'|(\S+))/g;
+    var re = /(-)?(?:"([^"]+)"|'([^']+)'|([^\s"]+))/g;
     while ((match = re.exec(source))) {
       var value = match[2] || match[3] || match[4] || '';
       var normalized = normalizeText(value);
@@ -432,6 +432,11 @@
     if (state.dialog) {
       renderView(state.dialog);
     }
+    syncSidebarMode();
+  }
+
+  function syncSidebarMode() {
+    document.body.classList.toggle('is-sidebar-searching', !!state.query);
   }
 
   // ---------- 交互 ----------
@@ -845,7 +850,9 @@
         currentBody.push(line);
         return;
       }
-      flushSection();
+      if (sawHeading || currentBody.join('').trim()) {
+        flushSection();
+      }
       sawHeading = true;
       currentTitle = match[2].trim();
       currentSlug = headingId ? route + '?id=' + headingId : route;
@@ -1727,7 +1734,7 @@
       '</div>',
       '<div class="custom-search-input-row">',
       '<span class="custom-search-input-icon">🔍</span>',
-      '<input type="search" class="custom-search-sidebar-input" placeholder="搜索文档，Ctrl+K 全局搜索" aria-label="搜索文档">',
+      '<input type="search" class="custom-search-sidebar-input" placeholder="搜索文档（/ 聚焦，Ctrl+K 全局）" aria-label="搜索文档">',
       '<button type="button" class="custom-search-input-btn" data-role="clear-search" aria-label="清空搜索">×</button>',
       '</div>',
       searchFiltersHtml(),
@@ -1898,7 +1905,12 @@
       }
       if (event.key === '/' && !isEditable(event.target)) {
         event.preventDefault();
-        openDialog();
+        if (state.sidebar && state.sidebar.input) {
+          state.sidebar.input.focus();
+          state.sidebar.input.select();
+        } else {
+          openDialog();
+        }
       }
       if (event.key === 'F3' && reading.active && !isEditable(event.target)) {
         event.preventDefault();

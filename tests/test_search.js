@@ -20,10 +20,11 @@ function loadSearch() {
 
 test('query parser supports phrases and exclusions', () => {
   const api = loadSearch();
-  assert.deepEqual(api.parseQuery('"DMA ctrl" -debug ready'), {
-    positive: ['dma ctrl', 'ready'],
-    negative: ['debug']
-  });
+  const parsed = api.parseQuery('"DMA ctrl" -debug ready');
+  assert.deepEqual(
+    { positive: Array.from(parsed.positive), negative: Array.from(parsed.negative) },
+    { positive: ['dma ctrl', 'ready'], negative: ['debug'] }
+  );
 });
 
 test('search includes code fences but does not treat code headings as sections', () => {
@@ -44,8 +45,8 @@ test('search applies exact folder boundary and file mode', () => {
     '/md/guide/a.md': {'/md/guide/a.md': {route:'/md/guide/a.md', pageTitle:'a.md', title:'A', body:'target'}},
     '/md/guides/b.md': {'/md/guides/b.md': {route:'/md/guides/b.md', pageTitle:'b.md', title:'B', body:'target'}},
   });
-  assert.deepEqual(api.search('a.md').map(item => item.path), ['guide/a.md']);
-  assert.deepEqual(api.search('b.md'), []);
+  assert.deepEqual(Array.from(api.search('a.md'), (item) => item.path), ['guide/a.md']);
+  assert.equal(api.search('b.md').length, 0);
 });
 
 test('full mode uses AND and excludes matching documents', () => {
@@ -57,5 +58,5 @@ test('full mode uses AND and excludes matching documents', () => {
     '/md/a.md': {'/md/a.md': {route:'/md/a.md', pageTitle:'a.md', title:'A', body:'DMA control ready'}},
     '/md/b.md': {'/md/b.md': {route:'/md/b.md', pageTitle:'b.md', title:'B', body:'DMA debug ready'}},
   });
-  assert.deepEqual(api.search('DMA ready -debug').map(item => item.path), ['a.md']);
+  assert.deepEqual(Array.from(api.search('DMA ready -debug'), (item) => item.path), ['a.md']);
 });

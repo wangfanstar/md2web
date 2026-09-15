@@ -782,3 +782,74 @@
     top: 0;
   }
 }
+
+/* ---------- 工程仪器风：侧栏搜索区（覆盖） ---------- */
+
+:root {
+  --docs-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --docs-ink: #1f2a37;
+  --docs-muted: #5b6b7c;
+  --docs-line: #e3e8ee;
+  --docs-accent: #1f6feb;
+  --docs-hit: #fff2a8;
+}
+
+.docs-custom-search {
+  background: #fff;
+  border-bottom: 1px solid var(--docs-line);
+  padding: 10px 10px 10px;
+}
+
+body.is-sidebar-searching .docs-custom-search {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+body.is-sidebar-searching .docs-sidebar-scroll {
+  display: none;
+}
+
+.custom-search-top-row { gap: 4px; margin-bottom: 6px; }
+.custom-sidebar-home-link { color: var(--docs-muted); font-size: 12px; font-weight: 600; padding: 4px 6px; }
+.custom-sidebar-home-link:hover { background: #eef2f6; color: var(--docs-ink); }
+.custom-search-kbd-hint { border-color: #dbe2ea; color: #6b7a89; font-size: 10px; padding: 2px 6px; }
+.custom-search-input-row { background: #fff; border: 1px solid #d7dee6; border-radius: 6px; padding: 0 4px 0 8px; }
+.custom-search-input-row:focus-within { border-color: var(--docs-accent); box-shadow: 0 0 0 2px rgba(31,111,235,.15); }
+.custom-search-sidebar-input { color: var(--docs-ink); font-size: 13px; padding: 8px 0; }
+.custom-search-input-icon { color: #8a97a5; font-size: 12px; }
+.custom-search-input-btn:hover { color: var(--docs-ink); }
+.custom-search-filters select { border-color: #dbe2ea; border-radius: 5px; color: var(--docs-muted); font-size: 11px; padding: 3px 4px; }
+.custom-search-refresh {
+  background: transparent;
+  border: 1px solid var(--docs-line);
+  border-radius: 5px;
+  color: #6b7a89;
+  float: right;
+  font-size: 11px;
+  margin-top: 6px;
+  padding: 3px 8px;
+  width: auto;
+}
+.custom-search-refresh:hover { background: #f4f7fa; border-color: #cfd8e3; color: var(--docs-ink); }
+.custom-search-refresh-status { clear: both; font-size: 11px; }
+.custom-search-status { color: var(--docs-muted); font-size: 12px; margin-top: 8px; }
+.custom-search-history-item { font-size: 12px; }
+.custom-search-results { gap: 6px; margin-top: 8px; }
+.custom-search-group-header { background: #f4f7fa; border-radius: 5px; padding: 6px 8px; }
+.custom-search-group-header:hover { background: #eaeff5; }
+.custom-search-group-title { color: var(--docs-ink); font-family: var(--docs-mono); font-size: 12px; font-weight: 600; }
+.custom-search-group-count { color: #6b7a89; font-size: 10px; }
+.custom-search-group-entries { border-left: 1px solid #edf1f5; padding: 2px 0 4px 8px; }
+.custom-search-result { border-radius: 5px; gap: 6px; padding: 6px 7px; }
+.custom-search-result:hover, .custom-search-result.is-active { background: #f2f6fb; border-left-color: var(--docs-accent); }
+.custom-search-badge { border-radius: 4px; }
+.custom-search-badge.badge-h { background: #e8f0fb; color: var(--docs-accent); }
+.custom-search-badge.badge-t { background: #f0f2f5; color: #6b7a89; }
+.custom-search-result-title { color: var(--docs-ink); font-family: var(--docs-mono); font-size: 12px; }
+.custom-search-result-snippet { color: var(--docs-muted); font-size: 11.5px; margin-left: 0; }
+.custom-search-result mark { background: var(--docs-hit); }
+.custom-search-empty { color: var(--docs-muted); font-size: 12px; }
+.custom-sidebar-resizer:hover::after,
+.custom-sidebar-resizer:focus-visible::after,
+body.is-resizing-sidebar .custom-sidebar-resizer::after { background: var(--docs-accent); }

@@ -95,20 +95,40 @@
     if (!document.querySelector('.workspace-tree-tools')) {
       var tools = document.createElement('div');
       tools.className = 'workspace-tree-tools';
-      tools.innerHTML = '<div class="workspace-tree-tools-row"><label class="workspace-tree-filter"><span>筛选文件</span><input type="search" placeholder="按文件名筛选" aria-label="按文件名筛选"></label><button type="button" data-workspace-action="expand">全部展开</button><button type="button" data-workspace-action="collapse">全部收起</button><button type="button" data-workspace-action="locate">定位当前</button></div>';
+      tools.innerHTML = '<div class="workspace-tree-tools-row">' +
+        '<input type="search" class="workspace-tree-filter-input" placeholder="过滤目录" aria-label="按文件名过滤目录">' +
+        '<button type="button" class="workspace-tree-more" aria-label="更多目录操作" aria-expanded="false">⋯</button>' +
+        '<div class="workspace-tree-menu" hidden>' +
+        '<button type="button" data-workspace-action="expand">全部展开</button>' +
+        '<button type="button" data-workspace-action="collapse">全部收起</button>' +
+        '<button type="button" data-workspace-action="locate">定位当前</button>' +
+        '</div></div>';
       var scroll = nav.closest('.docs-sidebar-scroll') || nav.parentNode;
       scroll.insertBefore(tools, nav);
       tools.querySelector('input').addEventListener('input', function () { state.filter = this.value.trim().toLowerCase(); filterTree(root); });
+      var more = tools.querySelector('.workspace-tree-more');
+      var menu = tools.querySelector('.workspace-tree-menu');
+      function closeMenu() { menu.hidden = true; more.setAttribute('aria-expanded', 'false'); }
+      more.addEventListener('click', function (event) {
+        event.stopPropagation();
+        var open = menu.hidden;
+        menu.hidden = !open;
+        more.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      document.addEventListener('click', function (event) {
+        if (!menu.hidden && !tools.contains(event.target)) closeMenu();
+      });
       tools.addEventListener('click', function (event) {
         var action = event.target.getAttribute('data-workspace-action');
         if (!action) return;
+        closeMenu();
         var currentRoot = (document.querySelector('.sidebar-nav') || nav).querySelector(':scope > ul') || root;
         if (action === 'locate') { locateCurrent(currentRoot, true); return; }
         all('li', currentRoot).filter(isFolder).forEach(function (li) { setCollapsed(li, action === 'collapse'); });
         saveCollapsed({});
       });
     }
-    var input = document.querySelector('.workspace-tree-filter input');
+    var input = document.querySelector('.workspace-tree-filter-input');
     if (input && input.value !== state.filter) input.value = state.filter;
     filterTree(root);
     var routeChanged = state.lastRoute !== currentRoute();
