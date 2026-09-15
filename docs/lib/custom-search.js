@@ -651,14 +651,28 @@
     }
 
     var base = currentRouteBase();
+    var counters = { 2: 0, 3: 0, 4: 0 };
     toc.innerHTML = [
       '<div class="docs-page-toc-title">' + escapeHtml(tocConfig.title || '本文目录') + '</div>',
       '<div class="docs-page-toc-links">',
       headings.map(function (heading) {
         var level = parseInt(heading.tagName.slice(1), 10);
         var href = base + '?id=' + encodeURIComponent(heading.id);
+        var number = '';
+        if (level >= 2 && level <= 4) {
+          counters[level] += 1;
+          for (var deeper = level + 1; deeper <= 4; deeper += 1) {
+            counters[deeper] = 0;
+          }
+          var parts = [];
+          for (var current = 2; current <= level; current += 1) {
+            parts.push(counters[current]);
+          }
+          number = '<span class="docs-page-toc-index">' + parts.join('.') + '</span>';
+        }
         return [
           '<a class="docs-page-toc-link level-' + level + '" data-page-toc-id="' + escapeHtml(heading.id) + '" href="' + escapeHtml(href) + '">',
+          number,
           escapeHtml(heading.textContent),
           '</a>'
         ].join('');

@@ -178,3 +178,25 @@ body { color: var(--docs-ink); background: #f7f9fb; }
   height: auto;
   max-width: 100%;
 }
+
+/* ---------- 章节序号 ---------- */
+
+.markdown-section { counter-reset: doc-h2; }
+.markdown-section h2 { counter-reset: doc-h3; }
+.markdown-section h3 { counter-reset: doc-h4; }
+.markdown-section h2::before { counter-increment: doc-h2; content: counter(doc-h2) ". "; }
+.markdown-section h3::before { counter-increment: doc-h3; content: counter(doc-h2) "." counter(doc-h3) " "; }
+.markdown-section h4::before { counter-increment: doc-h4; content: counter(doc-h2) "." counter(doc-h3) "." counter(doc-h4) " "; }
+.markdown-section h2::before,
+.markdown-section h3::before,
+.markdown-section h4::before {
+  color: #8a97a5;
+  font-variant-numeric: tabular-nums;
+}
+
+.docs-page-toc-index {
+  color: #8a97a5;
+  font-family: var(--docs-mono);
+  font-size: 11px;
+  margin-right: 4px;
+}
