@@ -24,7 +24,7 @@
     }
     var width = Math.max(560, entry.figure.clientWidth - 2);
     try {
-      var parsed = window.PacketDiag.parse(entry.source);
+      var parsed = window.PacketDiag.parse(window.PacketDiag.extractSource(entry.source));
       window.PacketDiag.render(parsed, entry.canvas, { fitWidth: true, width: width });
       entry.figure.classList.remove('has-error');
       entry.figure.removeAttribute('data-error');

@@ -31,11 +31,11 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `web/custom-search.js` / `.css` | 搜索算法与界面、结果列表、搜索/目录视图切换、正文命中高亮、右侧本文目录 |
 | `web/workspace.js` / `.css` | 目录树（折叠/过滤/计数/定位）、面包屑、首页卡片、复制、宽屏、章节序号、Mermaid 样式 |
 | `web/mermaid-init.js` | docsify 插件：把 ```mermaid 围栏渲染为图形（离线） |
-| `web/packetdiag.js` | PacketDiag 解析与 Canvas 绘制核心（从 `PacketDiagPic.html` 抽取，`window.PacketDiag = { parse, render, presets, defaultSource }`） |
+| `web/packetdiag.js` | PacketDiag 解析与 Canvas 绘制核心（从 `PacketDiagPic.html` 抽取，`window.PacketDiag = { parse, render, presets, defaultSource, extractSource, bitOrderFor, numberingFor }`）；支持 `bit_order`/`numbering`/`@row`/`@left`/`desctable` 等扩展语法 |
 | `web/packetdiag-init.js` | docsify 插件：把 ```packetdiag 围栏渲染为报文图，失败回退源码 |
 | `web/media-viewer.js` | 图片、Mermaid 图形与 PacketDiag 图形的全屏放大查看（缩放、平移、适应窗口、1:1、滚轮/触屏）与下载（Mermaid 导出 SVG/PNG，PacketDiag 导出 PNG；导出时把 foreignObject 转为 SVG 文本，保证 PNG 可导出、SVG 通用） |
 | `web/page-export.js` | 「下载本页」：把当前文档导出为自包含 HTML（样式内联、Canvas/图片转 data URL、生成目录） |
-| `web/plot-playground.html` | 独立绘图在线预览页（PacketDiag / Mermaid 编辑与预览、下载），构建复制到 `docs/lib/` |
+| `web/plot-playground.html` | 独立绘图在线预览页（Mermaid 全部类型模板 + PacketDiag 增强控件与完整语法说明、下载），构建复制到 `docs/lib/` |
 | `docs/md/` | 唯一需要人工维护的源文档目录 |
 | `docs/lib/` | 离线依赖 + 生成资源，不要手工修改 |
 | `docs/` 其余文件 | `index.html`、`README.md`、`_sidebar.md`、`search-index.json`、`offline-data.js` 等，均由构建生成 |

@@ -1555,6 +1555,19 @@
     parse: parsePacketDiag,
     render: renderDiagram,
     presets: PRESETS,
-    defaultSource: DEFAULT_PACKET_SOURCE
+    defaultSource: DEFAULT_PACKET_SOURCE,
+    extractSource: extractPacketSource,
+    bitOrderFor: function (parsed, mode) {
+      if (mode === "asc" || mode === "desc") {
+        return mode;
+      }
+      return parsed && parsed.config && parsed.config.bit_order === "desc" ? "desc" : "asc";
+    },
+    numberingFor: function (parsed, mode) {
+      if (mode === "global" || mode === "local") {
+        return mode;
+      }
+      return parsed && parsed.config && parsed.config.numbering === "local" ? "local" : "global";
+    }
   };
 }(typeof window !== "undefined" ? window : globalThis));

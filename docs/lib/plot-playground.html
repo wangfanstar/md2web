@@ -30,17 +30,20 @@
     cursor: pointer; font: inherit; padding: 10px 12px;
   }
   .pg-tabs button.is-active { border-bottom-color: var(--accent); color: var(--ink); font-weight: 600; }
-  .pg-panel { display: grid; gap: 14px; grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr); padding: 16px 20px 40px; }
+  .pg-panel { display: grid; gap: 14px; grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr); padding: 16px 20px 12px; }
   .pg-panel[hidden] { display: none; }
   .pg-card { background: #fff; border: 1px solid var(--line); border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; }
   .pg-card-head { align-items: center; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
   .pg-card-head strong { font-size: 13px; }
-  .pg-card-head select, .pg-card-head button {
+  .pg-card-head select, .pg-card-head button, .pg-controls select, .pg-controls input[type="text"] {
     background: #fff; border: 1px solid #d7dee6; border-radius: 5px; color: var(--ink);
     cursor: pointer; font: inherit; font-size: 12px; padding: 4px 9px;
   }
   .pg-card-head button:hover { border-color: var(--accent); color: var(--accent); }
   .pg-card-head .pg-spacer { flex: 1; }
+  .pg-controls { align-items: center; border-bottom: 1px solid var(--line); color: var(--muted); display: flex; flex-wrap: wrap; gap: 10px; padding: 8px 12px; font-size: 12px; }
+  .pg-controls label { align-items: center; display: inline-flex; gap: 4px; }
+  .pg-controls input[type="text"] { cursor: text; min-width: 140px; }
   textarea {
     background: var(--soft); border: 0; border-bottom: 1px solid var(--line); color: var(--ink);
     flex: 1; font-family: var(--mono); font-size: 12px; line-height: 1.6; min-height: 340px;
@@ -52,7 +55,20 @@
   .pg-preview { align-items: center; display: flex; justify-content: center; min-height: 340px; overflow: auto; padding: 12px; }
   .pg-preview canvas { height: auto; max-width: 100%; }
   .pg-preview svg { height: auto; max-width: 100%; }
-  .pg-hint { color: var(--muted); font-size: 12px; margin: 0; padding: 0 20px 24px; }
+  .pg-hint-line { color: var(--muted); font-size: 12px; margin: 0; padding: 0 12px 8px; }
+  .pg-help { border-top: 1px solid var(--line); font-size: 13px; }
+  .pg-help summary { color: var(--accent); cursor: pointer; padding: 9px 12px; }
+  .pg-help-body { max-height: 320px; overflow: auto; padding: 4px 14px 14px; }
+  .pg-help-body h2 { font-size: 14px; margin: 14px 0 6px; }
+  .pg-help-body h3 { font-size: 13px; margin: 12px 0 4px; }
+  .pg-help-body p { margin: 0 0 8px; }
+  .pg-help-body table { border-collapse: collapse; font-size: 12px; margin: 4px 0 10px; width: 100%; }
+  .pg-help-body th, .pg-help-body td { border: 1px solid var(--line); padding: 4px 7px; text-align: left; vertical-align: top; }
+  .pg-help-body th { background: var(--soft); }
+  .pg-help-body pre { background: var(--soft); border: 1px solid var(--line); border-radius: 6px; font-family: var(--mono); font-size: 12px; margin: 4px 0 10px; overflow: auto; padding: 8px 10px; }
+  .pg-help-body code { background: var(--soft); border-radius: 3px; font-family: var(--mono); font-size: 12px; padding: 1px 4px; }
+  .pg-help-body ul { margin: 4px 0 10px; padding-left: 20px; }
+  .pg-footer { color: var(--muted); font-size: 12px; padding: 0 20px 28px; }
   @media (max-width: 860px) {
     .pg-panel { grid-template-columns: 1fr; }
   }
@@ -61,7 +77,7 @@
 <body>
 <header class="pg-header">
   <h1>绘图在线预览</h1>
-  <p>离线可用：左侧编辑语法，右侧实时预览；PacketDiag 支持下载 PNG，Mermaid 支持下载 SVG / PNG。返回 <a href="../index.html">文档站</a></p>
+  <p>离线可用：左侧编辑语法，右侧实时预览。PacketDiag 支持位序/编号/全局注释与 PNG 导出；Mermaid 支持全部图形类型与 SVG / PNG 导出。返回 <a href="../index.html">文档站</a></p>
 </header>
 <nav class="pg-tabs">
   <button type="button" data-tab="packet" class="is-active">PacketDiag</button>
@@ -73,13 +89,92 @@
     <div class="pg-card">
       <div class="pg-card-head">
         <strong>PacketDiag 语法</strong>
-        <select id="pgPacketPreset" aria-label="预设示例"></select>
+        <select id="pgPacketPreset" aria-label="示例模板"></select>
         <span class="pg-spacer"></span>
         <button type="button" id="pgPacketRender">渲染</button>
         <button type="button" id="pgPacketDownload">下载 PNG</button>
       </div>
+      <div class="pg-controls">
+        <label>位序
+          <select id="pgPacketBitOrder" aria-label="位序">
+            <option value="">跟随源</option>
+            <option value="asc">升序 0→N</option>
+            <option value="desc">降序 N→0</option>
+          </select>
+        </label>
+        <label>编号
+          <select id="pgPacketNumbering" aria-label="编号方式">
+            <option value="">跟随源</option>
+            <option value="global">全局</option>
+            <option value="local">按行</option>
+          </select>
+        </label>
+        <label><input type="checkbox" id="pgPacketFit" checked> 适应宽度</label>
+        <label>全局注释 <input type="text" id="pgPacketNote" placeholder="显示在图形左侧，不写回源码"></label>
+      </div>
       <textarea id="pgPacketSource" spellcheck="false" aria-label="PacketDiag 源文本"></textarea>
       <p class="pg-error" id="pgPacketError" role="status"></p>
+      <details class="pg-help">
+        <summary>语法说明</summary>
+        <div class="pg-help-body">
+          <h2>标准 PacketDiag 语法</h2>
+          <p>基于 blockdiag/packetdiag 语法。源码包裹在 <code>packetdiag { }</code> 内，也支持 <code>@startpacketdiag</code> / <code>@endpacketdiag</code>；下方文本框可直接粘贴围栏内容（会自动提取）。</p>
+          <h3>全局配置</h3>
+          <table>
+            <tr><th>参数</th><th>默认值</th><th>说明</th></tr>
+            <tr><td><code>colwidth</code></td><td>32</td><td>每行位宽，超出自动折行</td></tr>
+            <tr><td><code>node_height</code></td><td>72</td><td>字段单元格高度 (px)</td></tr>
+            <tr><td><code>default_fontsize</code></td><td>12</td><td>字段标签字号</td></tr>
+            <tr><td><code>scale_interval</code></td><td>8</td><td>标尺主刻度间隔</td></tr>
+            <tr><td><code>numbering</code></td><td>global</td><td>local：每行从 0 开始编号，可重复使用 0-31</td></tr>
+            <tr><td><code>bit_order</code></td><td>asc</td><td>desc：位序反转（高位在左），匹配 IEEE 规范图</td></tr>
+          </table>
+          <h3>字段定义</h3>
+          <p>格式：<code>bit[-end]: 标签 [属性, …]</code></p>
+          <pre><code>0-3:   Version [color = "#dbeafe"];
+4-7:   IHL;
+8:     Single Bit;
+16-31: Total Len [textcolor = "red"];
+96-111: "0x8100";                // 特殊字符标签用引号</code></pre>
+          <h3>字段属性</h3>
+          <table>
+            <tr><th>属性</th><th>说明</th><th>示例</th></tr>
+            <tr><td><code>color</code></td><td>背景色</td><td><code>[color = "#fce5cd"]</code></td></tr>
+            <tr><td><code>textcolor</code></td><td>文字颜色</td><td><code>[textcolor = "red"]</code></td></tr>
+            <tr><td><code>rotate</code></td><td>文字旋转 90/270</td><td><code>[rotate = 270]</code></td></tr>
+            <tr><td><code>colheight</code></td><td>高度倍数 1–12</td><td><code>[colheight = 3]</code></td></tr>
+            <tr><td><code>label</code></td><td>显示别名</td><td><code>[label = "Src Port"]</code></td></tr>
+            <tr><td><code>number</code></td><td>是否显示位号徽章</td><td><code>[number = 0]</code></td></tr>
+            <tr><td><code>description</code></td><td>鼠标悬停提示</td><td><code>[description = "RFC 793"]</code></td></tr>
+            <tr><td><code>style</code></td><td>边框: solid/dashed/dotted/none</td><td><code>[style = "dashed"]</code></td></tr>
+            <tr><td><code>shape</code></td><td>形状: box/ellipse</td><td><code>[shape = "ellipse"]</code></td></tr>
+            <tr><td><code>len</code></td><td>变长字段，锯齿边缘</td><td><code>[len = 64]</code></td></tr>
+            <tr><td><code>icon</code></td><td>右上角图标徽章</td><td><code>[icon = "flag"]</code></td></tr>
+            <tr><td><code>background</code></td><td>背景色（优先 color）</td><td><code>[background = "#c7d2fe"]</code></td></tr>
+          </table>
+          <h3>注释与区段</h3>
+          <pre><code># 井号注释（标准 PacketDiag）
+// 双斜杠注释
+0-31: Field;  // 行尾注释
+
+// ---- 区段标题 ----
+// 变体 1: BFD上送        — 备选格式，渲染为独立行
+// @row: Word 1           — 显式行分隔
+// @left: 行注释          — 行左侧注释</code></pre>
+          <h3>desctable 描述表</h3>
+          <pre><code>packetdiag {
+  0-15: SrcPort [description = "源端口"];
+  desctable {
+    SrcPort = "发送方端口号（16 bits）"
+  }
+}</code></pre>
+          <h3>本页控件</h3>
+          <ul>
+            <li>「位序」「编号」下拉框可覆盖源码中的 <code>bit_order</code> / <code>numbering</code>，选择「跟随源」则使用源码配置。</li>
+            <li>「全局注释」显示在图形左侧，不写回源码；「适应宽度」控制图形是否缩放至容器宽度。</li>
+          </ul>
+        </div>
+      </details>
     </div>
     <div class="pg-card">
       <div class="pg-card-head"><strong>预览</strong></div>
@@ -91,13 +186,52 @@
     <div class="pg-card">
       <div class="pg-card-head">
         <strong>Mermaid 语法</strong>
+        <select id="pgMermaidType" aria-label="图形类型"></select>
         <span class="pg-spacer"></span>
         <button type="button" id="pgMermaidRender">渲染</button>
         <button type="button" id="pgMermaidSvg">下载 SVG</button>
         <button type="button" id="pgMermaidPng">下载 PNG</button>
       </div>
+      <p class="pg-hint-line" id="pgMermaidHint"></p>
       <textarea id="pgMermaidSource" spellcheck="false" aria-label="Mermaid 源文本"></textarea>
       <p class="pg-error" id="pgMermaidError" role="status"></p>
+      <details class="pg-help">
+        <summary>语法说明</summary>
+        <div class="pg-help-body">
+          <p>在文档中把围栏语言写为 <code>mermaid</code> 即可渲染；本页选择类型会自动载入对应模板。</p>
+          <table>
+            <tr><th>类型</th><th>用途</th><th>关键语法</th></tr>
+            <tr><td>flowchart</td><td>流程图</td><td><code>A[文本] --&gt; B{判断}</code>、<code>subgraph</code></td></tr>
+            <tr><td>sequenceDiagram</td><td>时序图</td><td><code>participant</code>、<code>-&gt;&gt;</code>、<code>--&gt;&gt;</code></td></tr>
+            <tr><td>classDiagram</td><td>类图</td><td><code>class</code>、<code>&lt;|--</code> 继承</td></tr>
+            <tr><td>stateDiagram-v2</td><td>状态图</td><td><code>[*]</code>、<code>A --&gt; B: 事件</code></td></tr>
+            <tr><td>erDiagram</td><td>ER 图</td><td><code>||--o{</code> 基数关系</td></tr>
+            <tr><td>journey</td><td>用户旅程</td><td><code>section</code>、<code>任务: 评分: 角色</code></td></tr>
+            <tr><td>gantt</td><td>甘特图</td><td><code>dateFormat</code>、<code>任务: 状态, id, 开始, 时长</code></td></tr>
+            <tr><td>pie</td><td>饼图</td><td><code>"标签" : 数值</code></td></tr>
+            <tr><td>quadrantChart</td><td>四象限</td><td><code>quadrant-1..4</code>、<code>[x, y]</code></td></tr>
+            <tr><td>requirementDiagram</td><td>需求图</td><td><code>requirement</code>、<code>element</code>、关系</td></tr>
+            <tr><td>gitGraph</td><td>提交图</td><td><code>commit</code>、<code>branch</code>、<code>merge</code></td></tr>
+            <tr><td>mindmap</td><td>思维导图</td><td><code>root((中心))</code> + 缩进</td></tr>
+            <tr><td>timeline</td><td>时间线</td><td><code>时间 : 事件</code></td></tr>
+            <tr><td>sankey-beta</td><td>桑基图</td><td>CSV：<code>来源,目标,数值</code></td></tr>
+            <tr><td>xychart-beta</td><td>XY 图</td><td><code>x-axis</code>、<code>bar</code>、<code>line</code></td></tr>
+            <tr><td>block-beta</td><td>块图</td><td><code>columns</code>、<code>A --&gt; B</code></td></tr>
+            <tr><td>packet-beta</td><td>报文图</td><td><code>0-15: "字段"</code></td></tr>
+            <tr><td>architecture-beta</td><td>架构图</td><td><code>service(icon)[标题]</code>、<code>:L -- R:</code></td></tr>
+            <tr><td>C4Context</td><td>上下文图</td><td><code>Person</code>、<code>System</code>、<code>Rel</code></td></tr>
+            <tr><td>kanban</td><td>看板</td><td><code>列[标题]</code> + 缩进任务</td></tr>
+            <tr><td>radar-beta</td><td>雷达图</td><td><code>axis</code>、<code>curve{...}</code>、<code>max</code></td></tr>
+            <tr><td>treemap-beta</td><td>矩形树图</td><td>层级标题 + <code>"叶子": 数值</code></td></tr>
+            <tr><td>wardley-beta</td><td>战略图</td><td><code>component [可见度, 演进度]</code>、<code>-&gt;</code></td></tr>
+            <tr><td>cynefin-beta</td><td>决策域</td><td><code>complex/clear/chaotic/...</code></td></tr>
+            <tr><td>eventmodeling</td><td>事件建模</td><td><code>tf 01 ui/cmd/evt 名称</code></td></tr>
+            <tr><td>treeView-beta</td><td>目录树</td><td>缩进层级，目录以 <code>/</code> 结尾</td></tr>
+            <tr><td>info</td><td>版本信息</td><td>仅 <code>info</code></td></tr>
+          </table>
+          <p>不支持的实验类型（需额外布局包或语法未稳定）：<code>flowchart-elk</code>、<code>railroad-*</code>、<code>venn</code>、<code>ishikawa</code>、<code>swimlane</code>。</p>
+        </div>
+      </details>
     </div>
     <div class="pg-card">
       <div class="pg-card-head"><strong>预览</strong></div>
@@ -106,7 +240,7 @@
   </section>
 </main>
 
-<p class="pg-hint">提示：PacketDiag 使用标准 <code>packetdiag { }</code> 语法（字段 <code>bit[-end]: 标签 [选项]</code>）；Mermaid 支持流程图、时序图、状态图等。文档中分别使用 <code>```packetdiag</code> 与 <code>```mermaid</code> 围栏。</p>
+<p class="pg-footer">提示：文档中 PacketDiag 使用 <code>```packetdiag</code> 围栏，Mermaid 使用 <code>```mermaid</code> 围栏；两者均可点击放大查看并下载图片。</p>
 
 <script src="packetdiag.js"></script>
 <script src="mermaid.min.js"></script>
@@ -142,7 +276,106 @@
   var packetCanvas = document.getElementById('pgPacketCanvas');
   var packetError = document.getElementById('pgPacketError');
   var packetPreset = document.getElementById('pgPacketPreset');
+  var packetBitOrder = document.getElementById('pgPacketBitOrder');
+  var packetNumbering = document.getElementById('pgPacketNumbering');
+  var packetFit = document.getElementById('pgPacketFit');
+  var packetNote = document.getElementById('pgPacketNote');
   var packetTimer = 0;
+
+  var PACKET_EXTRA = {
+    'ext-desc': {
+      label: '扩展：位序反转 (bit_order = desc)',
+      source: [
+        'packetdiag {',
+        '  colwidth = 32;',
+        '  node_height = 44;',
+        '  bit_order = "desc";',
+        '',
+        '  28-31: Version;',
+        '  24-27: IHL;',
+        '  16-23: TOS;',
+        '  0-15: Total Length;',
+        '  32-47: Identification;',
+        '  48-63: Flags + Fragment Offset;',
+        '}'
+      ].join('\n')
+    },
+    'ext-local': {
+      label: '扩展：按行编号 (numbering = local)',
+      source: [
+        'packetdiag {',
+        '  colwidth = 32;',
+        '  node_height = 44;',
+        '  numbering = "local";',
+        '',
+        '  0-15: Word0 High;',
+        '  16-31: Word0 Low;',
+        '  // @row: Word 1',
+        '  0-31: Word1;',
+        '  // @row: Word 2',
+        '  0-7: Byte 0;',
+        '  8-15: Byte 1;',
+        '  16-23: Byte 2;',
+        '  24-31: Byte 3;',
+        '}'
+      ].join('\n')
+    },
+    'ext-notes': {
+      label: '扩展：区段 / @row / @left 注释',
+      source: [
+        'packetdiag {',
+        '  colwidth = 32;',
+        '  node_height = 44;',
+        '',
+        '  // ---- 请求头 ----',
+        '  // @left: 固定 8 字节',
+        '  0-31: Magic;',
+        '  32-63: Length;',
+        '  // @row: 负载',
+        '  // @left: 可变长',
+        '  64-79: Type;',
+        '  80-95: Flags;',
+        '}'
+      ].join('\n')
+    },
+    'ext-desctable': {
+      label: '扩展：desctable 描述表',
+      source: [
+        'packetdiag {',
+        '  colwidth = 32;',
+        '  node_height = 44;',
+        '',
+        '  0-15: SrcPort [description = "源端口"];',
+        '  16-31: DstPort [description = "目的端口"];',
+        '  32-63: Seq [description = "序列号"];',
+        '',
+        '  desctable {',
+        '    SrcPort = "发送方端口号（16 bits）"',
+        '    DstPort = "接收方端口号（16 bits）"',
+        '    Seq = "本报文段数据第一个字节的序号"',
+        '  }',
+        '}'
+      ].join('\n')
+    },
+    'ext-options': {
+      label: '扩展：字段属性演示',
+      source: [
+        'packetdiag {',
+        '  colwidth = 32;',
+        '  node_height = 52;',
+        '',
+        '  0-3: Ver [color = "#dbeafe"];',
+        '  4-7: IHL [textcolor = "red"];',
+        '  8-15: TOS [background = "#fce5cd"];',
+        '  16-31: Len [rotate = 270];',
+        '  32-47: Flags [icon = "flag"];',
+        '  48-63: Dash [style = "dashed"];',
+        '  64-95: Payload [len = 64];',
+        '  96-127: Shape [shape = "ellipse"];',
+        '}'
+      ].join('\n')
+    }
+  };
 
   if (window.PacketDiag) {
     Object.keys(window.PacketDiag.presets).forEach(function (name) {
@@ -151,8 +384,21 @@
       option.textContent = name;
       packetPreset.appendChild(option);
     });
+    Object.keys(PACKET_EXTRA).forEach(function (key) {
+      var option = document.createElement('option');
+      option.value = key;
+      option.textContent = PACKET_EXTRA[key].label;
+      packetPreset.appendChild(option);
+    });
     packetPreset.value = 'tcp';
     packetSource.value = window.PacketDiag.presets.tcp || window.PacketDiag.defaultSource;
+  }
+
+  function packetTemplate(value) {
+    if (PACKET_EXTRA[value]) {
+      return PACKET_EXTRA[value].source;
+    }
+    return (window.PacketDiag && window.PacketDiag.presets[value]) || '';
   }
 
   function renderPacket() {
@@ -161,9 +407,18 @@
       return;
     }
     try {
-      var parsed = window.PacketDiag.parse(packetSource.value);
-      var width = Math.max(560, packetCanvas.parentNode.clientWidth - 24);
-      window.PacketDiag.render(parsed, packetCanvas, { fitWidth: true, width: width });
+      var raw = window.PacketDiag.extractSource(packetSource.value);
+      var firstPass = window.PacketDiag.parse(raw);
+      var bitOrder = window.PacketDiag.bitOrderFor(firstPass, packetBitOrder.value);
+      var numbering = window.PacketDiag.numberingFor(firstPass, packetNumbering.value);
+      var parsed = window.PacketDiag.parse(raw, { bit_order: bitOrder, numbering: numbering });
+      var width = packetFit.checked ? Math.max(560, packetCanvas.parentNode.clientWidth - 24) : 1040;
+      window.PacketDiag.render(parsed, packetCanvas, {
+        fitWidth: packetFit.checked,
+        width: width,
+        bitOrder: bitOrder,
+        globalNote: packetNote.value
+      });
       packetError.textContent = parsed.warnings.length ? parsed.warnings.join('\n') : '';
     } catch (error) {
       packetError.textContent = error && error.message ? error.message : String(error);
@@ -175,8 +430,15 @@
     packetTimer = setTimeout(renderPacket, 250);
   });
   packetPreset.addEventListener('change', function () {
-    packetSource.value = window.PacketDiag.presets[packetPreset.value] || '';
+    packetSource.value = packetTemplate(packetPreset.value);
     renderPacket();
+  });
+  [packetBitOrder, packetNumbering, packetFit].forEach(function (control) {
+    control.addEventListener('change', renderPacket);
+  });
+  packetNote.addEventListener('input', function () {
+    clearTimeout(packetTimer);
+    packetTimer = setTimeout(renderPacket, 250);
   });
   document.getElementById('pgPacketRender').addEventListener('click', renderPacket);
   document.getElementById('pgPacketDownload').addEventListener('click', function () {
@@ -192,17 +454,62 @@
   });
 
   // ---------- Mermaid ----------
+  var MERMAID_TYPES = [
+    { id: 'flowchart', label: 'flowchart 流程图', hint: '节点 A[文本]、判断 B{条件}、子图 subgraph', source: 'flowchart LR\n  A[开始] --> B{判断}\n  B -- 是 --> C[处理]\n  B -- 否 --> D[结束]' },
+    { id: 'sequenceDiagram', label: 'sequenceDiagram 时序图', hint: 'participant 参与者、->> 请求、-->> 响应', source: 'sequenceDiagram\n  participant U as 用户\n  participant S as 服务\n  U->>S: 请求\n  S-->>U: 响应' },
+    { id: 'classDiagram', label: 'classDiagram 类图', hint: 'class 类、+属性/+方法、<|-- 继承', source: 'classDiagram\n  class Animal {\n    +String name\n    +eat() void\n  }\n  class Dog {\n    +bark() void\n  }\n  Animal <|-- Dog' },
+    { id: 'stateDiagram-v2', label: 'stateDiagram-v2 状态图', hint: '[*] 起止状态、A --> B: 事件', source: 'stateDiagram-v2\n  [*] --> 待机\n  待机 --> 运行: 启动\n  运行 --> 待机: 暂停\n  运行 --> [*]: 停止' },
+    { id: 'erDiagram', label: 'erDiagram ER 图', hint: '实体 ||--o{ 关系 : 标签、属性块', source: 'erDiagram\n  CUSTOMER ||--o{ ORDER : places\n  ORDER ||--|{ LINE_ITEM : contains\n  CUSTOMER {\n    string name\n    string email\n  }' },
+    { id: 'journey', label: 'journey 用户旅程', hint: 'section 阶段、任务: 评分: 角色', source: 'journey\n  title 下单流程\n  section 浏览\n    打开首页: 5: 用户\n    搜索商品: 4: 用户\n  section 下单\n    加入购物车: 4: 用户\n    支付: 3: 用户, 系统' },
+    { id: 'gantt', label: 'gantt 甘特图', hint: 'dateFormat、section、任务: 状态, id, 开始, 时长', source: 'gantt\n  title 项目计划\n  dateFormat YYYY-MM-DD\n  section 设计\n    需求: done, a1, 2026-01-01, 7d\n    原型: active, a2, after a1, 5d\n  section 开发\n    编码: a3, after a2, 14d' },
+    { id: 'pie', label: 'pie 饼图', hint: 'pie title、\"标签\" : 数值', source: 'pie title 流量分布\n  "视频" : 45\n  "网页" : 30\n  "下载" : 25' },
+    { id: 'quadrantChart', label: 'quadrantChart 四象限', hint: 'x-axis/y-axis、quadrant-1..4、数据点 [x, y]', source: 'quadrantChart\n  title 优先级评估\n  x-axis 低收益 --> 高收益\n  y-axis 低成本 --> 高成本\n  quadrant-1 优先做\n  quadrant-2 计划做\n  quadrant-3 少做\n  quadrant-4 避免\n  需求A: [0.7, 0.3]\n  需求B: [0.3, 0.6]' },
+    { id: 'requirementDiagram', label: 'requirementDiagram 需求图', hint: 'requirement { id/text/risk/verifymethod }、element、关系；文本值需加引号', source: 'requirementDiagram\n  requirement login {\n    id: 1\n    text: "支持账号密码登录"\n    risk: medium\n    verifymethod: test\n  }\n  element login_module {\n    type: module\n  }\n  login_module - satisfies -> login' },
+    { id: 'gitGraph', label: 'gitGraph 提交图', hint: 'commit、branch、checkout、merge', source: 'gitGraph\n  commit id: "init"\n  branch develop\n  commit id: "feat"\n  checkout main\n  merge develop' },
+    { id: 'mindmap', label: 'mindmap 思维导图', hint: 'root((中心)) 与缩进层级', source: 'mindmap\n  root((产品))\n    功能\n      搜索\n      导出\n    体验\n      速度\n      易用' },
+    { id: 'timeline', label: 'timeline 时间线', hint: '标题、时间 : 事件 : 事件', source: 'timeline\n  title 版本历史\n  2024 : v1.0 发布\n  2025 : v2.0 发布 : 性能优化\n  2026 : v3.0 规划' },
+    { id: 'sankey-beta', label: 'sankey 桑基图', hint: 'CSV 三列：来源,目标,数值', source: 'sankey-beta\n\nA,B,10\nA,C,5\nB,D,8' },
+    { id: 'xychart-beta', label: 'xychart XY 图', hint: 'x-axis 分类、y-axis 范围、bar/line 数据', source: 'xychart-beta\n  title "月度访问量"\n  x-axis ["1月", "2月", "3月", "4月"]\n  y-axis "访问量" 0 --> 1000\n  bar [320, 480, 640, 900]\n  line [300, 500, 700, 950]' },
+    { id: 'block-beta', label: 'block 块图', hint: 'columns 列数、块定义、--> 连线', source: 'block-beta\n  columns 3\n  A["输入"] B["处理"] C["输出"]\n  A --> B\n  B --> C' },
+    { id: 'packet-beta', label: 'packet 报文图', hint: 'packet-beta、位范围: "字段"', source: 'packet-beta\n  0-15: "源端口"\n  16-31: "目的端口"\n  32-63: "序列号"\n  64-95: "确认号"' },
+    { id: 'architecture-beta', label: 'architecture 架构图', hint: 'group/service(icon)[标题]、:L -- R: 连线', source: 'architecture-beta\n  group api(cloud)[API 层]\n  service db(database)[数据库] in api\n  service server(server)[服务] in api\n  db:L -- R:server' },
+    { id: 'C4Context', label: 'C4 上下文图', hint: 'Person/System/Rel 声明', source: 'C4Context\n  title 系统上下文\n  Person(user, "用户", "使用系统")\n  System(sys, "系统", "提供能力")\n  Rel(user, sys, "使用")' },
+    { id: 'kanban', label: 'kanban 看板', hint: '列[标题] 与缩进任务[描述]', source: 'kanban\n  todo[待办]\n    task1[任务一]\n    task2[任务二]\n  doing[进行中]\n    task3[任务三]\n  done[已完成]\n    task4[任务四]' },
+    { id: 'radar-beta', label: 'radar 雷达图', hint: 'axis id["维度"]、curve id["名称"]{数值}、max 上限', source: 'radar-beta\n  title 方案对比\n  axis perf["性能"], cost["成本"], ease["易用"], eco["生态"]\n  curve a["方案A"]{80, 60, 70, 50}\n  curve b["方案B"]{60, 80, 50, 70}\n  max 100' },
+    { id: 'treemap-beta', label: 'treemap 矩形树图', hint: '层级标题 + "叶子": 数值', source: 'treemap-beta\n"根目录"\n  "文档": 30\n  "源码"\n    "前端": 20\n    "后端": 25\n  "测试": 15' },
+    { id: 'wardley-beta', label: 'wardley 战略图', hint: 'anchor/component 名称 [可见度, 演进度]、-> 依赖（名称需 ASCII）', source: 'wardley-beta\n  title Technology Evolution\n  anchor User [0.95, 0.35]\n  component System [0.7, 0.5]\n  component Database [0.6, 0.75]\n  User -> System\n  System -> Database' },
+    { id: 'cynefin-beta', label: 'cynefin 决策域', hint: 'complex/complicated/clear/chaotic/confusion 与条目', source: 'cynefin-beta\n  title 决策域\n  complex\n    "探索未知"\n  complicated\n    "专家分析"\n  clear\n    "标准流程"\n  chaotic\n    "紧急响应"\n  confusion\n    "待归类"' },
+    { id: 'eventmodeling', label: 'eventmodeling 事件建模', hint: 'tf 序号 类型 名称（ui/cmd/evt/readmodel 等，名称需 ASCII）', source: 'eventmodeling\n\ntf 01 ui CartUI\ntf 02 cmd AddItem\ntf 03 evt ItemAdded\ntf 04 readmodel CartView' },
+    { id: 'treeView-beta', label: 'treeView 目录树', hint: 'treeView-beta 与缩进层级（带 / 为目录）', source: 'treeView-beta\n    my-project/\n        src/\n            index.js\n        package.json\n        README.md' },
+    { id: 'info', label: 'info 版本信息', hint: '仅显示 Mermaid 版本', source: 'info' }
+  ];
+
   var mermaidSource = document.getElementById('pgMermaidSource');
   var mermaidPreview = document.getElementById('pgMermaidPreview');
   var mermaidError = document.getElementById('pgMermaidError');
+  var mermaidType = document.getElementById('pgMermaidType');
+  var mermaidHint = document.getElementById('pgMermaidHint');
   var mermaidCounter = 0;
+  var mermaidTimer = 0;
   var mermaidReady = false;
 
-  mermaidSource.value = [
-    'flowchart LR',
-    '  A[编写 Markdown] --> B[运行构建]',
-    '  B --> C[离线浏览与搜索]'
-  ].join('\n');
+  MERMAID_TYPES.forEach(function (item) {
+    var option = document.createElement('option');
+    option.value = item.id;
+    option.textContent = item.label;
+    mermaidType.appendChild(option);
+  });
+
+  function mermaidTemplate(id) {
+    return MERMAID_TYPES.filter(function (item) { return item.id === id; })[0] || MERMAID_TYPES[0];
+  }
+
+  function loadMermaidTemplate() {
+    var template = mermaidTemplate(mermaidType.value);
+    mermaidSource.value = template.source;
+    mermaidHint.textContent = '语法提示：' + template.hint;
+    renderMermaid();
+  }
 
   function ensureMermaid() {
     if (mermaidReady || !window.mermaid) {
@@ -256,11 +563,11 @@
     return { width: rect.width || 800, height: rect.height || 600 };
   }
 
+  mermaidType.addEventListener('change', loadMermaidTemplate);
   mermaidSource.addEventListener('input', function () {
     clearTimeout(mermaidTimer);
     mermaidTimer = setTimeout(renderMermaid, 300);
   });
-  var mermaidTimer = 0;
   document.getElementById('pgMermaidRender').addEventListener('click', renderMermaid);
   document.getElementById('pgMermaidSvg').addEventListener('click', function () {
     var svg = mermaidSvgElement();
@@ -271,7 +578,7 @@
     clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
     clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
     var text = '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(clone);
-    saveBlob(new Blob([text], { type: 'image/svg+xml;charset=utf-8' }), 'mermaid-diagram.svg');
+    saveBlob(new Blob([text], { type: 'image/svg+xml;charset=utf-8' }), 'mermaid-' + mermaidType.value + '.svg');
   });
   document.getElementById('pgMermaidPng').addEventListener('click', function () {
     var svg = mermaidSvgElement();
@@ -280,14 +587,14 @@
     }
     var size = svgNaturalSize(svg);
     window.MediaViewer.svgToPngBlob(svg, size.width, size.height, 2).then(function (blob) {
-      saveBlob(blob, 'mermaid-diagram.png');
+      saveBlob(blob, 'mermaid-' + mermaidType.value + '.png');
     }).catch(function (error) {
       mermaidError.textContent = 'PNG 导出失败：' + (error && error.message ? error.message : error);
     });
   });
 
   renderPacket();
-  renderMermaid();
+  loadMermaidTemplate();
 }());
 </script>
 </body>
