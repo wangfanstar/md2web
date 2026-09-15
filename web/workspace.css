@@ -165,3 +165,16 @@ body { color: var(--docs-ink); background: #f7f9fb; }
   outline: 2px solid rgba(31, 111, 235, .55);
   outline-offset: 1px;
 }
+
+/* ---------- Mermaid 图形 ---------- */
+
+.markdown-section .mermaid {
+  margin: 16px 0;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.markdown-section .mermaid svg {
+  height: auto;
+  max-width: 100%;
+}

@@ -97,6 +97,8 @@ ASSETS = {
     "prism.min.js": "https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js",
     "prism.min.css": "https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism.min.css",
     "prism-autoloader.min.js": "https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/autoloader/prism-autoloader.min.js",
+    # Mermaid 图形渲染（离线）
+    "mermaid.min.js": "https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js",
 }
 
 # Prism 语言组件（autoloader 运行时按需加载，需下载到本地实现离线）
@@ -128,6 +130,9 @@ PRISM_LANG_FALLBACK = {
     "p4": "c",
     "asm": "nasm",
 }
+
+# 由前端插件渲染、不交给 Prism 的语言
+IGNORED_FENCE_LANGS = {"mermaid"}
 
 SEARCH_DEPTH = 4
 
@@ -443,7 +448,10 @@ def collect_fence_languages(md_dir, md_files) -> set:
     for rel in md_files:
         text = (Path(md_dir) / rel).read_text(encoding="utf-8", errors="ignore")
         for match in fence_re.finditer(text):
-            langs.add(match.group(1).lower())
+            lang = match.group(1).lower()
+            if lang in IGNORED_FENCE_LANGS:
+                continue
+            langs.add(lang)
     return langs
 
 
@@ -501,9 +509,9 @@ def generate_custom_search_assets():
     LIB_DIR.mkdir(parents=True, exist_ok=True)
     (LIB_DIR / "custom-search.js").write_text(CUSTOM_SEARCH_JS, encoding="utf-8")
     (LIB_DIR / "custom-search.css").write_text(CUSTOM_SEARCH_CSS, encoding="utf-8")
-    for name in ("workspace.js", "workspace.css"):
+    for name in ("workspace.js", "workspace.css", "mermaid-init.js"):
         shutil.copyfile(WEB_DIR / name, LIB_DIR / name)
-    print("  [生成] custom-search.js / custom-search.css")
+    print("  [生成] custom-search.js / custom-search.css / mermaid-init.js")
 
 
 # Docsify 4.13.1 slugify 实际删除的标点集合（docsify.min.js 中的 En 正则），
@@ -837,6 +845,8 @@ def generate_index_html(title="文档中心"):
   <script src="lib/front-matter.min.js"></script>
   <script src="lib/custom-search.js"></script>
   <script src="lib/workspace.js"></script>
+  <script src="lib/mermaid.min.js"></script>
+  <script src="lib/mermaid-init.js"></script>
 </body>
 </html>
 """

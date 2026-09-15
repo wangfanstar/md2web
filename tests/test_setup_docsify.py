@@ -484,6 +484,18 @@ class GenerationTests(TempDirTestCase):
         self.assertIn("'/.*/_sidebar.md': '/_sidebar.md'", html_text)
         self.assertIn('rel="icon"', html_text)
 
+    def test_index_html_includes_mermaid(self):
+        with redirect_stdout(io.StringIO()):
+            self.module.generate_index_html("T")
+        html_text = (self.docs / "index.html").read_text(encoding="utf-8")
+        self.assertIn("lib/mermaid.min.js", html_text)
+        self.assertIn("lib/mermaid-init.js", html_text)
+
+    def test_generate_assets_copies_mermaid_init(self):
+        with redirect_stdout(io.StringIO()):
+            self.module.generate_custom_search_assets()
+        self.assertTrue((self.docs / "lib" / "mermaid-init.js").exists())
+
     def test_search_index_reports_non_utf8_path(self):
         self.write_doc("a.md", "# A")
         (self.md / "bad.md").write_bytes(b"\xff\xfe\x00bad")
@@ -563,6 +575,14 @@ class PrismTests(TempDirTestCase):
         self.assertIn("prism-cpp.min.js", requested)
         self.assertIn("prism-c.min.js", requested)
         self.assertNotIn("prism-cuda", requested)
+
+    def test_collect_fence_languages_ignores_mermaid(self):
+        self.write_doc(
+            "a.md", "```mermaid\ngraph TD\nA-->B\n```\n\n```python\nprint(1)\n```"
+        )
+        self.assertEqual(
+            self.module.collect_fence_languages(self.md, ["a.md"]), {"python"}
+        )
 
 
 class EndToEndTests(TempDirTestCase):

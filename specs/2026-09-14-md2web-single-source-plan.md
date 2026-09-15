@@ -1109,3 +1109,4 @@ Task 4 实现后的代码审查加固，提交 `fix: 预校验编码并收紧离
 - 2026-09-15 后续修复：`serve.py` 启动时检测 `docs/md` 是否比 `search-index.json` 新，若是则自动调用 `setup_docsify.py` 重建后再预览（新增 `--no-build` 关闭）；README 同步说明
 - 2026-09-15 后续修复：自动重建检测扩展为文件集合比对（与 `search-index.json` 的路由集合对比），删除或重命名文档同样会触发重建
 - 2026-09-15 后续修复：`serve.py` 运行期间每 2 秒自动检测并重建（无需重启服务）；启动时自动关闭旧的 `serve.py` 实例（跨平台，仅标准库）
+- 2026-09-15 后续增强：Mermaid 图形离线渲染（`docs/lib/mermaid.min.js` 11.17.2 + `web/mermaid-init.js` docsify 插件，围栏语言 `mermaid` 不再交给 Prism）
