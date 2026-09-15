@@ -3,7 +3,8 @@
 
   var STORAGE = {
     collapsed: 'md2web.workspace.collapsed',
-    wide: 'md2web.workspace.wide'
+    wide: 'md2web.workspace.wide',
+    numbers: 'md2web.workspace.numbers'
   };
   var state = { filter: '', observer: null, timer: 0, lastRoute: null };
 
@@ -191,9 +192,11 @@
     var actions = section.querySelector(':scope > .workspace-page-actions');
     if (!actions) { actions = document.createElement('div'); actions.className = 'workspace-page-actions'; section.insertBefore(actions, crumb.nextSibling); }
     if (!actions.querySelector('[data-workspace-copy-path]')) {
-      actions.innerHTML = '<button type="button" data-workspace-copy-path>复制路径</button><button type="button" data-workspace-wide>' + (document.body.classList.contains('workspace-wide') ? '退出宽屏' : '宽屏阅读') + '</button>';
+      var numbersHidden = document.body.classList.contains('hide-heading-numbers');
+      actions.innerHTML = '<button type="button" data-workspace-copy-path>复制路径</button><button type="button" data-workspace-wide>' + (document.body.classList.contains('workspace-wide') ? '退出宽屏' : '宽屏阅读') + '</button><button type="button" data-workspace-numbers>' + (numbersHidden ? '显示序号' : '隐藏序号') + '</button>';
       actions.querySelector('[data-workspace-copy-path]').addEventListener('click', function () { copyText(route ? 'docs/' + route + (/.md$/i.test(route) ? '' : '.md') : 'docs/README.md', this); });
       actions.querySelector('[data-workspace-wide]').addEventListener('click', function () { document.body.classList.toggle('workspace-wide'); try { localStorage.setItem(STORAGE.wide, document.body.classList.contains('workspace-wide') ? '1' : ''); } catch (_) {} var toggle = actions.querySelector('[data-workspace-wide]'); toggle.textContent = document.body.classList.contains('workspace-wide') ? '退出宽屏' : '宽屏阅读'; });
+      actions.querySelector('[data-workspace-numbers]').addEventListener('click', function () { var hidden = document.body.classList.toggle('hide-heading-numbers'); try { localStorage.setItem(STORAGE.numbers, hidden ? '0' : '1'); } catch (_) {} this.textContent = hidden ? '显示序号' : '隐藏序号'; });
     }
   }
   function escape(value) { return String(value).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
@@ -217,6 +220,7 @@
   function schedule() { clearTimeout(state.timer); state.timer = setTimeout(enhance, 40); }
   function init() {
     try { if (localStorage.getItem(STORAGE.wide) === '1') document.body.classList.add('workspace-wide'); } catch (_) {}
+    try { if (localStorage.getItem(STORAGE.numbers) === '0') document.body.classList.add('hide-heading-numbers'); } catch (_) {}
     enhance();
     state.observer = new MutationObserver(schedule);
     state.observer.observe(document.body, { childList: true, subtree: true });

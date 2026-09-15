@@ -201,3 +201,15 @@ body { color: var(--docs-ink); background: #f7f9fb; }
   font-size: 11px;
   margin-right: 4px;
 }
+
+/* ---------- 章节序号开关 ---------- */
+
+body.hide-heading-numbers .markdown-section h2::before,
+body.hide-heading-numbers .markdown-section h3::before,
+body.hide-heading-numbers .markdown-section h4::before {
+  content: none;
+}
+
+body.hide-heading-numbers .docs-page-toc-index {
+  display: none;
+}

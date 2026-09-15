@@ -61,7 +61,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 6. **索引语义一致**：Python 预构建 `build_page_index` 与浏览器重读 `buildSearchPage` 必须一致——代码围栏内容进入正文、代码内 `#` 不生成标题、首个标题前不落空壳条目。
 7. **Mermaid 围栏不交给 Prism**：`collect_fence_languages` 必须忽略 `mermaid`（`IGNORED_FENCE_LANGS`），由 `web/mermaid-init.js` 渲染。
 8. **UI 令牌统一**：颜色/字体使用 `--docs-*` 变量；`--docs-accent`（#1f6feb）只用于当前项/命中/焦点；路径、标识符、计数用等宽字体。
-9. **章节序号**：正文 h2–h4 由 CSS 计数器生成，右侧目录编号由 `buildPageToc` 生成，两者规则需保持一致（1 / 1.1 / 1.1.1）。
+9. **章节序号**：正文 h2–h4 由 CSS 计数器生成，右侧目录编号由 `buildPageToc` 生成，两者规则需保持一致（1 / 1.1 / 1.1.1）；阅读区「隐藏序号/显示序号」按钮通过 `body.hide-heading-numbers` 关闭两者，偏好存于 localStorage。
 
 ## 开发流程
 
