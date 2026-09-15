@@ -1792,6 +1792,38 @@
     }
   }
 
+  var SIDEBAR_HOME_ICON = '<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2.4 7.1 8 2.4l5.6 4.7v5.6a.9.9 0 0 1-.9.9h-3.2V9.8H6.5v3.8H3.3a.9.9 0 0 1-.9-.9z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>';
+  var SIDEBAR_AI_ICON = '<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="2.1" y="4.4" width="11.8" height="9.1" rx="2.1" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.4V2.3M5.7 8.3h.01M10.3 8.3h.01M5.9 11h4.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+
+  // 把侧栏顶部站点名替换为 HOME 图标，并在其右侧加入 AI 配置入口
+  function installSidebarIcons(aside) {
+    var root = aside || document.querySelector('aside.sidebar') || document.querySelector('.sidebar');
+    if (!root) {
+      return;
+    }
+    var appName = root.querySelector('.app-name');
+    if (!appName || appName.getAttribute('data-custom-icons') === '1') {
+      return;
+    }
+    var title = String(appName.textContent || '').trim() || '文档中心';
+    appName.setAttribute('data-custom-icons', '1');
+    appName.innerHTML = [
+      '<span class="custom-sidebar-icons">',
+      '<a class="custom-sidebar-icon" href="#/" title="' + escapeHtml(title) + '（Home）" aria-label="返回首页">',
+      SIDEBAR_HOME_ICON,
+      '</a>',
+      '<button type="button" class="custom-sidebar-icon" data-sidebar-ai title="AI 配置" aria-label="AI 配置">',
+      SIDEBAR_AI_ICON,
+      '</button>',
+      '</span>'
+    ].join('');
+    appName.querySelector('[data-sidebar-ai]').addEventListener('click', function () {
+      if (window.AIAssistant) {
+        window.AIAssistant.openConfig();
+      }
+    });
+  }
+
   function createSidebarSearch(aside) {
     var wrapper = document.createElement('div');
     wrapper.className = 'docs-custom-search';
@@ -2043,6 +2075,9 @@
     document.addEventListener('click', handleSearchResultClick);
     loadHistory();
     window.addEventListener('hashchange', scheduleReadingModeBuild);
+    window.addEventListener('hashchange', function () {
+      window.setTimeout(function () { installSidebarIcons(); }, 0);
+    });
     if (window.MutationObserver) {
       var readingTarget = document.querySelector('.content') || document.body;
       state.readingObserver = new MutationObserver(scheduleReadingModeBuild);
@@ -2054,6 +2089,7 @@
         createSidebarSearch(aside);
       }
       setupSidebarScrollArea(aside);
+      installSidebarIcons(aside);
       createDialog();
       bindGlobalShortcuts();
       observePageContent();

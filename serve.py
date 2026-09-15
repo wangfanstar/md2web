@@ -19,13 +19,18 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
+import urllib.request
 import webbrowser
 from pathlib import Path
 
 ROOT = Path(__file__).parent
 MD_API_PREFIX = "/__md/"
 MD_MAX_BODY = 8 * 1024 * 1024
+AI_API_PREFIX = "/__ai/"
+AI_MAX_BODY = 4 * 1024 * 1024
+AI_HOP_HEADERS = {"host", "content-length", "connection", "transfer-encoding", "accept-encoding", "content-type"}
 
 
 class MdSaveError(Exception):
@@ -41,6 +46,15 @@ class MdSaveError(Exception):
 def is_loopback_host(host):
     host = str(host or "")
     return host in ("::1", "localhost") or host.startswith("127.")
+
+
+def ai_target_url(raw):
+    """校验 AI 接口地址（仅允许 http/https），非法时抛 MdSaveError(400)。"""
+    value = str(raw or "").strip()
+    parsed = urllib.parse.urlparse(value)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise MdSaveError(400, "AI 接口地址必须是 http/https URL")
+    return value
 
 
 def normalize_md_path(raw):
@@ -203,10 +217,65 @@ class PreviewHandler(http.server.SimpleHTTPRequestHandler):
         if self.path.startswith(MD_API_PREFIX):
             self._handle_md_api("POST")
             return
+        if self.path.startswith(AI_API_PREFIX):
+            self._handle_ai_api()
+            return
         self.send_error(405, "Method Not Allowed")
 
+    def _handle_ai_api(self):
+        """把浏览器请求转发到用户配置的 AI 接口（解决跨域，仅本机调用）。"""
+        if not self._client_is_local():
+            self._send_json(403, {"ok": False, "error": "AI 代理仅允许本机调用"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if length <= 0 or length > AI_MAX_BODY:
+                raise MdSaveError(400, "请求体为空或过大")
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise MdSaveError(400, "请求体必须是 JSON 对象")
+            target = ai_target_url(payload.get("url"))
+            body = json.dumps(payload.get("payload") or {}, ensure_ascii=False).encode("utf-8")
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "User-Agent": "md2web-ai-proxy",
+            }
+            api_key = payload.get("apiKey")
+            if api_key:
+                headers["Authorization"] = "Bearer " + str(api_key)
+            for name, value in (payload.get("headers") or {}).items():
+                if isinstance(value, str) and name.lower() not in AI_HOP_HEADERS:
+                    headers[name] = value
+            request = urllib.request.Request(target, data=body, headers=headers, method="POST")
+            self.close_connection = True
+            try:
+                upstream = urllib.request.urlopen(request, timeout=180)
+            except urllib.error.HTTPError as error:
+                detail = error.read().decode("utf-8", "replace")
+                self._send_json(error.code, {"ok": False, "error": detail[:4000]})
+                return
+            except (urllib.error.URLError, OSError) as error:
+                self._send_json(502, {"ok": False, "error": f"无法访问 AI 接口: {error}"})
+                return
+            with upstream:
+                self.send_response(200)
+                self.send_header("Content-Type", upstream.headers.get("Content-Type", "application/json"))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                while True:
+                    chunk = upstream.read(2048)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+        except MdSaveError as error:
+            self._send_json(error.status, {"ok": False, "error": error.message})
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._send_json(400, {"ok": False, "error": "请求体不是有效的 JSON"})
+
     def log_message(self, fmt, *args):
-        if self.path.startswith(MD_API_PREFIX):
+        if self.path.startswith(MD_API_PREFIX) or self.path.startswith(AI_API_PREFIX):
             return
         super().log_message(fmt, *args)
 
@@ -435,6 +504,7 @@ def main(argv=None):
     print(f"预览目录: {directory}")
     print(f"本机访问: http://localhost:{port}")
     print("编辑保存: 已启用（仅本机页面可写回 docs/md 源文件）")
+    print("AI 代理: 已启用（仅本机；/__ai/chat 转发到浏览器配置的接口）")
     ip = lan_ip()
     if ip and args.bind == "0.0.0.0":
         print(f"局域网访问: http://{ip}:{port}")

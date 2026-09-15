@@ -8,7 +8,7 @@ md2web 把 `docs/md/` 下的 Markdown 构建成**完全离线可用**的 Docsify
 
 - 运行时：Python 3.8+（仅标准库，无需 pip/Node.js）；前端为原生 JS/CSS + Docsify 4.13.1 + Prism 1.29.0 + Mermaid 11.17.2，全部本地化
 - 支持 Windows 与 Linux；`file://` 双击与 HTTP 预览均可用
-- 仓库是**公开仓库**：不要提交密钥、令牌或敏感文档
+- 仓库是**公开仓库**：不要提交密钥、令牌或敏感文档；AI 助手的 API Key 只允许存在浏览器 localStorage（`window.AI_ASSISTANT_CONFIG` 也仅作可选预置，禁止把 Key 写进被提交的文件）
 
 ## 架构与数据流
 
@@ -27,7 +27,7 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | 路径 | 职责 |
 |------|------|
 | `setup_docsify.py` | 构建：扫描、编码校验、依赖复用/下载、Prism 组件、生成导航/首页/索引/离线数据/入口 |
-| `serve.py` | 跨平台预览：端口回退、自动替换旧实例、运行期每 2s 检测 `docs/md` 变化并自动重建；提供 `/__md/meta`、`/__md/save` 源文档读写接口（仅本机，sha256 冲突检测、EOL 保持、原子写入） |
+| `serve.py` | 跨平台预览：端口回退、自动替换旧实例、运行期每 2s 检测 `docs/md` 变化并自动重建；提供 `/__md/meta`、`/__md/save` 源文档读写接口与 `/__ai/chat` AI 转发代理（均仅本机可调用；保存含 sha256 冲突检测、EOL 保持、原子写入） |
 | `web/custom-search.js` / `.css` | 搜索算法与界面、结果列表、搜索/目录视图切换、正文命中高亮、右侧本文目录 |
 | `web/workspace.js` / `.css` | 目录树（折叠/过滤/计数/定位）、面包屑、首页卡片、复制、编辑/下载 MD、宽屏、章节序号、Mermaid 样式 |
 | `web/mermaid-init.js` | docsify 插件：把 ```mermaid 围栏渲染为图形（离线） |
@@ -38,6 +38,9 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `web/md-editor.js` | 「编辑 MD / 下载 MD」：双栏编辑器（左：可拖拽分栏的 Markdown 高亮源码；右：marked + Prism + Mermaid + PacketDiag + KaTeX 实时预览）、工具栏与快捷键、`Ctrl+S` 直连写回（HTTP 走 `/__md/save`，file:// 走 File System Access/下载）；`window.MdEditor = { open, download, save, close }` |
 | `web/math-init.js` | docsify 插件：`$...$` / `$$...$$` 等分隔符的 KaTeX 离线渲染；暴露 `window.MathRender.render` 供编辑器预览复用 |
 | `web/prism-init.js` | docsify 插件：`beforeEach` 阶段按围栏语言预载 Prism 组件，保证 docsify 渲染期即可高亮（docsify 内置 Prism 覆盖了 `window.Prism`，autoloader 必须在其之后加载） |
+| `web/ai-retrieval.js` | AI 助手的离线检索核心（纯函数，`window.AIRetrieval`）：分词（CJK 单字+双字）、从 `searchIndex`/Markdown 构建语料、TF-IDF 打分、摘录与上下文/消息组装；`tests/test_ai_retrieval.js` 覆盖 |
+| `web/ai-assistant.js` / `.css` | AI 助手聊天面板与独立配置弹窗（`window.AIAssistant`）：设置面板（服务商预设、接口地址、模型、Key、代理策略，Key 仅存 localStorage）、**资料范围勾选**（按文件夹/文档过滤检索）、**上传文档**（.md/.txt，仅本机 localStorage，≤512 KB）、本地检索 + 引用来源、OpenAI/Anthropic 风格流式 SSE 解析、直连失败自动走 `/__ai/chat` 代理；侧栏「AI 配置」图标与对话面板 ⚙ 均可打开配置 |
+| `tests/test_ai_retrieval.js` | AI 检索算法测试（`node --test`） |
 | `web/plot-playground.html` | 独立绘图在线预览页（Mermaid 全部类型模板 + PacketDiag 增强控件与完整语法说明、下载），构建复制到 `docs/lib/` |
 | `docs/md/` | 唯一需要人工维护的源文档目录 |
 | `docs/lib/` | 离线依赖 + 生成资源，不要手工修改 |
@@ -58,7 +61,8 @@ python serve.py                         # 预览 http://localhost:3000
 python -m unittest discover -s tests -v
 node --test tests/test_search.js
 node --test tests/test_packetdiag.js
-node --check web/custom-search.js       # 前端语法检查（workspace/mermaid-init/media-viewer/packetdiag/page-export/md-editor/math-init/prism-init 同理）
+node --test tests/test_ai_retrieval.js
+node --check web/custom-search.js       # 前端语法检查（workspace/mermaid-init/media-viewer/packetdiag/page-export/md-editor/math-init/prism-init/ai-assistant/ai-retrieval 同理）
 ```
 
 ## 不可破坏的约定
@@ -95,7 +99,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 ## 完成前检查清单
 
 1. `python -m unittest discover -s tests -v` 全绿
-2. `node --test tests/test_search.js`、`node --test tests/test_packetdiag.js` 全绿
+2. `node --test tests/test_search.js`、`node --test tests/test_packetdiag.js`、`node --test tests/test_ai_retrieval.js` 全绿
 3. `node --check web/custom-search.js`、`web/workspace.js`、`web/mermaid-init.js`、`web/media-viewer.js`、`web/packetdiag.js`、`web/packetdiag-init.js`、`web/page-export.js`、`web/md-editor.js`、`web/math-init.js`、`web/prism-init.js` 通过
 4. `python setup_docsify.py` 后 `git status` 无意外生成物差异（构建幂等）
 5. `docs/md` 内容逐字节未变

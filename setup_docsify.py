@@ -552,9 +552,12 @@ def generate_custom_search_assets():
         "md-editor.js",
         "math-init.js",
         "prism-init.js",
+        "ai-retrieval.js",
+        "ai-assistant.js",
+        "ai-assistant.css",
     ):
         shutil.copyfile(WEB_DIR / name, LIB_DIR / name)
-    print("  [生成] custom-search.* / workspace.* / mermaid-init.js / media-viewer.js / packetdiag* / page-export.js / plot-playground.html / md-editor.js / math-init.js / prism-init.js")
+    print("  [生成] custom-search.* / workspace.* / mermaid-init.js / media-viewer.js / packetdiag* / page-export.js / plot-playground.html / md-editor.js / math-init.js / prism-init.js / ai-*.js|css")
 
 
 # Docsify 4.13.1 slugify 实际删除的标点集合（docsify.min.js 中的 En 正则），
@@ -823,6 +826,7 @@ def generate_index_html(title="文档中心"):
   <link rel="stylesheet" href="lib/docsify.min.css">
   <link rel="stylesheet" href="lib/custom-search.css">
   <link rel="stylesheet" href="lib/workspace.css">
+  <link rel="stylesheet" href="lib/ai-assistant.css">
 </head>
 <body>
   <script src="lib/offline-data.js"></script>
@@ -904,6 +908,8 @@ def generate_index_html(title="文档中心"):
   <script src="lib/media-viewer.js"></script>
   <script src="lib/page-export.js"></script>
   <script src="lib/md-editor.js"></script>
+  <script src="lib/ai-retrieval.js"></script>
+  <script src="lib/ai-assistant.js"></script>
 </body>
 </html>
 """

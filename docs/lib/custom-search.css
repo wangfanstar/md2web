@@ -176,6 +176,40 @@
   opacity: .85;
 }
 
+.app-name {
+  align-items: center;
+  display: flex;
+}
+
+.custom-sidebar-icons {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.custom-sidebar-icon {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--docs-muted);
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  padding: 4px 7px;
+  text-decoration: none;
+}
+
+.custom-sidebar-icon:hover {
+  background: #eef2f6;
+  border-color: #dfe7ef;
+  color: var(--docs-ink);
+}
+
+.custom-sidebar-icon svg {
+  display: block;
+}
+
 .custom-search-kbd-hint {
   background: transparent;
   border: 1px solid #dfe7ef;
