@@ -1,0 +1,6 @@
+# 认证编辑服务依赖（阶段一）
+# 内网离线部署：在有网机器执行 python -m pip download -r server/requirements.txt -d wheels
+# 然后拷贝 wheels 目录到内网机器：python -m pip install --no-index --find-links wheels -r server/requirements.txt
+# 离线静态阅读（docs/index.html）不需要安装任何依赖。
+flask==3.0.3
+waitress==3.0.0

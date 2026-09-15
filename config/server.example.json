@@ -1,0 +1,36 @@
+{
+  "server": {
+    "bind": "127.0.0.1",
+    "port": 3000,
+    "secure_cookies": false
+  },
+  "auth": {
+    "url": "https://svn.example.invalid/svn/accounts/auth-check/",
+    "credential_group": "engineering",
+    "session_hours": 8,
+    "idle_minutes": 30
+  },
+  "storage": {
+    "database": "../data/md2web.sqlite3",
+    "workspaces": "../data/workspaces"
+  },
+  "sync": {
+    "interval_seconds": 120,
+    "credential_source": "deployment_secret",
+    "credential_name": "MD2WEB_SVN_READONLY"
+  },
+  "repositories": [
+    {
+      "id": "hardware",
+      "mount": "md/硬件设计",
+      "url": "https://svn.example.invalid/svn/hardware/trunk/docs/",
+      "credential_group": "engineering"
+    },
+    {
+      "id": "verification",
+      "mount": "md/验证指南",
+      "url": "https://svn.example.invalid/svn/verification/trunk/manual/",
+      "credential_group": "engineering"
+    }
+  ]
+}

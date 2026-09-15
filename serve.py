@@ -1,18 +1,19 @@
-"""跨平台本地预览服务器：python serve.py [--port 3000] [--no-browser]
+"""跨平台预览 / 认证编辑服务入口。
 
-额外提供源文档保存接口（仅本机可调用）：
-  GET  /__md/meta?path=md/a.md       读取源文档 hash 与 mtime
-  POST /__md/save                    {path, content, baseHash?, force?} 写回 docs/md
+- 默认（无 --config）：**只读预览**。静态站点、自动重建与本机 AI 代理可用；
+  `/__md/*`、`/__svn/*` 等写接口一律拒绝（不再提供匿名保存）。
+- `--config config/server.local.json`：启动认证编辑服务（Flask + Waitress）。
+  匿名只读，登录后进入草稿 / SVN 流程（分阶段实现，见 specs/）。
+- 只管理本项目自身的实例（pidfile），不再扫描并终止所有 serve.py 进程。
 """
 
 import argparse
 import errno
 import functools
-import hashlib
 import http.server
-import io
 import json
 import os
+import shlex
 import signal
 import socket
 import subprocess
@@ -25,131 +26,14 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+from server.paths import is_blocked_static_path
+
 ROOT = Path(__file__).parent
-MD_API_PREFIX = "/__md/"
-MD_MAX_BODY = 8 * 1024 * 1024
 AI_API_PREFIX = "/__ai/"
 AI_MAX_BODY = 4 * 1024 * 1024
 AI_HOP_HEADERS = {"host", "content-length", "connection", "transfer-encoding", "accept-encoding", "content-type"}
-
-
-class MdSaveError(Exception):
-    """源文档读写失败：status 为建议的 HTTP 状态码。"""
-
-    def __init__(self, status, message, **extra):
-        super().__init__(message)
-        self.status = status
-        self.message = message
-        self.extra = extra
-
-
-def is_loopback_host(host):
-    host = str(host or "")
-    return host in ("::1", "localhost") or host.startswith("127.")
-
-
-def ai_target_url(raw):
-    """校验 AI 接口地址（仅允许 http/https），非法时抛 MdSaveError(400)。"""
-    value = str(raw or "").strip()
-    parsed = urllib.parse.urlparse(value)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise MdSaveError(400, "AI 接口地址必须是 http/https URL")
-    return value
-
-
-def normalize_md_path(raw):
-    """规范化 md/<相对路径>.md；非法路径抛 MdSaveError(400)。"""
-    value = str(raw or "").strip().replace("\\", "/")
-    while value.startswith("./"):
-        value = value[2:]
-    value = value.lstrip("/")
-    if not value:
-        raise MdSaveError(400, "缺少 path 参数")
-    parts = [part for part in value.split("/") if part not in ("", ".")]
-    if not parts or parts[0] != "md":
-        raise MdSaveError(400, "仅允许编辑 docs/md 下的 Markdown 源文档")
-    if any(part == ".." for part in parts):
-        raise MdSaveError(400, "path 不能包含 ..")
-    if any(part.startswith(".") for part in parts):
-        raise MdSaveError(400, "path 不能包含隐藏目录")
-    if Path(*parts).suffix.lower() != ".md":
-        raise MdSaveError(400, "仅支持 .md 文件")
-    return "/".join(parts)
-
-
-def resolve_md_file(md_dir, raw):
-    rel = normalize_md_path(raw)
-    root = Path(md_dir).resolve()
-    candidate = (root / rel.split("/", 1)[1]).resolve()
-    if candidate != root and root not in candidate.parents:
-        raise MdSaveError(400, "path 越界，超出 docs/md 目录")
-    return candidate
-
-
-def normalize_eol(text):
-    return str(text).replace("\r\n", "\n").replace("\r", "\n")
-
-
-def text_hash(text):
-    return hashlib.sha256(normalize_eol(text).encode("utf-8")).hexdigest()
-
-
-def detect_eol(text, default="\n"):
-    crlf = text.count("\r\n")
-    lf = text.count("\n") - crlf
-    if crlf and crlf >= lf:
-        return "\r\n"
-    if lf:
-        return "\n"
-    return default
-
-
-def read_md_meta(md_dir, raw):
-    path = resolve_md_file(md_dir, raw)
-    if not path.is_file():
-        return {"path": normalize_md_path(raw), "exists": False, "mtime": None, "hash": None}
-    with io.open(path, "r", encoding="utf-8", newline="") as handle:
-        text = handle.read()
-    return {
-        "path": normalize_md_path(raw),
-        "exists": True,
-        "mtime": int(path.stat().st_mtime),
-        "hash": text_hash(text),
-    }
-
-
-def save_md(md_dir, raw, content, base_hash=None, force=False):
-    """写回源文档：EOL 与现有文件一致、原子替换、可选冲突检测。"""
-    path = resolve_md_file(md_dir, raw)
-    rel = normalize_md_path(raw)
-    if not path.is_file():
-        raise MdSaveError(404, "源文件不存在：" + rel)
-    if content is None:
-        raise MdSaveError(400, "缺少 content")
-    with io.open(path, "r", encoding="utf-8", newline="") as handle:
-        existing = handle.read()
-    current_hash = text_hash(existing)
-    if not force and base_hash is not None and base_hash != current_hash:
-        raise MdSaveError(
-            409,
-            "文件已在外部被修改，请重新加载后再保存",
-            currentHash=current_hash,
-            current=existing,
-        )
-    eol = detect_eol(existing)
-    text = normalize_eol(content)
-    if eol != "\n":
-        text = text.replace("\n", eol)
-    tmp = path.with_name(path.name + ".md2web-save.tmp")
-    with io.open(tmp, "w", encoding="utf-8", newline="") as handle:
-        handle.write(text)
-    os.replace(tmp, path)
-    return {
-        "path": rel,
-        "hash": text_hash(content),
-        "mtime": int(path.stat().st_mtime),
-        "bytes": path.stat().st_size,
-    }
+WRITE_PREFIXES = ("/__md/", "/__svn/", "/__operations/")
+DEFAULT_PIDFILE = ROOT / "data" / "serve.pid"
 
 
 class PreviewServer(http.server.ThreadingHTTPServer):
@@ -157,131 +41,8 @@ class PreviewServer(http.server.ThreadingHTTPServer):
     allow_reuse_address = os.name != "nt"
 
 
-class PreviewHandler(http.server.SimpleHTTPRequestHandler):
-    """静态文件 + /__md/ 源文档读写接口（仅本机）。"""
-
-    def __init__(self, *args, directory=None, md_dir=None, **kwargs):
-        self.md_dir = Path(md_dir)
-        super().__init__(*args, directory=directory, **kwargs)
-
-    def _send_json(self, status, payload):
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _client_is_local(self):
-        return is_loopback_host(self.client_address[0])
-
-    def _handle_md_api(self, method):
-        if not self._client_is_local():
-            self._send_json(403, {"ok": False, "error": "仅允许本机保存源文档"})
-            return
-        try:
-            if method == "GET":
-                params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-                meta = read_md_meta(self.md_dir, params.get("path", [""])[0])
-                self._send_json(200, dict(meta, ok=True))
-                return
-            length = int(self.headers.get("Content-Length") or 0)
-            if length <= 0 or length > MD_MAX_BODY:
-                raise MdSaveError(400, "请求体为空或超过 8 MB 限制")
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
-            if not isinstance(payload, dict):
-                raise MdSaveError(400, "请求体必须是 JSON 对象")
-            result = save_md(
-                self.md_dir,
-                payload.get("path"),
-                payload.get("content"),
-                base_hash=payload.get("baseHash"),
-                force=bool(payload.get("force")),
-            )
-            self._send_json(200, dict(result, ok=True))
-        except MdSaveError as error:
-            self._send_json(error.status, dict(error.extra, ok=False, error=error.message))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            self._send_json(400, {"ok": False, "error": "请求体不是有效的 JSON"})
-        except OSError as error:
-            self._send_json(500, {"ok": False, "error": f"写入失败: {error}"})
-
-    def do_GET(self):
-        if self.path.startswith(MD_API_PREFIX):
-            self._handle_md_api("GET")
-            return
-        super().do_GET()
-
-    def do_POST(self):
-        if self.path.startswith(MD_API_PREFIX):
-            self._handle_md_api("POST")
-            return
-        if self.path.startswith(AI_API_PREFIX):
-            self._handle_ai_api()
-            return
-        self.send_error(405, "Method Not Allowed")
-
-    def _handle_ai_api(self):
-        """把浏览器请求转发到用户配置的 AI 接口（解决跨域，仅本机调用）。"""
-        if not self._client_is_local():
-            self._send_json(403, {"ok": False, "error": "AI 代理仅允许本机调用"})
-            return
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-            if length <= 0 or length > AI_MAX_BODY:
-                raise MdSaveError(400, "请求体为空或过大")
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
-            if not isinstance(payload, dict):
-                raise MdSaveError(400, "请求体必须是 JSON 对象")
-            target = ai_target_url(payload.get("url"))
-            body = json.dumps(payload.get("payload") or {}, ensure_ascii=False).encode("utf-8")
-            headers = {
-                "Content-Type": "application/json",
-                "Accept": "application/json, text/event-stream",
-                "User-Agent": "md2web-ai-proxy",
-            }
-            api_key = payload.get("apiKey")
-            if api_key:
-                headers["Authorization"] = "Bearer " + str(api_key)
-            for name, value in (payload.get("headers") or {}).items():
-                if isinstance(value, str) and name.lower() not in AI_HOP_HEADERS:
-                    headers[name] = value
-            request = urllib.request.Request(target, data=body, headers=headers, method="POST")
-            self.close_connection = True
-            try:
-                upstream = urllib.request.urlopen(request, timeout=180)
-            except urllib.error.HTTPError as error:
-                detail = error.read().decode("utf-8", "replace")
-                self._send_json(error.code, {"ok": False, "error": detail[:4000]})
-                return
-            except (urllib.error.URLError, OSError) as error:
-                self._send_json(502, {"ok": False, "error": f"无法访问 AI 接口: {error}"})
-                return
-            with upstream:
-                self.send_response(200)
-                self.send_header("Content-Type", upstream.headers.get("Content-Type", "application/json"))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                while True:
-                    chunk = upstream.read(2048)
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
-        except MdSaveError as error:
-            self._send_json(error.status, {"ok": False, "error": error.message})
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            self._send_json(400, {"ok": False, "error": "请求体不是有效的 JSON"})
-
-    def log_message(self, fmt, *args):
-        if self.path.startswith(MD_API_PREFIX) or self.path.startswith(AI_API_PREFIX):
-            return
-        super().log_message(fmt, *args)
-
-
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="启动 docs/ 本地预览服务")
+    parser = argparse.ArgumentParser(description="启动 docs/ 预览或认证编辑服务")
     parser.add_argument(
         "--dir", dest="directory", type=Path, default=ROOT / "docs",
         help="要预览的目录，默认脚本同级的 docs/",
@@ -297,10 +58,102 @@ def parse_args(argv=None):
         action="store_true",
         help="不自动重建，直接预览现有产物",
     )
+    parser.add_argument(
+        "--config", type=Path, default=None,
+        help="认证编辑服务配置（JSON）；不提供时为只读预览",
+    )
+    parser.add_argument(
+        "--pidfile", type=Path, default=DEFAULT_PIDFILE,
+        help="记录本服务实例的 PID 文件，默认 data/serve.pid",
+    )
+    parser.add_argument(
+        "--svn-command", default=None,
+        help="svn 可执行文件（可含参数，如 \"C:/Program Files/.../svn.exe\"）；默认使用 PATH 中的 svn",
+    )
     args = parser.parse_args(argv)
     if not 0 <= args.port <= 65535:
         parser.error("端口必须在 0-65535 之间")
     return args
+
+
+# ---- 实例管理（只处理本项目自身实例） ----
+
+
+def read_pidfile(path):
+    try:
+        text = Path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return int(text) if text.isdigit() else None
+
+
+def write_pidfile(path, pid):
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(str(pid), encoding="utf-8")
+    return target
+
+
+def remove_pidfile(path):
+    try:
+        Path(path).unlink()
+    except OSError:
+        pass
+
+
+def process_is_project_serve(pid):
+    """判断 PID 是否为本项目 serve.py 进程（跨平台）。"""
+    if os.name == "nt":
+        script = (
+            f"Get-CimInstance Win32_Process -Filter \"ProcessId = {int(pid)}\" | "
+            "Select-Object -ExpandProperty CommandLine"
+        )
+        for executable in ("powershell", "pwsh"):
+            try:
+                result = subprocess.run(
+                    [executable, "-NoProfile", "-NonInteractive", "-Command", script],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+            text = (result.stdout or "").strip()
+            return bool(text) and "serve.py" in text and str(ROOT) in text
+        return False
+    try:
+        cmdline = Path(f"/proc/{int(pid)}/cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", "ignore")
+    except OSError:
+        return False
+    return "serve.py" in cmdline and str(ROOT) in cmdline
+
+
+def default_terminate(pid):
+    os.kill(int(pid), signal.SIGTERM)
+
+
+def manage_instance(pidfile, is_ours=None, terminate=None, log=print):
+    """按 pidfile 停止旧的自身实例；不属于本项目则跳过并清理 PID 文件。"""
+    pid = read_pidfile(pidfile)
+    if pid is None or pid == os.getpid():
+        return False
+    matcher = is_ours or process_is_project_serve
+    killer = terminate or default_terminate
+    if matcher(pid):
+        try:
+            killer(pid)
+            log(f"已停止旧的自身实例: PID {pid}")
+        except OSError:
+            pass
+        remove_pidfile(pidfile)
+        time.sleep(0.3)
+        return True
+    log(f"PID 文件记录的进程 {pid} 不属于本服务，跳过终止")
+    remove_pidfile(pidfile)
+    return False
+
+
+# ---- 构建与自动重建 ----
 
 
 def lan_ip():
@@ -388,94 +241,149 @@ def start_watcher(directory, interval=2.0):
     return stop_event
 
 
-def find_other_servers():
-    """返回其他正在运行的 serve.py 进程 PID 列表（跨平台，仅标准库）。"""
-    pids = []
-    current = os.getpid()
-    if os.name == "nt":
-        script = (
-            "Get-CimInstance Win32_Process -Filter \"Name like '%python%'\" | "
-            "Where-Object { $_.CommandLine -like '*serve.py*' } | "
-            "Select-Object -ExpandProperty ProcessId"
-        )
-        for executable in ("powershell", "pwsh"):
-            try:
-                result = subprocess.run(
-                    [executable, "-NoProfile", "-NonInteractive", "-Command", script],
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                )
-            except (OSError, subprocess.SubprocessError):
-                continue
-            for line in result.stdout.splitlines():
-                line = line.strip()
-                if line.isdigit() and int(line) != current:
-                    pids.append(int(line))
-            break
-        return pids
-
-    proc_dir = Path("/proc")
-    if proc_dir.is_dir():
-        for entry in proc_dir.iterdir():
-            if not entry.name.isdigit():
-                continue
-            pid = int(entry.name)
-            if pid == current:
-                continue
-            try:
-                cmdline = (
-                    (entry / "cmdline")
-                    .read_bytes()
-                    .replace(b"\x00", b" ")
-                    .decode("utf-8", "ignore")
-                )
-            except OSError:
-                continue
-            if "serve.py" in cmdline:
-                pids.append(pid)
-        return pids
-
-    try:
-        result = subprocess.run(
-            ["ps", "-eo", "pid=,args="],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return pids
-    for line in result.stdout.splitlines():
-        parts = line.strip().split(None, 1)
-        if len(parts) == 2 and parts[0].isdigit() and "serve.py" in parts[1]:
-            pid = int(parts[0])
-            if pid != current:
-                pids.append(pid)
-    return pids
+# ---- 本机 AI 代理（保留，仅 loopback 可用） ----
 
 
-def stop_other_servers():
-    """关闭旧的 serve.py 实例，返回成功关闭的 PID 列表。"""
-    stopped = []
-    for pid in find_other_servers():
-        try:
-            os.kill(pid, signal.SIGTERM)
-            stopped.append(pid)
-        except OSError:
+def split_command(value):
+    """拆分 --svn-command：Windows 下保留反斜杠，并支持用双引号包住带空格的路径。"""
+    text = str(value or "").strip()
+    if not text:
+        return ()
+    if os.name != "nt":
+        return tuple(shlex.split(text))
+    parts = []
+    current = ""
+    quoted = False
+    for char in text:
+        if char == '"':
+            quoted = not quoted
             continue
-    if stopped:
-        print(f"已关闭旧的预览服务进程: {', '.join(str(pid) for pid in stopped)}")
-        time.sleep(0.5)
-    return stopped
+        if char == " " and not quoted:
+            if current:
+                parts.append(current)
+                current = ""
+            continue
+        current += char
+    if current:
+        parts.append(current)
+    return tuple(parts)
+
+
+def is_loopback_host(host):
+    host = str(host or "")
+    return host in ("::1", "localhost") or host.startswith("127.")
+
+
+def ai_target_url(raw):
+    """校验 AI 接口地址（仅允许 http/https），非法时抛 ValueError。"""
+    value = str(raw or "").strip()
+    parsed = urllib.parse.urlparse(value)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise ValueError("AI 接口地址必须是 http/https URL")
+    return value
+
+
+class PreviewHandler(http.server.SimpleHTTPRequestHandler):
+    """只读预览：静态文件 + 本机 AI 代理；写接口一律拒绝。"""
+
+    def _send_json(self, status, payload):
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _client_is_local(self):
+        return is_loopback_host(self.client_address[0])
+
+    def do_GET(self):
+        rel = urllib.parse.unquote(urllib.parse.urlparse(self.path).path).lstrip("/")
+        if rel and is_blocked_static_path(rel):
+            self.send_error(404, "Not Found")
+            return
+        if rel == "":
+            self.path = "/index.html"
+        elif rel.endswith("/"):
+            self.send_error(404, "Not Found")
+            return
+        super().do_GET()
+
+    def do_POST(self):
+        if self.path.startswith(AI_API_PREFIX):
+            self._handle_ai_api()
+            return
+        if self.path.startswith(WRITE_PREFIXES):
+            self._send_json(403, {
+                "ok": False,
+                "code": "read_only_preview",
+                "error": "只读预览：写接口已停用，请使用 --config 启动认证编辑服务",
+            })
+            return
+        self.send_error(405, "Method Not Allowed")
+
+    def _handle_ai_api(self):
+        """把浏览器请求转发到用户配置的 AI 接口（解决跨域，仅本机调用）。"""
+        if not self._client_is_local():
+            self._send_json(403, {"ok": False, "error": "AI 代理仅允许本机调用"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if length <= 0 or length > AI_MAX_BODY:
+                raise ValueError("请求体为空或过大")
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("请求体必须是 JSON 对象")
+            target = ai_target_url(payload.get("url"))
+            body = json.dumps(payload.get("payload") or {}, ensure_ascii=False).encode("utf-8")
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "User-Agent": "md2web-ai-proxy",
+            }
+            api_key = payload.get("apiKey")
+            if api_key:
+                headers["Authorization"] = "Bearer " + str(api_key)
+            for name, value in (payload.get("headers") or {}).items():
+                if isinstance(value, str) and name.lower() not in AI_HOP_HEADERS:
+                    headers[name] = value
+            request = urllib.request.Request(target, data=body, headers=headers, method="POST")
+            self.close_connection = True
+            try:
+                upstream = urllib.request.urlopen(request, timeout=180)
+            except urllib.error.HTTPError as error:
+                detail = error.read().decode("utf-8", "replace")
+                self._send_json(error.code, {"ok": False, "error": detail[:4000]})
+                return
+            except (urllib.error.URLError, OSError) as error:
+                self._send_json(502, {"ok": False, "error": f"无法访问 AI 接口: {error}"})
+                return
+            with upstream:
+                self.send_response(200)
+                self.send_header("Content-Type", upstream.headers.get("Content-Type", "application/json"))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                while True:
+                    chunk = upstream.read(2048)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+        except ValueError as error:
+            self._send_json(400, {"ok": False, "error": str(error)})
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._send_json(400, {"ok": False, "error": "请求体不是有效的 JSON"})
+
+    def log_message(self, fmt, *args):
+        if self.path.startswith(AI_API_PREFIX):
+            return
+        super().log_message(fmt, *args)
 
 
 def make_server(directory, bind, port):
     """从 port 起连续尝试 20 个端口，返回 (server, 实际端口)。"""
-    handler = functools.partial(
-        PreviewHandler,
-        directory=str(directory),
-        md_dir=Path(directory) / "md",
-    )
+    handler = functools.partial(PreviewHandler, directory=str(directory))
     last = min(port + 20, 65536)
     for candidate in range(port, last):
         try:
@@ -488,27 +396,90 @@ def make_server(directory, bind, port):
     raise SystemExit(f"错误: 端口 {port}-{last - 1} 都被占用")
 
 
+# ---- 认证编辑服务 ----
+
+
+def run_authenticated_service(args, directory):
+    """按配置启动 Flask + Waitress 认证编辑服务。"""
+    from server import database
+    from server.app import create_app
+    from server.auth import AuthService
+    from server.config import ConfigError, load_config
+    from server.svn import SvnClient
+
+    try:
+        config = load_config(args.config, directory)
+    except ConfigError as error:
+        raise SystemExit(f"错误: {error}")
+
+    database_path = config["storage"]["database"]
+    workspaces = config["storage"]["workspaces"]
+    workspaces.mkdir(parents=True, exist_ok=True)
+    conn = database.connect(database_path)
+    database.migrate(conn)
+
+    svn_client = SvnClient(command=split_command(args.svn_command) if args.svn_command else ("svn",))
+    auth_service = AuthService(conn, svn_client, config)
+    auth_service.on_startup()
+    if auth_service.auth_source_changed():
+        auth_service.revoke_all("auth_source_changed")
+
+    docs_dir = directory if (directory / "index.html").exists() else ROOT / "docs"
+    app = create_app(config, conn, auth_service, docs_dir)
+
+    stop_watcher = None
+    if not args.no_build and (ROOT / "setup_docsify.py").exists():
+        rebuild_if_needed(docs_dir)
+        stop_watcher = start_watcher(docs_dir)
+        print("已开启自动重建：docs/md 有变化时自动重建（每 2 秒检测）")
+
+    bind = config["server"]["bind"]
+    port = config["server"]["port"]
+    print(f"认证编辑服务: http://{bind}:{port}")
+    print(f"认证地址: {config['auth']['url']}")
+    print(f"数据库: {database_path}")
+    print(f"工作副本目录: {workspaces}")
+    print("匿名可阅读；写接口要求 SVN 账号登录（阶段一实现登录边界）")
+    if not args.no_browser:
+        timer = threading.Timer(0.5, webbrowser.open, args=(f"http://127.0.0.1:{port}",))
+        timer.daemon = True
+        timer.start()
+    try:
+        from waitress import serve as waitress_serve
+        waitress_serve(app, host=bind, port=port, threads=8)
+    except KeyboardInterrupt:
+        print("\n已停止")
+    finally:
+        if stop_watcher is not None:
+            stop_watcher.set()
+        conn.close()
+
+
 def main(argv=None):
     args = parse_args(argv)
     directory = args.directory.expanduser().resolve()
-    if (ROOT / "setup_docsify.py").exists():
-        stop_other_servers()
-    stop_watcher = None
-    if not args.no_build and (ROOT / "setup_docsify.py").exists():
+    if not (directory / "index.html").exists():
+        raise SystemExit(f"错误: {directory} 下没有 index.html，请先运行 python setup_docsify.py")
+
+    manage_instance(args.pidfile)
+    write_pidfile(args.pidfile, os.getpid())
+
+    if args.config is not None:
+        run_authenticated_service(args, directory)
+        remove_pidfile(args.pidfile)
+        return
+
+    if (ROOT / "setup_docsify.py").exists() and not args.no_build:
         rebuild_if_needed(directory)
         stop_watcher = start_watcher(directory)
         print("已开启自动重建：docs/md 有新增/删除/修改时会自动重建（每 2 秒检测）")
-    if not (directory / "index.html").exists():
-        raise SystemExit(f"错误: {directory} 下没有 index.html，请先运行 python setup_docsify.py")
+    else:
+        stop_watcher = None
+
     server, port = make_server(directory, args.bind, args.port)
     print(f"预览目录: {directory}")
     print(f"本机访问: http://localhost:{port}")
-    print("编辑保存: 已启用（仅本机页面可写回 docs/md 源文件）")
-    print("AI 代理: 已启用（仅本机；/__ai/chat 转发到浏览器配置的接口）")
-    ip = lan_ip()
-    if ip and args.bind == "0.0.0.0":
-        print(f"局域网访问: http://{ip}:{port}")
-    print("按 Ctrl+C 停止")
+    print("模式: 只读预览（写接口已停用；认证编辑请使用 --config）")
     if not args.no_browser:
         timer = threading.Timer(0.5, webbrowser.open, args=(f"http://localhost:{port}",))
         timer.daemon = True
@@ -521,6 +492,7 @@ def main(argv=None):
         if stop_watcher is not None:
             stop_watcher.set()
         server.server_close()
+        remove_pidfile(args.pidfile)
 
 
 if __name__ == "__main__":

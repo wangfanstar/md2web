@@ -17,7 +17,6 @@
     original: '',
     baseHash: null,
     fileHandle: null,
-    forceSave: false,
     lastFocus: null,
     split: 50,
     dragging: false,
@@ -120,13 +119,16 @@
     return state.resource.split('/').pop() || 'document.md';
   }
 
-  function serverAvailable() {
-    return /^https?:$/.test(window.location.protocol);
+  function authAvailable() {
+    return !!(window.SiteAuth && window.SiteAuth.isAuthenticated());
   }
 
   function saveModeLabel() {
-    if (serverAvailable()) {
-      return '直连保存';
+    if (authAvailable()) {
+      return '草稿保存';
+    }
+    if (/^https?:$/.test(window.location.protocol)) {
+      return '登录后编辑';
     }
     if (window.showSaveFilePicker) {
       return '保存到文件';
@@ -137,28 +139,6 @@
   function downloadEditorSource() {
     saveBlob(new Blob([state.textarea.value], { type: 'text/markdown;charset=utf-8' }), fileName());
     setStatus('已下载 ' + fileName());
-  }
-
-  function postSave(content, force) {
-    return fetch('__md/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        path: state.resource,
-        content: content,
-        baseHash: state.baseHash,
-        force: !!force
-      })
-    }).then(function (response) {
-      return response.json().catch(function () { return {}; }).then(function (payload) {
-        if (!response.ok || !payload.ok) {
-          var error = new Error(payload.error || ('HTTP ' + response.status));
-          error.status = response.status;
-          throw error;
-        }
-        return payload;
-      });
-    });
   }
 
   function writeWithHandle(handle) {
@@ -190,31 +170,71 @@
     }
     promise.then(function (handle) {
       state.original = state.textarea.value;
-      state.forceSave = false;
       refreshModifiedState();
       setStatus('已保存 ' + handle.name);
     }).catch(function () { /* 用户取消 */ });
   }
 
-  function save() {
-    if (serverAvailable()) {
-      setStatus('正在保存…');
-      postSave(state.textarea.value, state.forceSave).then(function (result) {
-        state.original = state.textarea.value;
-        state.baseHash = result.hash;
-        state.forceSave = false;
-        refreshModifiedState();
-        setStatus('已保存到 ' + displayPath(state.resource) + '，站点将在数秒内自动重建');
-      }).catch(function (error) {
-        if (error.status === 409) {
-          state.forceSave = true;
-          setStatus('文件已被外部修改：再点「保存」将强制覆盖；或点「重新加载」放弃本地修改');
-        } else if (error.status === 404 || error.status === undefined) {
-          saveToFile(false);
-        } else {
-          setStatus('保存失败：' + error.message);
+  // 阶段一：登录后保存个人草稿（接口在阶段二实现，501 时给出明确提示）
+  function saveDraft() {
+    var text = state.textarea.value;
+    setStatus('正在保存草稿…');
+    return fetch('__md/draft', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': (window.SiteAuth && window.SiteAuth.csrfToken()) || ''
+      },
+      body: JSON.stringify({
+        path: state.resource,
+        content: text,
+        expectedVersion: state.draftVersion || 0,
+        baseHash: state.baseHash
+      })
+    }).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (payload) {
+        if (response.ok && payload.ok) {
+          state.original = text;
+          state.draftVersion = payload.version || (state.draftVersion || 0) + 1;
+          if (payload.hash) {
+            state.baseHash = payload.hash;
+          }
+          refreshModifiedState();
+          setStatus('已保存个人草稿（版本 ' + state.draftVersion + '）');
+          return true;
         }
+        var error = new Error(payload.error || ('HTTP ' + response.status));
+        error.status = response.status;
+        throw error;
       });
+    });
+  }
+
+  function save() {
+    if (authAvailable()) {
+      saveDraft().catch(function (error) {
+        if (error.status === 401) {
+          setStatus('会话已过期：' + error.message + '（内容已保留，可先下载 MD 再重新登录）');
+          window.SiteAuth.openLogin();
+          return;
+        }
+        if (error.status === 409) {
+          setStatus('草稿版本冲突：' + error.message + '（不会静默覆盖，请重新加载或另存）');
+          return;
+        }
+        if (error.status === 501) {
+          setStatus('草稿接口将在阶段二启用；当前可先「下载 MD」或由本地 SVN 客户端提交');
+          return;
+        }
+        setStatus('保存失败：' + error.message);
+      });
+      return;
+    }
+    if (/^https?:$/.test(window.location.protocol)) {
+      setStatus('请先登录 SVN 账号后再保存（内容已保留，可先下载 MD）');
+      if (window.SiteAuth) {
+        window.SiteAuth.openLogin();
+      }
       return;
     }
     saveToFile(false);
@@ -229,7 +249,6 @@
       state.resource = result.resource;
       state.original = result.text;
       state.textarea.value = result.text;
-      state.forceSave = false;
       state.titleEl.textContent = displayPath(state.resource);
       setStatus('已重新加载源文件');
       afterContentChanged(true);
@@ -266,7 +285,7 @@
 
   function refreshModifiedState() {
     if (isModified()) {
-      setStatus(state.forceSave ? state.statusEl.textContent : '已修改（Ctrl+S 保存）');
+      setStatus('已修改（Ctrl+S 保存）');
     } else if (state.statusEl && /已修改/.test(state.statusEl.textContent)) {
       setStatus('');
     }
@@ -449,7 +468,7 @@
       state.preview.innerHTML = '<p class="md-editor-preview-hint">渲染失败：' + escapeHtml(message(error)) + '</p>';
       return;
     }
-    state.preview.innerHTML = html;
+    state.preview.innerHTML = window.Sanitize ? window.Sanitize.html(html) : html;
     enhancePreview(token);
   }
 
@@ -777,7 +796,6 @@
 
   function revert() {
     state.textarea.value = state.original;
-    state.forceSave = false;
     setStatus('已还原为打开时的内容');
     afterContentChanged(true);
   }
@@ -840,7 +858,6 @@
     });
 
     state.textarea.addEventListener('input', function () {
-      state.forceSave = false;
       afterContentChanged(false);
     });
     state.textarea.addEventListener('scroll', function () {
@@ -974,7 +991,6 @@
     state.resource = currentResource();
     state.lastFocus = document.activeElement;
     state.fileHandle = null;
-    state.forceSave = false;
     if (!state.overlay) {
       buildOverlay();
     }
@@ -993,7 +1009,6 @@
       state.titleEl.textContent = displayPath(state.resource);
       state.original = result.text;
       state.textarea.value = result.text;
-      state.forceSave = false;
       afterContentChanged(true);
       state.textarea.focus();
       setStatus(state.resource === 'README.md'

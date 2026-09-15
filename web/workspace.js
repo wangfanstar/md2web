@@ -195,13 +195,54 @@
       var numbersHidden = document.body.classList.contains('hide-heading-numbers');
       actions.innerHTML = '<button type="button" data-workspace-copy-path>复制路径</button><button type="button" data-workspace-edit>编辑 MD</button><button type="button" data-workspace-download-md>下载 MD</button><button type="button" data-workspace-export>下载本页</button><button type="button" data-workspace-wide>' + (document.body.classList.contains('workspace-wide') ? '退出宽屏' : '宽屏阅读') + '</button><button type="button" data-workspace-numbers>' + (numbersHidden ? '显示序号' : '隐藏序号') + '</button>';
       actions.querySelector('[data-workspace-copy-path]').addEventListener('click', function () { copyText(route ? 'docs/' + route + (/.md$/i.test(route) ? '' : '.md') : 'docs/README.md', this); });
-      actions.querySelector('[data-workspace-edit]').addEventListener('click', function () { if (window.MdEditor) { window.MdEditor.open(); } });
+      updateEditLabel(actions);
+      actions.querySelector('[data-workspace-edit]').addEventListener('click', function () {
+        var auth = window.SiteAuth && window.SiteAuth.snapshot ? window.SiteAuth.snapshot() : null;
+        if (auth && !auth.fileMode) {
+          if (!auth.available) {
+            updateEditLabel(actions);
+            if (window.SiteAuth.openLogin) {
+              window.SiteAuth.openLogin();
+            }
+            return;
+          }
+          if (!auth.authenticated) {
+            window.SiteAuth.openLogin();
+            return;
+          }
+        } else if (window.SiteAuth && window.SiteAuth.isAuthenticated && !window.SiteAuth.isAuthenticated() && window.location.protocol !== 'file:') {
+          window.SiteAuth.openLogin();
+          return;
+        }
+        if (window.MdEditor) {
+          window.MdEditor.open();
+        }
+      });
       actions.querySelector('[data-workspace-download-md]').addEventListener('click', function () { if (window.MdEditor) { window.MdEditor.download(); } });
       actions.querySelector('[data-workspace-export]').addEventListener('click', function () { if (window.PageExport) { window.PageExport.download(); } });
       actions.querySelector('[data-workspace-wide]').addEventListener('click', function () { document.body.classList.toggle('workspace-wide'); try { localStorage.setItem(STORAGE.wide, document.body.classList.contains('workspace-wide') ? '1' : ''); } catch (_) {} var toggle = actions.querySelector('[data-workspace-wide]'); toggle.textContent = document.body.classList.contains('workspace-wide') ? '退出宽屏' : '宽屏阅读'; });
       actions.querySelector('[data-workspace-numbers]').addEventListener('click', function () { var hidden = document.body.classList.toggle('hide-heading-numbers'); try { localStorage.setItem(STORAGE.numbers, hidden ? '0' : '1'); } catch (_) {} this.textContent = hidden ? '显示序号' : '隐藏序号'; });
     }
   }
+  function updateEditLabel(actions) {
+    var button = actions ? actions.querySelector('[data-workspace-edit]') : document.querySelector('[data-workspace-edit]');
+    if (!button) {
+      return;
+    }
+    var auth = window.SiteAuth && window.SiteAuth.snapshot ? window.SiteAuth.snapshot() : null;
+    if (!auth || auth.fileMode) {
+      button.textContent = '编辑 MD';
+      return;
+    }
+    if (!auth.available) {
+      button.textContent = '只读预览';
+    } else if (!auth.authenticated) {
+      button.textContent = '登录后编辑';
+    } else {
+      button.textContent = '编辑 MD';
+    }
+  }
+  document.addEventListener('siteauth:change', function () { updateEditLabel(); });
   function escape(value) { return String(value).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
   function copyText(value, button) {
     var done = function () { if (button) { var old = button.textContent; button.textContent = '已复制'; setTimeout(function () { button.textContent = old; }, 1200); } };

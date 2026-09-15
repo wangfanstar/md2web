@@ -385,6 +385,11 @@
     }
   }
 
+  function safeMarkdown(text) {
+    var html = renderMarkdown(text);
+    return window.Sanitize ? window.Sanitize.html(html) : html;
+  }
+
   function enhance(root) {
     if (!root) {
       return;
@@ -409,7 +414,7 @@
   function appendMessage(role, content) {
     var bubble = document.createElement('div');
     bubble.className = 'ai-message ai-message-' + role;
-    bubble.innerHTML = role === 'user' ? escapeHtml(content).replace(/\n/g, '<br>') : renderMarkdown(content);
+    bubble.innerHTML = role === 'user' ? escapeHtml(content).replace(/\n/g, '<br>') : safeMarkdown(content);
     state.messagesEl.appendChild(bubble);
     state.messagesEl.scrollTop = state.messagesEl.scrollHeight;
     if (role === 'assistant') {
@@ -482,11 +487,11 @@
       var rendered = '';
       return requestModel(messages, function (partial) {
         rendered = partial;
-        bubble.innerHTML = renderMarkdown(partial);
+        bubble.innerHTML = safeMarkdown(partial);
         state.messagesEl.scrollTop = state.messagesEl.scrollHeight;
       }).then(function (answer) {
         rendered = answer || rendered;
-        bubble.innerHTML = renderMarkdown(rendered);
+        bubble.innerHTML = safeMarkdown(rendered);
         enhance(bubble);
         appendSources(hits);
         state.messages.push({ role: 'user', content: text });

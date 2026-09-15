@@ -100,6 +100,8 @@ ASSETS = {
     "mermaid.min.js": "https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js",
     # Markdown 渲染（编辑器实时预览，离线）
     "marked.min.js": "https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js",
+    # 前端内容净化（登录编辑前的阅读页/预览页统一净化）
+    "purify.min.js": "https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js",
     # KaTeX 数学公式（离线，含 20 个 woff2 字体）
     "katex/katex.min.js": "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js",
     "katex/katex.min.css": "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css",
@@ -555,9 +557,12 @@ def generate_custom_search_assets():
         "ai-retrieval.js",
         "ai-assistant.js",
         "ai-assistant.css",
+        "sanitize.js",
+        "auth.js",
+        "auth.css",
     ):
         shutil.copyfile(WEB_DIR / name, LIB_DIR / name)
-    print("  [生成] custom-search.* / workspace.* / mermaid-init.js / media-viewer.js / packetdiag* / page-export.js / plot-playground.html / md-editor.js / math-init.js / prism-init.js / ai-*.js|css")
+    print("  [生成] custom-search.* / workspace.* / mermaid-init.js / media-viewer.js / packetdiag* / page-export.js / plot-playground.html / md-editor.js / math-init.js / prism-init.js / ai-*.js|css / sanitize.js / auth.*")
 
 
 # Docsify 4.13.1 slugify 实际删除的标点集合（docsify.min.js 中的 En 正则），
@@ -827,6 +832,7 @@ def generate_index_html(title="文档中心"):
   <link rel="stylesheet" href="lib/custom-search.css">
   <link rel="stylesheet" href="lib/workspace.css">
   <link rel="stylesheet" href="lib/ai-assistant.css">
+  <link rel="stylesheet" href="lib/auth.css">
 </head>
 <body>
   <script src="lib/offline-data.js"></script>
@@ -896,6 +902,8 @@ def generate_index_html(title="文档中心"):
   <script src="lib/prism-init.js"></script>
   <script src="lib/front-matter.min.js"></script>
   <script src="lib/marked.min.js"></script>
+  <script src="lib/purify.min.js"></script>
+  <script src="lib/sanitize.js"></script>
   <script src="lib/katex/katex.min.js"></script>
   <script src="lib/katex/auto-render.min.js"></script>
   <script src="lib/math-init.js"></script>
@@ -910,6 +918,7 @@ def generate_index_html(title="文档中心"):
   <script src="lib/md-editor.js"></script>
   <script src="lib/ai-retrieval.js"></script>
   <script src="lib/ai-assistant.js"></script>
+  <script src="lib/auth.js"></script>
 </body>
 </html>
 """

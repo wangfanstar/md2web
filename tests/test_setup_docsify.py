@@ -267,16 +267,24 @@ class AssetTests(TempDirTestCase):
         self.assertTrue((self.docs / "lib" / "ai-assistant.js").exists())
         self.assertTrue((self.docs / "lib" / "ai-retrieval.js").exists())
         self.assertTrue((self.docs / "lib" / "ai-assistant.css").exists())
+        self.assertTrue((self.docs / "lib" / "auth.js").exists())
+        self.assertTrue((self.docs / "lib" / "auth.css").exists())
+        self.assertTrue((self.docs / "lib" / "sanitize.js").exists())
 
     def test_index_html_includes_ai_assistant(self):
         with redirect_stdout(io.StringIO()):
             self.module.generate_index_html("T")
         html_text = (self.docs / "index.html").read_text(encoding="utf-8")
-        for marker in ("lib/ai-assistant.css", "lib/ai-retrieval.js", "lib/ai-assistant.js"):
+        for marker in ("lib/ai-assistant.css", "lib/ai-retrieval.js", "lib/ai-assistant.js",
+                       "lib/auth.css", "lib/auth.js", "lib/sanitize.js", "lib/purify.min.js"):
             self.assertIn(marker, html_text)
         self.assertLess(
             html_text.index("lib/ai-retrieval.js"),
             html_text.index("lib/ai-assistant.js"),
+        )
+        self.assertLess(
+            html_text.index("lib/purify.min.js"),
+            html_text.index("lib/sanitize.js"),
         )
 
 
@@ -364,167 +372,6 @@ class ServeTests(unittest.TestCase):
         self.assertFalse(serve.parse_args([]).no_build)
         self.assertTrue(serve.parse_args(["--no-build"]).no_build)
 
-    def test_normalize_md_path_accepts_nested_docs(self):
-        serve = load_module("serve", "serve.py")
-        self.assertEqual(
-            serve.normalize_md_path("md/硬件设计/时钟树设计.md"),
-            "md/硬件设计/时钟树设计.md",
-        )
-        self.assertEqual(serve.normalize_md_path("/md/a.md"), "md/a.md")
-        self.assertEqual(serve.normalize_md_path("md//a.md"), "md/a.md")
-
-    def test_normalize_md_path_rejects_illegal(self):
-        serve = load_module("serve", "serve.py")
-        for value in ("", "/etc/passwd", "README.md", "docs/README.md", "md/../a.md",
-                      "md/.hidden/a.md", "md/a.txt", "md/a.md.exe"):
-            with self.assertRaises(serve.MdSaveError, msg=value):
-                serve.normalize_md_path(value)
-
-    def test_text_hash_ignores_line_endings(self):
-        serve = load_module("serve", "serve.py")
-        self.assertEqual(serve.text_hash("# A\r\n\r\nB"), serve.text_hash("# A\n\nB"))
-
-    def test_save_md_writes_file_and_reports_hash(self):
-        serve = load_module("serve", "serve.py")
-        tmp = Path(tempfile.mkdtemp(prefix="md2web-save-"))
-        try:
-            md_dir = tmp / "md"
-            md_dir.mkdir()
-            target = md_dir / "a.md"
-            target.write_text("# A\n", encoding="utf-8")
-            result = serve.save_md(md_dir, "md/a.md", "# A\n\n新增内容\n", base_hash=serve.text_hash("# A\n"))
-            self.assertEqual(result["path"], "md/a.md")
-            self.assertEqual(result["hash"], serve.text_hash("# A\n\n新增内容\n"))
-            self.assertIsInstance(result["mtime"], int)
-            self.assertEqual(target.read_text(encoding="utf-8"), "# A\n\n新增内容\n")
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
-    def test_save_md_preserves_crlf(self):
-        serve = load_module("serve", "serve.py")
-        tmp = Path(tempfile.mkdtemp(prefix="md2web-save-"))
-        try:
-            md_dir = tmp / "md"
-            md_dir.mkdir()
-            target = md_dir / "a.md"
-            target.write_bytes("# A\r\n\r\nB\r\n".encode("utf-8"))
-            serve.save_md(md_dir, "md/a.md", "# A\n\nB2\n", base_hash=serve.text_hash("# A\n\nB\n"))
-            self.assertEqual(target.read_bytes().decode("utf-8"), "# A\r\n\r\nB2\r\n")
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
-    def test_save_md_detects_conflict(self):
-        serve = load_module("serve", "serve.py")
-        tmp = Path(tempfile.mkdtemp(prefix="md2web-save-"))
-        try:
-            md_dir = tmp / "md"
-            md_dir.mkdir()
-            target = md_dir / "a.md"
-            target.write_text("# 外部修改\n", encoding="utf-8")
-            with self.assertRaises(serve.MdSaveError) as ctx:
-                serve.save_md(md_dir, "md/a.md", "# 我的修改\n", base_hash=serve.text_hash("# 旧内容\n"))
-            self.assertEqual(ctx.exception.status, 409)
-            self.assertEqual(target.read_text(encoding="utf-8"), "# 外部修改\n")
-            serve.save_md(md_dir, "md/a.md", "# 强制覆盖\n", base_hash=None, force=True)
-            self.assertEqual(target.read_text(encoding="utf-8"), "# 强制覆盖\n")
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
-    def test_save_md_missing_file(self):
-        serve = load_module("serve", "serve.py")
-        tmp = Path(tempfile.mkdtemp(prefix="md2web-save-"))
-        try:
-            md_dir = tmp / "md"
-            md_dir.mkdir()
-            with self.assertRaises(serve.MdSaveError) as ctx:
-                serve.save_md(md_dir, "md/没有.md", "# X\n")
-            self.assertEqual(ctx.exception.status, 404)
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
-    def test_read_md_meta(self):
-        serve = load_module("serve", "serve.py")
-        tmp = Path(tempfile.mkdtemp(prefix="md2web-save-"))
-        try:
-            md_dir = tmp / "md"
-            md_dir.mkdir()
-            (md_dir / "a.md").write_text("# A\n", encoding="utf-8")
-            meta = serve.read_md_meta(md_dir, "md/a.md")
-            self.assertTrue(meta["exists"])
-            self.assertEqual(meta["hash"], serve.text_hash("# A\n"))
-            missing = serve.read_md_meta(md_dir, "md/b.md")
-            self.assertFalse(missing["exists"])
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
-    def test_md_api_roundtrip_over_http(self):
-        serve = load_module("serve", "serve.py")
-        tmp = Path(tempfile.mkdtemp(prefix="md2web-serve-"))
-        try:
-            docs = tmp / "docs"
-            md_dir = docs / "md"
-            md_dir.mkdir(parents=True)
-            (docs / "index.html").write_text("ok", encoding="utf-8")
-            target = md_dir / "a.md"
-            target.write_text("# A\n", encoding="utf-8")
-            server, port = serve.make_server(docs, "127.0.0.1", 0)
-            thread = threading.Thread(target=server.serve_forever, daemon=True)
-            thread.start()
-            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-            try:
-                base = serve.text_hash("# A\n")
-                req = urllib.request.Request(
-                    f"http://127.0.0.1:{port}/__md/meta?path=md%2Fa.md"
-                )
-                with opener.open(req) as response:
-                    meta = json.loads(response.read().decode("utf-8"))
-                self.assertTrue(meta["ok"])
-                self.assertEqual(meta["hash"], base)
-
-                payload = json.dumps(
-                    {"path": "md/a.md", "content": "# A\n\nB\n", "baseHash": base}
-                ).encode("utf-8")
-                req = urllib.request.Request(
-                    f"http://127.0.0.1:{port}/__md/save",
-                    data=payload,
-                    headers={"Content-Type": "application/json"},
-                )
-                with opener.open(req) as response:
-                    result = json.loads(response.read().decode("utf-8"))
-                self.assertTrue(result["ok"])
-                self.assertEqual(target.read_text(encoding="utf-8"), "# A\n\nB\n")
-
-                stale = json.dumps(
-                    {"path": "md/a.md", "content": "# 过期\n", "baseHash": base}
-                ).encode("utf-8")
-                req = urllib.request.Request(
-                    f"http://127.0.0.1:{port}/__md/save",
-                    data=stale,
-                    headers={"Content-Type": "application/json"},
-                )
-                with self.assertRaises(urllib.error.HTTPError) as ctx:
-                    opener.open(req)
-                self.assertEqual(ctx.exception.code, 409)
-                conflict = json.loads(ctx.exception.read().decode("utf-8"))
-                self.assertIn("currentHash", conflict)
-
-                bad = json.dumps(
-                    {"path": "../secret.md", "content": "x"}
-                ).encode("utf-8")
-                req = urllib.request.Request(
-                    f"http://127.0.0.1:{port}/__md/save",
-                    data=bad,
-                    headers={"Content-Type": "application/json"},
-                )
-                with self.assertRaises(urllib.error.HTTPError) as ctx:
-                    opener.open(req)
-                self.assertEqual(ctx.exception.code, 400)
-            finally:
-                server.shutdown()
-                server.server_close()
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
     def test_is_loopback_host(self):
         serve = load_module("serve", "serve.py")
         self.assertTrue(serve.is_loopback_host("127.0.0.1"))
@@ -536,7 +383,7 @@ class ServeTests(unittest.TestCase):
         self.assertEqual(serve.ai_target_url("https://api.example.com/v1/chat"), "https://api.example.com/v1/chat")
         self.assertEqual(serve.ai_target_url("http://127.0.0.1:11434/api/chat"), "http://127.0.0.1:11434/api/chat")
         for value in ("", "file:///etc/passwd", "ftp://example.com/x", "not-a-url"):
-            with self.assertRaises(serve.MdSaveError, msg=value):
+            with self.assertRaises(ValueError, msg=value):
                 serve.ai_target_url(value)
 
     def test_ai_proxy_forwards_json(self):
@@ -761,21 +608,88 @@ class ServeTests(unittest.TestCase):
             finally:
                 stop_event.set()
 
-    def test_stop_other_servers_kills_listed_pids(self):
+    def test_manage_instance_stops_only_project_instance(self):
         serve = load_module("serve", "serve.py")
-        with mock.patch.object(serve, "find_other_servers", return_value=[111, 222]):
-            with mock.patch.object(serve.os, "kill") as kill:
-                with redirect_stdout(io.StringIO()):
-                    stopped = serve.stop_other_servers()
-        self.assertEqual(stopped, [111, 222])
-        self.assertEqual(kill.call_count, 2)
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-pid-"))
+        try:
+            pidfile = tmp / "serve.pid"
+            serve.write_pidfile(pidfile, 4321)
+            killed = []
+            stopped = serve.manage_instance(
+                pidfile,
+                is_ours=lambda pid: pid == 4321,
+                terminate=lambda pid: killed.append(pid),
+                log=lambda *args: None,
+            )
+            self.assertTrue(stopped)
+            self.assertEqual(killed, [4321])
+            self.assertFalse(pidfile.exists())
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
-    def test_stop_other_servers_ignores_missing_process(self):
+    def test_manage_instance_skips_foreign_process(self):
         serve = load_module("serve", "serve.py")
-        with mock.patch.object(serve, "find_other_servers", return_value=[333]):
-            with mock.patch.object(serve.os, "kill", side_effect=OSError("gone")):
-                with redirect_stdout(io.StringIO()):
-                    self.assertEqual(serve.stop_other_servers(), [])
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-pid-"))
+        try:
+            pidfile = tmp / "serve.pid"
+            serve.write_pidfile(pidfile, 987654)
+            killed = []
+            stopped = serve.manage_instance(
+                pidfile,
+                is_ours=lambda pid: False,
+                terminate=lambda pid: killed.append(pid),
+                log=lambda *args: None,
+            )
+            self.assertFalse(stopped)
+            self.assertEqual(killed, [])
+            self.assertFalse(pidfile.exists())
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_read_pidfile_ignores_invalid_content(self):
+        serve = load_module("serve", "serve.py")
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-pid-"))
+        try:
+            pidfile = tmp / "serve.pid"
+            self.assertIsNone(serve.read_pidfile(pidfile))
+            pidfile.write_text("not-a-pid", encoding="utf-8")
+            self.assertIsNone(serve.read_pidfile(pidfile))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_preview_server_rejects_writes_and_blocked_paths(self):
+        serve = load_module("serve", "serve.py")
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-serve-"))
+        try:
+            (tmp / "md").mkdir(parents=True)
+            (tmp / "index.html").write_text("ok", encoding="utf-8")
+            (tmp / "md" / "a.md").write_text("# A", encoding="utf-8")
+            (tmp / ".svn").mkdir()
+            (tmp / ".svn" / "entries").write_text("svn", encoding="utf-8")
+            server, port = serve.make_server(tmp, "127.0.0.1", 0)
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            try:
+                with opener.open(f"http://127.0.0.1:{port}/md/a.md") as response:
+                    self.assertEqual(response.status, 200)
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    opener.open(f"http://127.0.0.1:{port}/.svn/entries")
+                self.assertEqual(ctx.exception.code, 404)
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/__md/save",
+                    data=b'{"path": "md/a.md"}',
+                    headers={"Content-Type": "application/json"},
+                )
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    opener.open(request)
+                self.assertEqual(ctx.exception.code, 403)
+                payload = json.loads(ctx.exception.read().decode("utf-8"))
+                self.assertEqual(payload["code"], "read_only_preview")
+            finally:
+                server.shutdown()
+                server.server_close()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 class GenerationTests(TempDirTestCase):

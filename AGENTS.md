@@ -27,7 +27,18 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | 路径 | 职责 |
 |------|------|
 | `setup_docsify.py` | 构建：扫描、编码校验、依赖复用/下载、Prism 组件、生成导航/首页/索引/离线数据/入口 |
-| `serve.py` | 跨平台预览：端口回退、自动替换旧实例、运行期每 2s 检测 `docs/md` 变化并自动重建；提供 `/__md/meta`、`/__md/save` 源文档读写接口与 `/__ai/chat` AI 转发代理（均仅本机可调用；保存含 sha256 冲突检测、EOL 保持、原子写入） |
+| `serve.py` | 跨平台入口：默认**只读预览**（静态站点 + 自动重建 + 本机 AI 代理，写接口一律 403）；`--config config/server.local.json` 启动认证编辑服务（Flask + Waitress）；按 pidfile 只管理本项目自身实例 |
+| `server/config.py` | 配置加载/校验：存储路径不得在 `docs/` 内、mount 唯一且禁止越界、URL 仅 http/https、仓库存目录段最长前缀匹配 |
+| `server/database.py` | SQLite 访问层：7 张表迁移（users/sessions/repo_bindings/drafts/revisions/operations/audit_events）、外键与 busy_timeout、`backup_to` |
+| `server/svn.py` | 唯一的 svn 子进程入口：`--password-from-stdin`（口令绝不进 argv）、匿名可读检测、错误分类、XML 解析、超时与脱敏 |
+| `server/auth.py` | SVN 登录、会话（token 只存摘要、闲置/绝对过期）、CSRF、限速、审计；重启与认证源变更使旧会话失效；数据库访问串行化 |
+| `server/documents.py` | 受管 Markdown 读写底层：路径校验、EOL 保持、唯一临时文件 + 原子替换、必填 `base_hash` 冲突检测 |
+| `server/app.py` | Flask 应用：`/__auth/session|login|logout`、写接口守卫（匿名 401、旧 `/__md/save` 410、草稿/SVN 501）、静态分发白名单与安全响应头 |
+| `server/paths.py` | 静态分发禁止清单（点目录、`.svn`、`data/`、`config/`、临时/数据库/源码文件），预览与认证服务共用 |
+| `web/auth.js` / `.css` | 登录状态与弹窗（`window.SiteAuth`）：会话刷新、登录/退出、侧栏指示器、只读模式提示 |
+| `web/sanitize.js` | 前端净化入口（`window.Sanitize`，基于离线 DOMPurify）：阅读/预览/AI 回答统一净化 |
+| `config/server.example.json` | 认证服务示例配置（可提交）；`config/server.local.json` 为真实配置，不提交 |
+| `tests/test_server.py` | 认证服务单元/HTTP 集成测试（配置、数据库、SVN 假 CLI、登录会话、静态白名单） |
 | `web/custom-search.js` / `.css` | 搜索算法与界面、结果列表、搜索/目录视图切换、正文命中高亮、右侧本文目录 |
 | `web/workspace.js` / `.css` | 目录树（折叠/过滤/计数/定位）、面包屑、首页卡片、复制、编辑/下载 MD、宽屏、章节序号、Mermaid 样式 |
 | `web/mermaid-init.js` | docsify 插件：把 ```mermaid 围栏渲染为图形（离线） |
@@ -57,12 +68,13 @@ python setup_docsify.py                 # 完整构建（依赖已存在时全�
 python setup_docsify.py --index-only    # 仅重建搜索索引与离线数据
 python setup_docsify.py --title "我的文档"
 python setup_docsify.py --offline       # 严格离线：依赖缺失时报错，不尝试下载
-python serve.py                         # 预览 http://localhost:3000
+python serve.py                         # 只读预览 http://localhost:3000（无写接口）
+python serve.py --config config/server.local.json   # 认证编辑服务（需 pip install -r server/requirements.txt）
 python -m unittest discover -s tests -v
 node --test tests/test_search.js
 node --test tests/test_packetdiag.js
 node --test tests/test_ai_retrieval.js
-node --check web/custom-search.js       # 前端语法检查（workspace/mermaid-init/media-viewer/packetdiag/page-export/md-editor/math-init/prism-init/ai-assistant/ai-retrieval 同理）
+node --check web/custom-search.js       # 前端语法检查（workspace/mermaid-init/media-viewer/packetdiag/page-export/md-editor/math-init/prism-init/ai-assistant/ai-retrieval/auth/sanitize 同理）
 ```
 
 ## 不可破坏的约定
@@ -94,12 +106,16 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 修改 `web/*.js|css` 后必须重新构建，`docs/lib/` 才会更新；`serve.py` 的自动重建只监视 `docs/md`。
 - docsify 会覆盖 `window.Prism`（内置核心 + markup/css/clike/javascript），`prism-autoloader.min.js` 与 `prism-init.js` 必须放在 `docsify.min.js` 之后，否则代码块不会按需加载语言组件。
 - `docsify` 会逐目录请求 `_sidebar.md`，已在 `index.html` 用 `alias` 回落到根侧栏；不要移除。
+- **写接口只在认证服务中存在**：只读预览下 `/__md/*`、`/__svn/*` 一律 403；前端不得回退成“文件写入”或“匿名直存”。匿名 401、旧接口 410、未实现阶段 501，均有明确错误码。
+- SQLite 连接由 Waitress 多线程共享：`database.connect` 使用 `check_same_thread=False`，所有访问必须经 `AuthService._db_lock` 串行化；数据库写锁不得跨越 SVN 网络调用。
+- 服务启动只按 pidfile 终止本项目自身实例；不要再恢复“扫描并终止所有 serve.py 进程”的行为。
+- `--svn-command` 支持带空格的路径（Windows 用双引号包住）；测试用假 svn 可执行文件注入，真实认证需要能连通的强制认证 SVN 路径。
 - 搜索的排除词语法为 `-词`，短语为 `"词 组"`；改动 `parseQuery` 时注意与 UI 提示保持一致。
 
 ## 完成前检查清单
 
-1. `python -m unittest discover -s tests -v` 全绿
+1. `python -m unittest discover -s tests -v` 全绿（含 `tests/test_server.py`：配置、数据库、SVN 假 CLI、登录会话、静态白名单）
 2. `node --test tests/test_search.js`、`node --test tests/test_packetdiag.js`、`node --test tests/test_ai_retrieval.js` 全绿
-3. `node --check web/custom-search.js`、`web/workspace.js`、`web/mermaid-init.js`、`web/media-viewer.js`、`web/packetdiag.js`、`web/packetdiag-init.js`、`web/page-export.js`、`web/md-editor.js`、`web/math-init.js`、`web/prism-init.js` 通过
+3. `node --check web/custom-search.js`、`web/workspace.js`、`web/mermaid-init.js`、`web/media-viewer.js`、`web/packetdiag.js`、`web/packetdiag-init.js`、`web/page-export.js`、`web/md-editor.js`、`web/math-init.js`、`web/prism-init.js`、`web/auth.js`、`web/sanitize.js` 通过
 4. `python setup_docsify.py` 后 `git status` 无意外生成物差异（构建幂等）
 5. `docs/md` 内容逐字节未变

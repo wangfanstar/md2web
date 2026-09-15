@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 *.part
 *.tmp
+
+# 认证编辑服务：本机数据与真实配置不得提交
+data/
+wheels/
+config/server.local.json
