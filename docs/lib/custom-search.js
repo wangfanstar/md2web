@@ -1757,7 +1757,7 @@
       footerEl: null,
       max: config.maxSidebarResults,
       compact: true,
-      showSnippet: false,
+      showSnippet: true,
       autocompleteHidden: false,
       flat: [],
       activeIndex: 0
