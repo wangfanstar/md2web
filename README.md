@@ -11,7 +11,8 @@
 - Mermaid 图形：代码围栏标注 `mermaid` 即渲染流程图/时序图/甘特图等，本地渲染、离线可用
 - PacketDiag 报文图：代码围栏标注 `packetdiag` 即渲染报文/字段布局，离线 Canvas 渲染、可下载 PNG
 - 单页导出：阅读区「下载本页」把当前文档导出为自包含 HTML（样式内联、图片与图形内嵌，可直接分享）
-- 在线预览：内置绘图预览页（`lib/plot-playground.html`），Mermaid 全部图形类型与 PacketDiag 增强语法（位序/编号/全局注释）可边写边看、下载 SVG/PNG
+- 在线预览：内置绘图预览页（`lib/plot-playground.html`），Mermaid 全部图形类型与 PacketDiag 增强语法（位序/编号/全局注释）可边写边看、下载 SVG/PNG；侧栏顶部提供「绘图预览」快捷入口
+- 阅读增强：复制路径、编辑 MD（可直接回写 `docs/md/`）、下载当前 MD 源码、下载本页为自包含 HTML、宽屏与序号开关
 - 章节编号：正文 h2–h4 与右侧「本文目录」自动显示 `1 / 1.1 / 1.1.1` 序号
 - 跨平台预览：`python serve.py` 一键启动，Windows/Linux 通用；也可直接双击 `docs/index.html`
 - 多文件夹工作台：完整保留目录层级与同名文件位置，支持折叠树、数量统计、路径筛选、定位当前文档和分类首页

@@ -1798,6 +1798,7 @@
     wrapper.innerHTML = [
       '<div class="custom-search-top-row">',
       '<a class="custom-sidebar-home-link" href="../../index.html">返回首页</a>',
+      '<a class="custom-sidebar-home-link custom-sidebar-tool" href="lib/plot-playground.html" target="_blank" rel="noopener" title="绘图在线预览（Mermaid / PacketDiag）"><svg class="custom-tool-icon" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2.2 13.8l3.4-.7L13.9 4.8a1.5 1.5 0 0 0 0-2.1l-.6-.6a1.5 1.5 0 0 0-2.1 0L2.9 10.4l-.7 3.4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M10.2 3.2l2.6 2.6" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>绘图预览</a>',
       '<button type="button" class="custom-search-kbd-hint" title="打开全局搜索">Ctrl+K</button>',
       '</div>',
       '<div class="custom-search-input-row">',

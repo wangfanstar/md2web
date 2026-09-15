@@ -500,13 +500,13 @@ class GenerationTests(TempDirTestCase):
         with redirect_stdout(io.StringIO()):
             self.module.generate_index_html("T")
         html_text = (self.docs / "index.html").read_text(encoding="utf-8")
-        for marker in ("lib/packetdiag.js", "lib/packetdiag-init.js", "lib/page-export.js"):
+        for marker in ("lib/packetdiag.js", "lib/packetdiag-init.js", "lib/page-export.js", "lib/md-editor.js"):
             self.assertIn(marker, html_text)
 
     def test_generate_assets_copies_plot_tools(self):
         with redirect_stdout(io.StringIO()):
             self.module.generate_custom_search_assets()
-        for name in ("packetdiag.js", "packetdiag-init.js", "page-export.js", "plot-playground.html"):
+        for name in ("packetdiag.js", "packetdiag-init.js", "page-export.js", "plot-playground.html", "md-editor.js"):
             self.assertTrue((self.docs / "lib" / name).exists(), name)
 
     def test_search_index_reports_non_utf8_path(self):

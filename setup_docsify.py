@@ -518,9 +518,10 @@ def generate_custom_search_assets():
         "packetdiag-init.js",
         "page-export.js",
         "plot-playground.html",
+        "md-editor.js",
     ):
         shutil.copyfile(WEB_DIR / name, LIB_DIR / name)
-    print("  [生成] custom-search.* / workspace.* / mermaid-init.js / media-viewer.js / packetdiag* / page-export.js / plot-playground.html")
+    print("  [生成] custom-search.* / workspace.* / mermaid-init.js / media-viewer.js / packetdiag* / page-export.js / plot-playground.html / md-editor.js")
 
 
 # Docsify 4.13.1 slugify 实际删除的标点集合（docsify.min.js 中的 En 正则），
@@ -863,6 +864,7 @@ def generate_index_html(title="文档中心"):
   <script src="lib/packetdiag-init.js"></script>
   <script src="lib/media-viewer.js"></script>
   <script src="lib/page-export.js"></script>
+  <script src="lib/md-editor.js"></script>
 </body>
 </html>
 """
