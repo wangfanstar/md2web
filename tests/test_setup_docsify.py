@@ -314,7 +314,7 @@ class ServeTests(unittest.TestCase):
             (docs / "md").mkdir(parents=True)
             (tmp / "setup_docsify.py").write_text("", encoding="utf-8")
             index_path = docs / "search-index.json"
-            index_path.write_text("{}", encoding="utf-8")
+            index_path.write_text('{"/": {}, "/md/a.md": {}}', encoding="utf-8")
             doc_path = docs / "md" / "a.md"
             doc_path.write_text("# A", encoding="utf-8")
             old = time.time() - 100
@@ -323,6 +323,25 @@ class ServeTests(unittest.TestCase):
                 self.assertTrue(serve.needs_rebuild(docs))
                 os.utime(doc_path, (old, old))
                 self.assertFalse(serve.needs_rebuild(docs))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_needs_rebuild_detects_deleted_document(self):
+        serve = load_module("serve", "serve.py")
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-serve-"))
+        try:
+            docs = tmp / "docs"
+            (docs / "md").mkdir(parents=True)
+            (tmp / "setup_docsify.py").write_text("", encoding="utf-8")
+            doc_path = docs / "md" / "a.md"
+            doc_path.write_text("# A", encoding="utf-8")
+            (docs / "search-index.json").write_text(
+                '{"/": {}, "/md/a.md": {}}', encoding="utf-8"
+            )
+            with mock.patch.object(serve, "ROOT", tmp):
+                self.assertFalse(serve.needs_rebuild(docs))
+                doc_path.unlink()
+                self.assertTrue(serve.needs_rebuild(docs))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

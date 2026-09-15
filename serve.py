@@ -4,6 +4,7 @@ import argparse
 import errno
 import functools
 import http.server
+import json
 import os
 import socket
 import subprocess
@@ -55,8 +56,9 @@ def lan_ip():
 def needs_rebuild(directory):
     """判断默认 docs/ 目录是否需要重新构建。
 
-    仅当脚本同级存在 setup_docsify.py、预览目录就是默认 docs/、
-    且 docs/md 下有比 search-index.json 更新的 Markdown 时返回 True。
+    仅当脚本同级存在 setup_docsify.py、预览目录就是默认 docs/ 时生效。
+    以下任一情况返回 True：缺少搜索索引；docs/md 的文件集合与索引不一致
+    （新增、删除、重命名）；存在比索引更新的 Markdown（内容修改）。
     """
     setup_script = ROOT / "setup_docsify.py"
     docs_dir = (ROOT / "docs").resolve()
@@ -68,16 +70,26 @@ def needs_rebuild(directory):
     index_path = docs_dir / "search-index.json"
     if not index_path.exists():
         return True
-    index_mtime = index_path.stat().st_mtime
+
+    current = set()
+    newest_mtime = 0.0
     for path in md_dir.rglob("*"):
         if not path.is_file() or path.suffix.lower() != ".md":
             continue
         rel = path.relative_to(md_dir)
         if any(part.startswith(".") for part in rel.parts):
             continue
-        if path.stat().st_mtime > index_mtime:
-            return True
-    return False
+        current.add(f"/md/{rel.as_posix()}")
+        newest_mtime = max(newest_mtime, path.stat().st_mtime)
+
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return True
+    indexed = {key for key in index if key.startswith("/md/")}
+    if current != indexed:
+        return True
+    return newest_mtime > index_path.stat().st_mtime
 
 
 def rebuild():
