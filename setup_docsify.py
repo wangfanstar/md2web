@@ -132,7 +132,7 @@ PRISM_LANG_FALLBACK = {
 }
 
 # 由前端插件渲染、不交给 Prism 的语言
-IGNORED_FENCE_LANGS = {"mermaid"}
+IGNORED_FENCE_LANGS = {"mermaid", "packetdiag"}
 
 SEARCH_DEPTH = 4
 
@@ -509,9 +509,18 @@ def generate_custom_search_assets():
     LIB_DIR.mkdir(parents=True, exist_ok=True)
     (LIB_DIR / "custom-search.js").write_text(CUSTOM_SEARCH_JS, encoding="utf-8")
     (LIB_DIR / "custom-search.css").write_text(CUSTOM_SEARCH_CSS, encoding="utf-8")
-    for name in ("workspace.js", "workspace.css", "mermaid-init.js"):
+    for name in (
+        "workspace.js",
+        "workspace.css",
+        "mermaid-init.js",
+        "media-viewer.js",
+        "packetdiag.js",
+        "packetdiag-init.js",
+        "page-export.js",
+        "plot-playground.html",
+    ):
         shutil.copyfile(WEB_DIR / name, LIB_DIR / name)
-    print("  [生成] custom-search.js / custom-search.css / mermaid-init.js")
+    print("  [生成] custom-search.* / workspace.* / mermaid-init.js / media-viewer.js / packetdiag* / page-export.js / plot-playground.html")
 
 
 # Docsify 4.13.1 slugify 实际删除的标点集合（docsify.min.js 中的 En 正则），
@@ -746,6 +755,10 @@ def generate_readme(md_files, title="文档中心"):
                   '- 在搜索框下选择文件夹或当前文档缩小范围，多词同时匹配；`"exact phrase"` 精确短语，`-排除词` 排除内容。',
                   '- 阅读搜索结果后用 **F3 / Shift+F3** 跳转命中；**Esc** 关闭搜索或退出命中阅读。',
                   '- 侧栏筛选文件名与路径，使用「定位当前」返回当前文件；拖动侧栏边缘调整宽度。',
+                  '- 阅读区右上角「下载本页」可把当前文档导出为独立 HTML（样式内联、图片与图形内嵌）。',
+                  '', '## 绘图工具', '',
+                  '- [绘图语法示例](md/使用说明/绘图示例.md)：Mermaid 与 PacketDiag 的语法与示例。',
+                  '- <a href="lib/plot-playground.html" target="_blank" rel="noopener">绘图在线预览</a>：编辑语法实时预览，可下载 SVG / PNG。',
                   '', '## 离线维护', '',
                   '直接双击 `index.html` 即可查阅，分发时复制整个 `docs/` 文件夹。源文档放在 `docs/md/`，可以按项目、模块建立多层目录。', '',
                   '新增、删除或编辑文档后运行 `python setup_docsify.py`，再刷新页面。页面「重读索引」只更新已知文档或当前内嵌快照，不扫描磁盘新增文件。依赖齐全时构建不联网。', '',
@@ -841,12 +854,15 @@ def generate_index_html(title="文档中心"):
     }}
   </script>
   <script src="lib/docsify.min.js?v=file-router-3"></script>
-  <script src="lib/zoom-image.min.js"></script>
   <script src="lib/front-matter.min.js"></script>
   <script src="lib/custom-search.js"></script>
   <script src="lib/workspace.js"></script>
   <script src="lib/mermaid.min.js"></script>
   <script src="lib/mermaid-init.js"></script>
+  <script src="lib/packetdiag.js"></script>
+  <script src="lib/packetdiag-init.js"></script>
+  <script src="lib/media-viewer.js"></script>
+  <script src="lib/page-export.js"></script>
 </body>
 </html>
 """

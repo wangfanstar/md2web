@@ -213,3 +213,128 @@ body.hide-heading-numbers .markdown-section h4::before {
 body.hide-heading-numbers .docs-page-toc-index {
   display: none;
 }
+
+/* ---------- 图片/图形放大查看 ---------- */
+
+.markdown-section img,
+.markdown-section .mermaid svg {
+  cursor: zoom-in;
+}
+
+.media-viewer {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+}
+
+.media-viewer.is-open {
+  display: block;
+}
+
+.media-viewer-backdrop {
+  background: rgba(15, 23, 42, .93);
+  inset: 0;
+  position: absolute;
+}
+
+.media-viewer-stage {
+  align-items: center;
+  cursor: grab;
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  overflow: hidden;
+  position: absolute;
+  touch-action: none;
+}
+
+.media-viewer-stage:active {
+  cursor: grabbing;
+}
+
+.media-viewer-content {
+  transform-origin: center center;
+  will-change: transform;
+}
+
+.media-viewer-content img {
+  display: block;
+  max-height: none;
+  max-width: none;
+}
+
+.media-viewer-content svg {
+  display: block;
+  max-width: none !important;
+}
+
+.media-viewer-toolbar {
+  align-items: center;
+  background: rgba(30, 41, 59, .95);
+  border: 1px solid rgba(148, 163, 184, .35);
+  border-radius: 8px;
+  bottom: 22px;
+  color: #e2e8f0;
+  display: flex;
+  gap: 6px;
+  left: 50%;
+  padding: 6px 10px;
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+.media-viewer-toolbar button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: #e2e8f0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  min-width: 30px;
+  padding: 4px 8px;
+}
+
+.media-viewer-toolbar button:hover {
+  background: rgba(148, 163, 184, .2);
+}
+
+.media-viewer-scale {
+  font-family: var(--docs-mono);
+  font-size: 12px;
+  min-width: 46px;
+  text-align: center;
+}
+
+body.media-viewer-open {
+  overflow: hidden;
+}
+
+.media-viewer-download {
+  display: none;
+}
+
+.media-viewer.is-diagram .media-viewer-download {
+  display: inline-block;
+}
+
+.media-viewer.is-canvas [data-viewer-action="svg"] {
+  display: none;
+}
+
+.packetdiag-figure {
+  margin: 16px 0;
+  text-align: center;
+}
+
+.packetdiag-figure canvas {
+  cursor: zoom-in;
+  height: auto;
+  max-width: 100%;
+}
+
+.packetdiag-figure.has-error {
+  outline: 1px solid #f0b4b4;
+  outline-offset: 4px;
+}

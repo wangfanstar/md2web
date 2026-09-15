@@ -31,11 +31,17 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `web/custom-search.js` / `.css` | 搜索算法与界面、结果列表、搜索/目录视图切换、正文命中高亮、右侧本文目录 |
 | `web/workspace.js` / `.css` | 目录树（折叠/过滤/计数/定位）、面包屑、首页卡片、复制、宽屏、章节序号、Mermaid 样式 |
 | `web/mermaid-init.js` | docsify 插件：把 ```mermaid 围栏渲染为图形（离线） |
+| `web/packetdiag.js` | PacketDiag 解析与 Canvas 绘制核心（从 `PacketDiagPic.html` 抽取，`window.PacketDiag = { parse, render, presets, defaultSource }`） |
+| `web/packetdiag-init.js` | docsify 插件：把 ```packetdiag 围栏渲染为报文图，失败回退源码 |
+| `web/media-viewer.js` | 图片、Mermaid 图形与 PacketDiag 图形的全屏放大查看（缩放、平移、适应窗口、1:1、滚轮/触屏）与下载（Mermaid 导出 SVG/PNG，PacketDiag 导出 PNG；导出时把 foreignObject 转为 SVG 文本，保证 PNG 可导出、SVG 通用） |
+| `web/page-export.js` | 「下载本页」：把当前文档导出为自包含 HTML（样式内联、Canvas/图片转 data URL、生成目录） |
+| `web/plot-playground.html` | 独立绘图在线预览页（PacketDiag / Mermaid 编辑与预览、下载），构建复制到 `docs/lib/` |
 | `docs/md/` | 唯一需要人工维护的源文档目录 |
 | `docs/lib/` | 离线依赖 + 生成资源，不要手工修改 |
 | `docs/` 其余文件 | `index.html`、`README.md`、`_sidebar.md`、`search-index.json`、`offline-data.js` 等，均由构建生成 |
 | `tests/test_setup_docsify.py` | Python 回归测试（unittest，全程离线） |
 | `tests/test_search.js` | 搜索算法测试（`node --test`） |
+| `tests/test_packetdiag.js` | PacketDiag 解析回归测试（`node --test`） |
 | `specs/` | 设计与计划文档（历史归档，新增设计放这里） |
 
 ## 常用命令
@@ -48,7 +54,8 @@ python setup_docsify.py --offline       # 严格离线：依赖缺失时报错�
 python serve.py                         # 预览 http://localhost:3000
 python -m unittest discover -s tests -v
 node --test tests/test_search.js
-node --check web/custom-search.js       # 前端语法检查（workspace/mermaid-init 同理）
+node --test tests/test_packetdiag.js
+node --check web/custom-search.js       # 前端语法检查（workspace/mermaid-init/media-viewer/packetdiag/page-export 同理）
 ```
 
 ## 不可破坏的约定
@@ -59,9 +66,10 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 4. **完全离线**：运行时不得请求 CDN；新增第三方库必须保存到 `docs/lib/` 并登记到 `setup_docsify.py` 的 `ASSETS`（含固定版本 URL）。
 5. **失败要早、要清楚**：`docs/md` 缺失/为空、非 UTF-8 文档等应在写任何文件前抛 `BuildError`，错误信息带路径。
 6. **索引语义一致**：Python 预构建 `build_page_index` 与浏览器重读 `buildSearchPage` 必须一致——代码围栏内容进入正文、代码内 `#` 不生成标题、首个标题前不落空壳条目。
-7. **Mermaid 围栏不交给 Prism**：`collect_fence_languages` 必须忽略 `mermaid`（`IGNORED_FENCE_LANGS`），由 `web/mermaid-init.js` 渲染。
-8. **UI 令牌统一**：颜色/字体使用 `--docs-*` 变量；`--docs-accent`（#1f6feb）只用于当前项/命中/焦点；路径、标识符、计数用等宽字体。
-9. **章节序号**：正文 h2–h4 由 CSS 计数器生成，右侧目录编号由 `buildPageToc` 生成，两者规则需保持一致（1 / 1.1 / 1.1.1）；阅读区「隐藏序号/显示序号」按钮通过 `body.hide-heading-numbers` 关闭两者，偏好存于 localStorage。
+7. **绘图围栏不交给 Prism**：`collect_fence_languages` 必须忽略 `mermaid` 与 `packetdiag`（`IGNORED_FENCE_LANGS`），分别由 `web/mermaid-init.js`、`web/packetdiag-init.js` 渲染。
+8. **静态页链接用原始 HTML**：docsify 会重写 Markdown 链接为 hash 路由，指向 `lib/plot-playground.html` 等静态文件时必须使用 `<a href="lib/...">` 原始锚点，否则会被路由拦截。
+9. **UI 令牌统一**：颜色/字体使用 `--docs-*` 变量；`--docs-accent`（#1f6feb）只用于当前项/命中/焦点；路径、标识符、计数用等宽字体。
+10. **章节序号**：正文 h2–h4 由 CSS 计数器生成，右侧目录编号由 `buildPageToc` 生成，两者规则需保持一致（1 / 1.1 / 1.1.1）；阅读区「隐藏序号/显示序号」按钮通过 `body.hide-heading-numbers` 关闭两者，偏好存于 localStorage。
 
 ## 开发流程
 
@@ -83,7 +91,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 ## 完成前检查清单
 
 1. `python -m unittest discover -s tests -v` 全绿
-2. `node --test tests/test_search.js` 全绿
-3. `node --check web/custom-search.js`、`web/workspace.js`、`web/mermaid-init.js` 通过
+2. `node --test tests/test_search.js`、`node --test tests/test_packetdiag.js` 全绿
+3. `node --check web/custom-search.js`、`web/workspace.js`、`web/mermaid-init.js`、`web/media-viewer.js`、`web/packetdiag.js`、`web/packetdiag-init.js`、`web/page-export.js` 通过
 4. `python setup_docsify.py` 后 `git status` 无意外生成物差异（构建幂等）
 5. `docs/md` 内容逐字节未变

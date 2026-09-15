@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>绘图在线预览 — PacketDiag / Mermaid</title>
+<style>
+  :root {
+    --ink: #1f2a37;
+    --muted: #5b6b7c;
+    --line: #e3e8ee;
+    --accent: #1f6feb;
+    --soft: #f6f8fa;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: #f7f9fb;
+    color: var(--ink);
+    font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    margin: 0;
+  }
+  .pg-header { background: #fff; border-bottom: 1px solid var(--line); padding: 16px 20px 12px; }
+  .pg-header h1 { font-size: 18px; margin: 0 0 4px; }
+  .pg-header p { color: var(--muted); font-size: 12px; margin: 0; }
+  .pg-header a { color: var(--accent); text-decoration: none; }
+  .pg-tabs { background: #fff; border-bottom: 1px solid var(--line); display: flex; gap: 4px; padding: 0 20px; }
+  .pg-tabs button {
+    background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted);
+    cursor: pointer; font: inherit; padding: 10px 12px;
+  }
+  .pg-tabs button.is-active { border-bottom-color: var(--accent); color: var(--ink); font-weight: 600; }
+  .pg-panel { display: grid; gap: 14px; grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr); padding: 16px 20px 40px; }
+  .pg-panel[hidden] { display: none; }
+  .pg-card { background: #fff; border: 1px solid var(--line); border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; }
+  .pg-card-head { align-items: center; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
+  .pg-card-head strong { font-size: 13px; }
+  .pg-card-head select, .pg-card-head button {
+    background: #fff; border: 1px solid #d7dee6; border-radius: 5px; color: var(--ink);
+    cursor: pointer; font: inherit; font-size: 12px; padding: 4px 9px;
+  }
+  .pg-card-head button:hover { border-color: var(--accent); color: var(--accent); }
+  .pg-card-head .pg-spacer { flex: 1; }
+  textarea {
+    background: var(--soft); border: 0; border-bottom: 1px solid var(--line); color: var(--ink);
+    flex: 1; font-family: var(--mono); font-size: 12px; line-height: 1.6; min-height: 340px;
+    outline: none; padding: 12px; resize: vertical; width: 100%;
+  }
+  textarea:focus { background: #fff; }
+  .pg-error { color: #b42318; font-size: 12px; margin: 0; padding: 0 12px 10px; white-space: pre-wrap; }
+  .pg-error:empty { display: none; }
+  .pg-preview { align-items: center; display: flex; justify-content: center; min-height: 340px; overflow: auto; padding: 12px; }
+  .pg-preview canvas { height: auto; max-width: 100%; }
+  .pg-preview svg { height: auto; max-width: 100%; }
+  .pg-hint { color: var(--muted); font-size: 12px; margin: 0; padding: 0 20px 24px; }
+  @media (max-width: 860px) {
+    .pg-panel { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header class="pg-header">
+  <h1>绘图在线预览</h1>
+  <p>离线可用：左侧编辑语法，右侧实时预览；PacketDiag 支持下载 PNG，Mermaid 支持下载 SVG / PNG。返回 <a href="../index.html">文档站</a></p>
+</header>
+<nav class="pg-tabs">
+  <button type="button" data-tab="packet" class="is-active">PacketDiag</button>
+  <button type="button" data-tab="mermaid">Mermaid</button>
+</nav>
+
+<main>
+  <section class="pg-panel" data-panel="packet">
+    <div class="pg-card">
+      <div class="pg-card-head">
+        <strong>PacketDiag 语法</strong>
+        <select id="pgPacketPreset" aria-label="预设示例"></select>
+        <span class="pg-spacer"></span>
+        <button type="button" id="pgPacketRender">渲染</button>
+        <button type="button" id="pgPacketDownload">下载 PNG</button>
+      </div>
+      <textarea id="pgPacketSource" spellcheck="false" aria-label="PacketDiag 源文本"></textarea>
+      <p class="pg-error" id="pgPacketError" role="status"></p>
+    </div>
+    <div class="pg-card">
+      <div class="pg-card-head"><strong>预览</strong></div>
+      <div class="pg-preview"><canvas id="pgPacketCanvas" role="img" aria-label="PacketDiag 预览"></canvas></div>
+    </div>
+  </section>
+
+  <section class="pg-panel" data-panel="mermaid" hidden>
+    <div class="pg-card">
+      <div class="pg-card-head">
+        <strong>Mermaid 语法</strong>
+        <span class="pg-spacer"></span>
+        <button type="button" id="pgMermaidRender">渲染</button>
+        <button type="button" id="pgMermaidSvg">下载 SVG</button>
+        <button type="button" id="pgMermaidPng">下载 PNG</button>
+      </div>
+      <textarea id="pgMermaidSource" spellcheck="false" aria-label="Mermaid 源文本"></textarea>
+      <p class="pg-error" id="pgMermaidError" role="status"></p>
+    </div>
+    <div class="pg-card">
+      <div class="pg-card-head"><strong>预览</strong></div>
+      <div class="pg-preview" id="pgMermaidPreview"></div>
+    </div>
+  </section>
+</main>
+
+<p class="pg-hint">提示：PacketDiag 使用标准 <code>packetdiag { }</code> 语法（字段 <code>bit[-end]: 标签 [选项]</code>）；Mermaid 支持流程图、时序图、状态图等。文档中分别使用 <code>```packetdiag</code> 与 <code>```mermaid</code> 围栏。</p>
+
+<script src="packetdiag.js"></script>
+<script src="mermaid.min.js"></script>
+<script src="media-viewer.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  function saveBlob(blob, filename) {
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  }
+
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.pg-tabs button'));
+  var panels = Array.prototype.slice.call(document.querySelectorAll('.pg-panel'));
+  tabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      tabs.forEach(function (item) { item.classList.toggle('is-active', item === tab); });
+      panels.forEach(function (panel) {
+        panel.hidden = panel.getAttribute('data-panel') !== tab.getAttribute('data-tab');
+      });
+    });
+  });
+
+  // ---------- PacketDiag ----------
+  var packetSource = document.getElementById('pgPacketSource');
+  var packetCanvas = document.getElementById('pgPacketCanvas');
+  var packetError = document.getElementById('pgPacketError');
+  var packetPreset = document.getElementById('pgPacketPreset');
+  var packetTimer = 0;
+
+  if (window.PacketDiag) {
+    Object.keys(window.PacketDiag.presets).forEach(function (name) {
+      var option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      packetPreset.appendChild(option);
+    });
+    packetPreset.value = 'tcp';
+    packetSource.value = window.PacketDiag.presets.tcp || window.PacketDiag.defaultSource;
+  }
+
+  function renderPacket() {
+    if (!window.PacketDiag) {
+      packetError.textContent = 'packetdiag.js 未加载';
+      return;
+    }
+    try {
+      var parsed = window.PacketDiag.parse(packetSource.value);
+      var width = Math.max(560, packetCanvas.parentNode.clientWidth - 24);
+      window.PacketDiag.render(parsed, packetCanvas, { fitWidth: true, width: width });
+      packetError.textContent = parsed.warnings.length ? parsed.warnings.join('\n') : '';
+    } catch (error) {
+      packetError.textContent = error && error.message ? error.message : String(error);
+    }
+  }
+
+  packetSource.addEventListener('input', function () {
+    clearTimeout(packetTimer);
+    packetTimer = setTimeout(renderPacket, 250);
+  });
+  packetPreset.addEventListener('change', function () {
+    packetSource.value = window.PacketDiag.presets[packetPreset.value] || '';
+    renderPacket();
+  });
+  document.getElementById('pgPacketRender').addEventListener('click', renderPacket);
+  document.getElementById('pgPacketDownload').addEventListener('click', function () {
+    try {
+      packetCanvas.toBlob(function (blob) {
+        if (blob) {
+          saveBlob(blob, 'packetdiag-' + packetPreset.value + '.png');
+        }
+      }, 'image/png');
+    } catch (error) {
+      packetError.textContent = 'PNG 导出失败：' + (error && error.message ? error.message : error);
+    }
+  });
+
+  // ---------- Mermaid ----------
+  var mermaidSource = document.getElementById('pgMermaidSource');
+  var mermaidPreview = document.getElementById('pgMermaidPreview');
+  var mermaidError = document.getElementById('pgMermaidError');
+  var mermaidCounter = 0;
+  var mermaidReady = false;
+
+  mermaidSource.value = [
+    'flowchart LR',
+    '  A[编写 Markdown] --> B[运行构建]',
+    '  B --> C[离线浏览与搜索]'
+  ].join('\n');
+
+  function ensureMermaid() {
+    if (mermaidReady || !window.mermaid) {
+      return mermaidReady;
+    }
+    window.mermaid.initialize({
+      startOnLoad: false,
+      theme: 'base',
+      themeVariables: {
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif',
+        primaryColor: '#eef4fd',
+        primaryBorderColor: '#1f6feb',
+        primaryTextColor: '#1f2a37',
+        lineColor: '#5b6b7c',
+        secondaryColor: '#f4f7fa',
+        tertiaryColor: '#ffffff'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: false }
+    });
+    mermaidReady = true;
+    return true;
+  }
+
+  function renderMermaid() {
+    if (!ensureMermaid()) {
+      mermaidError.textContent = 'mermaid.min.js 未加载';
+      return;
+    }
+    mermaidCounter += 1;
+    mermaidError.textContent = '';
+    window.mermaid.render('pg-mermaid-' + mermaidCounter, mermaidSource.value).then(function (result) {
+      mermaidPreview.innerHTML = result.svg;
+    }).catch(function (error) {
+      mermaidError.textContent = error && error.message ? error.message : String(error);
+    });
+  }
+
+  function mermaidSvgElement() {
+    return mermaidPreview.querySelector('svg');
+  }
+
+  function svgNaturalSize(svg) {
+    var viewBox = svg.getAttribute('viewBox');
+    if (viewBox) {
+      var parts = viewBox.split(/[\s,]+/).map(Number);
+      if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+        return { width: parts[2], height: parts[3] };
+      }
+    }
+    var rect = svg.getBoundingClientRect();
+    return { width: rect.width || 800, height: rect.height || 600 };
+  }
+
+  mermaidSource.addEventListener('input', function () {
+    clearTimeout(mermaidTimer);
+    mermaidTimer = setTimeout(renderMermaid, 300);
+  });
+  var mermaidTimer = 0;
+  document.getElementById('pgMermaidRender').addEventListener('click', renderMermaid);
+  document.getElementById('pgMermaidSvg').addEventListener('click', function () {
+    var svg = mermaidSvgElement();
+    if (!svg) {
+      return;
+    }
+    var clone = svg.cloneNode(true);
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+    var text = '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(clone);
+    saveBlob(new Blob([text], { type: 'image/svg+xml;charset=utf-8' }), 'mermaid-diagram.svg');
+  });
+  document.getElementById('pgMermaidPng').addEventListener('click', function () {
+    var svg = mermaidSvgElement();
+    if (!svg || !window.MediaViewer) {
+      return;
+    }
+    var size = svgNaturalSize(svg);
+    window.MediaViewer.svgToPngBlob(svg, size.width, size.height, 2).then(function (blob) {
+      saveBlob(blob, 'mermaid-diagram.png');
+    }).catch(function (error) {
+      mermaidError.textContent = 'PNG 导出失败：' + (error && error.message ? error.message : error);
+    });
+  });
+
+  renderPacket();
+  renderMermaid();
+}());
+</script>
+</body>
+</html>

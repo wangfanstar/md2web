@@ -22,7 +22,7 @@
       secondaryColor: '#f4f7fa',
       tertiaryColor: '#ffffff'
     },
-    flowchart: { curve: 'basis', useMaxWidth: true },
+    flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: false },
     sequence: { useMaxWidth: true },
     gantt: { useMaxWidth: true }
   });

@@ -496,6 +496,19 @@ class GenerationTests(TempDirTestCase):
             self.module.generate_custom_search_assets()
         self.assertTrue((self.docs / "lib" / "mermaid-init.js").exists())
 
+    def test_index_html_includes_plot_tools(self):
+        with redirect_stdout(io.StringIO()):
+            self.module.generate_index_html("T")
+        html_text = (self.docs / "index.html").read_text(encoding="utf-8")
+        for marker in ("lib/packetdiag.js", "lib/packetdiag-init.js", "lib/page-export.js"):
+            self.assertIn(marker, html_text)
+
+    def test_generate_assets_copies_plot_tools(self):
+        with redirect_stdout(io.StringIO()):
+            self.module.generate_custom_search_assets()
+        for name in ("packetdiag.js", "packetdiag-init.js", "page-export.js", "plot-playground.html"):
+            self.assertTrue((self.docs / "lib" / name).exists(), name)
+
     def test_search_index_reports_non_utf8_path(self):
         self.write_doc("a.md", "# A")
         (self.md / "bad.md").write_bytes(b"\xff\xfe\x00bad")
@@ -582,6 +595,15 @@ class PrismTests(TempDirTestCase):
         )
         self.assertEqual(
             self.module.collect_fence_languages(self.md, ["a.md"]), {"python"}
+        )
+
+    def test_collect_fence_languages_ignores_packetdiag(self):
+        self.write_doc(
+            "a.md",
+            "```packetdiag\npacketdiag { 0-7: A; }\n```\n\n```c\nint x;\n```",
+        )
+        self.assertEqual(
+            self.module.collect_fence_languages(self.md, ["a.md"]), {"c"}
         )
 
 
