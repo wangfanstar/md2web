@@ -55,7 +55,7 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `web/ai-retrieval.js` | AI 助手的离线检索核心（纯函数，`window.AIRetrieval`）：分词（CJK 单字+双字）、从 `searchIndex`/Markdown 构建语料、TF-IDF 打分、摘录与上下文/消息组装；`tests/test_ai_retrieval.js` 覆盖 |
 | `web/ai-assistant.js` / `.css` | AI 助手聊天面板与独立配置弹窗（`window.AIAssistant`）：设置面板（服务商预设、接口地址、模型、Key、代理策略，Key 仅存 localStorage）、**资料范围勾选**（按文件夹/文档过滤检索）、**上传文档**（.md/.txt，仅本机 localStorage，≤512 KB）、本地检索 + 引用来源、OpenAI/Anthropic 风格流式 SSE 解析、直连失败自动走 `/__ai/chat` 代理；侧栏「AI 配置」图标与对话面板 ⚙ 均可打开配置 |
 | `tests/test_ai_retrieval.js` | AI 检索算法测试（`node --test`） |
-| `web/plot-playground.html` | 独立绘图在线预览页（Mermaid 全部类型模板 + PacketDiag 增强控件与完整语法说明、下载），构建复制到 `docs/lib/` |
+| `web/plot-playground.html` | 独立绘图在线预览页（Mermaid 全部类型模板 + PacketDiag 增强控件与完整语法说明、一键复制源码、下载），构建复制到 `docs/lib/`；`docs/md/使用说明/绘图示例.md` 与之保持全部样例同步（`tests/test_setup_docsify.py::DrawingExamplesTests` 校验） |
 | `docs/md/` | 唯一需要人工维护的源文档目录 |
 | `docs/lib/` | 离线依赖 + 生成资源，不要手工修改 |
 | `docs/` 其余文件 | `index.html`、`README.md`、`_sidebar.md`、`search-index.json`、`offline-data.js` 等，均由构建生成 |
@@ -73,6 +73,7 @@ python setup_docsify.py --title "我的文档"
 python setup_docsify.py --offline       # 严格离线：依赖缺失时报错，不尝试下载
 python serve.py                         # 默认认证编辑服务（需 pip install -r server/requirements.txt）
 python serve.py --preview               # 只读预览 http://localhost:3000（无写接口）
+python serve.py --reset-admin-password  # 忘记管理员密码时强制恢复为默认 admin/admin
 python -m unittest discover -s tests -v
 node --test tests/test_search.js
 node --test tests/test_packetdiag.js
@@ -114,6 +115,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 服务启动只按 pidfile 终止本项目自身实例；不要再恢复“扫描并终止所有 serve.py 进程”的行为。
 - `--svn-command` 支持带空格的路径（Windows 用双引号包住）；测试用假 svn 可执行文件注入，真实认证需要能连通的强制认证 SVN 路径。
 - 本地管理员默认 `admin / admin`（PBKDF2 存库）：仅用于网页「设置」；部署后必须尽快改密。修改 SVN 认证路径只失效 SVN 用户会话，管理员会话保留。
+- 忘记管理员密码用 `python serve.py --reset-admin-password`（`database.reset_admin_password` 强制写回默认值）；不要在网页接口里提供”重置为默认“的公开入口。
 - `PUT /__config` 为热应用：校验 → 原子写配置文件 → 原地更新内存配置 → 重建认证源摘要；AI 默认值（含 Key）只下发给已登录用户，匿名会话不下发。
 - 草稿保存必须带 `expectedVersion`（或 `baseHash`）；版本不符返回 409 且不回写任何文件——不要恢复“再次保存强制覆盖”。
 - 服务默认按认证模式启动（`--preview` 才是只读预览）；缺少 Flask/Waitress 时给出安装提示，不静默回退匿名写。

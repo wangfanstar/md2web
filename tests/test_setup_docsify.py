@@ -699,6 +699,25 @@ class ServeTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class DrawingExamplesTests(unittest.TestCase):
+    def test_doc_covers_every_playground_sample(self):
+        import re
+        html = (ROOT / "web" / "plot-playground.html").read_text(encoding="utf-8")
+        doc = (ROOT / "docs" / "md" / "使用说明" / "绘图示例.md").read_text(encoding="utf-8")
+        mermaid_labels = re.findall(r"\{ id: '[^']+', label: '([^']+)'", html)
+        self.assertGreaterEqual(len(mermaid_labels), 20, "playground 中的 Mermaid 类型不足")
+        for label in mermaid_labels:
+            self.assertIn(label, doc, label)
+        extra_labels = re.findall(r"'ext-[\w-]+': \{\s*label: '([^']+)'", html)
+        self.assertGreaterEqual(len(extra_labels), 3, "playground 中的 PacketDiag 扩展模板不足")
+        for label in extra_labels:
+            self.assertIn(label, doc, label)
+        for preset in ("packet", "tcp", "ipv4", "udp", "ethernet", "standard"):
+            self.assertIn("（" + preset + "）", doc, preset)
+        self.assertGreaterEqual(doc.count("```mermaid"), len(mermaid_labels))
+        self.assertGreaterEqual(doc.count("```packetdiag"), len(extra_labels) + 6)
+
+
 class GenerationTests(TempDirTestCase):
     def build_site(self):
         self.write_doc("指南/入门.md", "# 入门\n\n## 安装\n\n内容")

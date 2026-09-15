@@ -178,6 +178,15 @@ def ensure_admin(conn, username=DEFAULT_ADMIN_USERNAME, password=DEFAULT_ADMIN_P
     return True
 
 
+def reset_admin_password(conn, username=DEFAULT_ADMIN_USERNAME, password=DEFAULT_ADMIN_PASSWORD):
+    """强制把管理员密码恢复为默认值（忘记密码时使用）。返回被重置的用户名或 None。"""
+    row = find_user(conn, LOCAL_ADMIN_SOURCE, username)
+    if row is None:
+        return None
+    set_admin_password(conn, row["id"], password)
+    return row["svn_username"]
+
+
 def set_admin_password(conn, user_id, password):
     with conn:
         conn.execute(

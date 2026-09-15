@@ -71,6 +71,10 @@ def parse_args(argv=None):
         help="记录本服务实例的 PID 文件，默认 data/serve.pid",
     )
     parser.add_argument(
+        "--reset-admin-password", action="store_true",
+        help="把本机管理员密码强制恢复为默认 admin（忘记密码时使用；会写入数据库并继续启动服务）",
+    )
+    parser.add_argument(
         "--svn-command", default=None,
         help="svn 可执行文件（可含参数，如 \"C:/Program Files/.../svn.exe\"）；默认使用 PATH 中的 svn",
     )
@@ -437,6 +441,12 @@ def run_authenticated_service(args, directory):
     database.migrate(conn)
     if database.ensure_admin(conn):
         print("已创建默认管理员账号: admin / admin（请在网页「设置」中尽快修改密码）")
+    if args.reset_admin_password:
+        reset_user = database.reset_admin_password(conn)
+        if reset_user is None:
+            database.ensure_admin(conn)
+            reset_user = database.reset_admin_password(conn)
+        print(f"已强制恢复管理员密码: {reset_user or 'admin'} / admin（请登录后立即修改）")
 
     svn_client = SvnClient(command=split_command(args.svn_command) if args.svn_command else ("svn",))
     auth_service = AuthService(conn, svn_client, config)

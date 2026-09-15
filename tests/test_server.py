@@ -686,6 +686,19 @@ class AdminConfigTests(ServerTestBase):
         self.assertEqual(response.status_code, 503)
         self.assertIn("匿名", response.get_json()["error"])
 
+    def test_reset_admin_password_restores_default(self):
+        csrf = self.admin_login()
+        self.client.post("/__admin/password", json={"current": "admin", "password": "secret1"},
+                         headers={"X-CSRF-Token": csrf})
+        self.assertEqual(self.client.post("/__auth/login", json={"username": "admin", "password": "admin", "mode": "admin"}).status_code, 401)
+        self.assertEqual(server_database.reset_admin_password(self.conn), "admin")
+        self.assertEqual(self.client.post("/__auth/login", json={"username": "admin", "password": "admin", "mode": "admin"}).status_code, 200)
+
+    def test_reset_admin_password_missing_admin(self):
+        with self.conn:
+            self.conn.execute("DELETE FROM users WHERE auth_source_id = 'local-admin'")
+        self.assertIsNone(server_database.reset_admin_password(self.conn))
+
     def test_admin_password_change(self):
         csrf = self.admin_login()
         response = self.client.post("/__admin/password", json={"current": "admin", "password": "secret1"},

@@ -11,12 +11,14 @@
 - Mermaid 图形：代码围栏标注 `mermaid` 即渲染流程图/时序图/甘特图等，本地渲染、离线可用
 - PacketDiag 报文图：代码围栏标注 `packetdiag` 即渲染报文/字段布局，离线 Canvas 渲染、可下载 PNG
 - 单页导出：阅读区「下载本页」把当前文档导出为自包含 HTML（样式内联、图片与图形内嵌，可直接分享）
-- 在线预览：内置绘图预览页（`lib/plot-playground.html`），Mermaid 全部图形类型与 PacketDiag 增强语法（位序/编号/全局注释）可边写边看、下载 SVG/PNG；侧栏顶部提供「绘图预览」快捷入口
+- 在线预览：内置绘图预览页（`lib/plot-playground.html`），Mermaid 全部图形类型与 PacketDiag 增强语法（位序/编号/全局注释）可边写边看、一键复制源码、下载 SVG/PNG；侧栏顶部提供「绘图预览」快捷入口
+- 绘图示例：`docs/md/使用说明/绘图示例.md` 收录全部 27 种 Mermaid 类型与 11 个 PacketDiag 模板，每个样例均为「效果 + 源码」对照（有测试保证与绘图预览同步）
 - 阅读增强：复制路径、双栏编辑器（左侧 Markdown 格式分色 + 右侧实时预览）、`Ctrl+S` 直连写回 `docs/md/` 源文件、下载 MD、下载本页为自包含 HTML、宽屏与序号开关
 - 数学公式：`$...$` / `$$...$$` 由 KaTeX 离线渲染（编辑器预览与文档页一致）
 - AI 助手：右下角对话面板 + 侧栏「AI 配置」图标，本地检索后再发给可配置的大模型（OpenAI 兼容 / DeepSeek / Ollama / Anthropic），支持资料范围勾选与上传文档、带引用来源跳转；Key 仅存浏览器本地，跨域时经本机 `serve.py` 代理
 - 登录与权限（阶段一）：`python serve.py --config config/server.local.json` 启动认证编辑服务（Flask + Waitress + SQLite + SVN CLI），SVN 账号密码登录、会话/CSRF、匿名只读、静态分发白名单与前端内容净化；离线 `file://` 保持只读
 - 网页端「设置」（默认管理员 admin/admin）：配置 SVN 认证路径、仓库映射与 AI 助手默认值，保存后热应用；配置与数据库均在 `docs/` 之外、不入库提交
+- 管理员密码：默认 `admin / admin`（PBKDF2 存库），可在「设置」中修改；忘记密码时用 `python serve.py --reset-admin-password` 强制恢复为默认值
 - 个人草稿（阶段二）：登录后 `Ctrl+S` 保存带版本的草稿，支持修改历史、已发布↔草稿差异、放弃草稿；冲突只提示不覆盖，与 SVN 提交（阶段三）分离
 - 章节编号：正文 h2–h4 与右侧「本文目录」自动显示 `1 / 1.1 / 1.1.1` 序号
 - 跨平台预览：`python serve.py` 一键启动，Windows/Linux 通用；也可直接双击 `docs/index.html`
