@@ -21,27 +21,54 @@
   }
 
   function currentResource() {
-    return currentRoute().replace(/^\/+/, '') || 'README.md';
+    return currentRoute().replace(/^\/+/, '').replace(/\/+$/, '') || 'README.md';
   }
 
-  function displayPath() {
-    var resource = currentResource();
-    return resource === 'README.md' ? 'docs/README.md' : 'docs/md/' + resource.replace(/^md\//, '');
+  // docsify 路由会去掉 .md 后缀（file-router 补丁），取源文件时需按 docsify 的 ext 规则补回
+  function candidateResources(resource) {
+    var value = String(resource || '');
+    var candidates = [value];
+    if (!/\.[A-Za-z0-9]+$/.test(value)) {
+      candidates.push(value + '.md');
+    }
+    return candidates.filter(function (item, index) { return candidates.indexOf(item) === index; });
   }
 
-  function loadSource(resource) {
-    var offline = window.__DOCSIFY_OFFLINE_DATA__;
-    var embedded = offline && offline.content ? offline.content[resource] : undefined;
+  function displayPath(resource) {
+    var value = resource === 'README.md' ? 'README.md' : resource;
+    return value === 'README.md' ? 'docs/README.md' : 'docs/md/' + value.replace(/^md\//, '');
+  }
+
+  function fetchResource(resource) {
     return fetch(resource, { cache: 'no-cache' }).then(function (response) {
       if (!response.ok) {
         throw new Error('HTTP ' + response.status);
       }
       return response.text();
-    }).catch(function (error) {
+    }, function () {
+      var offline = window.__DOCSIFY_OFFLINE_DATA__;
+      var embedded = offline && offline.content ? offline.content[resource] : undefined;
       if (typeof embedded === 'string') {
         return embedded;
       }
-      throw error;
+      throw new Error('无法读取 ' + resource);
+    });
+  }
+
+  function loadSource(resource) {
+    var candidates = candidateResources(resource);
+    var index = 0;
+    function attempt() {
+      return fetchResource(candidates[index]).catch(function (error) {
+        index += 1;
+        if (index < candidates.length) {
+          return attempt();
+        }
+        throw error;
+      });
+    }
+    return attempt().then(function (text) {
+      return { resource: candidates[index], text: text };
     });
   }
 
@@ -186,16 +213,18 @@
     if (!state.overlay) {
       buildOverlay();
     }
-    state.titleEl.textContent = displayPath();
+    state.titleEl.textContent = displayPath(state.resource);
     state.original = '';
     state.textarea.value = '';
     state.statusEl.textContent = '正在读取源文档…';
     state.overlay.classList.add('is-open');
     document.body.classList.add('md-editor-open');
     state.overlay.focus();
-    loadSource(state.resource).then(function (text) {
-      state.original = text;
-      state.textarea.value = text;
+    loadSource(state.resource).then(function (result) {
+      state.resource = result.resource;
+      state.titleEl.textContent = displayPath(state.resource);
+      state.original = result.text;
+      state.textarea.value = result.text;
       state.statusEl.textContent = state.resource === 'README.md'
         ? '站点首页由构建生成；如需长期修改请编辑 docs/md 下的源文档'
         : '';
@@ -206,9 +235,8 @@
   }
 
   function download() {
-    var resource = currentResource();
-    loadSource(resource).then(function (text) {
-      saveBlob(new Blob([text], { type: 'text/markdown;charset=utf-8' }), resource.split('/').pop() || 'document.md');
+    loadSource(currentResource()).then(function (result) {
+      saveBlob(new Blob([result.text], { type: 'text/markdown;charset=utf-8' }), result.resource.split('/').pop() || 'document.md');
     }).catch(function (error) {
       if (window.console && console.warn) {
         console.warn('下载 Markdown 失败', error);
