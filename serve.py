@@ -6,10 +6,12 @@ import functools
 import http.server
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from pathlib import Path
 
@@ -100,6 +102,114 @@ def rebuild():
     )
     if result.returncode != 0:
         print("警告: 重新构建失败，将使用现有产物预览。")
+    else:
+        print("重建完成，请刷新浏览器页面。")
+
+
+def rebuild_if_needed(directory):
+    """检测到 docs/md 变化时重建，返回是否执行了重建。"""
+    if not needs_rebuild(directory):
+        return False
+    rebuild()
+    return True
+
+
+def start_watcher(directory, interval=2.0):
+    """后台轮询 docs/md，有变化时自动重建；返回停止事件。"""
+    stop_event = threading.Event()
+
+    def run():
+        while not stop_event.is_set():
+            try:
+                rebuild_if_needed(directory)
+            except Exception as error:
+                print(f"警告: 自动重建检测失败: {error}")
+            stop_event.wait(interval)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return stop_event
+
+
+def find_other_servers():
+    """返回其他正在运行的 serve.py 进程 PID 列表（跨平台，仅标准库）。"""
+    pids = []
+    current = os.getpid()
+    if os.name == "nt":
+        script = (
+            "Get-CimInstance Win32_Process -Filter \"Name like '%python%'\" | "
+            "Where-Object { $_.CommandLine -like '*serve.py*' } | "
+            "Select-Object -ExpandProperty ProcessId"
+        )
+        for executable in ("powershell", "pwsh"):
+            try:
+                result = subprocess.run(
+                    [executable, "-NoProfile", "-NonInteractive", "-Command", script],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if line.isdigit() and int(line) != current:
+                    pids.append(int(line))
+            break
+        return pids
+
+    proc_dir = Path("/proc")
+    if proc_dir.is_dir():
+        for entry in proc_dir.iterdir():
+            if not entry.name.isdigit():
+                continue
+            pid = int(entry.name)
+            if pid == current:
+                continue
+            try:
+                cmdline = (
+                    (entry / "cmdline")
+                    .read_bytes()
+                    .replace(b"\x00", b" ")
+                    .decode("utf-8", "ignore")
+                )
+            except OSError:
+                continue
+            if "serve.py" in cmdline:
+                pids.append(pid)
+        return pids
+
+    try:
+        result = subprocess.run(
+            ["ps", "-eo", "pid=,args="],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return pids
+    for line in result.stdout.splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) == 2 and parts[0].isdigit() and "serve.py" in parts[1]:
+            pid = int(parts[0])
+            if pid != current:
+                pids.append(pid)
+    return pids
+
+
+def stop_other_servers():
+    """关闭旧的 serve.py 实例，返回成功关闭的 PID 列表。"""
+    stopped = []
+    for pid in find_other_servers():
+        try:
+            os.kill(pid, signal.SIGTERM)
+            stopped.append(pid)
+        except OSError:
+            continue
+    if stopped:
+        print(f"已关闭旧的预览服务进程: {', '.join(str(pid) for pid in stopped)}")
+        time.sleep(0.5)
+    return stopped
 
 
 def make_server(directory, bind, port):
@@ -122,8 +232,13 @@ def make_server(directory, bind, port):
 def main(argv=None):
     args = parse_args(argv)
     directory = args.directory.expanduser().resolve()
-    if not args.no_build and needs_rebuild(directory):
-        rebuild()
+    if (ROOT / "setup_docsify.py").exists():
+        stop_other_servers()
+    stop_watcher = None
+    if not args.no_build and (ROOT / "setup_docsify.py").exists():
+        rebuild_if_needed(directory)
+        stop_watcher = start_watcher(directory)
+        print("已开启自动重建：docs/md 有新增/删除/修改时会自动重建（每 2 秒检测）")
     if not (directory / "index.html").exists():
         raise SystemExit(f"错误: {directory} 下没有 index.html，请先运行 python setup_docsify.py")
     server, port = make_server(directory, args.bind, args.port)
@@ -142,6 +257,8 @@ def main(argv=None):
     except KeyboardInterrupt:
         print("\n已停止")
     finally:
+        if stop_watcher is not None:
+            stop_watcher.set()
         server.server_close()
 
 

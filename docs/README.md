@@ -3,7 +3,7 @@
 <div class="workspace-home">
 <p class="workspace-eyebrow">ENGINEERING KNOWLEDGE BASE</p>
 <p class="workspace-intro">从目录浏览，或直接搜索文件、命令与技术细节。</p>
-<div class="workspace-stats"><span>3 篇文档</span><span>3 个文件夹</span><span>离线可用</span></div>
+<div class="workspace-stats"><span>5 篇文档</span><span>4 个文件夹</span><span>离线可用</span></div>
 </div>
 
 ## 文件夹
@@ -13,6 +13,11 @@
 <span class="workspace-folder-count">1 篇文档</span>
 <h3>使用说明</h3>
 <span class="workspace-folder-preview">快速开始</span>
+</a>
+<a class="workspace-folder-card" href="#/md/%E7%A1%AC%E4%BB%B6%E8%AE%BE%E8%AE%A1/%E5%AF%84%E5%AD%98%E5%99%A8%E6%89%8B%E5%86%8C.md">
+<span class="workspace-folder-count">2 篇文档</span>
+<h3>硬件设计</h3>
+<span class="workspace-folder-preview">寄存器手册 · 时钟树设计</span>
 </a>
 <a class="workspace-folder-card" href="#/md/%E8%BD%AF%E4%BB%B6%E5%B7%A5%E5%85%B7%E9%93%BE/%E7%BC%96%E8%AF%91%E5%B7%A5%E5%85%B7%E9%93%BE.md">
 <span class="workspace-folder-count">1 篇文档</span>
@@ -46,6 +51,9 @@
 
 - **使用说明**
   - [快速开始](md/使用说明/快速开始.md)
+- **硬件设计**
+  - [寄存器手册](md/硬件设计/寄存器手册.md)
+  - [时钟树设计](md/硬件设计/时钟树设计.md)
 - **软件工具链**
   - [编译工具链](md/软件工具链/编译工具链.md)
 - **验证指南**

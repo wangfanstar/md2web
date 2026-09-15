@@ -370,6 +370,50 @@ class ServeTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_rebuild_if_needed_only_rebuilds_when_needed(self):
+        serve = load_module("serve", "serve.py")
+        with mock.patch.object(serve, "needs_rebuild", return_value=False):
+            with mock.patch.object(serve, "rebuild") as rebuild:
+                self.assertFalse(serve.rebuild_if_needed(Path(".")))
+        rebuild.assert_not_called()
+        with mock.patch.object(serve, "needs_rebuild", return_value=True):
+            with mock.patch.object(serve, "rebuild") as rebuild:
+                self.assertTrue(serve.rebuild_if_needed(Path(".")))
+        rebuild.assert_called_once()
+
+    def test_start_watcher_polls_until_stopped(self):
+        serve = load_module("serve", "serve.py")
+        called = threading.Event()
+
+        def fake_rebuild_if_needed(directory):
+            called.set()
+            return False
+
+        with mock.patch.object(
+            serve, "rebuild_if_needed", side_effect=fake_rebuild_if_needed
+        ):
+            stop_event = serve.start_watcher(Path("."), interval=0.01)
+            try:
+                self.assertTrue(called.wait(2.0))
+            finally:
+                stop_event.set()
+
+    def test_stop_other_servers_kills_listed_pids(self):
+        serve = load_module("serve", "serve.py")
+        with mock.patch.object(serve, "find_other_servers", return_value=[111, 222]):
+            with mock.patch.object(serve.os, "kill") as kill:
+                with redirect_stdout(io.StringIO()):
+                    stopped = serve.stop_other_servers()
+        self.assertEqual(stopped, [111, 222])
+        self.assertEqual(kill.call_count, 2)
+
+    def test_stop_other_servers_ignores_missing_process(self):
+        serve = load_module("serve", "serve.py")
+        with mock.patch.object(serve, "find_other_servers", return_value=[333]):
+            with mock.patch.object(serve.os, "kill", side_effect=OSError("gone")):
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(serve.stop_other_servers(), [])
+
 
 class GenerationTests(TempDirTestCase):
     def build_site(self):
