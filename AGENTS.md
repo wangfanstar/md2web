@@ -33,8 +33,9 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `server/svn.py` | 唯一的 svn 子进程入口：`--password-from-stdin`（口令绝不进 argv）、匿名可读检测、错误分类、XML 解析、超时与脱敏 |
 | `server/auth.py` | SVN 登录、本地管理员登录/改密、会话（token 只存摘要、闲置/绝对过期）、CSRF、限速、审计；重启与认证源变更使 SVN 旧会话失效（保留管理员会话）；数据库访问串行化 |
 | `server/passwords.py` | 管理员口令哈希（PBKDF2-HMAC-SHA256）与校验 |
+| `server/drafts.py` | 个人草稿与版本历史：乐观并发（expected_version → 409）、不可变 revision 全文快照、统一差异（published/draft/版本号）、放弃草稿 |
 | `server/documents.py` | 受管 Markdown 读写底层：路径校验、EOL 保持、唯一临时文件 + 原子替换、必填 `base_hash` 冲突检测 |
-| `server/app.py` | Flask 应用：`/__auth/session|login|logout`（含 `mode:admin`）、`GET/PUT /__config`、`POST /__config/test-auth`、`POST /__admin/password`（均要求管理员 + CSRF）、写接口守卫（匿名 401、旧 `/__md/save` 410、草稿/SVN 501）、静态分发白名单与安全响应头 |
+| `server/app.py` | Flask 应用：`/__auth/session|login|logout`（含 `mode:admin`）、`GET/PUT /__config`、`POST /__config/test-auth`、`POST /__admin/password`（均要求管理员 + CSRF）、草稿接口（`/__md/document|draft|history|diff|revision|discard`）、写接口守卫（匿名 401、旧 `/__md/save` 410、SVN 501）、静态分发白名单与安全响应头 |
 | `server/paths.py` | 静态分发禁止清单（点目录、`.svn`、`data/`、`config/`、临时/数据库/源码文件），预览与认证服务共用 |
 | `web/auth.js` / `.css` | 登录状态与弹窗（`window.SiteAuth`）：会话刷新、登录/退出、侧栏指示器、只读模式提示、管理员角色与 AI 默认值下发 |
 | `web/settings.js` / `.css` | 服务设置弹窗（`window.Settings`）：管理员登录、SVN 认证路径与测试、仓库映射增删、AI 助手默认值、管理员改密；保存走 `PUT /__config` 热应用 |
@@ -70,8 +71,8 @@ python setup_docsify.py                 # 完整构建（依赖已存在时全�
 python setup_docsify.py --index-only    # 仅重建搜索索引与离线数据
 python setup_docsify.py --title "我的文档"
 python setup_docsify.py --offline       # 严格离线：依赖缺失时报错，不尝试下载
-python serve.py                         # 只读预览 http://localhost:3000（无写接口）
-python serve.py --config config/server.local.json   # 认证编辑服务（需 pip install -r server/requirements.txt）
+python serve.py                         # 默认认证编辑服务（需 pip install -r server/requirements.txt）
+python serve.py --preview               # 只读预览 http://localhost:3000（无写接口）
 python -m unittest discover -s tests -v
 node --test tests/test_search.js
 node --test tests/test_packetdiag.js
@@ -114,6 +115,8 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - `--svn-command` 支持带空格的路径（Windows 用双引号包住）；测试用假 svn 可执行文件注入，真实认证需要能连通的强制认证 SVN 路径。
 - 本地管理员默认 `admin / admin`（PBKDF2 存库）：仅用于网页「设置」；部署后必须尽快改密。修改 SVN 认证路径只失效 SVN 用户会话，管理员会话保留。
 - `PUT /__config` 为热应用：校验 → 原子写配置文件 → 原地更新内存配置 → 重建认证源摘要；AI 默认值（含 Key）只下发给已登录用户，匿名会话不下发。
+- 草稿保存必须带 `expectedVersion`（或 `baseHash`）；版本不符返回 409 且不回写任何文件——不要恢复“再次保存强制覆盖”。
+- 服务默认按认证模式启动（`--preview` 才是只读预览）；缺少 Flask/Waitress 时给出安装提示，不静默回退匿名写。
 - 搜索的排除词语法为 `-词`，短语为 `"词 组"`；改动 `parseQuery` 时注意与 UI 提示保持一致。
 
 ## 完成前检查清单

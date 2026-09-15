@@ -11,13 +11,18 @@ from pathlib import Path
 from flask import Flask, jsonify, make_response, request, send_from_directory
 
 from . import config as server_config
-from . import database
+from . import database, drafts
 from .auth import AuthError
 from .config import authenticated_config, config_to_json, public_config, save_config
+from .documents import MdSaveError
 from .paths import is_blocked_static_path
 
+
+def server_documents_error():
+    return MdSaveError
+
 COOKIE_NAME = "md2web_session"
-FEATURES = {"editDraft": False, "svnCommit": False, "localPublish": False}
+FEATURES = {"editDraft": True, "svnCommit": False, "localPublish": False}
 MAX_BODY = 2 * 1024 * 1024
 
 
@@ -33,8 +38,10 @@ def create_app(config, conn, auth_service, docs_dir):
     def current_session():
         return auth_service.resolve(request.cookies.get(COOKIE_NAME) or "")
 
-    def json_error(status, code, message):
-        response = jsonify({"ok": False, "code": code, "error": message})
+    def json_error(status, code, message, **extra):
+        payload = {"ok": False, "code": code, "error": message}
+        payload.update(extra)
+        response = jsonify(payload)
         response.status_code = status
         return response
 
@@ -230,7 +237,136 @@ def create_app(config, conn, auth_service, docs_dir):
             "旧的无版本保存接口已停用：请使用草稿接口（阶段二）或提交 SVN（阶段三）",
         )
 
-    @app.route("/__md/draft", methods=["PUT", "POST"])
+    # ---- 阶段二：个人草稿与版本历史 ----
+
+    def md_dir():
+        return docs_root / "md"
+
+    def require_csrf_header(session):
+        return require_csrf(session)
+
+    @app.get("/__md/document")
+    def read_document():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        path = request.args.get("path") or ""
+        binding = server_config.match_repository(config, path)
+        try:
+            state = drafts.document_state(conn, session["user"]["id"], md_dir(), path, binding)
+        except server_documents_error() as error:
+            return json_error(error.status, "invalid_path", error.message)
+        return jsonify({"ok": True, "document": state})
+
+    @app.put("/__md/draft")
+    def put_draft():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        binding = server_config.match_repository(config, payload.get("path") or "")
+        try:
+            result = drafts.save_draft(
+                conn,
+                session["user"]["id"],
+                md_dir(),
+                payload.get("path"),
+                payload.get("content"),
+                expected_version=payload.get("expectedVersion"),
+                binding_id=binding_row_id(binding),
+            )
+        except drafts.DraftError as error:
+            return json_error(error.status, "draft_conflict" if error.status == 409 else "draft_error",
+                              error.message, **error.extra)
+        return jsonify({"ok": True, **result})
+
+    @app.get("/__md/revision")
+    def read_revision():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        try:
+            revision_id = int(request.args.get("id") or 0)
+        except (TypeError, ValueError):
+            return json_error(400, "invalid_request", "缺少有效的版本 id")
+        revision = drafts.get_revision(conn, session["user"]["id"], revision_id)
+        if revision is None:
+            return json_error(404, "not_found", "版本不存在或无权访问")
+        return jsonify({"ok": True, "revision": {
+            "id": revision["id"],
+            "content": revision["content"],
+            "hash": revision["after_hash"],
+            "createdAt": revision["created_at"],
+            "baseRevision": revision["base_svn_revision"],
+        }})
+
+    @app.get("/__md/history")
+    def read_history():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        try:
+            history = drafts.list_history(conn, session["user"]["id"], md_dir(), request.args.get("path") or "")
+        except server_documents_error() as error:
+            return json_error(error.status, "invalid_path", error.message)
+        return jsonify({"ok": True, "history": history})
+
+    @app.get("/__md/diff")
+    def read_diff():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        try:
+            result = drafts.diff_documents(
+                conn,
+                session["user"]["id"],
+                md_dir(),
+                request.args.get("path") or "",
+                request.args.get("from"),
+                request.args.get("to"),
+            )
+        except drafts.DraftError as error:
+            return json_error(error.status, "diff_error", error.message)
+        except server_documents_error() as error:
+            return json_error(error.status, "invalid_path", error.message)
+        return jsonify({"ok": True, "diff": result})
+
+    @app.post("/__md/discard")
+    def discard_draft():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        try:
+            result = drafts.discard_draft(conn, session["user"]["id"], payload.get("path"))
+        except drafts.DraftError as error:
+            return json_error(error.status, "draft_error", error.message)
+        except server_documents_error() as error:
+            return json_error(error.status, "invalid_path", error.message)
+        return jsonify({"ok": True, **result})
+
+    def binding_row_id(binding):
+        """把配置中的仓库映射登记到 repo_bindings（阶段三提交时使用）。"""
+        if not binding:
+            return None
+        row = conn.execute("SELECT id FROM repo_bindings WHERE mount_path = ?", (binding["mount"],)).fetchone()
+        if row is not None:
+            return row["id"]
+        with conn:
+            cursor = conn.execute(
+                "INSERT INTO repo_bindings (repository_id, mount_path, credential_group, config_version,"
+                " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (binding["id"], binding["mount"], binding["credential_group"],
+                 str(config.get("path", "")), database.now_iso(), database.now_iso()),
+            )
+        return cursor.lastrowid
+
     @app.route("/__md/publish", methods=["POST"])
     @app.route("/__svn/prepare", methods=["POST"])
     @app.route("/__svn/commit", methods=["POST"])

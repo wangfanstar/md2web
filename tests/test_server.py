@@ -23,6 +23,7 @@ def load_module(name, filename):
 
 server_package = __import__("server")
 from server import auth as server_auth  # noqa: E402
+from server import drafts as server_drafts  # noqa: E402
 from server import config as server_config  # noqa: E402
 from server import database as server_database  # noqa: E402
 from server import documents as server_documents  # noqa: E402
@@ -490,13 +491,17 @@ class AppTests(ServerTestBase):
         payload = response.get_json()
         self.assertTrue(payload["ok"])
         self.assertFalse(payload["authenticated"])
-        self.assertFalse(payload["features"]["editDraft"])
+        self.assertTrue(payload["features"]["editDraft"])
         self.assertEqual(payload["site"]["repositories"][0]["id"], "hardware")
 
     def test_anonymous_writes_are_rejected(self):
-        for path in ("/__md/save", "/__md/draft", "/__svn/commit"):
+        for path in ("/__md/save", "/__svn/commit"):
             response = self.client.post(path, json={"path": "md/a.md", "content": "x"})
             self.assertEqual(response.status_code, 401, path)
+        response = self.client.put("/__md/draft", json={"path": "md/a.md", "content": "x"})
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(self.client.get("/__md/document?path=md/a.md").status_code, 401)
+        self.assertEqual(self.client.get("/__md/history?path=md/a.md").status_code, 401)
 
     def test_legacy_save_requires_login_then_reports_retired(self):
         csrf = self.login()
@@ -513,15 +518,17 @@ class AppTests(ServerTestBase):
         self.assertEqual(payload["user"]["username"], "alice")
         self.assertTrue(payload["csrfToken"])
 
-    def test_draft_requires_csrf_then_reports_phase_two(self):
+    def test_draft_requires_csrf_then_saves(self):
+        (self.docs / "md" / "a.md").write_text("# A\n", encoding="utf-8")
         self.login()
         response = self.client.put("/__md/draft", json={"path": "md/a.md", "content": "x"})
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.get_json()["code"], "csrf_failed")
         csrf = self.client.get("/__auth/session").get_json()["csrfToken"]
-        response = self.client.put("/__md/draft", json={"path": "md/a.md", "content": "x"},
+        response = self.client.put("/__md/draft", json={"path": "md/a.md", "content": "# A\n\n草稿\n"},
                                    headers={"X-CSRF-Token": csrf})
-        self.assertEqual(response.status_code, 501)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.get_json()["version"], 1)
 
     def test_logout_revokes_and_blocks_writes(self):
         csrf = self.login()
@@ -711,6 +718,149 @@ class ConfigFileTests(ServerTestBase):
         again = server_config.config_to_json(loaded)
         self.assertEqual(again["repositories"][0]["mount"], "md/硬件设计")
         self.assertEqual(again["storage"]["database"], "../data/md2web.sqlite3")
+
+
+class DraftTests(ServerTestBase):
+    def setUp(self):
+        super().setUp()
+        self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
+        server_database.migrate(self.conn)
+        self.md_dir = self.docs / "md"
+        (self.md_dir / "a.md").write_text("# A\n\n已发布内容\n", encoding="utf-8")
+        with self.conn:
+            cursor = self.conn.execute(
+                "INSERT INTO users (auth_source_id, svn_username, display_name, role, created_at)"
+                " VALUES ('src', 'alice', 'alice', 'user', 't')"
+            )
+            self.alice = cursor.lastrowid
+            cursor = self.conn.execute(
+                "INSERT INTO users (auth_source_id, svn_username, display_name, role, created_at)"
+                " VALUES ('src', 'bob', 'bob', 'user', 't')"
+            )
+            self.bob = cursor.lastrowid
+
+    def tearDown(self):
+        self.conn.close()
+        super().tearDown()
+
+    def test_save_draft_creates_version_and_history(self):
+        first = server_drafts.save_draft(self.conn, self.alice, self.md_dir, "md/a.md", "# A\n\n草稿一\n", expected_version=0)
+        self.assertEqual(first["version"], 1)
+        self.assertIsNotNone(first["revisionId"])
+        second = server_drafts.save_draft(self.conn, self.alice, self.md_dir, "md/a.md", "# A\n\n草稿二\n", expected_version=1)
+        self.assertEqual(second["version"], 2)
+        history = server_drafts.list_history(self.conn, self.alice, self.md_dir, "md/a.md")
+        self.assertEqual(len(history["revisions"]), 2)
+        self.assertTrue(history["revisions"][0]["isHead"])
+
+    def test_save_draft_conflict_returns_409_with_current(self):
+        server_drafts.save_draft(self.conn, self.alice, self.md_dir, "md/a.md", "# A\n\n草稿一\n", expected_version=0)
+        with self.assertRaises(server_drafts.DraftError) as ctx:
+            server_drafts.save_draft(self.conn, self.alice, self.md_dir, "md/a.md", "# B\n", expected_version=0)
+        self.assertEqual(ctx.exception.status, 409)
+        self.assertEqual(ctx.exception.extra.get("currentVersion"), 1)
+        self.assertIn("草稿一", ctx.exception.extra.get("currentContent") or "")
+
+    def test_draft_is_private_per_user(self):
+        server_drafts.save_draft(self.conn, self.alice, self.md_dir, "md/a.md", "# A\n\nAlice 草稿\n", expected_version=0)
+        bob_state = server_drafts.document_state(self.conn, self.bob, self.md_dir, "md/a.md")
+        self.assertIsNone(bob_state["draft"])
+        self.assertEqual(bob_state["published"]["text"].replace("\r\n", "\n"), "# A\n\n已发布内容\n")
+        self.assertIsNone(server_drafts.get_revision(self.conn, self.bob, 1))
+        alice_state = server_drafts.document_state(self.conn, self.alice, self.md_dir, "md/a.md")
+        self.assertIn("Alice 草稿", alice_state["draft"]["content"])
+
+    def test_published_file_not_changed_by_draft(self):
+        server_drafts.save_draft(self.conn, self.alice, self.md_dir, "md/a.md", "# A\n\n草稿\n", expected_version=0)
+        self.assertEqual((self.md_dir / "a.md").read_text(encoding="utf-8"), "# A\n\n已发布内容\n")
+
+    def test_diff_between_published_and_draft(self):
+        server_drafts.save_draft(self.conn, self.alice, self.md_dir, "md/a.md", "# A\n\n草稿\n", expected_version=0)
+        result = server_drafts.diff_documents(self.conn, self.alice, self.md_dir, "md/a.md", "published", "draft")
+        self.assertIn("-已发布内容", result["diff"])
+        self.assertIn("+草稿", result["diff"])
+        same = server_drafts.diff_documents(self.conn, self.alice, self.md_dir, "md/a.md", "published", "published")
+        self.assertTrue(same["identical"])
+
+    def test_discard_draft_keeps_history(self):
+        server_drafts.save_draft(self.conn, self.alice, self.md_dir, "md/a.md", "# A\n\n草稿\n", expected_version=0)
+        server_drafts.discard_draft(self.conn, self.alice, "md/a.md")
+        state = server_drafts.document_state(self.conn, self.alice, self.md_dir, "md/a.md")
+        self.assertIsNone(state["draft"])
+        history = server_drafts.list_history(self.conn, self.alice, self.md_dir, "md/a.md")
+        self.assertEqual(len(history["revisions"]), 1)
+
+    def test_draft_rejects_illegal_path(self):
+        for bad in ("../a.md", "README.md", "md/a.txt"):
+            with self.assertRaises(server_documents.MdSaveError, msg=bad):
+                server_drafts.save_draft(self.conn, self.alice, self.md_dir, bad, "x", expected_version=0)
+
+
+class DraftApiTests(ServerTestBase):
+    def setUp(self):
+        super().setUp()
+        self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
+        server_database.migrate(self.conn)
+        self.config = server_config.load_config(self.write_config(), self.docs)
+        self.svn = FakeSvn()
+        self.auth = server_auth.AuthService(self.conn, self.svn, self.config)
+        self.auth.on_startup()
+        from server.app import create_app
+        self.app = create_app(self.config, self.conn, self.auth, self.docs)
+        self.client = self.app.test_client()
+        (self.docs / "md" / "a.md").write_text("# A\n\n已发布\n", encoding="utf-8")
+        self.client.post("/__auth/login", json={"username": "alice", "password": "good"})
+        self.csrf = self.client.get("/__auth/session").get_json()["csrfToken"]
+
+    def tearDown(self):
+        self.conn.close()
+        super().tearDown()
+
+    def test_document_endpoint_returns_published_and_draft(self):
+        target = self.docs / "md" / "硬件设计"
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "a.md").write_text("# A\n\n已发布\n", encoding="utf-8")
+        path = "md/硬件设计/a.md"
+        payload = self.client.get("/__md/document?path=" + path).get_json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("已发布", payload["document"]["published"]["text"])
+        self.assertIsNone(payload["document"]["draft"])
+        self.assertEqual(payload["document"]["binding"]["id"], "hardware")
+        self.client.put("/__md/draft", json={"path": path, "content": "# A\n\n草稿\n", "expectedVersion": 0},
+                        headers={"X-CSRF-Token": self.csrf})
+        payload = self.client.get("/__md/document?path=" + path).get_json()
+        self.assertEqual(payload["document"]["draft"]["version"], 1)
+        self.assertIn("草稿", payload["document"]["draft"]["content"])
+
+    def test_draft_conflict_over_api(self):
+        headers = {"X-CSRF-Token": self.csrf}
+        self.client.put("/__md/draft", json={"path": "md/a.md", "content": "v1", "expectedVersion": 0}, headers=headers)
+        response = self.client.put("/__md/draft", json={"path": "md/a.md", "content": "v2", "expectedVersion": 0}, headers=headers)
+        self.assertEqual(response.status_code, 409)
+        payload = response.get_json()
+        self.assertEqual(payload["code"], "draft_conflict")
+        self.assertEqual(payload["currentVersion"], 1)
+        self.assertEqual(payload["currentContent"], "v1")
+
+    def test_history_and_diff_over_api(self):
+        headers = {"X-CSRF-Token": self.csrf}
+        self.client.put("/__md/draft", json={"path": "md/a.md", "content": "# A\n\n第一版\n", "expectedVersion": 0}, headers=headers)
+        self.client.put("/__md/draft", json={"path": "md/a.md", "content": "# A\n\n第二版\n", "expectedVersion": 1}, headers=headers)
+        history = self.client.get("/__md/history?path=md/a.md").get_json()["history"]
+        self.assertEqual(len(history["revisions"]), 2)
+        diff = self.client.get("/__md/diff?path=md/a.md&from=published&to=draft").get_json()["diff"]
+        self.assertIn("+第二版", diff["diff"])
+        older = history["revisions"][-1]["id"]
+        diff2 = self.client.get(f"/__md/diff?path=md/a.md&from={older}&to=draft").get_json()["diff"]
+        self.assertIn("-第一版", diff2["diff"])
+        self.assertIn("+第二版", diff2["diff"])
+
+    def test_discard_endpoint(self):
+        headers = {"X-CSRF-Token": self.csrf}
+        self.client.put("/__md/draft", json={"path": "md/a.md", "content": "x", "expectedVersion": 0}, headers=headers)
+        response = self.client.post("/__md/discard", json={"path": "md/a.md"}, headers=headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(self.client.get("/__md/document?path=md/a.md").get_json()["document"]["draft"])
 
 
 class PathsTests(unittest.TestCase):

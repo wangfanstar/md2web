@@ -28,7 +28,19 @@ body { color: var(--workspace-ink); background: #f7f9fb; }
 .workspace-breadcrumb a:hover { color: var(--workspace-accent); }
 .workspace-breadcrumb [aria-current="page"] { color: var(--workspace-ink); font-weight: 600; }
 .workspace-breadcrumb-sep { color: #b2bdc9; }
-.workspace-page-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin: -31px 0 15px; }
+.workspace-page-actions {
+  background: rgba(255, 255, 255, .97);
+  border-bottom: 1px solid #eef2f6;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  margin: 0 0 9px;
+  padding: 6px 0;
+  position: sticky;
+  top: 0;
+  z-index: 950;
+}
 .workspace-wide .markdown-section { max-width: none; }
 .workspace-wide .content { right: 0 !important; }
 .workspace-wide .docs-page-toc { display: none; }
@@ -621,4 +633,100 @@ body.media-viewer-open {
 
 body.md-editor-open {
   overflow: hidden;
+}
+
+.md-editor-binding {
+  color: var(--workspace-muted);
+  font-size: 11px;
+}
+
+.md-editor-panels {
+  background: #fff;
+  border-top: 1px solid var(--workspace-line);
+  max-height: 40vh;
+  overflow: auto;
+  padding: 8px 12px 10px;
+}
+
+.md-editor-panels-head {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.md-editor-panels-head strong {
+  color: var(--workspace-ink);
+  font-size: 12px;
+}
+
+.md-editor-panels-head button {
+  background: #fff;
+  border: 1px solid #d5dee8;
+  border-radius: 5px;
+  color: #506174;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 9px;
+}
+
+.md-editor-panels-head button:hover {
+  border-color: var(--workspace-accent);
+  color: var(--workspace-accent);
+}
+
+.md-editor-diff pre {
+  background: #0f172a;
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-family: var(--workspace-mono);
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 0;
+  max-height: 32vh;
+  overflow: auto;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+}
+
+.md-editor-history-list {
+  color: #475569;
+  font-size: 12px;
+}
+
+.md-editor-history-row {
+  align-items: center;
+  border-bottom: 1px dashed #eef2f6;
+  display: flex;
+  gap: 8px;
+  padding: 5px 0;
+}
+
+.md-editor-history-title {
+  flex: 1;
+  font-family: var(--workspace-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.md-editor-history-size {
+  color: #94a3b8;
+}
+
+.md-editor-history-row button {
+  background: #fff;
+  border: 1px solid #d5dee8;
+  border-radius: 5px;
+  color: #506174;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 8px;
+}
+
+.md-editor-history-row button:hover {
+  border-color: var(--workspace-accent);
+  color: var(--workspace-accent);
 }

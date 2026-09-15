@@ -17,6 +17,10 @@
     original: '',
     baseHash: null,
     fileHandle: null,
+    draftVersion: 0,
+    document: null,
+    binding: null,
+    conflict: null,
     lastFocus: null,
     split: 50,
     dragging: false,
@@ -176,37 +180,60 @@
   }
 
   // 阶段一：登录后保存个人草稿（接口在阶段二实现，501 时给出明确提示）
+  function authApi(path, options) {
+    var headers = Object.assign({ 'Content-Type': 'application/json' }, (options && options.headers) || {});
+    if (window.SiteAuth && window.SiteAuth.csrfToken()) {
+      headers['X-CSRF-Token'] = window.SiteAuth.csrfToken();
+    }
+    return fetch(path, Object.assign({}, options, { headers: headers })).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (payload) {
+        if (!response.ok || payload.ok === false) {
+          var error = new Error(payload.error || ('HTTP ' + response.status));
+          error.status = response.status;
+          error.payload = payload;
+          throw error;
+        }
+        return payload;
+      });
+    });
+  }
+
+  // 登录后：从服务端读取编辑基线（已发布内容 + 个人草稿）
+  function loadDocumentFromServer() {
+    return authApi('__md/document?path=' + encodeURIComponent(state.resource)).then(function (payload) {
+      var doc = payload.document || {};
+      state.document = doc;
+      state.baseHash = (doc.published && doc.published.hash) || null;
+      state.binding = doc.binding || null;
+      state.original = doc.draft ? doc.draft.content : (doc.published ? doc.published.text : '');
+      state.draftVersion = doc.draft ? doc.draft.version : 0;
+      state.textarea.value = state.original;
+      updateBindingLabel();
+      afterContentChanged(true);
+      setStatus(doc.draft
+        ? '已载入个人草稿 v' + doc.draft.version + '（未提交 SVN）'
+        : '已载入已发布版本');
+      return doc;
+    });
+  }
+
   function saveDraft() {
-    var text = state.textarea.value;
+    var content = state.textarea.value;
     setStatus('正在保存草稿…');
-    return fetch('__md/draft', {
+    return authApi('__md/draft', {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': (window.SiteAuth && window.SiteAuth.csrfToken()) || ''
-      },
       body: JSON.stringify({
         path: state.resource,
-        content: text,
+        content: content,
         expectedVersion: state.draftVersion || 0,
         baseHash: state.baseHash
       })
-    }).then(function (response) {
-      return response.json().catch(function () { return {}; }).then(function (payload) {
-        if (response.ok && payload.ok) {
-          state.original = text;
-          state.draftVersion = payload.version || (state.draftVersion || 0) + 1;
-          if (payload.hash) {
-            state.baseHash = payload.hash;
-          }
-          refreshModifiedState();
-          setStatus('已保存个人草稿（版本 ' + state.draftVersion + '）');
-          return true;
-        }
-        var error = new Error(payload.error || ('HTTP ' + response.status));
-        error.status = response.status;
-        throw error;
-      });
+    }).then(function (payload) {
+      state.original = content;
+      state.draftVersion = payload.version;
+      refreshModifiedState();
+      setStatus('已保存个人草稿 v' + payload.version + '（尚未提交 SVN）');
+      return payload;
     });
   }
 
@@ -219,11 +246,9 @@
           return;
         }
         if (error.status === 409) {
-          setStatus('草稿版本冲突：' + error.message + '（不会静默覆盖，请重新加载或另存）');
-          return;
-        }
-        if (error.status === 501) {
-          setStatus('草稿接口将在阶段二启用；当前可先「下载 MD」或由本地 SVN 客户端提交');
+          state.conflict = error.payload || {};
+          showDiffPanel('草稿版本冲突：' + error.message + '\n可点「载入最新」放弃本地修改，或点「差异」比对后手动合并。');
+          setStatus('草稿版本冲突（不会静默覆盖）：请查看差异后处理');
           return;
         }
         setStatus('保存失败：' + error.message);
@@ -239,6 +264,153 @@
     }
     saveToFile(false);
   }
+
+  // ---------- 版本历史与差异 ----------
+
+  function updateBindingLabel() {
+    var el = state.overlay && state.overlay.querySelector('[data-editor-binding]');
+    if (!el) {
+      return;
+    }
+    if (!authAvailable()) {
+      el.textContent = '未登录（只读）';
+      return;
+    }
+    el.textContent = state.binding
+      ? '目标库 ' + state.binding.id + ' · ' + state.binding.mount
+      : '未关联 SVN';
+  }
+
+  function ensurePanels() {
+    return state.overlay ? state.overlay.querySelector('[data-editor-panels]') : null;
+  }
+
+  function showDiffPanel(text, title) {
+    var panels = ensurePanels();
+    if (!panels) {
+      return;
+    }
+    panels.hidden = false;
+    panels.querySelector('[data-editor-panels-title]').textContent = title || '版本差异';
+    panels.querySelector('[data-editor-history-list]').hidden = true;
+    var area = panels.querySelector('[data-editor-diff]');
+    area.hidden = false;
+    area.querySelector('pre').textContent = text || '（无差异）';
+  }
+
+  function showHistoryPanel() {
+    var panels = ensurePanels();
+    if (!panels) {
+      return Promise.resolve();
+    }
+    panels.hidden = false;
+    panels.querySelector('[data-editor-panels-title]').textContent = '修改历史（个人草稿）';
+    panels.querySelector('[data-editor-diff]').hidden = true;
+    var list = panels.querySelector('[data-editor-history-list]');
+    list.hidden = false;
+    list.textContent = '正在读取历史…';
+    return authApi('__md/history?path=' + encodeURIComponent(state.resource)).then(function (payload) {
+      var revisions = (payload.history && payload.history.revisions) || [];
+      if (!revisions.length) {
+        list.textContent = '还没有草稿版本：Ctrl+S 保存一次草稿后即可看到历史。';
+        return;
+      }
+      list.innerHTML = revisions.map(function (item) {
+        var date = String(item.createdAt || '').replace('T', ' ').slice(0, 19);
+        return '<div class="md-editor-history-row">'
+          + '<span class="md-editor-history-title">#' + item.id + (item.isHead ? '（当前）' : '')
+          + ' · v' + item.draftVersion + ' · ' + escapeHtml(date) + '</span>'
+          + '<span class="md-editor-history-size">' + Math.round((item.size || 0) / 1024) + ' KB</span>'
+          + '<button type="button" data-editor-action="load-revision" data-revision="' + item.id + '">载入</button>'
+          + '<button type="button" data-editor-action="diff-revision" data-revision="' + item.id + '">与当前比对</button>'
+          + '</div>';
+      }).join('');
+    }).catch(function (error) {
+      list.textContent = '读取历史失败：' + error.message;
+    });
+  }
+
+  function diffWith(reference) {
+    setStatus('正在生成差异…');
+    return authApi('__md/diff?path=' + encodeURIComponent(state.resource)
+      + '&from=' + encodeURIComponent(reference) + '&to=draft').then(function (payload) {
+      var diff = payload.diff || {};
+      var header = diff.from && diff.to ? diff.from.label + ' → ' + diff.to.label + '\n\n' : '';
+      showDiffPanel(header + (diff.diff || ''), '版本差异');
+      setStatus(diff.identical ? '内容一致，没有差异' : '');
+    }).catch(function (error) {
+      showDiffPanel('生成差异失败：' + error.message);
+    });
+  }
+
+  function loadRevisionContent(revisionId) {
+    return authApi('__md/revision?id=' + encodeURIComponent(revisionId)).then(function (payload) {
+      state.textarea.value = payload.revision.content;
+      setStatus('已载入版本 #' + revisionId + '（未保存；Ctrl+S 会另存为新版本）');
+      afterContentChanged(true);
+    }).catch(function (error) {
+      setStatus('载入版本失败：' + error.message);
+    });
+  }
+
+  function discardDraft() {
+    if (!window.confirm('放弃当前草稿并回到已发布版本？（历史版本仍保留）')) {
+      return;
+    }
+    authApi('__md/discard', { method: 'POST', body: JSON.stringify({ path: state.resource }) }).then(function () {
+      setStatus('已放弃草稿，正在重新载入已发布版本…');
+      var panels = ensurePanels();
+      if (panels) {
+        panels.hidden = true;
+      }
+      return loadDocumentFromServer();
+    }).catch(function (error) {
+      setStatus('放弃草稿失败：' + error.message);
+    });
+  }
+
+  function handlePanelAction(target, action) {
+    if (action === 'history') {
+      showHistoryPanel();
+      return true;
+    }
+    if (action === 'diff') {
+      diffWith('published');
+      return true;
+    }
+    if (action === 'load-latest') {
+      if (!isModified() || window.confirm('放弃本地修改并载入最新草稿/已发布版本？')) {
+        loadDocumentFromServer().catch(function (error) {
+          setStatus('载入失败：' + error.message);
+        });
+      }
+      return true;
+    }
+    if (action === 'discard-draft') {
+      discardDraft();
+      return true;
+    }
+    if (action === 'panels-close') {
+      var panels = ensurePanels();
+      if (panels) {
+        panels.hidden = true;
+      }
+      return true;
+    }
+    if (action === 'load-revision') {
+      var revisionId = target.getAttribute('data-revision');
+      if (!isModified() || window.confirm('用该版本覆盖编辑器内容？（未保存修改将丢失）')) {
+        loadRevisionContent(revisionId);
+      }
+      return true;
+    }
+    if (action === 'diff-revision') {
+      diffWith(target.getAttribute('data-revision'));
+      return true;
+    }
+    return false;
+  }
+
 
   function reloadSource() {
     if (isModified() && !window.confirm('放弃本地修改并重新加载源文件？')) {
@@ -852,6 +1024,9 @@
         close();
         return;
       }
+      if (handlePanelAction(target, action)) {
+        return;
+      }
       if (action) {
         applyAction(action);
       }
@@ -933,6 +1108,10 @@
       '<header class="md-editor-head">',
       '<strong class="md-editor-title" data-editor-title></strong>',
       '<span class="md-editor-mode" data-editor-mode></span>',
+      '<span class="md-editor-binding" data-editor-binding></span>',
+      '<button type="button" data-editor-action="history">历史</button>',
+      '<button type="button" data-editor-action="diff">差异</button>',
+      '<button type="button" data-editor-action="load-latest">载入最新</button>',
       '<span class="md-editor-status" data-editor-status></span>',
       '<span class="md-editor-spacer"></span>',
       '<button type="button" data-editor-action="save">保存</button>',
@@ -953,6 +1132,16 @@
       '<div class="md-editor-pane md-editor-pane-preview">',
       '<div class="markdown-section md-editor-preview"></div>',
       '</div>',
+      '</div>',
+      '<div class="md-editor-panels" data-editor-panels hidden>',
+      '<div class="md-editor-panels-head">',
+      '<strong data-editor-panels-title>版本差异</strong>',
+      '<span class="md-editor-spacer"></span>',
+      '<button type="button" data-editor-action="discard-draft">放弃草稿</button>',
+      '<button type="button" data-editor-action="panels-close">关闭</button>',
+      '</div>',
+      '<div class="md-editor-diff" data-editor-diff hidden><pre></pre></div>',
+      '<div class="md-editor-history-list" data-editor-history-list hidden></div>',
       '</div>',
       '<div class="md-editor-help" hidden>',
       '<strong>快捷键</strong>',
@@ -1004,6 +1193,15 @@
     state.overlay.classList.add('is-open');
     document.body.classList.add('md-editor-open');
     state.overlay.focus();
+    updateBindingLabel();
+    if (authAvailable()) {
+      loadDocumentFromServer().then(function () {
+        state.textarea.focus();
+      }).catch(function (error) {
+        setStatus('读取服务端基线失败：' + message(error));
+      });
+      return;
+    }
     loadSource(state.resource).then(function (result) {
       state.resource = result.resource;
       state.titleEl.textContent = displayPath(state.resource);

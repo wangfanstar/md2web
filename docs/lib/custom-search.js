@@ -626,6 +626,43 @@
     return toc;
   }
 
+
+  var TOC_HIDDEN_KEY = 'md2web:hide-page-toc';
+
+  function setTocHidden(hidden) {
+    document.body.classList.toggle('hide-page-toc', !!hidden);
+    ensureTocRestoreChip();
+    try {
+      localStorage.setItem(TOC_HIDDEN_KEY, hidden ? '1' : '');
+    } catch (error) { /* 忽略隐私模式 */ }
+  }
+
+  function restoreTocPreference() {
+    try {
+      if (localStorage.getItem(TOC_HIDDEN_KEY) === '1') {
+        document.body.classList.add('hide-page-toc');
+      }
+    } catch (error) { /* 忽略 */ }
+    ensureTocRestoreChip();
+  }
+
+  function ensureTocRestoreChip() {
+    var existing = document.querySelector('.docs-page-toc-restore');
+    if (existing) {
+      return existing;
+    }
+    var chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'docs-page-toc-restore';
+    chip.title = '显示本文目录';
+    chip.textContent = '目录';
+    chip.addEventListener('click', function () {
+      setTocHidden(false);
+    });
+    document.body.appendChild(chip);
+    return chip;
+  }
+
   function buildPageToc() {
     var toc = ensurePageToc();
     if (!toc) {
@@ -653,7 +690,7 @@
     var base = currentRouteBase();
     var counters = { 2: 0, 3: 0, 4: 0 };
     toc.innerHTML = [
-      '<div class="docs-page-toc-title">' + escapeHtml(tocConfig.title || '本文目录') + '</div>',
+'<div class="docs-page-toc-title"><span>' + escapeHtml(tocConfig.title || '本文目录') + '</span><button type="button" class="docs-page-toc-hide" title="隐藏本文目录">隐藏</button></div>',
       '<div class="docs-page-toc-links">',
       headings.map(function (heading) {
         var level = parseInt(heading.tagName.slice(1), 10);
@@ -679,6 +716,12 @@
       }).join(''),
       '</div>'
     ].join('');
+    var tocHideButton = toc.querySelector('.docs-page-toc-hide');
+    if (tocHideButton) {
+      tocHideButton.addEventListener('click', function () {
+        setTocHidden(true);
+      });
+    }
     toc.classList.add('has-items');
   }
 
@@ -2074,6 +2117,7 @@
     document.addEventListener('click', handleFilePageTocClick);
     document.addEventListener('click', handleSearchResultClick);
     loadHistory();
+    restoreTocPreference();
     window.addEventListener('hashchange', scheduleReadingModeBuild);
     window.addEventListener('hashchange', function () {
       window.setTimeout(function () { installSidebarIcons(); }, 0);

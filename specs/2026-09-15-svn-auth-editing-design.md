@@ -9,7 +9,7 @@
 | 阶段 | 状态 | 落地内容 |
 |---|---|---|
 | 阶段一：认证与只读边界 | **已实现（见本次提交）** | `server/` 包（config/database/svn/auth/documents/app/paths/passwords）、`serve.py --config` 认证服务（配置缺失自动生成）、网页「设置」界面（管理员 admin/admin 可配置 SVN 认证路径/仓库映射/AI 助手/改密，热应用）、登录/退出/会话/CSRF、写接口守卫（匿名 401、旧 `/__md/save` 410、草稿/SVN 501）、静态白名单、前端 `auth.js`/`settings.js` 与 `sanitize.js` 净化、`tests/test_server.py` 59 项测试 |
-| 阶段二：草稿与修改记录 | 待实施 | `drafts/revisions` 表已建好；`/__md/draft` 当前返回 501 |
+| 阶段二：草稿与修改记录 | **已实现** | `server/drafts.py`、`/__md/document|draft|history|diff|revision|discard`、编辑器草稿模式（版本号 + 409 冲突不覆盖）、历史与差异面板；`tests/test_server.py` 覆盖并发与私有性 |
 | 阶段三：多库 SVN 操作与发布 | 待实施 | `repo_bindings/operations` 表与最长前缀匹配已就绪；`/__svn/*` 当前返回 501 |
 
 阶段一验收结论（本机假 SVN 集成测试）：匿名写请求 401；错误密码 401；认证路径允许匿名访问时登录被拒绝（503）；合法账号可登录且口令不落库（仅内存传参）；退出/重启/认证源变更后旧会话与旧写请求全部失败；编辑器预览对 `<script>`、事件属性与 `javascript:` 链接已净化。

@@ -524,6 +524,7 @@
         appendSources(hits);
         state.messages.push({ role: 'user', content: text });
         state.messages.push({ role: 'assistant', content: rendered });
+        persistMessages();
         setStatus('');
       });
     }).catch(function (error) {
@@ -550,6 +551,8 @@
       '<span class="ai-badge" data-ai-badge></span>',
       '<span class="ai-head-spacer"></span>',
       '<button type="button" data-ai-action="config" title="AI 配置">⚙ 配置</button>',
+      '<button type="button" data-ai-action="history">历史</button>',
+      '<button type="button" data-ai-action="newChat">新对话</button>',
       '<button type="button" data-ai-action="clear">清空</button>',
       '<button type="button" data-ai-action="close">关闭</button>',
       '</header>',
@@ -560,6 +563,12 @@
       '<button type="button" data-ai-quick="这篇文档讲了什么？">文档概览</button>',
       '<button type="button" data-ai-quick="解释选中的内容">解释选中</button>',
       '</div>',
+      '<div class="ai-upload-bar">',
+      '<label class="ai-upload-button">上传文档<input type="file" multiple accept=".md,.markdown,.txt" data-ai-file></label>',
+      '<div class="ai-upload-chips" data-ai-upload-chips></div>',
+      '<button type="button" class="ai-upload-clear" data-ai-action="uploadClear">清空上传</button>',
+      '</div>',
+      '<div class="ai-history" data-ai-history hidden></div>',
       '<div class="ai-compose">',
       '<textarea rows="2" placeholder="就文档内容提问（Ctrl+Enter 发送）" data-ai-input></textarea>',
       '<button type="button" data-ai-action="send">发送</button>',
@@ -595,6 +604,16 @@
       }
       if (action === 'config') {
         openConfig();
+      } else if (action === 'history') {
+        toggleHistory();
+      } else if (action === 'newChat') {
+        startConversation();
+      } else if (action === 'uploadClear') {
+        state.config.uploads = [];
+        persistConfig();
+        renderUploads();
+        renderScopeTree();
+        setStatus('已清空上传文档');
       } else if (action === 'close') {
         closePanel();
       } else if (action === 'send') {
@@ -602,7 +621,32 @@
       } else if (action === 'clear') {
         state.messages = [];
         state.messagesEl.innerHTML = '';
-        setStatus('');
+        var conversation = activeConversation();
+        if (conversation) {
+          conversation.messages = [];
+        }
+        saveHistoryStore();
+        renderHistory();
+        setStatus('已清空当前对话（历史记录保留）');
+      }
+    });
+    overlay.addEventListener('click', function (event) {
+      var historyId = event.target.getAttribute && event.target.getAttribute('data-ai-history-id');
+      var historyDelete = event.target.getAttribute && event.target.getAttribute('data-ai-history-delete');
+      if (historyDelete) {
+        deleteConversation(historyDelete);
+        return;
+      }
+      if (historyId) {
+        switchConversation(historyId);
+      }
+    });
+    overlay.addEventListener('change', function (event) {
+      var target = event.target;
+      var flag = target.getAttribute && target.getAttribute('data-ai-file');
+      if (flag !== null && flag !== undefined && target.type === 'file') {
+        addUploads(target.files);
+        target.value = '';
       }
     });
     state.inputEl.addEventListener('keydown', function (event) {
@@ -611,6 +655,156 @@
         ask(state.inputEl.value);
       }
     });
+  }
+
+  // ---------- 对话历史（本机 localStorage） ----------
+
+  var HISTORY_KEY = 'md2web:ai-conversations';
+  var HISTORY_LIMIT = 20;
+  var HISTORY_MESSAGES = 60;
+
+  function loadHistoryStore() {
+    try {
+      var parsed = JSON.parse(localStorage.getItem(HISTORY_KEY) || 'null');
+      if (parsed && Array.isArray(parsed.conversations)) {
+        return parsed;
+      }
+    } catch (error) { /* 忽略损坏数据 */ }
+    return { conversations: [], activeId: '' };
+  }
+
+  function saveHistoryStore() {
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify({
+        conversations: state.conversations.slice(-HISTORY_LIMIT),
+        activeId: state.activeId
+      }));
+    } catch (error) {
+      if (window.console && console.warn) {
+        console.warn('AI 对话历史保存失败（可能超出配额）', error);
+      }
+    }
+  }
+
+  function activeConversation() {
+    return state.conversations.filter(function (item) { return item.id === state.activeId; })[0] || null;
+  }
+
+  function ensureConversation() {
+    var current = activeConversation();
+    if (current) {
+      return current;
+    }
+    return startConversation();
+  }
+
+  function startConversation() {
+    var now = new Date().toISOString();
+    var conversation = { id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title: '新对话', createdAt: now, updatedAt: now, messages: [] };
+    state.conversations.push(conversation);
+    state.conversations = state.conversations.slice(-HISTORY_LIMIT);
+    state.activeId = conversation.id;
+    state.messages = conversation.messages;
+    saveHistoryStore();
+    if (state.messagesEl) {
+      state.messagesEl.innerHTML = '';
+    }
+    renderHistory();
+    setStatus('已开始新对话');
+    return conversation;
+  }
+
+  function persistMessages() {
+    var conversation = ensureConversation();
+    conversation.messages = state.messages.slice(-HISTORY_MESSAGES);
+    conversation.updatedAt = new Date().toISOString();
+    if (conversation.title === '新对话') {
+      var firstUser = state.messages.filter(function (item) { return item.role === 'user'; })[0];
+      if (firstUser) {
+        conversation.title = String(firstUser.content).slice(0, 24);
+      }
+    }
+    state.messages = conversation.messages;
+    saveHistoryStore();
+    renderHistory();
+  }
+
+  function switchConversation(id) {
+    var conversation = state.conversations.filter(function (item) { return item.id === id; })[0];
+    if (!conversation) {
+      return;
+    }
+    state.activeId = id;
+    state.messages = conversation.messages;
+    saveHistoryStore();
+    renderMessages();
+    renderHistory();
+    toggleHistory(false);
+  }
+
+  function deleteConversation(id) {
+    state.conversations = state.conversations.filter(function (item) { return item.id !== id; });
+    if (state.activeId === id) {
+      state.activeId = '';
+      state.messages = [];
+      ensureConversation();
+      renderMessages();
+    }
+    saveHistoryStore();
+    renderHistory();
+  }
+
+  function renderMessages() {
+    if (!state.messagesEl) {
+      return;
+    }
+    state.messagesEl.innerHTML = '';
+    state.messages.forEach(function (item) {
+      var bubble = document.createElement('div');
+      bubble.className = 'ai-message ai-message-' + item.role;
+      bubble.innerHTML = item.role === 'user'
+        ? escapeHtml(item.content).replace(/\n/g, '<br>')
+        : safeMarkdown(item.content);
+      state.messagesEl.appendChild(bubble);
+      if (item.role === 'assistant') {
+        enhance(bubble);
+      }
+    });
+    state.messagesEl.scrollTop = state.messagesEl.scrollHeight;
+  }
+
+  function renderHistory() {
+    if (!state.overlay) {
+      return;
+    }
+    var list = state.overlay.querySelector('[data-ai-history]');
+    if (!list) {
+      return;
+    }
+    if (!state.conversations.length) {
+      list.innerHTML = '<p class="ai-history-empty">暂无历史对话</p>';
+      return;
+    }
+    list.innerHTML = state.conversations.slice().reverse().map(function (item) {
+      var date = String(item.updatedAt || '').replace('T', ' ').slice(0, 16);
+      return '<div class="ai-history-item' + (item.id === state.activeId ? ' is-active' : '') + '" data-ai-history-id="' + escapeHtml(item.id) + '">'
+        + '<span class="ai-history-title">' + escapeHtml(item.title || '新对话') + '</span>'
+        + '<span class="ai-history-date">' + escapeHtml(date) + '</span>'
+        + '<button type="button" data-ai-history-delete="' + escapeHtml(item.id) + '" title="删除">×</button>'
+        + '</div>';
+    }).join('');
+  }
+
+  function toggleHistory(force) {
+    var list = state.overlay.querySelector('[data-ai-history]');
+    if (!list) {
+      return;
+    }
+    var show = typeof force === 'boolean' ? force : list.hidden;
+    list.hidden = !show;
+    if (show) {
+      renderHistory();
+    }
   }
 
   function updateBadge() {
@@ -627,6 +821,11 @@
     if (!state.overlay) {
       buildOverlay();
     }
+    ensureConversation();
+    state.messages = activeConversation().messages;
+    renderMessages();
+    renderUploads();
+    renderHistory();
     updateBadge();
     state.overlay.classList.add('is-open');
     if (!configured()) {
@@ -671,10 +870,6 @@
       '<div class="ai-scope">',
       '<div class="ai-scope-head"><strong>资料范围</strong><span>不勾选 = 使用全部文档</span><button type="button" data-ai-action="scopeAll">全选</button><button type="button" data-ai-action="scopeNone">全不选</button></div>',
       '<div class="ai-scope-tree" data-ai-scope-tree></div>',
-      '</div>',
-      '<div class="ai-uploads">',
-      '<div class="ai-scope-head"><strong>上传文档</strong><span>仅本机浏览器保存（.md/.markdown/.txt）</span><label class="ai-upload-button">选择文件<input type="file" multiple accept=".md,.markdown,.txt" data-ai-file></label><button type="button" data-ai-action="uploadClear">清空上传</button></div>',
-      '<div class="ai-uploads-list" data-ai-uploads></div>',
       '</div>',
       '<p class="ai-hint">Key 只存在浏览器 localStorage，不会写入仓库或服务端。跨域受限时可保持「自动」，请求会经本机 <code>serve.py</code> 的 <code>/__ai/chat</code> 代理（仅本机可调用）。离线 <code>file://</code> 模式只支持直连。勾选「资料范围」后，回答只依据所选文档/文件夹。</p>',
       '</div>',
@@ -756,20 +951,25 @@
   }
 
   function renderUploads() {
-    if (!state.configOverlay) {
-      return;
+    var hosts = [];
+    if (state.overlay) {
+      hosts.push(state.overlay.querySelector('[data-ai-upload-chips]'));
     }
-    var list = state.configOverlay.querySelector('[data-ai-uploads]');
     var uploads = state.config.uploads || [];
-    if (!uploads.length) {
-      list.textContent = '尚未上传文档';
-      return;
-    }
-    list.innerHTML = uploads.map(function (item, index) {
-      return '<span class="ai-upload-item"><span>' + escapeHtml(item.name) + '</span>'
-        + '<span class="ai-upload-size">' + Math.round(item.text.length / 1024) + ' KB</span>'
-        + '<button type="button" data-ai-upload-remove="' + index + '" title="移除">×</button></span>';
-    }).join('');
+    hosts.forEach(function (host) {
+      if (!host) {
+        return;
+      }
+      if (!uploads.length) {
+        host.innerHTML = '<span class="ai-upload-empty">未上传文档</span>';
+        return;
+      }
+      host.innerHTML = uploads.map(function (item, index) {
+        return '<span class="ai-upload-item"><span>' + escapeHtml(item.name) + '</span>'
+          + '<span class="ai-upload-size">' + Math.round(item.text.length / 1024) + ' KB</span>'
+          + '<button type="button" data-ai-upload-remove="' + index + '" title="移除">×</button></span>';
+      }).join('');
+    });
   }
 
   function addUploads(files) {
@@ -824,7 +1024,6 @@
       }
       if (removeIndex !== null && removeIndex !== undefined) {
         state.config.uploads.splice(Number(removeIndex), 1);
-        state.config.scope = [];
         persistConfig();
         renderUploads();
         renderScopeTree();
@@ -860,6 +1059,17 @@
         renderUploads();
         renderScopeTree();
         setStatus('已清空上传文档');
+      }
+    });
+    overlay.addEventListener('click', function (event) {
+      var historyId = event.target.getAttribute && event.target.getAttribute('data-ai-history-id');
+      var historyDelete = event.target.getAttribute && event.target.getAttribute('data-ai-history-delete');
+      if (historyDelete) {
+        deleteConversation(historyDelete);
+        return;
+      }
+      if (historyId) {
+        switchConversation(historyId);
       }
     });
     overlay.addEventListener('change', function (event) {
@@ -934,6 +1144,9 @@
 
   function init() {
     state.config = loadConfig();
+    var store = loadHistoryStore();
+    state.conversations = store.conversations;
+    state.activeId = store.activeId;
     var button = document.createElement('button');
     button.type = 'button';
     button.className = 'ai-assistant-button';
@@ -942,6 +1155,9 @@
     button.addEventListener('click', openPanel);
     document.body.appendChild(button);
     loadCorpus();
+    if (activeConversation()) {
+      state.messages = activeConversation().messages;
+    }
     document.addEventListener('siteauth:change', function () {
       state.config = loadConfig();
       updateBadge();

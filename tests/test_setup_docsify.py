@@ -372,6 +372,13 @@ class ServeTests(unittest.TestCase):
         self.assertFalse(serve.parse_args([]).no_build)
         self.assertTrue(serve.parse_args(["--no-build"]).no_build)
 
+    def test_parse_args_defaults_to_authenticated_service(self):
+        serve = load_module("serve", "serve.py")
+        args = serve.parse_args([])
+        self.assertFalse(args.preview)
+        self.assertEqual(args.config.name, "server.local.json")
+        self.assertTrue(serve.parse_args(["--preview"]).preview)
+
     def test_is_loopback_host(self):
         serve = load_module("serve", "serve.py")
         self.assertTrue(serve.is_loopback_host("127.0.0.1"))

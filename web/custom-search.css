@@ -910,3 +910,54 @@ mark.search-reading-mark {
 mark.search-reading-mark.is-current {
   background: #ffb84d;
 }
+
+body.hide-page-toc .docs-page-toc {
+  display: none;
+}
+
+body.hide-page-toc .content {
+  right: 0 !important;
+}
+
+.docs-page-toc-restore {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #dfe7ef;
+  border-radius: 999px 0 0 999px;
+  border-right: 0;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, .12);
+  color: var(--docs-muted, #6b7a8d);
+  cursor: pointer;
+  display: none;
+  font: inherit;
+  font-size: 11px;
+  gap: 4px;
+  padding: 6px 10px 6px 12px;
+  position: fixed;
+  right: 0;
+  top: 45%;
+  z-index: 960;
+}
+
+.docs-page-toc-restore:hover {
+  border-color: var(--docs-accent, #1f6feb);
+  color: var(--docs-accent, #1f6feb);
+}
+
+body.hide-page-toc .docs-page-toc-restore {
+  display: inline-flex;
+}
+
+.docs-page-toc-hide {
+  background: transparent;
+  border: 0;
+  color: var(--docs-muted, #6b7a8d);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 0 4px;
+}
+
+.docs-page-toc-hide:hover {
+  color: var(--docs-accent, #1f6feb);
+}

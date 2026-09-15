@@ -92,6 +92,7 @@
         <select id="pgPacketPreset" aria-label="示例模板"></select>
         <span class="pg-spacer"></span>
         <button type="button" id="pgPacketRender">渲染</button>
+        <button type="button" id="pgPacketCopy">复制源码</button>
         <button type="button" id="pgPacketDownload">下载 PNG</button>
       </div>
       <div class="pg-controls">
@@ -189,6 +190,7 @@
         <select id="pgMermaidType" aria-label="图形类型"></select>
         <span class="pg-spacer"></span>
         <button type="button" id="pgMermaidRender">渲染</button>
+        <button type="button" id="pgMermaidCopy">复制源码</button>
         <button type="button" id="pgMermaidSvg">下载 SVG</button>
         <button type="button" id="pgMermaidPng">下载 PNG</button>
       </div>
@@ -272,9 +274,41 @@
   });
 
   // ---------- PacketDiag ----------
+  function copyText(text, button, label) {
+    var original = button ? button.textContent : '';
+    function done(ok) {
+      if (!button) { return; }
+      button.textContent = ok ? '已复制' : '复制失败';
+      setTimeout(function () { button.textContent = original; }, 1500);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+      return;
+    }
+    var area = document.createElement('textarea');
+    area.value = text;
+    document.body.appendChild(area);
+    area.select();
+    try { done(document.execCommand('copy')); } catch (error) { done(false); }
+    area.remove();
+  }
+
   var packetSource = document.getElementById('pgPacketSource');
   var packetCanvas = document.getElementById('pgPacketCanvas');
   var packetError = document.getElementById('pgPacketError');
+  var packetCopyButton = document.getElementById('pgPacketCopy');
+  if (packetCopyButton) {
+    packetCopyButton.addEventListener('click', function () {
+      copyText(packetSource.value, packetCopyButton);
+    });
+  }
+  var mermaidCopyButton = document.getElementById('pgMermaidCopy');
+  if (mermaidCopyButton) {
+    mermaidCopyButton.addEventListener('click', function () {
+      var source = document.getElementById('pgMermaidSource');
+      copyText(source ? source.value : '', mermaidCopyButton);
+    });
+  }
   var packetPreset = document.getElementById('pgPacketPreset');
   var packetBitOrder = document.getElementById('pgPacketBitOrder');
   var packetNumbering = document.getElementById('pgPacketNumbering');

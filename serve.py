@@ -59,8 +59,12 @@ def parse_args(argv=None):
         help="不自动重建，直接预览现有产物",
     )
     parser.add_argument(
-        "--config", type=Path, default=None,
-        help="认证编辑服务配置（JSON）；不提供时为只读预览",
+        "--config", type=Path, default=ROOT / "config" / "server.local.json",
+        help="认证编辑服务配置（JSON），默认 config/server.local.json（缺失会自动生成）",
+    )
+    parser.add_argument(
+        "--preview", action="store_true",
+        help="只读预览模式（静态站点 + 自动重建 + 本机 AI 代理，写接口一律拒绝）",
     )
     parser.add_argument(
         "--pidfile", type=Path, default=DEFAULT_PIDFILE,
@@ -401,11 +405,18 @@ def make_server(directory, bind, port):
 
 def run_authenticated_service(args, directory):
     """按配置启动 Flask + Waitress 认证编辑服务。"""
-    from server import database
-    from server.app import create_app
-    from server.auth import AuthService
-    from server.config import ConfigError, default_config, load_config, save_config
-    from server.svn import SvnClient
+    try:
+        from server import database
+        from server.app import create_app
+        from server.auth import AuthService
+        from server.config import ConfigError, default_config, load_config, save_config
+        from server.svn import SvnClient
+    except ModuleNotFoundError as error:
+        raise SystemExit(
+            "错误: 认证编辑服务需要 Flask 与 Waitress（缺少 " + str(error.name) + "）。\n"
+            "  安装: python -m pip install -r server/requirements.txt\n"
+            "  离线只读预览: python serve.py --preview"
+        )
 
     config_path = Path(args.config)
     if not config_path.exists():
@@ -476,7 +487,7 @@ def main(argv=None):
     manage_instance(args.pidfile)
     write_pidfile(args.pidfile, os.getpid())
 
-    if args.config is not None:
+    if not args.preview:
         run_authenticated_service(args, directory)
         remove_pidfile(args.pidfile)
         return
@@ -491,7 +502,7 @@ def main(argv=None):
     server, port = make_server(directory, args.bind, args.port)
     print(f"预览目录: {directory}")
     print(f"本机访问: http://localhost:{port}")
-    print("模式: 只读预览（写接口已停用；认证编辑请使用 --config）")
+    print("模式: 只读预览（写接口已停用；认证编辑去掉 --preview 即可）")
     if not args.no_browser:
         timer = threading.Timer(0.5, webbrowser.open, args=(f"http://localhost:{port}",))
         timer.daemon = True
