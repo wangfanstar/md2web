@@ -238,9 +238,10 @@ class DatabaseTests(ServerTestBase):
 
 
 class FakeSvn:
-    def __init__(self, error=None, info=None):
+    def __init__(self, error=None, info=None, anonymous=False):
         self.error = error
         self.info = info or {"uuid": "u-1", "root_url": "https://svn.example.invalid/svn/accounts"}
+        self.anonymous = anonymous
         self.calls = []
 
     def verify_credentials(self, url, username, password):
@@ -248,6 +249,11 @@ class FakeSvn:
         if self.error:
             raise self.error
         return dict(self.info)
+
+    def anonymous_readable(self, url, config_dir):
+        if self.error and self.error.code in ("unreachable", "timeout", "cert_error"):
+            raise self.error
+        return self.anonymous
 
 
 class DocumentsTests(ServerTestBase):
@@ -550,6 +556,161 @@ class AppTests(ServerTestBase):
             self.assertEqual(self.client.get(blocked).status_code, 404, blocked)
         response = self.client.get("/md/a.md")
         self.assertEqual(response.headers.get("X-Content-Type-Options"), "nosniff")
+
+
+class AdminConfigTests(ServerTestBase):
+    def setUp(self):
+        super().setUp()
+        self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
+        server_database.migrate(self.conn)
+        server_database.ensure_admin(self.conn)
+        self.config = server_config.load_config(self.write_config(), self.docs)
+        self.svn = FakeSvn()
+        self.auth = server_auth.AuthService(self.conn, self.svn, self.config)
+        self.auth.on_startup()
+        from server.app import create_app
+        self.app = create_app(self.config, self.conn, self.auth, self.docs)
+        self.client = self.app.test_client()
+
+    def tearDown(self):
+        self.conn.close()
+        super().tearDown()
+
+    def admin_login(self):
+        response = self.client.post("/__auth/login", json={"username": "admin", "password": "admin", "mode": "admin"})
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        return response.get_json()["csrfToken"]
+
+    def test_schema_v2_adds_admin_columns_and_seed(self):
+        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(users)")}
+        self.assertIn("role", columns)
+        self.assertIn("password_hash", columns)
+        self.assertFalse(server_database.ensure_admin(self.conn))
+        row = self.conn.execute("SELECT * FROM users WHERE auth_source_id = 'local-admin'").fetchone()
+        self.assertEqual(row["role"], "admin")
+        self.assertTrue(row["password_hash"].startswith("pbkdf2_sha256$"))
+
+    def test_admin_login_and_role_in_session(self):
+        csrf = self.admin_login()
+        self.assertTrue(csrf)
+        payload = self.client.get("/__auth/session").get_json()
+        self.assertTrue(payload["authenticated"])
+        self.assertEqual(payload["user"]["role"], "admin")
+
+    def test_admin_login_rejects_wrong_password(self):
+        response = self.client.post("/__auth/login", json={"username": "admin", "password": "nope", "mode": "admin"})
+        self.assertEqual(response.status_code, 401)
+
+    def test_svn_login_reports_missing_auth_configuration(self):
+        empty = self.write_config({"auth": {"url": "", "credential_group": "engineering"}})
+        config = server_config.load_config(empty, self.docs, allow_incomplete=True)
+        service = server_auth.AuthService(self.conn, self.svn, config)
+        with self.assertRaises(server_auth.AuthError) as ctx:
+            service.login("alice", "good", "127.0.0.1")
+        self.assertEqual(ctx.exception.status, 503)
+        self.assertIn("尚未配置", str(ctx.exception))
+
+    def test_config_api_requires_admin(self):
+        self.assertEqual(self.client.get("/__config").status_code, 401)
+        self.client.post("/__auth/login", json={"username": "alice", "password": "good"})
+        response = self.client.get("/__config")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["code"], "admin_required")
+
+    def test_config_api_roundtrip_and_hot_apply(self):
+        svn_client = self.app.test_client()
+        svn_client.post("/__auth/login", json={"username": "alice", "password": "good"})
+        self.assertTrue(svn_client.get("/__auth/session").get_json()["authenticated"])
+        csrf = self.admin_login()
+        payload = self.client.get("/__config").get_json()["config"]
+        self.assertEqual(payload["auth"]["url"], self.config["auth"]["url"])
+        payload["auth"]["url"] = "https://svn.other.invalid/svn/accounts/auth-check/"
+        payload["ai"] = {"provider": "deepseek", "baseUrl": "https://api.deepseek.com/chat/completions",
+                         "model": "deepseek-chat", "apiKey": "sk-team", "useProxy": "auto", "contextChars": 5000}
+        response = self.client.put("/__config", json=payload, headers={"X-CSRF-Token": csrf})
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(self.config["auth"]["url"], "https://svn.other.invalid/svn/accounts/auth-check/")
+        on_disk = json.loads(Path(self.config["path"]).read_text(encoding="utf-8"))
+        self.assertEqual(on_disk["ai"]["model"], "deepseek-chat")
+        # 认证源变化必须让 SVN 用户旧会话失效；管理员会话保留以便继续配置
+        self.assertFalse(svn_client.get("/__auth/session").get_json()["authenticated"])
+        session = self.client.get("/__auth/session").get_json()
+        self.assertTrue(session["authenticated"])
+        self.assertEqual(session["site"]["ai"]["apiKey"], "sk-team")
+        self.assertEqual(session["site"]["authConfigured"], True)
+
+    def test_anonymous_session_hides_ai_key(self):
+        csrf = self.admin_login()
+        payload = self.client.get("/__config").get_json()["config"]
+        payload["ai"] = {"provider": "openai", "baseUrl": "https://api.example.com/v1/chat/completions",
+                         "model": "m", "apiKey": "sk-secret", "useProxy": "auto", "contextChars": 6000}
+        self.client.put("/__config", json=payload, headers={"X-CSRF-Token": csrf})
+        self.client.post("/__auth/logout", json={}, headers={"X-CSRF-Token": self.client.get("/__auth/session").get_json()["csrfToken"]})
+        site = self.client.get("/__auth/session").get_json()["site"]
+        self.assertNotIn("apiKey", site["ai"] or {})
+        self.assertFalse(site["authConfigured"] is None)
+
+    def test_config_api_rejects_invalid_payload(self):
+        csrf = self.admin_login()
+        payload = self.client.get("/__config").get_json()["config"]
+        payload["repositories"] = [{"id": "x", "mount": "md/x", "url": "file:///etc"}]
+        response = self.client.put("/__config", json=payload, headers={"X-CSRF-Token": csrf})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["code"], "config_invalid")
+
+    def test_config_api_requires_csrf(self):
+        self.admin_login()
+        response = self.client.put("/__config", json={})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["code"], "csrf_failed")
+
+    def test_test_auth_endpoint_accepts_protected_path(self):
+        csrf = self.admin_login()
+        response = self.client.post("/__config/test-auth", json={"url": "https://svn.example.invalid/auth-check/"},
+                                    headers={"X-CSRF-Token": csrf})
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertTrue(response.get_json()["result"]["requiresAuth"])
+
+    def test_test_auth_endpoint_rejects_anonymous_path(self):
+        self.svn.anonymous = True
+        csrf = self.admin_login()
+        response = self.client.post("/__config/test-auth", json={"url": "https://svn.example.invalid/public/"},
+                                    headers={"X-CSRF-Token": csrf})
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("匿名", response.get_json()["error"])
+
+    def test_admin_password_change(self):
+        csrf = self.admin_login()
+        response = self.client.post("/__admin/password", json={"current": "admin", "password": "secret1"},
+                                    headers={"X-CSRF-Token": csrf})
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.client.post("/__auth/logout", json={}, headers={"X-CSRF-Token": csrf})
+        wrong = self.client.post("/__auth/login", json={"username": "admin", "password": "admin", "mode": "admin"})
+        self.assertEqual(wrong.status_code, 401)
+        right = self.client.post("/__auth/login", json={"username": "admin", "password": "secret1", "mode": "admin"})
+        self.assertEqual(right.status_code, 200)
+
+
+class ConfigFileTests(ServerTestBase):
+    def test_default_config_bootstraps_loadable_file(self):
+        path = self.tmp / "config" / "server.local.json"
+        self.assertFalse(path.exists())
+        loaded = server_config.save_config(path, server_config.default_config(), self.docs)
+        self.assertTrue(path.exists())
+        self.assertEqual(loaded["auth"]["url"], "")
+        self.assertEqual(loaded["repositories"], [])
+        self.assertEqual(loaded["ai"]["provider"], "openai")
+
+    def test_saved_config_roundtrip_keeps_values(self):
+        path = self.tmp / "config" / "server.local.json"
+        payload = server_config.default_config()
+        payload["auth"]["url"] = "https://svn.example.invalid/svn/accounts/auth-check/"
+        payload["repositories"] = [{"id": "hardware", "mount": "md/硬件设计",
+                                    "url": "https://svn.example.invalid/svn/hardware/"}]
+        loaded = server_config.save_config(path, payload, self.docs)
+        again = server_config.config_to_json(loaded)
+        self.assertEqual(again["repositories"][0]["mount"], "md/硬件设计")
+        self.assertEqual(again["storage"]["database"], "../data/md2web.sqlite3")
 
 
 class PathsTests(unittest.TestCase):

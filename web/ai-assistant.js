@@ -52,6 +52,10 @@
     busy: false
   };
 
+  function serverAiDefaults() {
+    return (window.SiteAuth && window.SiteAuth.aiDefaults && window.SiteAuth.aiDefaults()) || null;
+  }
+
   function defaults() {
     var external = window.AI_ASSISTANT_CONFIG || {};
     var base = {
@@ -66,6 +70,30 @@
       scope: [],
       uploads: []
     };
+    // 服务端设置（管理员在「设置」中配置）优先于内置默认值，浏览器本地配置优先级最高
+    var server = serverAiDefaults();
+    if (server) {
+      Object.keys(PROVIDERS).forEach(function (name) {
+        if (server.provider === name) {
+          base.provider = name;
+        }
+      });
+      if (server.baseUrl) {
+        base.baseUrl = server.baseUrl;
+      }
+      if (server.model) {
+        base.model = server.model;
+      }
+      if (server.apiKey) {
+        base.apiKey = server.apiKey;
+      }
+      if (server.useProxy) {
+        base.useProxy = server.useProxy;
+      }
+      if (server.contextChars) {
+        base.contextChars = server.contextChars;
+      }
+    }
     Object.keys(PROVIDERS).forEach(function (name) {
       if (external.provider === name) {
         base.provider = name;
@@ -914,6 +942,13 @@
     button.addEventListener('click', openPanel);
     document.body.appendChild(button);
     loadCorpus();
+    document.addEventListener('siteauth:change', function () {
+      state.config = loadConfig();
+      updateBadge();
+      if (state.configOverlay && state.configOverlay.classList.contains('is-open')) {
+        fillConfigForm();
+      }
+    });
     document.addEventListener('keydown', function (event) {
       if (event.key === 'Escape') {
         if (state.configOverlay && state.configOverlay.classList.contains('is-open')) {

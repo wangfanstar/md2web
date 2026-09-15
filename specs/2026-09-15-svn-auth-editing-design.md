@@ -8,7 +8,7 @@
 
 | 阶段 | 状态 | 落地内容 |
 |---|---|---|
-| 阶段一：认证与只读边界 | **已实现（见本次提交）** | `server/` 包（config/database/svn/auth/documents/app/paths）、`serve.py --config` 认证服务、登录/退出/会话/CSRF、写接口守卫（匿名 401、旧 `/__md/save` 410、草稿/SVN 501）、静态白名单、前端 `auth.js` 登录状态与 `sanitize.js` 净化、`tests/test_server.py` 45 项测试 |
+| 阶段一：认证与只读边界 | **已实现（见本次提交）** | `server/` 包（config/database/svn/auth/documents/app/paths/passwords）、`serve.py --config` 认证服务（配置缺失自动生成）、网页「设置」界面（管理员 admin/admin 可配置 SVN 认证路径/仓库映射/AI 助手/改密，热应用）、登录/退出/会话/CSRF、写接口守卫（匿名 401、旧 `/__md/save` 410、草稿/SVN 501）、静态白名单、前端 `auth.js`/`settings.js` 与 `sanitize.js` 净化、`tests/test_server.py` 59 项测试 |
 | 阶段二：草稿与修改记录 | 待实施 | `drafts/revisions` 表已建好；`/__md/draft` 当前返回 501 |
 | 阶段三：多库 SVN 操作与发布 | 待实施 | `repo_bindings/operations` 表与最长前缀匹配已就绪；`/__svn/*` 当前返回 501 |
 

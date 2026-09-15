@@ -1,7 +1,13 @@
-"""配置加载与校验：路径/URL/仓库身份都需要在这里被验证，拒绝越界与歧义配置。"""
+"""配置加载、校验与保存：路径/URL/仓库身份都在这里被验证。
+
+- `allow_incomplete=True` 允许首次部署时配置为空（先启动服务，再由管理员在网页设置里填写）。
+- 保存使用与加载同一套校验，并原子替换配置文件。
+"""
 
 import json
+import os
 import re
+import tempfile
 from pathlib import Path
 
 DEFAULT_SESSION_HOURS = 8
@@ -9,6 +15,14 @@ DEFAULT_IDLE_MINUTES = 30
 DEFAULT_SYNC_INTERVAL = 120
 ALLOWED_URL_SCHEMES = ("http", "https")
 URL_RE = re.compile(r"^https?://[^\s/]+/", re.IGNORECASE)
+DEFAULT_AI = {
+    "provider": "openai",
+    "baseUrl": "",
+    "model": "",
+    "apiKey": "",
+    "useProxy": "auto",
+    "contextChars": 6000,
+}
 
 
 class ConfigError(Exception):
@@ -53,17 +67,21 @@ def _resolve_path(base, value, label, docs_dir):
     return resolved
 
 
-def load_config(path, docs_dir):
+def load_config(path, docs_dir, allow_incomplete=False):
     """读取并校验配置；路径相对配置文件目录解析。"""
     config_path = Path(path)
     if not config_path.is_file():
-        raise ConfigError(f"配置文件不存在: {config_path}")
-    try:
-        raw = json.loads(config_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
-        raise ConfigError(f"配置文件不是有效 JSON: {error}") from error
-    if not isinstance(raw, dict):
-        raise ConfigError("配置文件必须是 JSON 对象")
+        if allow_incomplete:
+            raw = {}
+        else:
+            raise ConfigError(f"配置文件不存在: {config_path}")
+    else:
+        try:
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            raise ConfigError(f"配置文件不是有效 JSON: {error}") from error
+        if not isinstance(raw, dict):
+            raise ConfigError("配置文件必须是 JSON 对象")
     base = config_path.resolve().parent
 
     server_raw = raw.get("server") or {}
@@ -76,7 +94,13 @@ def load_config(path, docs_dir):
     secure_cookies = bool(server_raw.get("secure_cookies", False))
 
     auth_raw = raw.get("auth") or {}
-    auth_url = _check_url(auth_raw.get("url"), "auth.url")
+    auth_value = str(auth_raw.get("url") or "").strip()
+    if not auth_value:
+        if not allow_incomplete:
+            raise ConfigError("auth.url 不能为空")
+        auth_url = ""
+    else:
+        auth_url = _check_url(auth_value, "auth.url")
     credential_group = str(auth_raw.get("credential_group") or "default").strip() or "default"
     session_hours = auth_raw.get("session_hours", DEFAULT_SESSION_HOURS)
     idle_minutes = auth_raw.get("idle_minutes", DEFAULT_IDLE_MINUTES)
@@ -85,8 +109,10 @@ def load_config(path, docs_dir):
             raise ConfigError(f"auth.{label} 必须是正数")
 
     storage_raw = raw.get("storage") or {}
-    database = _resolve_path(base, storage_raw.get("database") or "../data/md2web.sqlite3", "storage.database", docs_dir)
-    workspaces = _resolve_path(base, storage_raw.get("workspaces") or "../data/workspaces", "storage.workspaces", docs_dir)
+    database_raw = str(storage_raw.get("database") or "../data/md2web.sqlite3").strip()
+    workspaces_raw = str(storage_raw.get("workspaces") or "../data/workspaces").strip()
+    database = _resolve_path(base, database_raw, "storage.database", docs_dir)
+    workspaces = _resolve_path(base, workspaces_raw, "storage.workspaces", docs_dir)
 
     sync_raw = raw.get("sync") or {}
     interval = sync_raw.get("interval_seconds", DEFAULT_SYNC_INTERVAL)
@@ -116,6 +142,18 @@ def load_config(path, docs_dir):
             "credential_group": str(item.get("credential_group") or credential_group).strip() or credential_group,
         })
 
+    ai_raw = raw.get("ai") or {}
+    ai = {
+        "provider": str(ai_raw.get("provider") or DEFAULT_AI["provider"]).strip() or DEFAULT_AI["provider"],
+        "baseUrl": str(ai_raw.get("baseUrl") or "").strip(),
+        "model": str(ai_raw.get("model") or "").strip(),
+        "apiKey": str(ai_raw.get("apiKey") or "").strip(),
+        "useProxy": str(ai_raw.get("useProxy") or DEFAULT_AI["useProxy"]).strip() or DEFAULT_AI["useProxy"],
+        "contextChars": int(ai_raw.get("contextChars") or DEFAULT_AI["contextChars"]),
+    }
+    if ai["baseUrl"]:
+        ai["baseUrl"] = _check_url(ai["baseUrl"], "ai.baseUrl")
+
     return {
         "path": config_path.resolve(),
         "server": {"bind": bind, "port": port, "secure_cookies": secure_cookies},
@@ -125,13 +163,88 @@ def load_config(path, docs_dir):
             "session_hours": float(session_hours),
             "idle_minutes": float(idle_minutes),
         },
-        "storage": {"database": database, "workspaces": workspaces},
+        "storage": {
+            "database": database,
+            "workspaces": workspaces,
+            "database_raw": database_raw,
+            "workspaces_raw": workspaces_raw,
+        },
         "sync": {
             "interval_seconds": float(interval),
             "credential_source": str(sync_raw.get("credential_source") or "").strip(),
             "credential_name": str(sync_raw.get("credential_name") or "").strip(),
         },
         "repositories": repositories,
+        "ai": ai,
+    }
+
+
+def config_to_json(config):
+    """把已加载配置还原成文件结构（供设置界面读取）。"""
+    return {
+        "server": dict(config["server"]),
+        "auth": {
+            "url": config["auth"]["url"],
+            "credential_group": config["auth"]["credential_group"],
+            "session_hours": config["auth"]["session_hours"],
+            "idle_minutes": config["auth"]["idle_minutes"],
+        },
+        "storage": {
+            "database": config["storage"].get("database_raw", "../data/md2web.sqlite3"),
+            "workspaces": config["storage"].get("workspaces_raw", "../data/workspaces"),
+        },
+        "sync": dict(config["sync"]),
+        "repositories": [
+            {"id": repo["id"], "mount": repo["mount"], "url": repo["url"],
+             "credential_group": repo["credential_group"]}
+            for repo in config["repositories"]
+        ],
+        "ai": dict(config["ai"]),
+    }
+
+
+def save_config(path, payload, docs_dir):
+    """校验并原子写入配置文件，返回加载后的配置。"""
+    if not isinstance(payload, dict):
+        raise ConfigError("配置必须是 JSON 对象")
+    config_path = Path(path)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    handle = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", newline="\n", delete=False,
+        dir=str(config_path.parent), prefix="." + config_path.name + ".", suffix=".tmp",
+    )
+    tmp_path = Path(handle.name)
+    try:
+        with handle:
+            handle.write(text)
+        loaded = load_config(tmp_path, docs_dir, allow_incomplete=True)
+        os.replace(tmp_path, config_path)
+    except Exception:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+        raise
+    loaded["path"] = config_path.resolve()
+    return loaded
+
+
+def default_config():
+    """首次启动时写入的默认配置（SVN 地址留空，待管理员在网页设置中填写）。"""
+    return {
+        "server": {"bind": "127.0.0.1", "port": 3000, "secure_cookies": False},
+        "auth": {
+            "url": "",
+            "credential_group": "default",
+            "session_hours": DEFAULT_SESSION_HOURS,
+            "idle_minutes": DEFAULT_IDLE_MINUTES,
+        },
+        "storage": {"database": "../data/md2web.sqlite3", "workspaces": "../data/workspaces"},
+        "sync": {"interval_seconds": DEFAULT_SYNC_INTERVAL, "credential_source": "", "credential_name": ""},
+        "repositories": [],
+        "ai": dict(DEFAULT_AI),
     }
 
 
@@ -150,9 +263,21 @@ def match_repository(config, document_path):
 
 
 def public_config(config):
-    """给前端的配置视图：不含认证地址与任何凭据。"""
+    """给未登录前端的配置视图：不含认证地址、AI Key 与任何凭据。"""
+    ai = config.get("ai") or {}
     return {
         "repositories": [{"id": repo["id"], "mount": repo["mount"]} for repo in config.get("repositories") or []],
         "sessionHours": config["auth"]["session_hours"],
         "idleMinutes": config["auth"]["idle_minutes"],
+        "authConfigured": bool(config["auth"]["url"]),
+        "ai": {"provider": ai.get("provider", ""), "baseUrl": ai.get("baseUrl", ""),
+               "model": ai.get("model", ""), "useProxy": ai.get("useProxy", "auto"),
+               "contextChars": ai.get("contextChars", 6000)},
     }
+
+
+def authenticated_config(config):
+    """给已登录用户的配置视图：包含 AI 默认值（含 Key，供共享 AI 助手使用）。"""
+    data = public_config(config)
+    data["ai"]["apiKey"] = (config.get("ai") or {}).get("apiKey", "")
+    return data

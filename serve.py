@@ -404,11 +404,18 @@ def run_authenticated_service(args, directory):
     from server import database
     from server.app import create_app
     from server.auth import AuthService
-    from server.config import ConfigError, load_config
+    from server.config import ConfigError, default_config, load_config, save_config
     from server.svn import SvnClient
 
+    config_path = Path(args.config)
+    if not config_path.exists():
+        try:
+            save_config(config_path, default_config(), directory)
+        except ConfigError as error:
+            raise SystemExit(f"错误: {error}")
+        print(f"已生成默认配置: {config_path}（SVN 认证路径与仓库映射可在网页「设置」中填写）")
     try:
-        config = load_config(args.config, directory)
+        config = load_config(config_path, directory, allow_incomplete=True)
     except ConfigError as error:
         raise SystemExit(f"错误: {error}")
 
@@ -417,6 +424,8 @@ def run_authenticated_service(args, directory):
     workspaces.mkdir(parents=True, exist_ok=True)
     conn = database.connect(database_path)
     database.migrate(conn)
+    if database.ensure_admin(conn):
+        print("已创建默认管理员账号: admin / admin（请在网页「设置」中尽快修改密码）")
 
     svn_client = SvnClient(command=split_command(args.svn_command) if args.svn_command else ("svn",))
     auth_service = AuthService(conn, svn_client, config)
@@ -436,7 +445,10 @@ def run_authenticated_service(args, directory):
     bind = config["server"]["bind"]
     port = config["server"]["port"]
     print(f"认证编辑服务: http://{bind}:{port}")
-    print(f"认证地址: {config['auth']['url']}")
+    if config["auth"]["url"]:
+        print(f"SVN 认证地址: {config['auth']['url']}")
+    else:
+        print("SVN 认证地址: 未配置（请在网页右上角/侧栏「设置」中用 admin 登录后填写）")
     print(f"数据库: {database_path}")
     print(f"工作副本目录: {workspaces}")
     print("匿名可阅读；写接口要求 SVN 账号登录（阶段一实现登录边界）")

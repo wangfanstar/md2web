@@ -4,7 +4,9 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+from .passwords import hash_password
+
+SCHEMA_VERSION = 2
 
 SCHEMA_SQL = """
 CREATE TABLE users (
@@ -106,6 +108,19 @@ CREATE INDEX idx_operations_actor ON operations (actor_id, created_at);
 """
 
 
+
+# v2：本地管理员账号（role/password_hash），用于网页端配置 SVN 认证路径与 AI 助手
+MIGRATION_V2_SQL = """
+ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user';
+ALTER TABLE users ADD COLUMN password_hash TEXT;
+CREATE UNIQUE INDEX idx_users_local_admin ON users (svn_username) WHERE auth_source_id = 'local-admin';
+"""
+
+LOCAL_ADMIN_SOURCE = "local-admin"
+DEFAULT_ADMIN_USERNAME = "admin"
+DEFAULT_ADMIN_PASSWORD = "admin"
+
+
 def now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -134,9 +149,43 @@ def migrate(conn):
     if version >= SCHEMA_VERSION:
         return version
     with conn:
-        conn.executescript(SCHEMA_SQL)
+        if version < 1:
+            conn.executescript(SCHEMA_SQL)
+        if version < 2:
+            conn.executescript(MIGRATION_V2_SQL)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return SCHEMA_VERSION
+
+
+def find_user(conn, auth_source_id, username):
+    return conn.execute(
+        "SELECT * FROM users WHERE auth_source_id = ? AND svn_username = ?",
+        (auth_source_id, username),
+    ).fetchone()
+
+
+def ensure_admin(conn, username=DEFAULT_ADMIN_USERNAME, password=DEFAULT_ADMIN_PASSWORD):
+    """首次启动创建本地管理员（默认 admin/admin），返回是否新建。"""
+    if find_user(conn, LOCAL_ADMIN_SOURCE, username) is not None:
+        return False
+    with conn:
+        conn.execute(
+            "INSERT INTO users (auth_source_id, svn_username, display_name, role, password_hash,"
+            " created_at, last_login_at) VALUES (?, ?, ?, 'admin', ?, ?, ?)",
+            (LOCAL_ADMIN_SOURCE, username, "管理员", hash_password(password), now_iso(), None),
+        )
+        audit(conn, "admin_seeded", "ok", resource=username)
+    return True
+
+
+def set_admin_password(conn, user_id, password):
+    with conn:
+        conn.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ? AND role = 'admin'",
+            (hash_password(password), user_id),
+        )
+        audit(conn, "admin_password_changed", "ok", actor_id=user_id)
+
 
 
 def backup_to(conn, destination):

@@ -10,6 +10,7 @@
     csrfToken: null,
     features: { editDraft: false, svnCommit: false, localPublish: false },
     site: { repositories: [] },
+    ai: null,
     overlay: null,
     error: ''
   };
@@ -39,7 +40,9 @@
       available: state.available,
       authenticated: state.authenticated,
       user: state.user,
+      role: (state.user && state.user.role) || '',
       features: state.features,
+      ai: state.ai,
       fileMode: isFileMode()
     };
   }
@@ -66,6 +69,7 @@
     state.csrfToken = payload.csrfToken || null;
     state.features = payload.features || state.features;
     state.site = payload.site || state.site;
+    state.ai = (payload.site && payload.site.ai) || null;
   }
 
   function refresh() {
@@ -87,11 +91,11 @@
     });
   }
 
-  function login(username, password) {
+  function login(username, password, mode) {
     return request('__auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: username, password: password })
+      body: JSON.stringify({ username: username, password: password, mode: mode || '' })
     }).then(function (payload) {
       state.authenticated = true;
       state.user = payload.user;
@@ -269,6 +273,8 @@
     closeLogin: closeLogin,
     snapshot: snapshot,
     isAuthenticated: function () { return !!state.authenticated; },
+    isAdmin: function () { return !!state.authenticated && (state.user && state.user.role) === 'admin'; },
+    aiDefaults: function () { return state.ai; },
     csrfToken: function () { return state.csrfToken; },
     features: function () { return state.features; },
     repositories: function () { return state.site.repositories || []; },

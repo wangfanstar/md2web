@@ -10,9 +10,10 @@ from pathlib import Path
 
 from flask import Flask, jsonify, make_response, request, send_from_directory
 
+from . import config as server_config
 from . import database
 from .auth import AuthError
-from .config import public_config
+from .config import authenticated_config, config_to_json, public_config, save_config
 from .paths import is_blocked_static_path
 
 COOKIE_NAME = "md2web_session"
@@ -108,13 +109,14 @@ def create_app(config, conn, auth_service, docs_dir):
     @app.get("/__auth/session")
     def session_info():
         session = current_session()
+        site = authenticated_config(config) if session else public_config(config)
         return jsonify({
             "ok": True,
             "authenticated": session is not None,
             "user": session["user"] if session else None,
             "csrfToken": session["csrfToken"] if session else None,
             "features": FEATURES,
-            "site": public_config(config),
+            "site": site,
             "serverManaged": True,
         })
 
@@ -124,12 +126,20 @@ def create_app(config, conn, auth_service, docs_dir):
         if rejected:
             return rejected
         payload = request.get_json(silent=True) or {}
-        result = auth_service.login(
-            payload.get("username"),
-            payload.get("password"),
-            request.remote_addr or "",
-            request.headers.get("User-Agent", ""),
-        )
+        if str(payload.get("mode") or "").strip() == "admin":
+            result = auth_service.login_admin(
+                payload.get("username"),
+                payload.get("password"),
+                request.remote_addr or "",
+                request.headers.get("User-Agent", ""),
+            )
+        else:
+            result = auth_service.login(
+                payload.get("username"),
+                payload.get("password"),
+                request.remote_addr or "",
+                request.headers.get("User-Agent", ""),
+            )
         response = jsonify({"ok": True, "user": result["user"], "csrfToken": result["csrfToken"]})
         return set_session_cookie(response, result["token"])
 
@@ -145,6 +155,67 @@ def create_app(config, conn, auth_service, docs_dir):
         response = jsonify({"ok": True})
         response.delete_cookie(COOKIE_NAME, path="/")
         return response
+
+    # ---- 管理员配置 API ----
+
+    def require_admin():
+        session, rejected = require_session()
+        if rejected:
+            return None, rejected
+        if (session["user"].get("role") or "user") != "admin":
+            return None, json_error(403, "admin_required", "需要管理员账号登录后才能修改配置")
+        return session, None
+
+    @app.get("/__config")
+    def read_config():
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        return jsonify({"ok": True, "config": config_to_json(config)})
+
+    @app.put("/__config")
+    def write_config():
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True)
+        try:
+            loaded = save_config(config["path"], payload, docs_root)
+        except server_config.ConfigError as error:
+            return json_error(400, "config_invalid", str(error))
+        config.clear()
+        config.update(loaded)
+        auth_service.on_config_changed()
+        return jsonify({"ok": True, "config": config_to_json(config), "authConfigured": bool(config["auth"]["url"])})
+
+    @app.post("/__config/test-auth")
+    def test_auth_config():
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        result = auth_service.test_auth_url(payload.get("url"))
+        return jsonify({"ok": True, "result": result})
+
+    @app.post("/__admin/password")
+    def change_password():
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        auth_service.change_admin_password(
+            session["user"]["id"], payload.get("current"), payload.get("password")
+        )
+        return jsonify({"ok": True})
 
     # ---- 写接口守卫：阶段一统一只读，拒绝匿名与旧接口 ----
 

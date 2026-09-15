@@ -16,6 +16,7 @@
 - 数学公式：`$...$` / `$$...$$` 由 KaTeX 离线渲染（编辑器预览与文档页一致）
 - AI 助手：右下角对话面板 + 侧栏「AI 配置」图标，本地检索后再发给可配置的大模型（OpenAI 兼容 / DeepSeek / Ollama / Anthropic），支持资料范围勾选与上传文档、带引用来源跳转；Key 仅存浏览器本地，跨域时经本机 `serve.py` 代理
 - 登录与权限（阶段一）：`python serve.py --config config/server.local.json` 启动认证编辑服务（Flask + Waitress + SQLite + SVN CLI），SVN 账号密码登录、会话/CSRF、匿名只读、静态分发白名单与前端内容净化；离线 `file://` 保持只读
+- 网页端「设置」（默认管理员 admin/admin）：配置 SVN 认证路径、仓库映射与 AI 助手默认值，保存后热应用；配置与数据库均在 `docs/` 之外、不入库提交
 - 章节编号：正文 h2–h4 与右侧「本文目录」自动显示 `1 / 1.1 / 1.1.1` 序号
 - 跨平台预览：`python serve.py` 一键启动，Windows/Linux 通用；也可直接双击 `docs/index.html`
 - 多文件夹工作台：完整保留目录层级与同名文件位置，支持折叠树、数量统计、路径筛选、定位当前文档和分类首页
