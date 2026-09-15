@@ -32,6 +32,19 @@
     return / (language|lang)-mermaid /.test(className);
   }
 
+  function restoreMermaidBlock(entry) {
+    if (!entry.container.isConnected || !entry.container.parentNode) {
+      return;
+    }
+    var pre = document.createElement('pre');
+    pre.setAttribute('data-lang', 'mermaid');
+    var code = document.createElement('code');
+    code.className = 'lang-mermaid';
+    code.textContent = entry.text;
+    pre.appendChild(code);
+    entry.container.parentNode.replaceChild(pre, entry.container);
+  }
+
   function renderMermaidBlocks() {
     var section = document.querySelector('.markdown-section');
     if (!section) {
@@ -41,17 +54,28 @@
     if (!blocks.length) {
       return;
     }
-    var containers = blocks.map(function (code) {
+    var entries = blocks.map(function (code) {
       var pre = code.parentNode;
       var container = document.createElement('div');
       container.className = 'mermaid';
       container.textContent = code.textContent;
       pre.parentNode.replaceChild(container, pre);
-      return container;
+      return { container: container, text: code.textContent };
     });
-    window.mermaid.run({ nodes: containers, suppressErrors: true }).catch(function (error) {
+    function fallbackToSource() {
+      entries.forEach(function (entry) {
+        if (!entry.container.querySelector('svg')) {
+          restoreMermaidBlock(entry);
+        }
+      });
+    }
+    window.mermaid.run({
+      nodes: entries.map(function (entry) { return entry.container; }),
+      suppressErrors: true
+    }).then(fallbackToSource).catch(function (error) {
+      fallbackToSource();
       if (window.console && console.warn) {
-        console.warn('mermaid 渲染失败', error);
+        console.warn('mermaid 渲染失败，已回退显示源码', error);
       }
     });
   }
