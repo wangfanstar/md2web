@@ -2,6 +2,8 @@
   --docs-sidebar-width: 300px;
   --docs-toc-width: 240px;
   --docs-toc-gap: 24px;
+  /* 正文区域底色（docsify vue 主题 body 背景），用于吸顶行等需要与正文一致的场景 */
+  --docs-page-bg: #f7f9fb;
 }
 
 .custom-sidebar-resizer {

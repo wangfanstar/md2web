@@ -29,7 +29,7 @@ body { color: var(--workspace-ink); background: #f7f9fb; }
 .workspace-breadcrumb [aria-current="page"] { color: var(--workspace-ink); font-weight: 600; }
 .workspace-breadcrumb-sep { color: #b2bdc9; }
 .workspace-page-actions {
-  background: #fff;
+  background: var(--docs-page-bg, #f7f9fb);
   border-bottom: 0;
   display: flex;
   flex-wrap: wrap;
