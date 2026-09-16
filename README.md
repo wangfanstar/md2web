@@ -1,6 +1,6 @@
 # Markdown 离线文档站生成器（md2web）
 
-把 `docs/md/` 里的 Markdown 一键转换成**完全离线可用**的 Docsify 文档站：产物自包含，拷贝到任意机器双击即可浏览与搜索；需要 Python 3.6.8+（认证服务：3.6.8 用 server/requirements-py36.txt，3.8+ 用 server/requirements.txt），仅用标准库，无需 pip/Node.js，支持 Windows 与 Linux。
+把 `docs/md/` 里的 Markdown 一键转换成**完全离线可用**的 Docsify 文档站：产物自包含，拷贝到任意机器双击即可浏览与搜索；需要 Python 3.6.8+（构建与只读预览仅用标准库；认证编辑服务执行 `python3 -m pip install -r server/requirements.txt`，Flask 2.0.3 + Waitress 2.0.0，已在 3.6.8 / 3.8 / 3.12 实测），仅用标准库，无需 pip/Node.js，支持 Windows 与 Linux。
 
 ## 特性
 

@@ -2,8 +2,8 @@
 
 - 默认（无 --config）：**只读预览**。静态站点、自动重建与本机 AI 代理可用；
   `/__md/*`、`/__svn/*` 等写接口一律拒绝（不再提供匿名保存）。
-- `--config config/server.local.json`：启动认证编辑服务（Flask + Waitress）。
-  匿名只读，登录后进入草稿 / SVN 流程（分阶段实现，见 specs/）。
+- `--config`（默认 config/server.local.json）：启动认证编辑服务（Flask + Waitress，
+  Python 3.6.8+ 同一套依赖 server/requirements.txt）。匿名只读，登录后可编辑草稿并提交 SVN。
 - 只管理本项目自身的实例（pidfile），不再扫描并终止所有 serve.py 进程。
 """
 
@@ -457,12 +457,10 @@ def run_authenticated_service(args, directory):
         from server.svn import SvnClient
         from waitress import serve as waitress_serve
     except (ModuleNotFoundError, ImportError) as error:
-        requirements = "server/requirements.txt" if sys.version_info >= (3, 8) else "server/requirements-py36.txt"
         print("警告: 未安装认证编辑服务依赖（缺少 " + str(error.name) + "），已降级为只读预览。")
         print("  当前解释器: Python " + ".".join(str(v) for v in sys.version_info[:3]))
-        print("  安装依赖后可启用登录编辑: python3 -m pip install -r " + requirements)
+        print("  安装依赖后可启用登录编辑: python3 -m pip install -r server/requirements.txt")
         print("  pip 过旧时先执行: python3 -m pip install --upgrade \"pip<22\"")
-        print("  指定其他版本解释器: PYTHON=python3.9 ./start_linux.sh")
         args.preview = True
         return None
 
@@ -541,8 +539,7 @@ def main(argv=None):
         raise SystemExit(f"错误: {directory} 下没有 index.html，请先运行 python setup_docsify.py")
 
     print("Python: " + sys.version.split()[0] + " (" + sys.executable + ")")
-    if sys.version_info < (3, 8) and sys.version_info >= (3, 6):
-        print("提示: Python 3.6 请用 server/requirements-py36.txt 安装依赖（Flask 2.0.3 + Waitress 2.0.0）。")
+
     manage_instance(args.pidfile)
     write_pidfile(args.pidfile, os.getpid())
 

@@ -8,7 +8,7 @@ md2web 把 `docs/md/` 下的 Markdown 构建成**完全离线可用**的 Docsify
 
 - 运行时：Python 3.8+（仅标准库，无需 pip/Node.js）；前端为原生 JS/CSS + Docsify 4.13.1 + Prism 1.29.0 + Mermaid 11.17.2，全部本地化
 - 支持 Windows 与 Linux；`file://` 双击与 HTTP 预览均可用
-- Python 版本：构建/只读预览 3.6.8+；认证编辑服务 3.6.8（`requirements-py36.txt`）或 3.8+（`requirements.txt`）。新增代码必须通过 `Python36CompatibilityTests`（3.6 语法解析 + 禁用 3.7+ API 清单）。
+- Python 版本：**3.6.8 及以上统一支持**（构建/只读预览仅标准库；认证编辑服务 `python3 -m pip install -r server/requirements.txt`）。新增代码必须通过 `Python36CompatibilityTests`（3.6 语法解析 + 禁用 3.7+ API 清单）。
 - 仓库是**公开仓库**：不要提交密钥、令牌或敏感文档；AI 助手的 API Key 只允许存在浏览器 localStorage（`window.AI_ASSISTANT_CONFIG` 也仅作可选预置，禁止把 Key 写进被提交的文件）
 
 ## 架构与数据流
@@ -73,9 +73,8 @@ python setup_docsify.py                 # 完整构建（依赖已存在时全�
 python setup_docsify.py --index-only    # 仅重建搜索索引与离线数据
 python setup_docsify.py --title "我的文档"
 python setup_docsify.py --offline       # 严格离线：依赖缺失时报错，不尝试下载
-python3 -m pip install -r server/requirements-py36.txt  # Python 3.6.8：Flask 2.0.3 + Waitress 2.0.0（已在 3.6.8 实测）
-python -m pip install -r server/requirements.txt        # Python 3.8+：Flask 3 + Waitress 3
-python serve.py                         # 默认认证编辑服务（需 pip install -r server/requirements.txt）
+python3 -m pip install -r server/requirements.txt  # 认证编辑服务依赖（3.6.8+ 通用，仅认证模式需要）
+python serve.py                         # 默认认证编辑服务（认证模式下需先安装上面的依赖）
 python serve.py --preview               # 只读预览 http://localhost:3000（无写接口）
 python serve.py --reset-admin-password  # 忘记管理员密码时强制恢复为默认 admin/admin
 python -m unittest discover -s tests -v

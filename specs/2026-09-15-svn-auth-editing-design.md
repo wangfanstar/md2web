@@ -12,7 +12,7 @@
 | 阶段二：草稿与修改记录 | **已实现** | `server/drafts.py`、`/__md/document|draft|history|diff|revision|discard`、编辑器草稿模式（版本号 + 409 冲突不覆盖）、历史与差异面板；`tests/test_server.py` 覆盖并发与私有性 |
 | 阶段三：多库 SVN 操作与发布 | **已实现** | `server/operations.py`（审阅清单、私有工作副本稀疏检出、UUID/URL 绑定核对、幂等 operation、状态机与失败分级、发布与 published_revision、`/__svn/refresh` 导出同步）、`/__svn/info|log|prepare|commit|refresh`、编辑器「提交 SVN…／SVN 日志」流程；管理员提交时补充 SVN 凭据（仅进程内存） |
 
-运维补充：管理员密码默认 `admin/admin`（PBKDF2 存库，可在网页「设置」修改）；忘记密码时用 `python serve.py --reset-admin-password` 强制恢复默认值，不提供网页端重置入口。`docs/md/使用说明/绘图示例.md` 由绘图预览页样例生成保持同步，`DrawingExamplesTests` 会在样例增减时失败提醒更新。
+运维补充：认证编辑服务依赖见 `server/requirements.txt`（Python 3.6.8+ 单套，已在 3.6.8/3.8/3.12 实测）。管理员密码默认 `admin/admin`（PBKDF2 存库，可在网页「设置」修改）；忘记密码时用 `python serve.py --reset-admin-password` 强制恢复默认值，不提供网页端重置入口。`docs/md/使用说明/绘图示例.md` 由绘图预览页样例生成保持同步，`DrawingExamplesTests` 会在样例增减时失败提醒更新。
 
 阶段一验收结论（本机假 SVN 集成测试）：匿名写请求 401；错误密码 401；认证路径允许匿名访问时登录被拒绝（503）；合法账号可登录且口令不落库（仅内存传参）；退出/重启/认证源变更后旧会话与旧写请求全部失败；编辑器预览对 `<script>`、事件属性与 `javascript:` 链接已净化。
 
