@@ -22,6 +22,7 @@ DEFAULT_AI = {
     "apiKey": "",
     "useProxy": "auto",
     "contextChars": 6000,
+    "sourcePath": "",
 }
 
 
@@ -150,6 +151,7 @@ def load_config(path, docs_dir, allow_incomplete=False):
         "apiKey": str(ai_raw.get("apiKey") or "").strip(),
         "useProxy": str(ai_raw.get("useProxy") or DEFAULT_AI["useProxy"]).strip() or DEFAULT_AI["useProxy"],
         "contextChars": int(ai_raw.get("contextChars") or DEFAULT_AI["contextChars"]),
+        "sourcePath": str(ai_raw.get("sourcePath") or "").strip()[:500],
     }
     if ai["baseUrl"]:
         ai["baseUrl"] = _check_url(ai["baseUrl"], "ai.baseUrl")
@@ -272,7 +274,7 @@ def public_config(config):
         "authConfigured": bool(config["auth"]["url"]),
         "ai": {"provider": ai.get("provider", ""), "baseUrl": ai.get("baseUrl", ""),
                "model": ai.get("model", ""), "useProxy": ai.get("useProxy", "auto"),
-               "contextChars": ai.get("contextChars", 6000)},
+               "contextChars": ai.get("contextChars", 6000), "sourcePath": ai.get("sourcePath", "")},
     }
 
 

@@ -66,6 +66,39 @@
     }).join('');
   }
 
+  function personalAiSection() {
+    if (!(window.AIAssistant && window.AIAssistant.getConfig)) {
+      return '';
+    }
+    var config = window.AIAssistant.getConfig() || {};
+    return [
+      '<section class="settings-section">',
+      '<h4>AI 助手（我的设置，仅本机浏览器）</h4>',
+      '<p class="settings-note">接口与 Key 只保存在浏览器 localStorage；「参考源码路径」会随提问发给模型，便于引用代码库中的位置。</p>',
+      '<div class="settings-grid">',
+      '<label>服务商<select data-ai-chip="provider">' + providerOptions(config.provider) + '</select></label>',
+      '<label>模型<input type="text" data-ai-chip="model" placeholder="如 deepseek-chat" value="' + escapeHtml(config.model || '') + '"></label>',
+      '</div>',
+      '<label>接口地址<input type="text" data-ai-chip="baseUrl" placeholder="https://api.deepseek.com/chat/completions" value="' + escapeHtml(config.baseUrl || '') + '"></label>',
+      '<div class="settings-grid">',
+      '<label>API Key<input type="password" data-ai-chip="apiKey" autocomplete="off" placeholder="仅保存在本机" value="' + escapeHtml(config.apiKey || '') + '"></label>',
+      '<label>请求方式<select data-ai-chip="useProxy">'
+        + '<option value="auto"' + (config.useProxy === 'auto' ? ' selected' : '') + '>自动</option>'
+        + '<option value="always"' + (config.useProxy === 'always' ? ' selected' : '') + '>始终走本机代理</option>'
+        + '<option value="never"' + (config.useProxy === 'never' ? ' selected' : '') + '>只允许直连</option>'
+        + '</select></label>',
+      '<label>资料上限（字符）<input type="number" step="500" min="1000" data-ai-chip="contextChars" value="' + escapeHtml(String(config.contextChars || 6000)) + '"></label>',
+      '</div>',
+      '<label>参考源码路径<input type="text" data-ai-chip="sourcePath" placeholder="如 D:/repo/firmware 或 /srv/src/project（可选）" value="' + escapeHtml(config.sourcePath || '') + '"></label>',
+      '<div class="ai-scope-head"><strong>资料范围</strong><span>勾选后 AI 只在所选范围检索</span>'
+        + '<button type="button" data-settings-action="scopeAll">全选</button>'
+        + '<button type="button" data-settings-action="scopeNone">全不选</button></div>',
+      '<div class="ai-scope-tree" data-personal-scope>正在加载文档索引…</div>',
+      '<div class="settings-row-actions"><button type="button" data-settings-action="save-personal-ai">保存我的 AI 设置</button></div>',
+      '</section>'
+    ].join('');
+  }
+
   function renderForm() {
     var overlay = state.overlay;
     var body = overlay.querySelector('[data-settings-body]');
@@ -73,31 +106,40 @@
     var info = snapshot();
 
     if (info.fileMode) {
-      body.innerHTML = '<p class="settings-note">离线浏览（file://）为只读模式，无法修改服务端配置。'
-        + '请在服务机执行 <code>python serve.py --config config/server.local.json</code> 后通过服务地址访问。</p>';
+      body.innerHTML = personalAiSection()
+        + '<section class="settings-section"><h4>服务端设置</h4>'
+        + '<p class="settings-note">离线浏览（file://）为只读模式，无法修改服务端配置。请通过'
+        + ' <code>python serve.py</code> 启动认证服务后访问。</p></section>';
       overlay.querySelector('[data-settings-save]').hidden = true;
+      renderPersonalScope();
       return;
     }
     if (!info.available) {
-      body.innerHTML = '<p class="settings-note">当前是只读预览模式：配置需要认证服务。</p>'
+      body.innerHTML = personalAiSection()
+        + '<section class="settings-section"><h4>服务端设置</h4>'
+        + '<p class="settings-note">当前是只读预览模式：服务端配置需要认证服务。</p>'
         + '<ol class="settings-steps">'
         + '<li><code>python -m pip install -r server/requirements.txt</code></li>'
-        + '<li><code>python serve.py --config config/server.local.json</code>（文件不存在会自动生成）</li>'
+        + '<li><code>python serve.py</code>（配置不存在会自动生成）</li>'
         + '<li>刷新页面后在本窗口用管理员账号登录，填写 SVN 认证路径与仓库映射</li>'
         + '</ol>'
-        + '<p class="settings-note">默认管理员账号：<code>admin / admin</code>（首次登录后请尽快修改密码）。</p>';
+        + '<p class="settings-note">默认管理员账号：<code>admin / admin</code>（首次登录后请尽快修改密码）。</p></section>';
       overlay.querySelector('[data-settings-save]').hidden = true;
+      renderPersonalScope();
       return;
     }
     if (!(siteAuth && siteAuth.isAdmin())) {
-      body.innerHTML = '<p class="settings-note">配置需要管理员账号登录。</p>'
+      body.innerHTML = personalAiSection()
+        + '<section class="settings-section"><h4>服务端设置（管理员）</h4>'
+        + '<p class="settings-note">SVN 认证路径、仓库映射与全站 AI 默认值需要管理员账号登录。</p>'
         + '<form class="settings-admin-login" data-settings-admin-form>'
         + '<label>管理员账号<input type="text" name="adminUser" value="admin" autocomplete="username"></label>'
         + '<label>密码<input type="password" name="adminPassword" autocomplete="current-password"></label>'
         + '<button type="submit" class="is-primary">登录</button>'
         + '</form>'
-        + '<p class="settings-note">默认账号为 <code>admin / admin</code>；普通 SVN 账号无配置权限。</p>';
+        + '<p class="settings-note">默认账号为 <code>admin / admin</code>；普通 SVN 账号无配置权限。</p></section>';
       overlay.querySelector('[data-settings-save]').hidden = true;
+      renderPersonalScope();
       return;
     }
 
@@ -105,7 +147,7 @@
     var authConfig = config.auth || {};
     var ai = config.ai || {};
     var sync = config.sync || {};
-    body.innerHTML = [
+    body.innerHTML = personalAiSection() + [
       '<section class="settings-section">',
       '<h4>SVN 认证路径</h4>',
       '<p class="settings-note">必须是<b>强制账号密码认证</b>的 SVN 路径（允许匿名访问的路径会被拒绝）。例如只读的 <code>/svn/accounts/auth-check/</code>。</p>',
@@ -140,6 +182,7 @@
         + '</select></label>',
       '<label>资料上限（字符）<input type="number" step="500" min="1000" data-config="ai.contextChars" value="' + escapeHtml(String(ai.contextChars || 6000)) + '"></label>',
       '</div>',
+      '<label>参考源码路径<input type="text" data-config="ai.sourcePath" placeholder="如 D:/repo/firmware（可选，下发所有用户）" value="' + escapeHtml(ai.sourcePath || '') + '"></label>',
       '</section>',
       '<section class="settings-section">',
       '<h4>修改管理员密码</h4>',
@@ -158,6 +201,74 @@
       '</section>'
     ].join('');
     overlay.querySelector('[data-settings-save]').hidden = false;
+    renderPersonalScope();
+  }
+
+  function personalAiConfig() {
+    return (window.AIAssistant && window.AIAssistant.getConfig && window.AIAssistant.getConfig()) || { scope: [] };
+  }
+
+  function renderPersonalScope() {
+    var host = state.overlay && state.overlay.querySelector('[data-personal-scope]');
+    if (!host || !(window.AIAssistant && window.AIAssistant.scopeTree)) {
+      return;
+    }
+    var scope = personalAiConfig().scope || [];
+    window.AIAssistant.scopeTree().then(function (tree) {
+      if (!tree || !tree.length) {
+        host.textContent = '没有可用文档';
+        return;
+      }
+      host.innerHTML = tree.map(function (folder) {
+        var checked = scope.indexOf(folder.prefix) >= 0;
+        var pages = folder.pages.map(function (page) {
+          var pageChecked = checked || scope.indexOf(page.route) >= 0;
+          return '<label class="ai-scope-page" title="' + escapeHtml(page.route) + '">'
+            + '<input type="checkbox" data-personal-scope-value="' + escapeHtml(page.route) + '"' + (pageChecked ? ' checked' : '') + '>'
+            + '<span>' + escapeHtml(page.label) + (page.upload ? '（上传）' : '') + '</span></label>';
+        }).join('');
+        return '<details class="ai-scope-folder"' + (checked ? ' open' : '') + '>'
+          + '<summary><label><input type="checkbox" data-personal-scope-value="' + escapeHtml(folder.prefix) + '"' + (checked ? ' checked' : '') + '><span>' + escapeHtml(folder.label) + '</span></label></summary>'
+          + pages + '</details>';
+      }).join('');
+    }).catch(function (error) {
+      host.textContent = '读取文档索引失败：' + error.message;
+    });
+  }
+
+  function readPersonalAi() {
+    var overlay = state.overlay;
+    function field(name) {
+      var input = overlay.querySelector('[data-ai-chip="' + name + '"]');
+      return input ? input.value.trim() : '';
+    }
+    return {
+      provider: field('provider') || 'openai',
+      baseUrl: field('baseUrl'),
+      model: field('model'),
+      apiKey: field('apiKey'),
+      useProxy: field('useProxy') || 'auto',
+      contextChars: Number(field('contextChars')) || 6000,
+      sourcePath: field('sourcePath')
+    };
+  }
+
+  function savePersonalAi() {
+    if (!(window.AIAssistant && window.AIAssistant.configure)) {
+      return;
+    }
+    var patch = readPersonalAi();
+    window.AIAssistant.configure(patch);
+    setStatus('已保存本机 AI 设置' + (patch.sourcePath ? '（参考源码路径：' + patch.sourcePath + '）' : ''));
+  }
+
+  function updatePersonalScope(scopeValue, checked) {
+    var scope = (personalAiConfig().scope || []).filter(function (item) { return item !== scopeValue; });
+    if (checked) {
+      scope.push(scopeValue);
+    }
+    window.AIAssistant.configure({ scope: scope });
+    renderPersonalScope();
   }
 
   function readConfig() {
@@ -287,7 +398,19 @@
         close();
         return;
       }
-      if (action === 'reload') {
+      if (action === 'save-personal-ai') {
+        savePersonalAi();
+      } else if (action === 'scopeAll') {
+        if (window.AIAssistant && window.AIAssistant.scopeTree) {
+          window.AIAssistant.scopeTree().then(function (tree) {
+            window.AIAssistant.configure({ scope: tree.map(function (folder) { return folder.prefix; }) });
+            renderPersonalScope();
+          });
+        }
+      } else if (action === 'scopeNone') {
+        window.AIAssistant.configure({ scope: [] });
+        renderPersonalScope();
+      } else if (action === 'reload') {
         loadConfig();
       } else if (action === 'add-repo') {
         var holder = overlay.querySelector('[data-settings-repos]');
@@ -301,6 +424,12 @@
         testAuth();
       } else if (action === 'change-password') {
         changePassword();
+      }
+    });
+    overlay.addEventListener('change', function (event) {
+      var scopeValue = event.target.getAttribute && event.target.getAttribute('data-personal-scope-value');
+      if (scopeValue) {
+        updatePersonalScope(scopeValue, event.target.checked);
       }
     });
     overlay.querySelector('[data-settings-save]').addEventListener('click', saveConfig);
@@ -361,27 +490,7 @@
     }
   }
 
-  function installEntry() {
-    var row = document.querySelector('.custom-search-top-row');
-    if (!row) {
-      window.setTimeout(installEntry, 400);
-      return;
-    }
-    if (row.querySelector('[data-site-settings]')) {
-      return;
-    }
-    var button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'site-auth-login';
-    button.setAttribute('data-site-settings', '');
-    button.title = '服务设置（SVN 认证路径 / AI 助手）';
-    button.textContent = '设置';
-    button.addEventListener('click', open);
-    row.appendChild(button);
-  }
-
   function init() {
-    installEntry();
     document.addEventListener('siteauth:change', function () {
       updateBadge();
       if (state.overlay && state.overlay.classList.contains('is-open')) {

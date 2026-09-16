@@ -2,6 +2,8 @@
   --docs-sidebar-width: 300px;
   --docs-toc-width: 240px;
   --docs-toc-gap: 24px;
+  /* 目录与窗口右边距（目录固定靠最右） */
+  --docs-toc-right: 12px;
   /* 正文区域底色（docsify vue 主题 body 背景），用于吸顶行等需要与正文一致的场景 */
   --docs-page-bg: #f7f9fb;
 }
@@ -86,12 +88,36 @@
   .docs-page-toc.has-items {
     bottom: 24px;
     display: block;
-    overflow: auto;
+    left: auto;
+    overflow: hidden;
     position: fixed;
-    right: var(--docs-toc-gap);
+    right: var(--docs-toc-right);
     top: 86px;
     width: var(--docs-toc-width);
     z-index: 20;
+  }
+
+  .docs-page-toc-scroll {
+    height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding-right: 2px;
+  }
+
+  .docs-page-toc-resizer {
+    background: transparent;
+    bottom: 0;
+    cursor: col-resize;
+    left: 0;
+    position: absolute;
+    top: 0;
+    width: 7px;
+    z-index: 3;
+  }
+
+  .docs-page-toc-resizer:hover,
+  .docs-page-toc-resizer.is-dragging {
+    background: rgba(31, 111, 235, .18);
   }
 
   .docs-page-toc-title {
@@ -1019,4 +1045,9 @@ body.hide-page-toc .docs-page-toc-restore {
 
 .docs-page-toc-link.is-active .docs-page-toc-index {
   color: var(--docs-accent, #1f6feb);
+}
+
+body.toc-resizing {
+  cursor: col-resize;
+  user-select: none;
 }

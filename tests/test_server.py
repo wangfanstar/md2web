@@ -742,6 +742,28 @@ class AdminConfigTests(ServerTestBase):
         self.assertTrue(payload["authenticated"])
         self.assertEqual(payload["user"]["role"], "admin")
 
+    def test_main_login_accepts_local_admin_without_svn(self):
+        # 主登录框（不带 mode=admin）也应识别本机管理员，不需要 SVN 校验
+        response = self.client.post("/__auth/login", json={"username": "admin", "password": "admin"})
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        payload = self.client.get("/__auth/session").get_json()
+        self.assertTrue(payload["authenticated"])
+        self.assertEqual(payload["user"]["role"], "admin")
+
+    def test_main_login_local_admin_wrong_password(self):
+        response = self.client.post("/__auth/login", json={"username": "admin", "password": "nope"})
+        self.assertEqual(response.status_code, 401)
+
+    def test_main_login_admin_works_without_svn_configuration(self):
+        empty = self.write_config({"auth": {"url": "", "credential_group": "engineering"}})
+        config = server_config.load_config(empty, self.docs, allow_incomplete=True)
+        service = server_auth.AuthService(self.conn, self.svn, config)
+        result = service.login("admin", "admin", "127.0.0.1")
+        self.assertEqual(result["user"]["role"], "admin")
+        with self.assertRaises(server_auth.AuthError) as ctx:
+            service.login("alice", "good", "127.0.0.1")
+        self.assertEqual(ctx.exception.status, 503)
+
     def test_admin_login_rejects_wrong_password(self):
         response = self.client.post("/__auth/login", json={"username": "admin", "password": "nope", "mode": "admin"})
         self.assertEqual(response.status_code, 401)

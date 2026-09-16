@@ -651,9 +651,70 @@
     return map[currentRouteBase()] || [];
   }
 
+  var TOC_WIDTH_KEY = 'md2web:toc-width';
+  var TOC_DEFAULT_WIDTH = 240;
+  var TOC_MIN_WIDTH = 180;
+  var TOC_MAX_WIDTH = 480;
+
+  function readTocWidth() {
+    try {
+      var value = parseInt(localStorage.getItem(TOC_WIDTH_KEY) || '', 10);
+      if (Number.isFinite(value) && value >= TOC_MIN_WIDTH && value <= TOC_MAX_WIDTH) {
+        return value;
+      }
+    } catch (error) { /* 忽略 */ }
+    return TOC_DEFAULT_WIDTH;
+  }
+
+  function applyTocWidth(width) {
+    var value = Math.min(TOC_MAX_WIDTH, Math.max(TOC_MIN_WIDTH, Math.round(width || readTocWidth())));
+    document.documentElement.style.setProperty('--docs-toc-width', value + 'px');
+    return value;
+  }
+
+  function setupTocResize(toc) {
+    if (toc.querySelector('.docs-page-toc-resizer')) {
+      applyTocWidth();
+      return;
+    }
+    var handle = document.createElement('div');
+    handle.className = 'docs-page-toc-resizer';
+    handle.setAttribute('role', 'separator');
+    handle.setAttribute('aria-orientation', 'vertical');
+    handle.setAttribute('aria-label', '拖动调整本文目录宽度');
+    handle.title = '拖动调整目录宽度';
+    toc.appendChild(handle);
+    applyTocWidth();
+    handle.addEventListener('mousedown', function (event) {
+      event.preventDefault();
+      var startX = event.clientX;
+      var startWidth = toc.getBoundingClientRect().width || readTocWidth();
+      handle.classList.add('is-dragging');
+      document.body.classList.add('toc-resizing');
+      function onMove(moveEvent) {
+        // 右侧固定，向左拖动变宽、向右拖动变窄
+        applyTocWidth(startWidth - (moveEvent.clientX - startX));
+      }
+      function onUp() {
+        handle.classList.remove('is-dragging');
+        document.body.classList.remove('toc-resizing');
+        try {
+          localStorage.setItem(TOC_WIDTH_KEY, String(Math.round(toc.getBoundingClientRect().width)));
+        } catch (error) { /* 忽略 */ }
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
+
   function setTocHidden(hidden) {
     document.body.classList.toggle('hide-page-toc', !!hidden);
     ensureTocRestoreChip();
+    if (!hidden) {
+      applyTocWidth();
+    }
     try {
       localStorage.setItem(TOC_HIDDEN_KEY, hidden ? '1' : '');
     } catch (error) { /* 忽略隐私模式 */ }
@@ -766,10 +827,12 @@
     }
 
     toc.innerHTML = [
+      '<div class="docs-page-toc-scroll">',
       '<div class="docs-page-toc-title"><span>' + escapeHtml(tocConfig.title || '本文目录')
         + '</span><button type="button" class="docs-page-toc-hide" title="隐藏本文目录">隐藏</button></div>',
       '<div class="docs-page-toc-links">',
       renderTocItems(rootItems),
+      '</div>',
       '</div>'
     ].join('');
     if (toc.getAttribute('data-toc-toggle-bound') !== '1') {
@@ -808,6 +871,7 @@
       });
     }
     toc.classList.add('has-items');
+    setupTocResize(toc);
     updateActiveTocLink();
   }
 
@@ -851,8 +915,15 @@
         previous = item;
         item = item.parentElement && item.parentElement.closest ? item.parentElement.closest('.docs-page-toc-item') : null;
       }
-      if (link.scrollIntoView) {
-        try { link.scrollIntoView({ block: 'nearest' }); } catch (error) { /* 忽略 */ }
+      var scroller = toc.querySelector('.docs-page-toc-scroll');
+      if (scroller) {
+        var linkTop = link.offsetTop;
+        var linkBottom = linkTop + link.offsetHeight;
+        if (linkTop < scroller.scrollTop) {
+          scroller.scrollTop = Math.max(0, linkTop - 24);
+        } else if (linkBottom > scroller.scrollTop + scroller.clientHeight) {
+          scroller.scrollTop = linkBottom - scroller.clientHeight + 8;
+        }
       }
     });
   }
@@ -1992,13 +2063,15 @@
       '<a class="custom-sidebar-icon" href="#/" title="' + escapeHtml(title) + '（Home）" aria-label="返回首页">',
       SIDEBAR_HOME_ICON,
       '</a>',
-      '<button type="button" class="custom-sidebar-icon" data-sidebar-ai title="AI 配置" aria-label="AI 配置">',
+      '<button type="button" class="custom-sidebar-icon" data-sidebar-ai title="设置（含 AI 配置）" aria-label="设置">',
       SIDEBAR_AI_ICON,
       '</button>',
       '</span>'
     ].join('');
     appName.querySelector('[data-sidebar-ai]').addEventListener('click', function () {
-      if (window.AIAssistant) {
+      if (window.Settings) {
+        window.Settings.open('ai');
+      } else if (window.AIAssistant) {
         window.AIAssistant.openConfig();
       }
     });
@@ -2257,6 +2330,7 @@
     restoreTocPreference();
     window.addEventListener('hashchange', scheduleReadingModeBuild);
     window.addEventListener('scroll', scheduleActiveToc, true);
+    window.addEventListener('resize', function () { applyTocWidth(); });
     window.addEventListener('hashchange', scheduleActiveToc);
     window.addEventListener('hashchange', function () {
       window.setTimeout(function () { installSidebarIcons(); }, 0);

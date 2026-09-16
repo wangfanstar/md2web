@@ -238,6 +238,11 @@ class AuthService:
         username = str(username or "").strip()
         if not username or password is None or password == "":
             raise AuthError("invalid_request")
+        # 本机管理员账号（默认 admin）：不经过 SVN 校验，直接以管理员身份登录
+        with self._db_lock:
+            admin_row = database.find_user(self.conn, database.LOCAL_ADMIN_SOURCE, username)
+        if admin_row is not None:
+            return self.login_admin(username, password, client_ip, user_agent)
         if not self.configured():
             raise AuthError("not_configured")
         key = self._rate_key(client_ip, username)

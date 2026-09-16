@@ -39,7 +39,7 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `server/app.py` | Flask 应用：`/__auth/session|login|logout`（含 `mode:admin`）、`GET/PUT /__config`、`POST /__config/test-auth`、`POST /__admin/password`（均要求管理员 + CSRF）、草稿接口（`/__md/document|draft|history|diff|revision|discard`）、SVN 接口（`/__svn/info|log|prepare|commit|refresh`、`/__operations/<id>`；提交支持管理员补充 SVN 凭据）、写接口守卫（匿名 401、旧 `/__md/save` 410）、静态分发白名单与安全响应头 |
 | `server/paths.py` | 静态分发禁止清单（点目录、`.svn`、`data/`、`config/`、临时/数据库/源码文件），预览与认证服务共用 |
 | `web/auth.js` / `.css` | 登录状态与弹窗（`window.SiteAuth`）：会话刷新、登录/退出、侧栏指示器、只读模式提示、管理员角色与 AI 默认值下发 |
-| `web/settings.js` / `.css` | 服务设置弹窗（`window.Settings`）：管理员登录、SVN 认证路径与测试、仓库映射增删、AI 助手默认值、管理员改密；保存走 `PUT /__config` 热应用 |
+| `web/settings.js` / `.css` | 统一设置弹窗（`window.Settings`，侧栏单一入口）：本机 AI 设置（服务商/接口/模型/Key/代理/**参考源码路径**/资料范围，浏览器 localStorage）、管理员登录、SVN 认证路径与测试、仓库映射增删、全站 AI 默认值、管理员改密；服务端保存走 `PUT /__config` 热应用 |
 | `web/sanitize.js` | 前端净化入口（`window.Sanitize`，基于离线 DOMPurify）：阅读/预览/AI 回答统一净化 |
 | `config/server.example.json` | 认证服务示例配置（可提交）；`config/server.local.json` 为真实配置，不提交（缺失时 `--config` 会自动生成默认文件） |
 | `tests/test_server.py` | 认证服务单元/HTTP 集成测试（配置、数据库、SVN 假 CLI、登录会话、静态白名单） |
@@ -116,6 +116,8 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 服务启动只按 pidfile 终止本项目自身实例；不要再恢复“扫描并终止所有 serve.py 进程”的行为。
 - `--svn-command` 支持带空格的路径（Windows 用双引号包住）；测试用假 svn 可执行文件注入，真实认证需要能连通的强制认证 SVN 路径。
 - 本地管理员默认 `admin / admin`（PBKDF2 存库）：仅用于网页「设置」；部署后必须尽快改密。修改 SVN 认证路径只失效 SVN 用户会话，管理员会话保留。
+- 登录接口会自动识别本机管理员账号（`auth_source_id = local-admin`）：直接用本地口令校验并以管理员身份登录，**不需要 SVN 校验**；普通账号仍走 SVN 认证路径。
+- 本文目录固定靠窗口右缘（`--docs-toc-right`），左边缘为拖动手柄调整**宽度**（`md2web:toc-width`，写入 `--docs-toc-width`）；目录内容放在内层 `.docs-page-toc-scroll`，外层禁止横向滚动，拖动手柄才不会被滚动条带偏。
 - 忘记管理员密码用 `python serve.py --reset-admin-password`（`database.reset_admin_password` 强制写回默认值）；不要在网页接口里提供”重置为默认“的公开入口。
 - `PUT /__config` 为热应用：校验 → 原子写配置文件 → 原地更新内存配置 → 重建认证源摘要；AI 默认值（含 Key）只下发给已登录用户，匿名会话不下发。
 - 草稿保存必须带 `expectedVersion`（或 `baseHash`）；版本不符返回 409 且不回写任何文件——不要恢复“再次保存强制覆盖”。

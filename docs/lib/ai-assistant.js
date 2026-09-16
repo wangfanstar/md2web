@@ -67,6 +67,7 @@
       contextChars: 6000,
       systemPrompt: DEFAULT_SYSTEM,
       useProxy: 'auto',
+      sourcePath: '',
       scope: [],
       uploads: []
     };
@@ -92,6 +93,9 @@
       }
       if (server.contextChars) {
         base.contextChars = server.contextChars;
+      }
+      if (server.sourcePath) {
+        base.sourcePath = server.sourcePath;
       }
     }
     Object.keys(PROVIDERS).forEach(function (name) {
@@ -506,8 +510,13 @@
         ? '已找到 ' + hits.length + ' 条相关资料，正在请求模型…'
         : '未命中本地资料，正在按模型已有知识回答…');
       var context = window.AIRetrieval.buildContext(hits, state.config.contextChars);
+      var systemPrompt = state.config.systemPrompt || DEFAULT_SYSTEM;
+      if (state.config.sourcePath) {
+        systemPrompt += '\n\n参考源码路径：' + state.config.sourcePath
+          + '（如与问题相关，请引用该代码库中的文件路径与符号名，便于工程师定位）';
+      }
       var messages = window.AIRetrieval.buildMessages({
-        systemPrompt: state.config.systemPrompt || DEFAULT_SYSTEM,
+        systemPrompt: systemPrompt,
         context: context,
         history: history,
         question: text
@@ -603,7 +612,11 @@
         return;
       }
       if (action === 'config') {
-        openConfig();
+        if (window.Settings) {
+          window.Settings.open('ai');
+        } else {
+          openConfig();
+        }
       } else if (action === 'history') {
         toggleHistory();
       } else if (action === 'newChat') {

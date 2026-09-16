@@ -133,7 +133,7 @@
       '<div class="site-auth-backdrop" data-auth-close></div>',
       '<form class="site-auth-panel">',
       '<h3>登录 SVN 账号</h3>',
-      '<p class="site-auth-hint">使用 SVN 账号密码登录；口令仅用于向 SVN 服务器验证，不写入本应用数据库。</p>',
+      '<p class="site-auth-hint">普通用户用 SVN 账号密码登录（仅用于向 SVN 服务器验证，不写入本应用数据库）；管理员可用本机管理员账号（默认 <b>admin / admin</b>）登录。</p>',
       '<label>用户名<input type="text" name="username" autocomplete="username" required></label>',
       '<label>密码<input type="password" name="password" autocomplete="current-password" required></label>',
       '<p class="site-auth-error" data-auth-error></p>',
