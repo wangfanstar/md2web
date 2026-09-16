@@ -113,7 +113,6 @@ CREATE INDEX idx_operations_actor ON operations (actor_id, created_at);
 MIGRATION_V2_SQL = """
 ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user';
 ALTER TABLE users ADD COLUMN password_hash TEXT;
-CREATE UNIQUE INDEX idx_users_local_admin ON users (svn_username) WHERE auth_source_id = 'local-admin';
 """
 
 LOCAL_ADMIN_SOURCE = "local-admin"
@@ -198,12 +197,29 @@ def set_admin_password(conn, user_id, password):
 
 
 def backup_to(conn, destination):
-    """使用 sqlite3 backup API 备份到目标文件。"""
+    """备份到目标文件：优先 sqlite3 backup API（3.7+），否则用 iterdump 兼容 3.6。"""
     dest = Path(destination)
     dest.parent.mkdir(parents=True, exist_ok=True)
+    if hasattr(conn, "backup"):
+        target = sqlite3.connect(str(dest))
+        try:
+            conn.backup(target)
+        finally:
+            target.close()
+        return dest
+    return dump_backup(conn, dest)
+
+
+def dump_backup(conn, destination):
+    """用 SQL 转储方式备份（Python 3.6 无 Connection.backup 时使用）。"""
+    dest = Path(destination)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        dest.unlink()
     target = sqlite3.connect(str(dest))
     try:
-        conn.backup(target)
+        target.executescript("\n".join(conn.iterdump()))
+        target.commit()
     finally:
         target.close()
     return dest

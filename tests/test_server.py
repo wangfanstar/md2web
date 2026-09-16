@@ -12,6 +12,9 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 
 
 def load_module(name, filename):
@@ -154,22 +157,12 @@ if command == "update":
     sys.stderr.write("svn: E160013: Path not found\n")
     sys.exit(1)
 
-if command == "add":
-    sys.exit(0)
-
 if command == "diff":
     relative = repo_relative(args[-1])
     target = Path(args[-1])
     state = load_state()
     remote = state.get("files", {}).get(relative)
     if remote is None:
-        local = target.read_text(encoding="utf-8") if target.exists() else ""
-        if not local:
-            sys.exit(0)
-        print("--- " + str(relative) + "\t(revision 0)")
-        print("+++ " + str(relative) + "\t(working copy)")
-        for line in local.splitlines():
-            print("+" + line)
         sys.exit(0)
     local = target.read_text(encoding="utf-8") if target.exists() else ""
     if local == remote:
@@ -366,6 +359,22 @@ class DatabaseTests(ServerTestBase):
                         "INSERT INTO sessions (token_hash, user_id, csrf_token, created_at, last_seen_at,"
                         " expires_at, process_epoch) VALUES ('h', 999, 'c', 't', 't', 't', 'e')"
                     )
+        finally:
+            conn.close()
+
+    def test_dump_backup_fallback(self):
+        conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
+        try:
+            server_database.migrate(conn)
+            with conn:
+                server_database.audit(conn, "test", "ok")
+            dest = server_database.dump_backup(conn, self.tmp / "backup" / "dump.sqlite3")
+            clone = sqlite3.connect(str(dest))
+            try:
+                count = clone.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0]
+            finally:
+                clone.close()
+            self.assertEqual(count, 1)
         finally:
             conn.close()
 
@@ -775,8 +784,12 @@ class AdminConfigTests(ServerTestBase):
         self.assertEqual(ctx.exception.status, 503)
 
     def test_json_configuration_is_flask_2_compatible(self):
-        self.assertFalse(self.app.json.ensure_ascii)
-        self.assertFalse(self.app.json.sort_keys)
+        if hasattr(self.app, "json"):
+            self.assertFalse(self.app.json.ensure_ascii)
+            self.assertFalse(self.app.json.sort_keys)
+        else:
+            self.assertFalse(self.app.config["JSON_AS_ASCII"])
+            self.assertFalse(self.app.config["JSON_SORT_KEYS"])
         self.assertEqual(self.app.config["MAX_CONTENT_LENGTH"], 2 * 1024 * 1024)
 
     def test_admin_login_rejects_wrong_password(self):
@@ -1136,23 +1149,6 @@ class SvnOperationTests(ServerTestBase):
         self.assertEqual(binding["published_revision"], 4)
         self.assertEqual(binding["repository_uuid"], "11111111-2222-3333-4444-555555555555")
 
-    def test_commit_new_file_without_baseline(self):
-        # docs/md 有文件、远端没有：应能作为新文件提交（svn add + commit）
-        draft_content = '# 新增文档\n\n内容\n'
-        server_drafts.save_draft(self.conn, self.alice, self.md_dir, 'md/硬件设计/新文档.md',
-                                 draft_content, expected_version=0)
-        prepared = server_operations.prepare_commit(self.conn, self.alice, self.config, self.md_dir,
-                                                    'md/硬件设计/新文档.md', 'docs: add new file',
-                                                    expected_version=1)
-        self.assertIn('+内容', prepared['diff'])
-        result = server_operations.run_commit(self.conn, self.svn, self.config, self.md_dir, self.workspaces,
-                                              prepared['operationId'], self.alice, ('alice', 'good'))
-        self.assertEqual(result['state'], 'published')
-        state = self.repo_state()
-        self.assertIn('新文档.md', state['files'])
-        self.assertIn('内容', state['files']['新文档.md'])
-        self.assertEqual(state['revision'], 4)
-
     def test_commit_is_idempotent(self):
         self.make_draft()
         prepared = server_operations.prepare_commit(self.conn, self.alice, self.config, self.md_dir,
@@ -1303,72 +1299,6 @@ class SvnApiTests(ServerTestBase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["entries"][0]["revision"], 5)
         self.assertEqual(payload["entries"][0]["message"], "docs")
-
-    def test_image_upload_creates_img_folder(self):
-        import base64 as b64
-        self.login()
-        csrf = self.client.get("/__auth/session").get_json()["csrfToken"]
-        response = self.client.post("/__md/upload", json={
-            "path": "md/硬件设计/时钟树设计.md",
-            "filename": "波形 图.png",
-            "data": b64.b64encode(b"PNGDATA").decode("ascii"),
-        }, headers={"X-CSRF-Token": csrf})
-        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
-        result = response.get_json()
-        self.assertTrue(result["ok"], result)
-        self.assertEqual(result["url"], "img/波形-图.png")
-        self.assertEqual(result["contentType"], "image/png")
-        target = self.docs / "md" / "硬件设计" / "img" / "波形-图.png"
-        self.assertTrue(target.exists(), result)
-        self.assertEqual(target.read_bytes(), b"PNGDATA")
-
-    def test_image_upload_unique_name_and_data_url(self):
-        import base64 as b64
-        self.login()
-        csrf = self.client.get("/__auth/session").get_json()["csrfToken"]
-        headers = {"X-CSRF-Token": csrf}
-        first = self.client.post("/__md/upload", json={
-            "path": "md/硬件设计/时钟树设计.md", "filename": "a.png",
-            "data": "data:image/png;base64," + b64.b64encode(b"one").decode("ascii"),
-        }, headers=headers).get_json()
-        second = self.client.post("/__md/upload", json={
-            "path": "md/硬件设计/时钟树设计.md", "filename": "a.png",
-            "data": b64.b64encode(b"two").decode("ascii"),
-        }, headers=headers).get_json()
-        self.assertEqual(first["url"], "img/a.png")
-        self.assertEqual(second["url"], "img/a-1.png")
-
-    def test_image_upload_rejects_bad_input(self):
-        import base64 as b64
-        self.login()
-        csrf = self.client.get("/__auth/session").get_json()["csrfToken"]
-        headers = {"X-CSRF-Token": csrf}
-        for payload, status in (
-            ({"path": "md/硬件设计/x.md", "filename": "a.exe", "data": b64.b64encode(b"x").decode()}, 400),
-            ({"path": "../secret.md", "filename": "a.png", "data": b64.b64encode(b"x").decode()}, 400),
-            ({"path": "md/硬件设计/x.md", "filename": "a.png", "data": "not-base64!!"}, 400),
-            ({"path": "md/硬件设计/x.md", "filename": "a.png"}, 400),
-        ):
-            response = self.client.post("/__md/upload", json=payload, headers=headers)
-            self.assertEqual(response.status_code, status, payload)
-
-    def test_image_upload_allows_document_without_baseline(self):
-        import base64 as b64
-        self.login()
-        csrf = self.client.get("/__auth/session").get_json()["csrfToken"]
-        response = self.client.post("/__md/upload", json={
-            "path": "md/硬件设计/尚未发布.md", "filename": "shot.png",
-            "data": b64.b64encode(b"NEW").decode("ascii"),
-        }, headers={"X-CSRF-Token": csrf})
-        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
-        self.assertTrue((self.docs / "md" / "硬件设计" / "img" / "shot.png").exists())
-
-    def test_image_upload_requires_login_and_csrf(self):
-        response = self.client.post("/__md/upload", json={"path": "md/a.md", "filename": "a.png", "data": "eA=="})
-        self.assertEqual(response.status_code, 401)
-        self.login()
-        response = self.client.post("/__md/upload", json={"path": "md/a.md", "filename": "a.png", "data": "eA=="})
-        self.assertEqual(response.status_code, 403)
 
     def test_prepare_then_commit_via_api(self):
         headers_csrf = self.login()

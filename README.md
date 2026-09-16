@@ -1,6 +1,6 @@
 # Markdown 离线文档站生成器（md2web）
 
-把 `docs/md/` 里的 Markdown 一键转换成**完全离线可用**的 Docsify 文档站：产物自包含，拷贝到任意机器双击即可浏览与搜索；需要 Python 3.8+，仅用标准库，无需 pip/Node.js，支持 Windows 与 Linux。
+把 `docs/md/` 里的 Markdown 一键转换成**完全离线可用**的 Docsify 文档站：产物自包含，拷贝到任意机器双击即可浏览与搜索；需要 Python 3.6.8+（认证服务：3.6.8 用 server/requirements-py36.txt，3.8+ 用 server/requirements.txt），仅用标准库，无需 pip/Node.js，支持 Windows 与 Linux。
 
 ## 特性
 
@@ -13,12 +13,9 @@
 - 单页导出：阅读区「下载本页」把当前文档导出为自包含 HTML（样式内联、图片与图形内嵌，可直接分享）
 - 在线预览：内置绘图预览页（`lib/plot-playground.html`），Mermaid 全部图形类型与 PacketDiag 增强语法（位序/编号/全局注释）可边写边看、一键复制源码、下载 SVG/PNG；侧栏顶部提供「绘图预览」快捷入口
 - 绘图示例：`docs/md/使用说明/绘图示例.md` 收录全部 27 种 Mermaid 类型与 11 个 PacketDiag 模板，每个样例均为「效果 + 源码」对照（有测试保证与绘图预览同步）
-- 阅读增强：复制路径、双栏编辑器（左侧 Markdown 格式分色 + 右侧实时预览）、个人草稿、下载 MD、下载本页为自包含 HTML、宽屏与序号开关
-- 编辑器插图：工具栏「图片」选择文件，或直接 `Ctrl+V` 粘贴剪贴板图片；登录后自动上传到文档同目录的 `img/`（不存在则创建，重名自动加序号），离线模式则内嵌 data URL
-- 无 SVN 基线也可编辑：文档未发布/未关联仓库时照常编辑并保存草稿，提交时作为新文件加入 SVN
+- 阅读增强：复制路径、双栏编辑器（左侧 Markdown 格式分色 + 右侧实时预览）、`Ctrl+S` 直连写回 `docs/md/` 源文件、下载 MD、下载本页为自包含 HTML、宽屏与序号开关
 - 数学公式：`$...$` / `$$...$$` 由 KaTeX 离线渲染（编辑器预览与文档页一致）
 - AI 助手：右下角对话面板 + 侧栏设置图标（设置与 AI 配置合一），本地检索后再发给可配置的大模型（OpenAI 兼容 / DeepSeek / Ollama / Anthropic），支持资料范围勾选与上传文档、带引用来源跳转；Key 仅存浏览器本地，跨域时经本机 `serve.py` 代理
-- 运行环境：构建与只读预览支持 Python 3.6+（Linux 上 `python3` 3.6 也能用）；认证编辑服务需要 Python 3.8+ 与 Flask/Waitress，缺失时自动降级为只读预览
 - 登录与权限（阶段一）：`python serve.py --config config/server.local.json` 启动认证编辑服务（Flask + Waitress + SQLite + SVN CLI），SVN 账号密码登录、会话/CSRF、匿名只读、静态分发白名单与前端内容净化；离线 `file://` 保持只读
 - 网页端「设置」（侧栏 HOME 图标旁，单一入口）：本机 AI 设置（含**参考源码路径**与资料范围，仅浏览器 localStorage）+ 服务端设置（默认管理员 admin/admin；SVN 认证路径、仓库映射、全站 AI 默认值），保存后热应用；配置与数据库均在 `docs/` 之外、不入库提交
 - 管理员可用本机账号直接登录编辑（不需要 SVN 校验）；提交 SVN 时补充一次 SVN 账号（仅进程内存）

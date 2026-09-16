@@ -295,12 +295,6 @@ class SvnClient:
         args = ["diff", "--non-interactive", "--no-auth-cache"] + creds + [str(path)]
         return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
 
-    def add(self, path, config_dir=None, username=None, password=None):
-        """把新文件加入版本控制（已受控时 svn 会提示已存在，按成功处理）。"""
-        creds, stdin_text = self._credential_args(username, password)
-        args = ["add", "--parents", "--non-interactive", "--no-auth-cache"] + creds + [str(path)]
-        return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
-
     def commit(self, path, message, config_dir=None, username=None, password=None):
         creds, stdin_text = self._credential_args(username, password)
         args = ["commit", str(path), "-m", str(message), "--non-interactive", "--no-auth-cache"] + creds

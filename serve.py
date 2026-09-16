@@ -302,7 +302,37 @@ def ai_target_url(raw):
 
 
 class PreviewHandler(http.server.SimpleHTTPRequestHandler):
-    """只读预览：静态文件 + 本机 AI 代理；写接口一律拒绝。"""
+    """只读预览：静态文件 + 本机 AI 代理；写接口一律拒绝。
+
+    Python 3.6 的 SimpleHTTPRequestHandler 不支持 directory 参数，
+    这里用 translate_path 兼容（3.7+ 走原生实现）。
+    """
+
+    def __init__(self, *args, **kwargs):
+        directory = kwargs.pop("directory", None)
+        self._directory = Path(directory) if directory else None
+        if sys.version_info >= (3, 7):
+            super().__init__(*args, directory=directory, **kwargs)
+        else:
+            super().__init__(*args, **kwargs)
+
+    def translate_path(self, path):
+        if sys.version_info >= (3, 7) or self._directory is None:
+            return super().translate_path(path)
+        # 复刻 3.6 实现，只把根目录替换为指定目录
+        import posixpath
+
+        path = path.split("?", 1)[0].split("#", 1)[0]
+        path = posixpath.normpath(urllib.parse.unquote(path))
+        words = [word for word in path.split("/") if word]
+        resolved = str(self._directory)
+        for word in words:
+            drive, word = os.path.splitdrive(word)
+            head, word = os.path.split(word)
+            if word in (os.curdir, os.pardir):
+                continue
+            resolved = os.path.join(resolved, word)
+        return resolved
 
     def _send_json(self, status, payload):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -427,13 +457,12 @@ def run_authenticated_service(args, directory):
         from server.svn import SvnClient
         from waitress import serve as waitress_serve
     except (ModuleNotFoundError, ImportError) as error:
-        if sys.version_info < (3, 8):
-            print("警告: 当前 Python " + ".".join(str(v) for v in sys.version_info[:3])
-                  + " 过旧（认证服务需要 3.8+，Flask/Waitress 无法安装）。")
-        print("警告: 认证编辑服务需要 Flask 与 Waitress（缺少 " + str(error.name) + "），"
-              "已降级为只读预览。")
-        print("  安装依赖后可启用登录编辑: python -m pip install -r server/requirements.txt")
-        print("  指定其他版本解释器: python3.9 serve.py  或  PYTHON=python3.9 ./start_linux.sh")
+        requirements = "server/requirements.txt" if sys.version_info >= (3, 8) else "server/requirements-py36.txt"
+        print("警告: 未安装认证编辑服务依赖（缺少 " + str(error.name) + "），已降级为只读预览。")
+        print("  当前解释器: Python " + ".".join(str(v) for v in sys.version_info[:3]))
+        print("  安装依赖后可启用登录编辑: python3 -m pip install -r " + requirements)
+        print("  pip 过旧时先执行: python3 -m pip install --upgrade \"pip<22\"")
+        print("  指定其他版本解释器: PYTHON=python3.9 ./start_linux.sh")
         args.preview = True
         return None
 
@@ -512,9 +541,8 @@ def main(argv=None):
         raise SystemExit(f"错误: {directory} 下没有 index.html，请先运行 python setup_docsify.py")
 
     print("Python: " + sys.version.split()[0] + " (" + sys.executable + ")")
-    if sys.version_info < (3, 8):
-        print("提示: 该解释器低于 3.8，认证编辑服务不可用（会自动降级为只读预览）；"
-              "如需登录编辑请安装 Python 3.8+ 并设置 PYTHON 环境变量。")
+    if sys.version_info < (3, 8) and sys.version_info >= (3, 6):
+        print("提示: Python 3.6 请用 server/requirements-py36.txt 安装依赖（Flask 2.0.3 + Waitress 2.0.0）。")
     manage_instance(args.pidfile)
     write_pidfile(args.pidfile, os.getpid())
 

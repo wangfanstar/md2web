@@ -10,12 +10,8 @@ from pathlib import Path
 
 from flask import Flask, jsonify, make_response, request, send_from_directory
 
-import base64
-import os
-import re as _re
-
 from . import config as server_config
-from . import database, documents, drafts, operations
+from . import database, drafts, operations
 from .auth import AuthError
 from .config import authenticated_config, config_to_json, public_config, save_config
 from .documents import MdSaveError
@@ -290,86 +286,6 @@ def create_app(config, conn, auth_service, docs_dir):
             return json_error(error.status, "draft_conflict" if error.status == 409 else "draft_error",
                               error.message, **error.extra)
         return jsonify({"ok": True, **result})
-
-    IMAGE_TYPES = {
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".gif": "image/gif",
-        ".webp": "image/webp",
-        ".bmp": "image/bmp",
-        ".svg": "image/svg+xml",
-    }
-    IMAGE_MAX_BYTES = 5 * 1024 * 1024
-
-    @app.post("/__md/upload")
-    def upload_image():
-        """把编辑器里的图片保存到文档同目录的 img/ 下，返回可直接引用的相对路径。"""
-        session, rejected = require_session()
-        if rejected:
-            return rejected
-        csrf_error = require_csrf(session)
-        if csrf_error:
-            return csrf_error
-        payload = request.get_json(silent=True) or {}
-        try:
-            rel = documents.normalize_md_path(payload.get("path"))
-        except MdSaveError as error:
-            return json_error(error.status, "invalid_path", error.message)
-        filename = Path(str(payload.get("filename") or "")).name
-        filename = _re.sub(r'[\\/:*?"<>|\s\x00-\x1f]+', "-", filename).strip(". ")
-        suffix = Path(filename).suffix.lower()
-        if not filename or suffix not in IMAGE_TYPES:
-            return json_error(400, "invalid_image",
-                              "仅支持图片类型: " + ", ".join(sorted(IMAGE_TYPES)))
-        raw = payload.get("data")
-        if not isinstance(raw, str) or not raw:
-            return json_error(400, "invalid_image", "缺少图片内容")
-        encoded = raw.split(",", 1)[1] if raw.startswith("data:") and "," in raw else raw
-        try:
-            content = base64.b64decode(encoded, validate=True)
-        except (ValueError, TypeError):
-            return json_error(400, "invalid_image", "图片内容不是有效的 base64")
-        if not content:
-            return json_error(400, "invalid_image", "图片内容为空")
-        if len(content) > IMAGE_MAX_BYTES:
-            return json_error(413, "image_too_large", "图片超过 5 MB 限制")
-        doc_file = documents.resolve_md_file(md_dir(), rel)
-        img_dir = doc_file.parent / "img"
-        try:
-            img_dir.mkdir(parents=True, exist_ok=True)
-            resolved_dir = img_dir.resolve()
-            root = md_dir().resolve()
-            if root not in resolved_dir.parents:
-                return json_error(400, "invalid_path", "图片目录越界")
-        except OSError as error:
-            return json_error(500, "upload_failed", f"无法创建图片目录: {error}")
-        stem = Path(filename).stem
-        target = img_dir / filename
-        index = 1
-        while target.exists():
-            target = img_dir / (stem + "-" + str(index) + suffix)
-            index += 1
-        import tempfile as _tempfile
-        handle = _tempfile.NamedTemporaryFile(mode="wb", delete=False, dir=str(img_dir),
-                                              prefix="." + target.name + ".", suffix=".tmp")
-        tmp_path = Path(handle.name)
-        try:
-            with handle:
-                handle.write(content)
-            os.replace(tmp_path, target)
-        finally:
-            if tmp_path.exists():
-                try:
-                    tmp_path.unlink()
-                except OSError:
-                    pass
-        with conn:
-            database.audit(conn, "image_upload", "ok", actor_id=session["user"]["id"],
-                           resource=str(target.relative_to(md_dir().resolve())).replace("\\", "/"))
-        return jsonify({"ok": True, "url": "img/" + target.name,
-                        "path": str(target.relative_to(md_dir().resolve())).replace("\\", "/"),
-                        "bytes": len(content), "contentType": IMAGE_TYPES[suffix]})
 
     @app.get("/__md/revision")
     def read_revision():

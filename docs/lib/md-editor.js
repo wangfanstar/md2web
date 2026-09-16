@@ -211,13 +211,9 @@
       state.textarea.value = state.original;
       updateBindingLabel();
       afterContentChanged(true);
-      if (doc.draft) {
-        setStatus('已载入个人草稿 v' + doc.draft.version + '（未提交 SVN）');
-      } else if (!doc.exists) {
-        setStatus('该文档在 docs/md 中还没有内容（无 SVN 基线）：可直接编辑，Ctrl+S 保存草稿；提交时会作为新文件加入');
-      } else {
-        setStatus('已载入已发布版本');
-      }
+      setStatus(doc.draft
+        ? '已载入个人草稿 v' + doc.draft.version + '（未提交 SVN）'
+        : '已载入已发布版本');
       return doc;
     });
   }
@@ -477,102 +473,6 @@
     }).catch(function (error) {
       setStatus('读取 SVN 日志失败：' + error.message);
     });
-  }
-
-  // ---------- 插入图片：文件选择 / 剪贴板粘贴 → 上传到文档同目录 img/ ----------
-
-  function fileToDataUrl(file) {
-    return new Promise(function (resolve, reject) {
-      var reader = new FileReader();
-      reader.onload = function () { resolve(String(reader.result || '')); };
-      reader.onerror = function () { reject(new Error('读取图片失败：' + file.name)); };
-      reader.readAsDataURL(file);
-    });
-  }
-
-  function insertImageMarkdown(name, url) {
-    var label = String(name || '图片').replace(/\.[A-Za-z0-9]+$/, '');
-    insertBlock('![' + label + '](' + url + ')\n');
-  }
-
-  function pickImages() {
-    if (!authAvailable() && window.location.protocol !== 'file:') {
-      setStatus('请先登录后再上传图片（登录后图片会保存到文档同目录的 img/ 下）');
-      if (window.SiteAuth) {
-        window.SiteAuth.openLogin();
-      }
-      return;
-    }
-    var input = document.createElement('input');
-    input.type = 'file';
-    input.className = 'md-editor-image-input';
-    input.accept = 'image/png,image/jpeg,image/gif,image/webp,image/bmp,image/svg+xml';
-    input.multiple = true;
-    input.style.display = 'none';
-    document.body.appendChild(input);
-    input.addEventListener('change', function () {
-      uploadImages(Array.prototype.slice.call(input.files || []));
-      input.remove();
-    });
-    input.click();
-  }
-
-  function uploadImages(files) {
-    if (!files.length) {
-      return;
-    }
-    setStatus('正在处理 ' + files.length + ' 张图片…');
-    var uploaded = 0;
-    var chain = Promise.resolve();
-    files.forEach(function (file) {
-      chain = chain.then(function () {
-        return fileToDataUrl(file).then(function (dataUrl) {
-          if (!authAvailable()) {
-            // 离线模式：直接内嵌为 data URL
-            insertImageMarkdown(file.name, dataUrl);
-            uploaded += 1;
-            return null;
-          }
-          return authApi('__md/upload', {
-            method: 'POST',
-            body: JSON.stringify({ path: state.resource, filename: file.name, data: dataUrl })
-          }).then(function (payload) {
-            insertImageMarkdown(file.name, payload.url);
-            uploaded += 1;
-          });
-        });
-      });
-    });
-    chain.then(function () {
-      if (!authAvailable()) {
-        setStatus('已插入 ' + uploaded + ' 张图片（离线模式，使用内嵌 data URL；在线登录后会上传到 img/ 目录）');
-      } else {
-        setStatus('已上传并插入 ' + uploaded + ' 张图片到 img/ 目录');
-      }
-    }).catch(function (error) {
-      setStatus('插入图片失败：' + error.message);
-    });
-  }
-
-  function handleEditorPaste(event) {
-    var items = event.clipboardData && event.clipboardData.items;
-    if (!items) {
-      return;
-    }
-    var files = [];
-    for (var index = 0; index < items.length; index += 1) {
-      if (items[index].kind === 'file' && /^image\//.test(items[index].type)) {
-        var file = items[index].getAsFile();
-        if (file) {
-          files.push(file);
-        }
-      }
-    }
-    if (!files.length) {
-      return;
-    }
-    event.preventDefault();
-    uploadImages(files);
   }
 
   function handlePanelAction(target, action) {
@@ -849,11 +749,6 @@
       state.preview.innerHTML = '<p class="md-editor-preview-hint">预览不可用：未加载 marked.min.js</p>';
       return;
     }
-    if (!state.textarea.value.trim()) {
-      state.preview.innerHTML = '<p class="md-editor-preview-hint">（文档为空）在左侧输入 Markdown，右侧会实时预览；'
-        + '可用工具栏插入标题、列表、图片与公式。</p>';
-      return;
-    }
     var token = state.previewToken + 1;
     state.previewToken = token;
     var html;
@@ -1078,7 +973,7 @@
       strike: function () { surround('~~', '~~', '删除线', true); },
       code: function () { surround('`', '`', '行内代码', true); },
       link: function () { surround('[', '](https://)', '链接文字'); },
-      image: function () { pickImages(); },
+      image: function () { surround('![', '](images/example.png)', '图片说明'); },
       math: function () { surround('$', '$', 'E = mc^2'); },
       mathBlock: function () { insertBlock('$$\nE = mc^2\n$$\n', 3, 3); },
       h1: function () { toggleHeading(1); },
@@ -1258,7 +1153,6 @@
     state.textarea.addEventListener('input', function () {
       afterContentChanged(false);
     });
-    state.textarea.addEventListener('paste', handleEditorPaste);
     state.textarea.addEventListener('scroll', function () {
       if (state.highlight) {
         state.highlight.scrollTop = state.textarea.scrollTop;

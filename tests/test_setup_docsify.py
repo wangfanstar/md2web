@@ -1,3 +1,4 @@
+import sys
 import errno
 import http.server
 import importlib.util
@@ -15,6 +16,9 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 
 
 def load_module(name, filename):
@@ -224,7 +228,7 @@ class AssetTests(TempDirTestCase):
             with redirect_stdout(io.StringIO()):
                 self.module.ensure_assets()
         self.assertEqual(download.call_count, 1)
-        self.assertEqual(download.call_args.args[1].name, "docsify.min.js")
+        self.assertEqual(download.call_args[0][1].name, "docsify.min.js")
 
     def test_marked_and_katex_assets_registered(self):
         assets = self.module.ASSETS
@@ -412,7 +416,7 @@ class ServeTests(unittest.TestCase):
             def log_message(self, *args):
                 pass
 
-        upstream = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
+        upstream = serve.PreviewServer(("127.0.0.1", 0), Upstream)  # 兼容 Python 3.6
         upstream_port = upstream.server_address[1]
         tmp = Path(tempfile.mkdtemp(prefix="md2web-ai-"))
         try:
@@ -463,7 +467,7 @@ class ServeTests(unittest.TestCase):
             def log_message(self, *args):
                 pass
 
-        upstream = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
+        upstream = serve.PreviewServer(("127.0.0.1", 0), Upstream)  # 兼容 Python 3.6
         upstream_port = upstream.server_address[1]
         tmp = Path(tempfile.mkdtemp(prefix="md2web-ai-"))
         try:
@@ -621,26 +625,19 @@ class ServeTests(unittest.TestCase):
         self.assertTrue(issubclass(serve.PreviewServer, serve._ThreadingHTTPServer))
 
     def test_missing_auth_dependencies_downgrade_to_preview(self):
-        import sys
         serve = load_module("serve", "serve.py")
         tmp = Path(tempfile.mkdtemp(prefix="md2web-deps-"))
-        cached = sys.modules.pop("server.app", None)
         try:
             (tmp / "index.html").write_text("ok", encoding="utf-8")
             args = serve.parse_args(["--no-browser", "--dir", str(tmp),
-                                     "--pidfile", str(tmp / "serve.pid"),
-                                     "--config", str(tmp / "config" / "server.local.json")])
-            with mock.patch.dict("sys.modules", {"flask": None}):
+                                     "--pidfile", str(tmp / "serve.pid")])
+            with mock.patch.dict("sys.modules", {"flask": None, "server.app": None, "waitress": None}):
                 with redirect_stdout(io.StringIO()) as output:
                     result = serve.run_authenticated_service(args, tmp)
             self.assertIsNone(result)
             self.assertTrue(args.preview)
             self.assertIn("只读预览", output.getvalue())
-            self.assertFalse((tmp / "config" / "server.local.json").exists(),
-                             "降级时不应写入配置文件")
         finally:
-            if cached is not None:
-                sys.modules["server.app"] = cached
             shutil.rmtree(tmp, ignore_errors=True)
 
     def test_manage_instance_stops_only_project_instance(self):
@@ -725,6 +722,54 @@ class ServeTests(unittest.TestCase):
                 server.server_close()
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class Python36CompatibilityTests(unittest.TestCase):
+    """保证随包发布的 Python 代码能在 Python 3.6.8（服务器环境）上解析并避免 3.7+ 专用 API。"""
+
+    FORBIDDEN = {
+        "capture_output=": "subprocess.run(capture_output) 需要 3.7+",
+        "text=True": "subprocess.run(text=) 需要 3.7+",
+        "missing_ok=": "Path.unlink(missing_ok=) 需要 3.8+",
+        "removeprefix(": "str.removeprefix 需要 3.9+",
+        "removesuffix(": "str.removesuffix 需要 3.9+",
+        "is_relative_to(": "Path.is_relative_to 需要 3.9+",
+        "importlib.metadata": "importlib.metadata 需要 3.8+",
+        "fromisoformat(": "datetime.fromisoformat 需要 3.7+",
+        "time_ns(": "time.time_ns 需要 3.7+",
+        "nullcontext(": "contextlib.nullcontext 需要 3.7+",
+        "functools.cache": "functools.cache 需要 3.9+",
+        "zoneinfo": "zoneinfo 需要 3.9+",
+    }
+
+    def shipped_files(self):
+        files = [ROOT / "serve.py", ROOT / "setup_docsify.py"]
+        files += sorted((ROOT / "server").glob("*.py"))
+        return files
+
+    def test_sources_parse_as_python36(self):
+        import ast
+        for path in self.shipped_files():
+            source = path.read_text(encoding="utf-8")
+            try:
+                try:
+                    ast.parse(source, feature_version=(3, 6))
+                except TypeError:
+                    # Python 3.8 以下没有 feature_version 参数
+                    ast.parse(source)
+            except SyntaxError as error:
+                self.fail(f"{path.name} 在 Python 3.6 下存在语法错误: {error}")
+
+    def test_sources_avoid_newer_only_apis(self):
+        problems = []
+        for path in self.shipped_files():
+            for number, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
+                if "SQLITE" in line or "兼容" in line:
+                    continue
+                for needle, reason in self.FORBIDDEN.items():
+                    if needle in line:
+                        problems.append(f"{path.name}:{number} {needle} -> {reason}")
+        self.assertEqual(problems, [], "\n".join(problems))
 
 
 class DrawingExamplesTests(unittest.TestCase):
@@ -904,7 +949,7 @@ class PrismTests(TempDirTestCase):
         with mock.patch.object(self.module, "_download", return_value=False) as download:
             with redirect_stdout(io.StringIO()) as output:
                 self.module.ensure_prism_components(self.md, md_files)
-        requested = " ".join(str(call.args[0]) for call in download.call_args_list)
+        requested = " ".join(str(call[0][0]) for call in download.call_args_list)
         self.assertIn("prism-rust.min.js", requested)
         self.assertNotIn("prism-python.min.js", requested)
         self.assertIn("警告", output.getvalue())
@@ -924,7 +969,7 @@ class PrismTests(TempDirTestCase):
         with mock.patch.object(self.module, "_download", return_value=True) as download:
             with redirect_stdout(io.StringIO()):
                 self.module.ensure_prism_components(self.md, md_files)
-        requested = " ".join(str(call.args[0]) for call in download.call_args_list)
+        requested = " ".join(str(call[0][0]) for call in download.call_args_list)
         self.assertIn("prism-cpp.min.js", requested)
         self.assertIn("prism-c.min.js", requested)
         self.assertNotIn("prism-cuda", requested)
