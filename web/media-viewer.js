@@ -79,6 +79,43 @@
     return { width: rect.width || 800, height: rect.height || 600 };
   }
 
+  function renderDiagramFresh(source, wrapper) {
+    // Mermaid：按源码重渲染，避免克隆 SVG 时丢文字/箭头
+    var mermaidHost = source.classList && source.classList.contains('mermaid') ? source : source.closest('.mermaid');
+    if (mermaidHost && window.MermaidRender) {
+      var mermaidSource = mermaidHost.getAttribute('data-source');
+      if (mermaidSource) {
+        return window.MermaidRender.render(mermaidSource).then(function (svgText) {
+          if (!svgText) {
+            return false;
+          }
+          wrapper.innerHTML = svgText;
+          var svg = wrapper.querySelector('svg');
+          if (svg) {
+            svg.removeAttribute('width');
+            svg.removeAttribute('height');
+            svg.style.maxWidth = 'none';
+          }
+          return true;
+        });
+      }
+    }
+    // PacketDiag：按源码重绘为图片
+    var figure = source.closest ? source.closest('.packetdiag-figure') : null;
+    if (figure && window.PacketDiagRerender) {
+      var dataUrl = window.PacketDiagRerender(figure, 1400);
+      if (dataUrl) {
+        var image = document.createElement('img');
+        image.src = dataUrl;
+        image.style.maxWidth = 'none';
+        image.alt = 'PacketDiag 图形';
+        wrapper.appendChild(image);
+        return Promise.resolve(true);
+      }
+    }
+    return Promise.resolve(false);
+  }
+
   function buildContent(source) {
     var wrapper = document.createElement('div');
     wrapper.className = 'media-viewer-content';
@@ -96,13 +133,33 @@
     }
     var svg = source.tagName === 'svg' ? source : source.querySelector('svg');
     if (svg) {
-      var svgClone = svg.cloneNode(true);
-      svgClone.removeAttribute('width');
-      svgClone.removeAttribute('height');
-      svgClone.style.maxWidth = 'none';
-      svgClone.style.width = state.natural.width + 'px';
-      svgClone.style.height = state.natural.height + 'px';
-      wrapper.appendChild(svgClone);
+      // 先留出占位，稍后用具名 SVG（重渲染 / 克隆）替换
+      var placeholder = document.createElement('div');
+      placeholder.className = 'media-viewer-diagram';
+      placeholder.style.width = state.natural.width + 'px';
+      placeholder.style.height = state.natural.height + 'px';
+      wrapper.appendChild(placeholder);
+      var finish = function (fresh) {
+        var node = placeholder.querySelector('svg');
+        if (fresh && node) {
+          node.style.width = state.natural.width + 'px';
+          node.style.height = state.natural.height + 'px';
+          return;
+        }
+        placeholder.innerHTML = '';
+        var svgClone = svg.cloneNode(true);
+        svgClone.removeAttribute('width');
+        svgClone.removeAttribute('height');
+        svgClone.style.maxWidth = 'none';
+        svgClone.style.width = state.natural.width + 'px';
+        svgClone.style.height = state.natural.height + 'px';
+        placeholder.appendChild(svgClone);
+      };
+      state.pendingRender = renderDiagramFresh(source, placeholder).then(function (fresh) {
+        finish(fresh);
+      }).catch(function () {
+        finish(false);
+      });
       return wrapper;
     }
     var img = source.tagName === 'IMG' ? source : source.querySelector('img');

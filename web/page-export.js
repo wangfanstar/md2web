@@ -30,7 +30,23 @@
     'blockquote { border-left: 3px solid #d7dee6; color: #5b6b7c; margin-left: 0; padding: 4px 0 4px 14px; }',
     'img, svg, canvas { height: auto; max-width: 100%; }',
     '.mermaid, .packetdiag-figure { margin: 18px 0; text-align: center; }',
-    'hr { border: 0; border-top: 1px solid #e3e8ee; margin: 28px 0; }'
+    'hr { border: 0; border-top: 1px solid #e3e8ee; margin: 28px 0; }',
+    'body { margin: 0; }',
+    '.page-toc { background: #fbfcfe; border-right: 1px solid #e3e8ee; bottom: 0; left: 0;',
+    '  overflow: auto; padding: 22px 16px 32px; position: fixed; top: 0; width: 268px; }',
+    '.page-toc strong { color: #24344a; display: block; font-size: 13px; margin-bottom: 10px; }',
+    '.page-toc ol { list-style: none; margin: 0; padding: 0; }',
+    '.page-toc li { margin: 0 0 2px; }',
+    '.page-toc a { border-radius: 5px; color: #44556b; display: block; font-size: 12.5px;',
+    '  line-height: 1.5; overflow: hidden; padding: 3px 6px; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }',
+    '.page-toc a:hover { background: #eef2f6; color: #1f6feb; }',
+    '.page-toc .toc-level-3 { padding-left: 14px; }',
+    '.page-toc .toc-level-4 { padding-left: 28px; }',
+    '.page { margin-left: 268px; max-width: 1000px; padding: 30px 40px 60px; }',
+    '@media (max-width: 900px) {',
+    '  .page-toc { border-bottom: 1px solid #e3e8ee; border-right: 0; position: static; width: auto; }',
+    '  .page { margin-left: 0; padding: 20px 18px 48px; }',
+    '}'
   ].join('\n');
 
   function escapeHtml(value) {
@@ -61,6 +77,9 @@
     if (!section) {
       return null;
     }
+    if (window.PacketDiagEnsureRendered) {
+      window.PacketDiagEnsureRendered(section);
+    }
     var clone = section.cloneNode(true);
     Array.prototype.forEach.call(
       clone.querySelectorAll('.workspace-breadcrumb, .workspace-page-actions, .search-reading-toolbar, .workspace-copy-code, .search-section-arrow, .search-section-badge, .search-section-body'),
@@ -68,12 +87,24 @@
     );
     Array.prototype.forEach.call(clone.querySelectorAll('canvas'), function (canvas) {
       var image = document.createElement('img');
-      try {
-        image.src = canvas.toDataURL('image/png');
-      } catch (error) {
-        image.src = '';
+      var dataUrl = '';
+      var figure = canvas.closest ? canvas.closest('.packetdiag-figure') : null;
+      if (figure && window.PacketDiagRerender) {
+        // 重新绘制一份，避免导出时画布尚未绘制导致的空白图
+        dataUrl = window.PacketDiagRerender(figure, Math.max(560, figure.clientWidth || 864));
       }
+      if (!dataUrl) {
+        try {
+          dataUrl = canvas.toDataURL('image/png');
+        } catch (error) {
+          dataUrl = '';
+        }
+      }
+      image.src = dataUrl;
       image.alt = canvas.getAttribute('aria-label') || '图形';
+      if (canvas.width) {
+        image.setAttribute('width', String(canvas.width));
+      }
       canvas.parentNode.replaceChild(image, canvas);
     });
     Array.prototype.forEach.call(clone.querySelectorAll('h1 > .anchor, h2 > .anchor, h3 > .anchor, h4 > .anchor, h5 > .anchor, h6 > .anchor'), function (anchor) {
@@ -161,11 +192,11 @@
         '</style>',
         '</head>',
         '<body>',
+        buildToc(article),
         '<article class="page">',
         '<h1>' + escapeHtml(title) + '</h1>',
         '<p class="page-meta">来源：docs/md/' + escapeHtml(route) + ' · 导出于 ' +
           escapeHtml(new Date().toLocaleString()) + '</p>',
-        buildToc(article),
         article.innerHTML,
         '</article>',
         '</body>',

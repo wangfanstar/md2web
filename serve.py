@@ -523,6 +523,13 @@ def run_authenticated_service(args, directory):
         waitress_serve(app, host=bind, port=port, threads=8)
     except KeyboardInterrupt:
         print("\n已停止")
+    except OSError as error:
+        if getattr(error, "errno", None) in (errno.EADDRINUSE, 10048):
+            print("错误: 端口 " + str(port) + " 已被占用（可能有另一个服务实例在运行）。")
+            print("  请关闭占用该端口的程序，或修改配置中的 server.port；"
+                  "重复启动本脚本时会先按 pidfile 关闭自己的旧实例。")
+        else:
+            print("错误: 无法在 " + bind + ":" + str(port) + " 启动服务: " + str(error))
     finally:
         if stop_watcher is not None:
             stop_watcher.set()

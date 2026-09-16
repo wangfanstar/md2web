@@ -132,12 +132,8 @@
       body.innerHTML = personalAiSection()
         + '<section class="settings-section"><h4>服务端设置（管理员）</h4>'
         + '<p class="settings-note">SVN 认证路径、仓库映射与全站 AI 默认值需要管理员账号登录。</p>'
-        + '<form class="settings-admin-login" data-settings-admin-form>'
-        + '<label>管理员账号<input type="text" name="adminUser" value="admin" autocomplete="username"></label>'
-        + '<label>密码<input type="password" name="adminPassword" autocomplete="current-password"></label>'
-        + '<button type="submit" class="is-primary">登录</button>'
-        + '</form>'
-        + '<p class="settings-note">默认账号为 <code>admin / admin</code>；普通 SVN 账号无配置权限。</p></section>';
+        + '<div class="settings-row-actions"><button type="button" data-settings-action="open-login">登录（本机管理员或 SVN 账号）</button></div>'
+        + '<p class="settings-note">默认管理员账号 <code>admin / admin</code>（本机账号，仅本地编辑；合入 SVN 时再提供 SVN 账号）。</p></section>';
       overlay.querySelector('[data-settings-save]').hidden = true;
       renderPersonalScope();
       return;
@@ -398,7 +394,12 @@
         close();
         return;
       }
-      if (action === 'save-personal-ai') {
+      if (action === 'open-login') {
+        close();
+        if (window.SiteAuth) {
+          window.SiteAuth.openLogin();
+        }
+      } else if (action === 'save-personal-ai') {
         savePersonalAi();
       } else if (action === 'scopeAll') {
         if (window.AIAssistant && window.AIAssistant.scopeTree) {

@@ -363,6 +363,10 @@ class AuthService:
             raise AuthError(error.code, str(error))
         return True
 
+    def has_credential(self, session_id):
+        with self._lock:
+            return int(session_id) in self._credentials
+
     def forget_credential(self, session_id):
         with self._lock:
             self._credentials.pop(int(session_id), None)

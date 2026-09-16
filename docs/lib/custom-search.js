@@ -1575,6 +1575,7 @@
         toolbar.parentNode.removeChild(toolbar);
       }
     }
+    document.body.classList.remove('search-reading');
     clearReadingMarks();
     reading.wrapped.forEach(function (entry) {
       var wrapper = entry.wrapper;
@@ -1810,6 +1811,13 @@
   function buildReadingToolbar(section) {
     var toolbar = document.createElement('div');
     toolbar.className = 'search-reading-toolbar';
+    document.body.classList.add('search-reading');
+    window.requestAnimationFrame(function () {
+      var height = Math.round(toolbar.getBoundingClientRect().height);
+      if (height > 0) {
+        document.documentElement.style.setProperty('--reading-toolbar-h', (height + 8) + 'px');
+      }
+    });
     toolbar.innerHTML = [
       '<div class="search-reading-info">🔍 ' + escapeHtml(reading.query) + ' · ' + reading.matches.length + ' 处命中</div>',
       '<div class="search-reading-actions">',
@@ -2015,14 +2023,42 @@
       })).join('');
   }
 
+  var SEARCH_FILTERS_KEY = 'md2web:search-filters-open';
+
   function searchFiltersHtml() {
-    return '<div class="custom-search-filters">' +
+    return '<div class="custom-search-filters" data-role="search-filters" hidden>' +
       '<label>范围 <select data-role="search-scope" aria-label="搜索范围">' + searchScopeOptions() + '</select></label>' +
       '<label>模式 <select data-role="search-mode" aria-label="搜索模式"><option value="full">全文</option><option value="file">文件名/路径</option></select></label>' +
       '</div>';
   }
 
   function bindSearchFilters(view, root) {
+    var filters = root.querySelector('[data-role="search-filters"]');
+    var toggle = root.querySelector('[data-role="filter-toggle"]');
+    if (toggle && filters) {
+      var stored = null;
+      try {
+        stored = localStorage.getItem(SEARCH_FILTERS_KEY);
+      } catch (error) { /* 忽略隐私模式 */ }
+      filters.hidden = stored !== '1';
+      toggle.setAttribute('aria-expanded', filters.hidden ? 'false' : 'true');
+      toggle.addEventListener('click', function () {
+        filters.hidden = !filters.hidden;
+        toggle.setAttribute('aria-expanded', filters.hidden ? 'false' : 'true');
+        try {
+          localStorage.setItem(SEARCH_FILTERS_KEY, filters.hidden ? '' : '1');
+        } catch (error) { /* 忽略 */ }
+      });
+    }
+    function refreshToggleState() {
+      if (!toggle) {
+        return;
+      }
+      var active = state.searchScope !== 'all' || state.searchMode !== 'full';
+      toggle.classList.toggle('is-active', active);
+      toggle.title = active ? '搜索范围/模式已筛选（点击展开）' : '搜索范围与模式';
+    }
+    refreshToggleState();
     var scope = root.querySelector('[data-role="search-scope"]');
     var mode = root.querySelector('[data-role="search-mode"]');
     if (scope) {
@@ -2030,6 +2066,7 @@
       scope.addEventListener('change', function () {
         state.searchScope = scope.value;
         state.results = search(state.query);
+        refreshToggleState();
         renderAll();
       });
     }
@@ -2038,6 +2075,7 @@
       mode.addEventListener('change', function () {
         state.searchMode = mode.value;
         state.results = search(state.query);
+        refreshToggleState();
         renderAll();
       });
     }
@@ -2088,7 +2126,9 @@
       '</div>',
       '<div class="custom-search-input-row">',
       '<span class="custom-search-input-icon">🔍</span>',
+      '<button type="button" class="custom-search-filter-toggle" data-role="filter-toggle" title="搜索范围与模式" aria-label="搜索范围与模式" aria-expanded="false">⚙</button>',
       '<input type="search" class="custom-search-sidebar-input" placeholder="搜索文档（/ 聚焦，Ctrl+K 全局）" aria-label="搜索文档">',
+      '<button type="button" class="custom-search-filter-toggle" data-role="filter-toggle" title="搜索范围与模式" aria-label="搜索范围与模式" aria-expanded="false">⚙</button>',
       '<button type="button" class="custom-search-input-btn" data-role="clear-search" aria-label="清空搜索">×</button>',
       '</div>',
       searchFiltersHtml(),

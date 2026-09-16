@@ -783,7 +783,13 @@
   padding: 8px 12px;
   position: sticky;
   top: 0;
-  z-index: 25;
+  z-index: 960;
+}
+
+/* 搜索结果阅读模式：命中工具条在上、操作行紧随其下，二者同时可见且互不遮挡 */
+body.search-reading .workspace-page-actions {
+  top: var(--reading-toolbar-h, 44px);
+  z-index: 940;
 }
 
 .search-reading-info {
@@ -1050,4 +1056,31 @@ body.hide-page-toc .docs-page-toc-restore {
 body.toc-resizing {
   cursor: col-resize;
   user-select: none;
+}
+
+.custom-search-filter-toggle {
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--docs-muted, #6b7a8d);
+  cursor: pointer;
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 4px 5px;
+}
+
+.custom-search-filter-toggle:hover {
+  background: #eef2f6;
+  color: var(--docs-ink, #1f2a37);
+}
+
+.custom-search-filter-toggle.is-active {
+  background: #eef4fd;
+  color: var(--docs-accent, #1f6feb);
+}
+
+.custom-search-filters[hidden] {
+  display: none !important;
 }

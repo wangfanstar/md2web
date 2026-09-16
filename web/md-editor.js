@@ -203,6 +203,11 @@
   function loadDocumentFromServer() {
     return authApi('__md/document?path=' + encodeURIComponent(state.resource)).then(function (payload) {
       var doc = payload.document || {};
+      if (doc.path && doc.path !== state.resource) {
+        // 服务端会补回 .md 后缀（docsify 路由不带扩展名）
+        state.resource = doc.path;
+        state.titleEl.textContent = displayPath(state.resource);
+      }
       state.document = doc;
       state.baseHash = (doc.published && doc.published.hash) || null;
       state.binding = doc.binding || null;
@@ -239,6 +244,14 @@
   }
 
   function save() {
+    if (state.localMode) {
+      downloadEditorSource();
+      return;
+    }
+    if (state.readOnlyHome) {
+      setStatus('站点首页由构建生成，无法保存；请编辑 docs/md 下的文档。');
+      return;
+    }
     if (authAvailable()) {
       saveDraft().catch(function (error) {
         if (error.status === 401) {
@@ -370,12 +383,13 @@
     });
   }
 
-  function promptCredentials() {
-    var username = window.prompt('请输入 SVN 账号（用于本次提交）');
+  function promptCredentials(reason) {
+    var prefix = reason ? reason + '\n' : '';
+    var username = window.prompt(prefix + '请输入用于本次合入的 SVN 账号（本机管理员账号无法合入 SVN）');
     if (!username) {
       return null;
     }
-    var password = window.prompt('请输入 SVN 密码');
+    var password = window.prompt(prefix + '请输入该 SVN 账号的密码（仅用于本次合入，留在进程内存）');
     if (!password) {
       return null;
     }
@@ -392,6 +406,10 @@
   function startSvnCommit() {
     if (!authAvailable()) {
       setStatus('请先登录后再提交 SVN');
+      return;
+    }
+    if (state.readOnlyHome) {
+      setStatus('站点首页由构建生成，无法提交；请编辑 docs/md 下的文档。');
       return;
     }
     var message = window.prompt('提交说明（将写入 SVN 日志）', 'docs: 更新 ' + state.resource.split('/').pop());
@@ -434,6 +452,26 @@
       return;
     }
     var operationId = state.prepareOperation.operationId;
+    var snapshot = window.SiteAuth && window.SiteAuth.snapshot ? window.SiteAuth.snapshot() : {};
+    if (!snapshot.svnCredential) {
+      var reason = '本机管理员账号只能本地编辑（草稿），合入 SVN 需要 SVN 账号。';
+      setStatus(reason + '请在提示框中输入用于本次合入的账号密码。');
+      var credentials = promptCredentials(reason);
+      if (!credentials) {
+        setStatus('已取消合入：需要 SVN 账号才能写入仓库（草稿已保留）');
+        return;
+      }
+      setStatus('正在提交 SVN…');
+      commitWithCredentials(operationId, credentials).then(function (payload) {
+        state.prepareOperation = null;
+        var result = payload.result || {};
+        window.SiteAuth.refresh();
+        setStatus('已提交 SVN：r' + result.svnRevision + '（站点将在重建后更新）');
+      }).catch(function (error) {
+        setStatus('提交失败：' + error.message);
+      });
+      return;
+    }
     setStatus('正在提交 SVN…');
     commitWithCredentials(operationId).then(function (payload) {
       state.prepareOperation = null;
@@ -1296,15 +1334,30 @@
     bindOverlay();
   }
 
-  function open() {
+  function open(options) {
+    state.localMode = !!(options && options.local);
     state.resource = currentResource();
     state.lastFocus = document.activeElement;
     state.fileHandle = null;
+    var serverButtons = ['history', 'diff', 'load-latest', 'svn-commit', 'svn-log'];
+    var saveButton = null;
     if (!state.overlay) {
       buildOverlay();
     }
     state.titleEl.textContent = displayPath(state.resource);
-    state.modeEl.textContent = saveModeLabel();
+    state.modeEl.textContent = state.localMode ? '仅本地查看源码' : saveModeLabel();
+    if (state.overlay) {
+      saveButton = state.overlay.querySelector('[data-editor-action="save"]');
+      if (saveButton) {
+        saveButton.textContent = state.localMode ? '保存到本地' : '保存';
+      }
+      serverButtons.forEach(function (name) {
+        var button = state.overlay.querySelector('[data-editor-action="' + name + '"]');
+        if (button) {
+          button.hidden = state.localMode;
+        }
+      });
+    }
     state.original = '';
     state.textarea.value = '';
     state.highlight.innerHTML = '';
@@ -1314,6 +1367,43 @@
     document.body.classList.add('md-editor-open');
     state.overlay.focus();
     updateBindingLabel();
+    if (state.localMode) {
+      loadSource(state.resource).then(function (result) {
+        state.resource = result.resource;
+        state.titleEl.textContent = displayPath(state.resource);
+        state.original = result.text;
+        state.textarea.value = result.text;
+        afterContentChanged(true);
+        state.textarea.focus();
+        setStatus('本地查看模式：可编辑与预览，保存到本地不会改动服务端文档。');
+      }).catch(function (error) {
+        setStatus('读取失败：' + message(error));
+      });
+      return;
+    }
+    if (state.resource === 'README.md') {
+      // 首页由构建生成：只读预览，不提供保存/提交
+      state.readOnlyHome = true;
+      setStatus('站点首页由构建生成，无法编辑源文档；请从左侧目录打开 docs/md 下的文档。');
+      loadSource(state.resource).then(function (result) {
+        state.original = result.text;
+        state.textarea.value = result.text;
+        afterContentChanged(true);
+        setStatus('站点首页由构建生成，无法编辑源文档；请从左侧目录打开 docs/md 下的文档。');
+      }).catch(function (error) {
+        setStatus('读取失败：' + message(error));
+      });
+      var homeCommit = state.overlay.querySelector('[data-editor-action="svn-commit"]');
+      if (homeCommit) {
+        homeCommit.hidden = true;
+      }
+      var homeLog = state.overlay.querySelector('[data-editor-action="svn-log"]');
+      if (homeLog) {
+        homeLog.hidden = true;
+      }
+      return;
+    }
+    state.readOnlyHome = false;
     var commitButton = state.overlay.querySelector('[data-editor-action="svn-commit"]');
     var logButton = state.overlay.querySelector('[data-editor-action="svn-log"]');
     if (commitButton) {
@@ -1348,5 +1438,11 @@
     });
   }
 
-  window.MdEditor = { open: open, download: download, save: save, close: close };
+  window.MdEditor = {
+    open: open,
+    openLocal: function () { open({ local: true }); },
+    download: download,
+    save: save,
+    close: close
+  };
 }());

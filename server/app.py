@@ -129,6 +129,7 @@ def create_app(config, conn, auth_service, docs_dir):
             "features": FEATURES,
             "site": site,
             "serverManaged": True,
+            "svnCredential": bool(session) and auth_service.has_credential(session["sessionId"]),
         })
 
     @app.post("/__auth/login")

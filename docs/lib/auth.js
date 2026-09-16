@@ -11,6 +11,7 @@
     features: { editDraft: false, svnCommit: false, localPublish: false },
     site: { repositories: [] },
     ai: null,
+    svnCredential: false,
     overlay: null,
     error: ''
   };
@@ -43,6 +44,7 @@
       role: (state.user && state.user.role) || '',
       features: state.features,
       ai: state.ai,
+      svnCredential: state.svnCredential,
       fileMode: isFileMode()
     };
   }
@@ -70,6 +72,7 @@
     state.features = payload.features || state.features;
     state.site = payload.site || state.site;
     state.ai = (payload.site && payload.site.ai) || null;
+    state.svnCredential = !!payload.svnCredential || (payload.user && payload.user.role !== 'admin' && !!payload.authenticated);
   }
 
   function refresh() {
@@ -133,7 +136,7 @@
       '<div class="site-auth-backdrop" data-auth-close></div>',
       '<form class="site-auth-panel">',
       '<h3>登录 SVN 账号</h3>',
-      '<p class="site-auth-hint">普通用户用 SVN 账号密码登录（仅用于向 SVN 服务器验证，不写入本应用数据库）；管理员可用本机管理员账号（默认 <b>admin / admin</b>）登录。</p>',
+      '<p class="site-auth-hint">普通用户用 SVN 账号登录（仅用于向 SVN 服务器验证，不写入数据库）；管理员可用本机账号（默认 <b>admin / admin</b>）登录，仅本地编辑与保存草稿，合入 SVN 时需再提供 SVN 账号。</p>',
       '<label>用户名<input type="text" name="username" autocomplete="username" required></label>',
       '<label>密码<input type="password" name="password" autocomplete="current-password" required></label>',
       '<p class="site-auth-error" data-auth-error></p>',
@@ -234,7 +237,12 @@
       return;
     }
     var name = state.user && (state.user.displayName || state.user.username) || '已登录';
-    host.innerHTML = '<span class="site-auth-user" title="已登录">' + escapeHtml(name) + '</span>'
+    var isAdmin = !!(state.user && state.user.role === 'admin');
+    var label = isAdmin ? name + '（本机）' : name;
+    var hint = isAdmin
+      ? '本机管理员：可本地编辑（草稿）；合入 SVN 需要 SVN 账号'
+      : '已登录';
+    host.innerHTML = '<span class="site-auth-user" title="' + escapeHtml(hint) + '">' + escapeHtml(label) + '</span>'
       + '<button type="button" class="site-auth-login" title="退出登录">退出</button>';
     host.querySelector('.site-auth-login').addEventListener('click', function () {
       logout();

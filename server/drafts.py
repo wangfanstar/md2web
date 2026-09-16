@@ -51,8 +51,9 @@ def published_text(md_dir, document_path):
 
 def document_state(conn, user_id, md_dir, document_path, binding=None):
     """返回已发布内容与当前用户草稿（设计：打开编辑器时的编辑基线）。"""
-    published = published_text(md_dir, document_path)
-    draft_row = get_draft_row(conn, user_id, document_path)
+    rel = documents.normalize_md_path(document_path)
+    published = published_text(md_dir, rel)
+    draft_row = get_draft_row(conn, user_id, rel)
     draft = None
     if draft_row is not None and draft_row["state"] == "active" and draft_row["head_revision_id"]:
         head = conn.execute(
@@ -67,7 +68,7 @@ def document_state(conn, user_id, md_dir, document_path, binding=None):
                 "updatedAt": draft_row["updated_at"],
             }
     return {
-        "path": document_path,
+        "path": rel,
         "exists": published is not None,
         "published": {
             "hash": documents.text_hash(published) if published is not None else None,

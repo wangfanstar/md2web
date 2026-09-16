@@ -45,12 +45,12 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `config/server.example.json` | 认证服务示例配置（可提交）；`config/server.local.json` 为真实配置，不提交（缺失时 `--config` 会自动生成默认文件） |
 | `tests/test_server.py` | 认证服务单元/HTTP 集成测试（配置、数据库、SVN 假 CLI、登录会话、静态白名单） |
 | `web/custom-search.js` / `.css` | 搜索算法与界面、结果列表、搜索/目录视图切换、正文命中高亮、右侧本文目录 |
-| `web/workspace.js` / `.css` | 目录树（折叠/过滤/计数/定位）、面包屑、首页卡片、复制、编辑/下载 MD、宽屏、章节序号、Mermaid 样式 |
-| `web/mermaid-init.js` | docsify 插件：把 ```mermaid 围栏渲染为图形（离线） |
+| `web/workspace.js` / `.css` | 目录树（折叠/过滤/计数/定位）、面包屑、首页卡片、复制、查看源码/编辑/下载 MD、章节序号、Mermaid 样式 |
+| `web/mermaid-init.js` | docsify 插件：把 ```mermaid 围栏渲染为图形（离线）；容器保留 `data-source`，并暴露 `window.MermaidRender.render(source)` 供放大查看/导出重渲染 |
 | `web/packetdiag.js` | PacketDiag 解析与 Canvas 绘制核心（从 `PacketDiagPic.html` 抽取，`window.PacketDiag = { parse, render, presets, defaultSource, extractSource, bitOrderFor, numberingFor }`）；支持 `bit_order`/`numbering`/`@row`/`@left`/`desctable` 等扩展语法 |
-| `web/packetdiag-init.js` | docsify 插件：把 ```packetdiag 围栏渲染为报文图，失败回退源码 |
-| `web/media-viewer.js` | 图片、Mermaid 图形与 PacketDiag 图形的全屏放大查看（缩放、平移、适应窗口、1:1、滚轮/触屏）与下载（Mermaid 导出 SVG/PNG，PacketDiag 导出 PNG；导出时把 foreignObject 转为 SVG 文本，保证 PNG 可导出、SVG 通用） |
-| `web/page-export.js` | 「下载本页」：把当前文档导出为自包含 HTML（样式内联、Canvas/图片转 data URL、生成目录） |
+| `web/packetdiag-init.js` | docsify 插件：把 ```packetdiag 围栏渲染为报文图（figure 保留 `data-source`），失败回退源码；暴露 `PacketDiagRerender`（按源码重绘 data URL）与 `PacketDiagEnsureRendered`（导出前修复空白画布） |
+| `web/media-viewer.js` | 图片、Mermaid 图形与 PacketDiag 图形的全屏放大查看（放大时用 `MermaidRender.render(source)` 重渲染、PacketDiag 用 `PacketDiagRerender` 重绘，避免克隆丢字/丢箭头）与下载（Mermaid 导出 SVG/PNG，PacketDiag 导出 PNG） |
+| `web/page-export.js` | 「下载本页」：把当前文档导出为自包含 HTML（样式内联、Canvas/图片转 data URL、本文目录固定左侧导航；导出前会调用 `PacketDiagEnsureRendered` 重绘空白画布） |
 | `web/md-editor.js` | 「编辑 MD / 下载 MD」（含草稿、历史、差异、提交 SVN 与 SVN 日志）：双栏编辑器（左：可拖拽分栏的 Markdown 高亮源码；右：marked + Prism + Mermaid + PacketDiag + KaTeX 实时预览）、工具栏与快捷键、`Ctrl+S` 直连写回（HTTP 走 `/__md/save`，file:// 走 File System Access/下载）；`window.MdEditor = { open, download, save, close }` |
 | `web/math-init.js` | docsify 插件：`$...$` / `$$...$$` 等分隔符的 KaTeX 离线渲染；暴露 `window.MathRender.render` 供编辑器预览复用 |
 | `web/prism-init.js` | docsify 插件：`beforeEach` 阶段按围栏语言预载 Prism 组件，保证 docsify 渲染期即可高亮（docsify 内置 Prism 覆盖了 `window.Prism`，autoloader 必须在其之后加载） |
@@ -116,9 +116,13 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - **写接口只在认证服务中存在**：只读预览下 `/__md/*`、`/__svn/*` 一律 403；前端不得回退成“文件写入”或“匿名直存”。匿名 401、旧接口 410、未实现阶段 501，均有明确错误码。
 - SQLite 连接由 Waitress 多线程共享：`database.connect` 使用 `check_same_thread=False`，所有访问必须经 `AuthService._db_lock` 串行化；数据库写锁不得跨越 SVN 网络调用。
 - 服务启动只按 pidfile 终止本项目自身实例；不要再恢复“扫描并终止所有 serve.py 进程”的行为。
+- 认证模式直接绑定配置端口：端口被占用时打印明确提示（不会自动换端口）；重复双击启动靠 pidfile 关闭旧实例。`start_windows.bat` 保持纯 ASCII（cmd 用 OEM 代码页解析，中文会破坏脚本）。
 - `--svn-command` 支持带空格的路径（Windows 用双引号包住）；测试用假 svn 可执行文件注入，真实认证需要能连通的强制认证 SVN 路径。
 - 本地管理员默认 `admin / admin`（PBKDF2 存库）：仅用于网页「设置」；部署后必须尽快改密。修改 SVN 认证路径只失效 SVN 用户会话，管理员会话保留。
+- 本机管理员账号只能本地编辑（草稿）与配置；提交 SVN 时要求补充 SVN 账号（仅会话内存），界面与提示不得暗示本机账号可直接合入。
 - 登录接口会自动识别本机管理员账号（`auth_source_id = local-admin`）：直接用本地口令校验并以管理员身份登录，**不需要 SVN 校验**；普通账号仍走 SVN 认证路径。
+- 搜索结果阅读模式下：命中工具条（sticky，z-index 960）在上，操作行通过 `--reading-toolbar-h` 下移（z-index 940）两者同时可见；不要再把操作行隐藏或让两者同 top 重叠。
+- 放大查看/导出禁止直接克隆已渲染的 SVG（会丢文字或箭头）：Mermaid 走 `MermaidRender.render(data-source)`，PacketDiag 走 `PacketDiagRerender(figure)`。
 - 本文目录固定靠窗口右缘（`--docs-toc-right`），左边缘为拖动手柄调整**宽度**（`md2web:toc-width`，写入 `--docs-toc-width`）；目录内容放在内层 `.docs-page-toc-scroll`，外层禁止横向滚动，拖动手柄才不会被滚动条带偏。
 - 忘记管理员密码用 `python serve.py --reset-admin-password`（`database.reset_admin_password` 强制写回默认值）；不要在网页接口里提供”重置为默认“的公开入口。
 - `PUT /__config` 为热应用：校验 → 原子写配置文件 → 原地更新内存配置 → 重建认证源摘要；AI 默认值（含 Key）只下发给已登录用户，匿名会话不下发。

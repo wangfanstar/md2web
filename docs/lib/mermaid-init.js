@@ -75,6 +75,7 @@
       var container = document.createElement('div');
       container.className = 'mermaid';
       container.textContent = code.textContent;
+      container.setAttribute('data-source', code.textContent);
       pre.parentNode.replaceChild(container, pre);
       return { container: container, text: code.textContent };
     });
@@ -95,6 +96,24 @@
       }
     });
   }
+
+  // 供放大查看/导出使用：从源码重新渲染一份独立 SVG（避免克隆造成的文字/箭头丢失）
+  var renderCounter = 0;
+  window.MermaidRender = {
+    render: function (source) {
+      var text = String(source || '').trim();
+      if (!text || !window.mermaid || !window.mermaid.render) {
+        return Promise.resolve('');
+      }
+      renderCounter += 1;
+      var id = 'md2web-mermaid-' + Date.now() + '-' + renderCounter;
+      return window.mermaid.render(id, text).then(function (result) {
+        return result && result.svg ? result.svg : '';
+      }).catch(function () {
+        return '';
+      });
+    }
+  };
 
   window.$docsify = window.$docsify || {};
   window.$docsify.plugins = (window.$docsify.plugins || []).concat(function (hook) {

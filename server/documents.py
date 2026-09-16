@@ -37,7 +37,11 @@ def normalize_md_path(raw):
         raise MdSaveError(400, "path 不能包含 ..")
     if any(part.startswith(".") for part in parts):
         raise MdSaveError(400, "path 不能包含隐藏目录")
-    if Path(*parts).suffix.lower() != ".md":
+    suffix = Path(*parts).suffix.lower()
+    if not suffix:
+        # docsify 路由会去掉 .md 后缀（file-router 补丁），这里按 ext 规则补回
+        parts[-1] = parts[-1] + ".md"
+    elif suffix != ".md":
         raise MdSaveError(400, "仅支持 .md 文件")
     return "/".join(parts)
 
