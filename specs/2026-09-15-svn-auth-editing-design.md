@@ -10,7 +10,7 @@
 |---|---|---|
 | 阶段一：认证与只读边界 | **已实现（见本次提交）** | `server/` 包（config/database/svn/auth/documents/app/paths/passwords）、`serve.py --config` 认证服务（配置缺失自动生成）、网页「设置」界面（管理员 admin/admin 可配置 SVN 认证路径/仓库映射/AI 助手/改密，热应用）、登录/退出/会话/CSRF、写接口守卫（匿名 401、旧 `/__md/save` 410、草稿/SVN 501）、静态白名单、前端 `auth.js`/`settings.js` 与 `sanitize.js` 净化、`tests/test_server.py` 59 项测试 |
 | 阶段二：草稿与修改记录 | **已实现** | `server/drafts.py`、`/__md/document|draft|history|diff|revision|discard`、编辑器草稿模式（版本号 + 409 冲突不覆盖）、历史与差异面板；`tests/test_server.py` 覆盖并发与私有性 |
-| 阶段三：多库 SVN 操作与发布 | 待实施 | `repo_bindings/operations` 表与最长前缀匹配已就绪；`/__svn/*` 当前返回 501 |
+| 阶段三：多库 SVN 操作与发布 | **已实现** | `server/operations.py`（审阅清单、私有工作副本稀疏检出、UUID/URL 绑定核对、幂等 operation、状态机与失败分级、发布与 published_revision、`/__svn/refresh` 导出同步）、`/__svn/info|log|prepare|commit|refresh`、编辑器「提交 SVN…／SVN 日志」流程；管理员提交时补充 SVN 凭据（仅进程内存） |
 
 运维补充：管理员密码默认 `admin/admin`（PBKDF2 存库，可在网页「设置」修改）；忘记密码时用 `python serve.py --reset-admin-password` 强制恢复默认值，不提供网页端重置入口。`docs/md/使用说明/绘图示例.md` 由绘图预览页样例生成保持同步，`DrawingExamplesTests` 会在样例增减时失败提醒更新。
 

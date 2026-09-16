@@ -30,12 +30,13 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `serve.py` | 跨平台入口：默认**只读预览**（静态站点 + 自动重建 + 本机 AI 代理，写接口一律 403）；`--config config/server.local.json` 启动认证编辑服务（Flask + Waitress）；按 pidfile 只管理本项目自身实例 |
 | `server/config.py` | 配置加载/校验：存储路径不得在 `docs/` 内、mount 唯一且禁止越界、URL 仅 http/https、仓库存目录段最长前缀匹配 |
 | `server/database.py` | SQLite 访问层：7 张表迁移 v2（users 含 role/password_hash，首次启动创建 admin/admin）、外键与 busy_timeout、`backup_to` |
-| `server/svn.py` | 唯一的 svn 子进程入口：`--password-from-stdin`（口令绝不进 argv）、匿名可读检测、错误分类、XML 解析、超时与脱敏 |
+| `server/svn.py` | 唯一的 svn 子进程入口：`--password-from-stdin`（口令绝不进 argv）、匿名可读检测、错误分类（含冲突/远端不存在）、info/log XML 解析、检出/稀疏更新/差异/提交/导出，超时与脱敏 |
 | `server/auth.py` | SVN 登录、本地管理员登录/改密、会话（token 只存摘要、闲置/绝对过期）、CSRF、限速、审计；重启与认证源变更使 SVN 旧会话失效（保留管理员会话）；数据库访问串行化 |
 | `server/passwords.py` | 管理员口令哈希（PBKDF2-HMAC-SHA256）与校验 |
+| `server/operations.py` | 提交任务：审阅清单冻结、私有工作副本（稀疏检出）、UUID/URL 绑定核对、幂等 operation、状态机（prepared/running/svn_committed/published/failed/uncertain/needs_auth）、发布到 docs/md 与 published_revision、远端同步导出 |
 | `server/drafts.py` | 个人草稿与版本历史：乐观并发（expected_version → 409）、不可变 revision 全文快照、统一差异（published/draft/版本号）、放弃草稿 |
 | `server/documents.py` | 受管 Markdown 读写底层：路径校验、EOL 保持、唯一临时文件 + 原子替换、必填 `base_hash` 冲突检测 |
-| `server/app.py` | Flask 应用：`/__auth/session|login|logout`（含 `mode:admin`）、`GET/PUT /__config`、`POST /__config/test-auth`、`POST /__admin/password`（均要求管理员 + CSRF）、草稿接口（`/__md/document|draft|history|diff|revision|discard`）、写接口守卫（匿名 401、旧 `/__md/save` 410、SVN 501）、静态分发白名单与安全响应头 |
+| `server/app.py` | Flask 应用：`/__auth/session|login|logout`（含 `mode:admin`）、`GET/PUT /__config`、`POST /__config/test-auth`、`POST /__admin/password`（均要求管理员 + CSRF）、草稿接口（`/__md/document|draft|history|diff|revision|discard`）、SVN 接口（`/__svn/info|log|prepare|commit|refresh`、`/__operations/<id>`；提交支持管理员补充 SVN 凭据）、写接口守卫（匿名 401、旧 `/__md/save` 410）、静态分发白名单与安全响应头 |
 | `server/paths.py` | 静态分发禁止清单（点目录、`.svn`、`data/`、`config/`、临时/数据库/源码文件），预览与认证服务共用 |
 | `web/auth.js` / `.css` | 登录状态与弹窗（`window.SiteAuth`）：会话刷新、登录/退出、侧栏指示器、只读模式提示、管理员角色与 AI 默认值下发 |
 | `web/settings.js` / `.css` | 服务设置弹窗（`window.Settings`）：管理员登录、SVN 认证路径与测试、仓库映射增删、AI 助手默认值、管理员改密；保存走 `PUT /__config` 热应用 |
@@ -49,7 +50,7 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `web/packetdiag-init.js` | docsify 插件：把 ```packetdiag 围栏渲染为报文图，失败回退源码 |
 | `web/media-viewer.js` | 图片、Mermaid 图形与 PacketDiag 图形的全屏放大查看（缩放、平移、适应窗口、1:1、滚轮/触屏）与下载（Mermaid 导出 SVG/PNG，PacketDiag 导出 PNG；导出时把 foreignObject 转为 SVG 文本，保证 PNG 可导出、SVG 通用） |
 | `web/page-export.js` | 「下载本页」：把当前文档导出为自包含 HTML（样式内联、Canvas/图片转 data URL、生成目录） |
-| `web/md-editor.js` | 「编辑 MD / 下载 MD」：双栏编辑器（左：可拖拽分栏的 Markdown 高亮源码；右：marked + Prism + Mermaid + PacketDiag + KaTeX 实时预览）、工具栏与快捷键、`Ctrl+S` 直连写回（HTTP 走 `/__md/save`，file:// 走 File System Access/下载）；`window.MdEditor = { open, download, save, close }` |
+| `web/md-editor.js` | 「编辑 MD / 下载 MD」（含草稿、历史、差异、提交 SVN 与 SVN 日志）：双栏编辑器（左：可拖拽分栏的 Markdown 高亮源码；右：marked + Prism + Mermaid + PacketDiag + KaTeX 实时预览）、工具栏与快捷键、`Ctrl+S` 直连写回（HTTP 走 `/__md/save`，file:// 走 File System Access/下载）；`window.MdEditor = { open, download, save, close }` |
 | `web/math-init.js` | docsify 插件：`$...$` / `$$...$$` 等分隔符的 KaTeX 离线渲染；暴露 `window.MathRender.render` 供编辑器预览复用 |
 | `web/prism-init.js` | docsify 插件：`beforeEach` 阶段按围栏语言预载 Prism 组件，保证 docsify 渲染期即可高亮（docsify 内置 Prism 覆盖了 `window.Prism`，autoloader 必须在其之后加载） |
 | `web/ai-retrieval.js` | AI 助手的离线检索核心（纯函数，`window.AIRetrieval`）：分词（CJK 单字+双字）、从 `searchIndex`/Markdown 构建语料、TF-IDF 打分、摘录与上下文/消息组装；`tests/test_ai_retrieval.js` 覆盖 |
@@ -118,6 +119,8 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 忘记管理员密码用 `python serve.py --reset-admin-password`（`database.reset_admin_password` 强制写回默认值）；不要在网页接口里提供”重置为默认“的公开入口。
 - `PUT /__config` 为热应用：校验 → 原子写配置文件 → 原地更新内存配置 → 重建认证源摘要；AI 默认值（含 Key）只下发给已登录用户，匿名会话不下发。
 - 草稿保存必须带 `expectedVersion`（或 `baseHash`）；版本不符返回 409 且不回写任何文件——不要恢复“再次保存强制覆盖”。
+- 提交只用**当前会话的 SVN 凭据**（登录时记入进程内存，退出/过期/重启即失效）；管理员本机账号没有 SVN 口令，提交时补充并立即校验，`needs_auth` 状态允许带凭据重试。
+- 提交状态机与幂等：同一 `operationId` 重复提交直接返回已有结果；不确定（超时/断网）标记 `uncertain` 且绝不自动重试；发布写 docs/md 前核对 hash，站点重建由 watcher 完成。
 - 服务默认按认证模式启动（`--preview` 才是只读预览）；缺少 Flask/Waitress 时给出安装提示，不静默回退匿名写。
 - 搜索的排除词语法为 `-词`，短语为 `"词 组"`；改动 `parseQuery` 时注意与 UI 提示保持一致。
 

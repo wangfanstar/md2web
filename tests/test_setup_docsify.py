@@ -716,6 +716,15 @@ class DrawingExamplesTests(unittest.TestCase):
             self.assertIn("（" + preset + "）", doc, preset)
         self.assertGreaterEqual(doc.count("```mermaid"), len(mermaid_labels))
         self.assertGreaterEqual(doc.count("```packetdiag"), len(extra_labels) + 6)
+        # 每个绘图围栏都必须有内容，避免生成空白图（历史问题：预设源取错字段）
+        empty = []
+        for language in ("mermaid", "packetdiag"):
+            blocks = re.findall(r"```" + language + r"\n(.*?)\n```", doc, re.S)
+            self.assertGreaterEqual(len(blocks), 1, language)
+            for index, block in enumerate(blocks):
+                if not block.strip():
+                    empty.append(language + "#" + str(index))
+        self.assertEqual(empty, [], "存在空白的绘图源码块: " + ",".join(empty))
 
 
 class GenerationTests(TempDirTestCase):

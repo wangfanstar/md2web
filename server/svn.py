@@ -23,6 +23,8 @@ ERROR_MESSAGES = {
     "cert_error": "SVN 服务证书校验失败",
     "timeout": "svn 命令超时",
     "parse_error": "无法解析 svn 输出",
+    "conflict": "远端内容已更新，本地基线过期，需要先更新并处理冲突",
+    "not_found_remote": "远端路径不存在",
     "failed": "svn 命令执行失败",
     "url_not_allowed": "目标地址不在允许的 SVN 服务器范围内",
 }
@@ -30,6 +32,8 @@ ERROR_MESSAGES = {
 AUTH_FAILED_MARKERS = ("e170001", "w170001", "e215004", "authorization failed", "authentication failed", "could not authenticate")
 UNREACHABLE_MARKERS = ("e170013", "e731001", "e670002", "e175002", "unable to connect", "could not connect", "connection refused", "connection timed out", "name or service not known", "no route to host")
 CERT_MARKERS = ("certificate verification failed", "e230001", "server certificate", "certificate issuer")
+CONFLICT_MARKERS = ("e160028", "e155011", "e170004", "out of date", "conflict", "is out of date")
+NOT_FOUND_MARKERS = ("e160013", "e160006", "path not found", "e200009")
 
 SECRET_ENV_KEYS = ("SVN_PASSWORD", "SVN_USERNAME", "SVN_AUTH_CACHE", "SVN_SSH", "SVN_ASP_DOT_NET_HACK")
 
@@ -46,6 +50,12 @@ def classify_error(stderr):
     for marker in AUTH_FAILED_MARKERS:
         if marker in text:
             return "auth_failed"
+    for marker in CONFLICT_MARKERS:
+        if marker in text:
+            return "conflict"
+    for marker in NOT_FOUND_MARKERS:
+        if marker in text:
+            return "not_found_remote"
     for marker in CERT_MARKERS:
         if marker in text:
             return "cert_error"
@@ -98,6 +108,27 @@ def parse_info_xml(text):
         info["root_url"] = (repo.find("root").text if repo.find("root") is not None else "") or ""
         info["uuid"] = (repo.find("uuid").text if repo.find("uuid") is not None else "") or ""
     return info
+
+
+def parse_log_xml(text):
+    """解析 svn log --xml。"""
+    content = str(text or "")
+    if "<!DOCTYPE" in content.upper() or "<!ENTITY" in content.upper():
+        raise SvnError("parse_error", detail="XML 包含 DTD/ENTITY，已拒绝解析")
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError as error:
+        raise SvnError("parse_error", detail=str(error)) from error
+    entries = []
+    for entry in root.findall("logentry"):
+        message = entry.find("msg")
+        entries.append({
+            "revision": int(entry.get("revision") or 0),
+            "author": (entry.findtext("author") or ""),
+            "date": (entry.findtext("date") or ""),
+            "message": (message.text or "") if message is not None else "",
+        })
+    return entries
 
 
 class SvnClient:
@@ -221,6 +252,74 @@ class SvnClient:
                     Path(own_config).rmdir()
                 except OSError:
                     pass
+
+    def _credential_args(self, username=None, password=None):
+        args = []
+        stdin_text = None
+        if username:
+            args += ["--username", str(username)]
+        if password:
+            if not self.supports_password_from_stdin():
+                raise SvnError("unsupported")
+            args.append("--password-from-stdin")
+            stdin_text = str(password) + "\n"
+        return args, stdin_text
+
+    def _run_checked(self, args, stdin_text=None, config_dir=None, timeout=None):
+        completed = self._run(args, stdin_text=stdin_text, config_dir=config_dir, timeout=timeout)
+        if completed.returncode != 0:
+            raise SvnError(classify_error(completed.stderr), detail=completed.stderr)
+        return completed.stdout or ""
+
+    def checkout(self, url, target_dir, revision=None, depth="empty", config_dir=None,
+                 username=None, password=None):
+        """私有工作副本：默认只检出目录骨架，按需稀疏更新具体文件。"""
+        creds, stdin_text = self._credential_args(username, password)
+        args = ["checkout", url, str(target_dir), "--depth", depth, "--non-interactive", "--no-auth-cache"]
+        if revision:
+            args += ["--revision", str(revision)]
+        args += creds
+        return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
+
+    def update(self, path, revision=None, depth="infinity", config_dir=None, username=None, password=None):
+        creds, stdin_text = self._credential_args(username, password)
+        args = ["update", str(path), "--depth", depth, "--non-interactive", "--no-auth-cache", "--accept", "postpone"]
+        if revision:
+            args += ["--revision", str(revision)]
+        args += creds
+        return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
+
+    def diff(self, path, config_dir=None, username=None, password=None):
+        creds, stdin_text = self._credential_args(username, password)
+        args = ["diff", "--non-interactive", "--no-auth-cache"] + creds + [str(path)]
+        return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
+
+    def commit(self, path, message, config_dir=None, username=None, password=None):
+        creds, stdin_text = self._credential_args(username, password)
+        args = ["commit", str(path), "-m", str(message), "--non-interactive", "--no-auth-cache"] + creds
+        output = self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
+        match = re.search(r"Committed revision (\d+)", output or "")
+        return int(match.group(1)) if match else None
+
+    def log(self, target, limit=50, config_dir=None, username=None, password=None, revision=None):
+        creds, stdin_text = self._credential_args(username, password)
+        args = ["log", "--xml", "--limit", str(int(limit)), "--non-interactive", "--no-auth-cache"]
+        if revision:
+            args += ["--revision", str(revision)]
+        args += creds
+        args.append(str(target))
+        return parse_log_xml(self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir))
+
+    def export(self, url, target_dir, revision=None, force=True, config_dir=None,
+               username=None, password=None):
+        creds, stdin_text = self._credential_args(username, password)
+        args = ["export", url, str(target_dir), "--non-interactive", "--no-auth-cache"]
+        if force:
+            args.append("--force")
+        if revision:
+            args += ["--revision", str(revision)]
+        args += creds
+        return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
 
     def info(self, url, config_dir, username=None, password=None):
         """读取配置中仓库的远程信息；绑定场景可带当前会话凭据。"""

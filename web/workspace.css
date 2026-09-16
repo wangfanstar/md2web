@@ -29,8 +29,8 @@ body { color: var(--workspace-ink); background: #f7f9fb; }
 .workspace-breadcrumb [aria-current="page"] { color: var(--workspace-ink); font-weight: 600; }
 .workspace-breadcrumb-sep { color: #b2bdc9; }
 .workspace-page-actions {
-  background: rgba(255, 255, 255, .97);
-  border-bottom: 1px solid #eef2f6;
+  background: #fff;
+  border-bottom: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -729,4 +729,9 @@ body.md-editor-open {
 .md-editor-history-row button:hover {
   border-color: var(--workspace-accent);
   color: var(--workspace-accent);
+}
+
+/* mermaid 时序图：actor 名称的 <text> 继承了角色框的浅色填充，导致文字不可见 */
+svg text[class*="actor"] {
+  fill: #1f2a37 !important;
 }

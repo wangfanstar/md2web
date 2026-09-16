@@ -24,30 +24,66 @@ def load_module(name, filename):
 server_package = __import__("server")
 from server import auth as server_auth  # noqa: E402
 from server import drafts as server_drafts  # noqa: E402
+from server import operations as server_operations  # noqa: E402
 from server import config as server_config  # noqa: E402
 from server import database as server_database  # noqa: E402
 from server import documents as server_documents  # noqa: E402
 from server import paths as server_paths  # noqa: E402
 from server import svn as server_svn  # noqa: E402
 
-FAKE_SVN = r'''import os
+FAKE_SVN = r'''import json
+import os
 import sys
 import time
+from pathlib import Path
 
 MODE = os.environ.get("FAKE_SVN_MODE", "ok")
+STATE_PATH = os.environ.get("FAKE_SVN_STATE", "")
 args = sys.argv[1:]
+
+
+def load_state():
+    if not STATE_PATH or not Path(STATE_PATH).exists():
+        return {"files": {}, "revision": 0, "log": [], "wc": {}, "uuid": "11111111-2222-3333-4444-555555555555"}
+    return json.loads(Path(STATE_PATH).read_text(encoding="utf-8"))
+
+
+def save_state(state):
+    if STATE_PATH:
+        Path(STATE_PATH).write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+
+def repo_relative(path):
+    state = load_state()
+    best = None
+    for root, url in state.get("wc", {}).items():
+        try:
+            relative = str(Path(path).resolve().relative_to(Path(root).resolve()))
+        except ValueError:
+            continue
+        if best is None or len(root) > len(best[0]):
+            best = (root, relative)
+    return best[1].replace("\\", "/") if best else None
+
 
 INFO_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <info>
-<entry kind="dir" path="auth-check" revision="42">
+<entry kind="dir" path="auth-check" revision="{revision}">
 <url>https://svn.example.invalid/svn/accounts/auth-check</url>
 <repository>
 <root>https://svn.example.invalid/svn/accounts</root>
-<uuid>11111111-2222-3333-4444-555555555555</uuid>
+<uuid>{uuid}</uuid>
 </repository>
 </entry>
 </info>
 """
+
+
+def emit_info(revision=None, uuid=None):
+    state = load_state()
+    sys.stdout.write(INFO_XML.format(revision=revision if revision is not None else state.get("revision", 0),
+                                     uuid=uuid or state.get("uuid")))
+
 
 if "--version" in args:
     print("1.14.2")
@@ -60,9 +96,18 @@ if "help" in args:
         print("  --password-from-stdin : read password from stdin")
     sys.exit(0)
 
-if "info" in args:
-    if MODE == "timeout":
-        time.sleep(5)
+args = sys.argv[1:]
+if args and args[0] == "--config-dir":
+    args = args[2:]
+command = args[0] if args else ""
+
+if MODE == "timeout" and command == "info":
+    time.sleep(10)
+
+if MODE == "commit_timeout" and command == "commit":
+    time.sleep(10)
+
+if command == "info":
     if MODE == "unreachable":
         sys.stderr.write("svn: E170013: Unable to connect to a repository at URL\n")
         sys.exit(1)
@@ -73,13 +118,106 @@ if "info" in args:
     if "--password-from-stdin" in args:
         password = sys.stdin.readline().strip()
     if MODE == "anon":
-        sys.stdout.write(INFO_XML)
+        state = load_state()
+        emit_info(revision=state.get("revision", 0), uuid="22222222-3333-4444-5555-666666666666")
         sys.exit(0)
-    if password == "good":
-        sys.stdout.write(INFO_XML)
+    if password != "good":
+        sys.stderr.write("svn: E170001: Authentication failed\n")
+        sys.exit(1)
+    emit_info()
+    sys.exit(0)
+
+if command == "checkout":
+    url = args[1]
+    target = Path(args[2])
+    depth = args[args.index("--depth") + 1] if "--depth" in args else "infinity"
+    state = load_state()
+    state.setdefault("wc", {})[str(target)] = url
+    save_state(state)
+    target.mkdir(parents=True, exist_ok=True)
+    if depth == "infinity":
+        for relative, content in state.get("files", {}).items():
+            file_path = target / relative
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content, encoding="utf-8")
+    sys.exit(0)
+
+if command == "update":
+    target = Path(args[1])
+    state = load_state()
+    relative = str(target.relative_to(next(iter(state.get("wc", {})), str(target.parent)))).replace("\\", "/")
+    if relative in state.get("files", {}):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(state["files"][relative], encoding="utf-8")
+        print("U    " + relative)
         sys.exit(0)
-    sys.stderr.write("svn: E170001: Authentication failed\n")
+    sys.stderr.write("svn: E160013: Path not found\n")
     sys.exit(1)
+
+if command == "diff":
+    relative = repo_relative(args[-1])
+    target = Path(args[-1])
+    state = load_state()
+    remote = state.get("files", {}).get(relative)
+    if remote is None:
+        sys.exit(0)
+    local = target.read_text(encoding="utf-8") if target.exists() else ""
+    if local == remote:
+        sys.exit(0)
+    print("Index: " + str(relative))
+    print("=" * 20)
+    print("--- " + str(relative) + " (revision %s)" % state.get("revision", 0))
+    print("+++ " + str(relative) + " (working copy)")
+    for line in remote.splitlines():
+        if line not in local.splitlines():
+            print("-" + line)
+    for line in local.splitlines():
+        if line not in remote.splitlines():
+            print("+" + line)
+    sys.exit(0)
+
+if command == "commit":
+    if MODE == "commit_conflict":
+        sys.stderr.write("svn: E160028: File is out of date\n")
+        sys.exit(1)
+    relative = repo_relative(args[1])
+    state = load_state()
+    state.setdefault("files", {})[relative] = Path(args[1]).read_text(encoding="utf-8")
+    state["revision"] = int(state.get("revision", 0)) + 1
+    state.setdefault("log", []).insert(0, {"revision": state["revision"], "author": "alice",
+                                           "date": "2026-09-15T08:00:00.000000Z",
+                                           "message": args[args.index("-m") + 1]})
+    save_state(state)
+    print("Committed revision %d." % state["revision"])
+    sys.exit(0)
+
+if command == "export":
+    url = args[1]
+    target = Path(args[2])
+    state = load_state()
+    for relative, content in state.get("files", {}).items():
+        file_path = target / relative
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(content, encoding="utf-8")
+    print("Exported revision %s." % state.get("revision", 0))
+    sys.exit(0)
+
+if command == "log":
+    state = load_state()
+    limit = 50
+    if "--limit" in args:
+        limit = int(args[args.index("--limit") + 1])
+    entries = state.get("log", [])[:limit]
+    print('<?xml version="1.0" encoding="UTF-8"?>')
+    print("<log>")
+    for entry in entries:
+        print('<logentry revision="%d">' % entry["revision"])
+        print("<author>%s</author>" % entry["author"])
+        print("<date>%s</date>" % entry["date"])
+        print("<msg>%s</msg>" % entry["message"])
+        print("</logentry>")
+    print("</log>")
+    sys.exit(0)
 
 sys.stderr.write("svn: unknown command\n")
 sys.exit(1)
@@ -874,6 +1012,261 @@ class DraftApiTests(ServerTestBase):
         response = self.client.post("/__md/discard", json={"path": "md/a.md"}, headers=headers)
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(self.client.get("/__md/document?path=md/a.md").get_json()["document"]["draft"])
+
+
+class SvnOperationTests(ServerTestBase):
+    def setUp(self):
+        super().setUp()
+        self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
+        server_database.migrate(self.conn)
+        server_database.ensure_admin(self.conn)
+        self.config = server_config.load_config(self.write_config(), self.docs)
+        self.md_dir = self.docs / "md"
+        self.mount_dir = self.md_dir / "硬件设计"
+        self.mount_dir.mkdir(parents=True, exist_ok=True)
+        self.published_file = self.mount_dir / "时钟树设计.md"
+        self.published_file.write_text("# 时钟树设计\n\n远端基线\n", encoding="utf-8")
+        self.document_path = "md/硬件设计/时钟树设计.md"
+        self.state_path = self.tmp / "svn-state.json"
+        self.state_path.write_text(json.dumps({
+            "files": {"时钟树设计.md": "# 时钟树设计\n\n远端基线\n"},
+            "revision": 3,
+            "log": [{"revision": 3, "author": "bob", "date": "2026-09-14T08:00:00.000000Z", "message": "baseline"}],
+            "wc": {},
+            "uuid": "11111111-2222-3333-4444-555555555555",
+        }, ensure_ascii=False), encoding="utf-8")
+        fake = self.tmp / "fake_svn.py"
+        fake.write_text(FAKE_SVN, encoding="utf-8")
+        self.svn = server_svn.SvnClient(command=(sys.executable, str(fake)), timeout=5)
+        self.env = mock.patch.dict("os.environ", {"FAKE_SVN_STATE": str(self.state_path)})
+        self.env.start()
+        with self.conn:
+            cursor = self.conn.execute(
+                "INSERT INTO users (auth_source_id, svn_username, display_name, role, created_at)"
+                " VALUES ('src', 'alice', 'alice', 'user', 't')"
+            )
+            self.alice = cursor.lastrowid
+        self.workspaces = self.tmp / "workspaces"
+
+    def tearDown(self):
+        self.env.stop()
+        self.conn.close()
+        super().tearDown()
+
+    def repo_state(self):
+        return json.loads(self.state_path.read_text(encoding="utf-8"))
+
+    def make_draft(self, content="# 时钟树设计\n\n远端基线\n\n草稿修改\n"):
+        server_drafts.save_draft(self.conn, self.alice, self.md_dir, self.document_path, content, expected_version=0)
+        return content
+
+    def test_prepare_requires_binding_and_draft(self):
+        with self.assertRaises(server_operations.OperationError) as ctx:
+            server_operations.prepare_commit(self.conn, self.alice, self.config, self.md_dir, "md/其他/x.md", "msg")
+        self.assertEqual(ctx.exception.status, 400)
+        with self.assertRaises(server_operations.OperationError) as ctx:
+            server_operations.prepare_commit(self.conn, self.alice, self.config, self.md_dir, self.document_path, "msg")
+        self.assertEqual(ctx.exception.status, 409)
+        self.assertIn("草稿", str(ctx.exception))
+
+    def test_prepare_freezes_manifest_and_diff(self):
+        content = self.make_draft()
+        result = server_operations.prepare_commit(self.conn, self.alice, self.config, self.md_dir,
+                                                  self.document_path, "docs: update clock tree", expected_version=1)
+        self.assertEqual(result["state"], "prepared")
+        manifest = result["manifest"]
+        self.assertEqual(manifest["repositoryId"], "hardware")
+        self.assertEqual(manifest["mount"], "md/硬件设计")
+        self.assertEqual(manifest["message"], "docs: update clock tree")
+        self.assertEqual(manifest["contentHash"], server_documents.text_hash(content))
+        self.assertIn("+草稿修改", result["diff"])
+        row = server_operations.get_operation(self.conn, result["operationId"], self.alice)
+        self.assertEqual(row["state"], "prepared")
+        self.assertIsNone(server_operations.get_operation(self.conn, result["operationId"], 999))
+
+    def test_commit_success_publishes_and_records_revision(self):
+        content = self.make_draft()
+        prepared = server_operations.prepare_commit(self.conn, self.alice, self.config, self.md_dir,
+                                                    self.document_path, "docs: update", expected_version=1)
+        result = server_operations.run_commit(self.conn, self.svn, self.config, self.md_dir, self.workspaces,
+                                              prepared["operationId"], self.alice, ("alice", "good"))
+        self.assertEqual(result["state"], "published")
+        self.assertEqual(result["svnRevision"], 4)
+        self.assertEqual(self.published_file.read_text(encoding="utf-8").replace("\r\n", "\n"), content)
+        self.assertEqual(self.repo_state()["revision"], 4)
+        self.assertEqual(self.repo_state()["files"]["时钟树设计.md"], content)
+        binding = self.conn.execute("SELECT * FROM repo_bindings WHERE mount_path = 'md/硬件设计'").fetchone()
+        self.assertEqual(binding["published_revision"], 4)
+        self.assertEqual(binding["repository_uuid"], "11111111-2222-3333-4444-555555555555")
+
+    def test_commit_is_idempotent(self):
+        self.make_draft()
+        prepared = server_operations.prepare_commit(self.conn, self.alice, self.config, self.md_dir,
+                                                    self.document_path, "docs: update", expected_version=1)
+        first = server_operations.run_commit(self.conn, self.svn, self.config, self.md_dir, self.workspaces,
+                                             prepared["operationId"], self.alice, ("alice", "good"))
+        second = server_operations.run_commit(self.conn, self.svn, self.config, self.md_dir, self.workspaces,
+                                              prepared["operationId"], self.alice, ("alice", "good"))
+        self.assertFalse(first.get("reused"))
+        self.assertTrue(second["reused"])
+        self.assertEqual(self.repo_state()["revision"], 4)
+
+    def test_commit_without_credential_requires_auth(self):
+        self.make_draft()
+        prepared = server_operations.prepare_commit(self.conn, self.alice, self.config, self.md_dir,
+                                                    self.document_path, "docs: update", expected_version=1)
+        with self.assertRaises(server_operations.OperationError) as ctx:
+            server_operations.run_commit(self.conn, self.svn, self.config, self.md_dir, self.workspaces,
+                                         prepared["operationId"], self.alice, None)
+        self.assertEqual(ctx.exception.status, 401)
+        row = server_operations.get_operation(self.conn, prepared["operationId"], self.alice)
+        self.assertEqual(row["state"], "needs_auth")
+        self.assertEqual(self.repo_state()["revision"], 3)
+
+    def test_commit_conflict_marks_operation_failed(self):
+        self.make_draft()
+        prepared = server_operations.prepare_commit(self.conn, self.alice, self.config, self.md_dir,
+                                                    self.document_path, "docs: update", expected_version=1)
+        with mock.patch.dict("os.environ", {"FAKE_SVN_MODE": "commit_conflict"}):
+            with self.assertRaises(server_operations.OperationError) as ctx:
+                server_operations.run_commit(self.conn, self.svn, self.config, self.md_dir, self.workspaces,
+                                             prepared["operationId"], self.alice, ("alice", "good"))
+        self.assertEqual(ctx.exception.status, 409)
+        row = server_operations.get_operation(self.conn, prepared["operationId"], self.alice)
+        self.assertEqual(row["state"], "failed")
+        self.assertEqual(row["error_code"], "conflict")
+        self.assertEqual(self.repo_state()["revision"], 3)
+
+    def test_commit_timeout_is_uncertain_and_not_retried(self):
+        self.make_draft()
+        prepared = server_operations.prepare_commit(self.conn, self.alice, self.config, self.md_dir,
+                                                    self.document_path, "docs: update", expected_version=1)
+        slow = server_svn.SvnClient(command=(sys.executable, str(self.tmp / "fake_svn.py")), timeout=1)
+        with mock.patch.dict("os.environ", {"FAKE_SVN_MODE": "commit_timeout"}):
+            with self.assertRaises(server_operations.OperationError) as ctx:
+                server_operations.run_commit(self.conn, slow, self.config, self.md_dir, self.workspaces,
+                                             prepared["operationId"], self.alice, ("alice", "good"))
+        self.assertEqual(ctx.exception.status, 502)
+        self.assertIn("不确定", str(ctx.exception))
+        row = server_operations.get_operation(self.conn, prepared["operationId"], self.alice)
+        self.assertEqual(row["state"], "uncertain")
+        with mock.patch.dict("os.environ", {"FAKE_SVN_MODE": "commit_timeout"}):
+            with self.assertRaises(server_operations.OperationError) as ctx:
+                server_operations.run_commit(self.conn, slow, self.config, self.md_dir, self.workspaces,
+                                             prepared["operationId"], self.alice, ("alice", "good"))
+        self.assertEqual(ctx.exception.status, 409)
+
+    def test_binding_uuid_mismatch_is_rejected(self):
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO repo_bindings (repository_id, mount_path, repository_uuid, root_url, target_url,"
+                " credential_group, config_version, created_at, updated_at)"
+                " VALUES ('hardware', 'md/硬件设计', 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',"
+                " 'https://svn.example.invalid/svn/hardware', 'https://svn.example.invalid/svn/hardware/trunk/docs/',"
+                " 'engineering', 'cfg', 't', 't')"
+            )
+        binding = server_config.match_repository(self.config, self.document_path)
+        with self.assertRaises(server_operations.OperationError) as ctx:
+            server_operations.ensure_binding(self.conn, binding, self.svn, self.config, ("alice", "good"))
+        self.assertEqual(ctx.exception.status, 409)
+        self.assertIn("UUID", str(ctx.exception))
+
+    def test_sync_binding_exports_and_tracks_revision(self):
+        binding = server_config.match_repository(self.config, self.document_path)
+        first = server_operations.sync_binding(self.conn, self.svn, self.config, self.md_dir, binding,
+                                               ("alice", "good"))
+        self.assertTrue(first["updated"])
+        self.assertEqual(first["revision"], 3)
+        self.assertIn("时钟树设计.md", first["files"])
+        second = server_operations.sync_binding(self.conn, self.svn, self.config, self.md_dir, binding,
+                                                ("alice", "good"))
+        self.assertFalse(second["updated"])
+        row = self.conn.execute("SELECT * FROM repo_bindings WHERE mount_path = 'md/硬件设计'").fetchone()
+        self.assertEqual(row["published_revision"], 3)
+
+
+class SvnApiTests(ServerTestBase):
+    def setUp(self):
+        super().setUp()
+        self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
+        server_database.migrate(self.conn)
+        server_database.ensure_admin(self.conn)
+        self.config = server_config.load_config(self.write_config(), self.docs)
+        (self.docs / "md" / "硬件设计").mkdir(parents=True, exist_ok=True)
+        (self.docs / "md" / "硬件设计" / "时钟树设计.md").write_text("# A\n", encoding="utf-8")
+        self.state_path = self.tmp / "svn-state.json"
+        self.state_path.write_text(json.dumps({
+            "files": {"时钟树设计.md": "# A\n"}, "revision": 5, "log": [
+                {"revision": 5, "author": "alice", "date": "2026-09-15T08:00:00.000000Z", "message": "docs"}],
+            "wc": {}, "uuid": "11111111-2222-3333-4444-555555555555",
+        }, ensure_ascii=False), encoding="utf-8")
+        fake = self.tmp / "fake_svn.py"
+        fake.write_text(FAKE_SVN, encoding="utf-8")
+        self.env = mock.patch.dict("os.environ", {"FAKE_SVN_STATE": str(self.state_path)})
+        self.env.start()
+        self.svn = server_svn.SvnClient(command=(sys.executable, str(fake)), timeout=5)
+        self.auth = server_auth.AuthService(self.conn, self.svn, self.config)
+        self.auth.on_startup()
+        from server.app import create_app
+        self.app = create_app(self.config, self.conn, self.auth, self.docs)
+        self.client = self.app.test_client()
+
+    def tearDown(self):
+        self.env.stop()
+        self.conn.close()
+        super().tearDown()
+
+    def login(self):
+        response = self.client.post("/__auth/login", json={"username": "alice", "password": "good"})
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        return self.client.get("/__auth/session").get_json()["csrfToken"]
+
+    def test_anonymous_svn_endpoints_are_rejected(self):
+        self.assertEqual(self.client.get("/__svn/info?path=md/硬件设计/时钟树设计.md").status_code, 401)
+        self.assertEqual(self.client.post("/__svn/prepare", json={"path": "md/硬件设计/时钟树设计.md"}).status_code, 401)
+        self.assertEqual(self.client.post("/__svn/commit", json={}).status_code, 401)
+        self.assertEqual(self.client.get("/__svn/log?path=md/硬件设计/时钟树设计.md").status_code, 401)
+
+    def test_csrf_required_for_prepare_and_commit(self):
+        self.login()
+        response = self.client.post("/__svn/prepare", json={"path": "md/硬件设计/时钟树设计.md", "message": "m"})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["code"], "csrf_failed")
+
+    def test_info_endpoint_reports_binding(self):
+        self.login()
+        response = self.client.get("/__svn/info?path=md/硬件设计/时钟树设计.md")
+        payload = response.get_json()
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(payload["binding"]["id"], "hardware")
+        self.assertEqual(payload["binding"]["targetUrl"], "https://svn.example.invalid/svn/hardware/trunk/docs/")
+        self.assertEqual(payload["binding"]["repositoryUuid"], "11111111-2222-3333-4444-555555555555")
+        self.assertEqual(self.client.get("/__svn/info?path=md/其他/x.md").status_code, 400)
+
+    def test_log_endpoint_uses_session_credential(self):
+        self.login()
+        payload = self.client.get("/__svn/log?path=md/硬件设计/时钟树设计.md&limit=5").get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["entries"][0]["revision"], 5)
+        self.assertEqual(payload["entries"][0]["message"], "docs")
+
+    def test_prepare_then_commit_via_api(self):
+        headers_csrf = self.login()
+        headers = {"X-CSRF-Token": headers_csrf}
+        self.client.put("/__md/draft", json={"path": "md/硬件设计/时钟树设计.md", "content": "# A\n\n草稿\n",
+                                             "expectedVersion": 0}, headers=headers)
+        prepared = self.client.post("/__svn/prepare", json={"path": "md/硬件设计/时钟树设计.md",
+                                                            "message": "docs: 草稿提交", "expectedVersion": 1},
+                                    headers=headers).get_json()
+        self.assertTrue(prepared["ok"], prepared)
+        operation_id = prepared["operationId"]
+        committed = self.client.post("/__svn/commit", json={"operationId": operation_id}, headers=headers).get_json()
+        self.assertTrue(committed["ok"], committed)
+        self.assertEqual(committed["result"]["state"], "published")
+        self.assertEqual(committed["result"]["svnRevision"], 6)
+        status = self.client.get("/__operations/" + operation_id).get_json()["operation"]
+        self.assertEqual(status["state"], "published")
+        self.assertEqual(status["svnRevision"], 6)
 
 
 class PathsTests(unittest.TestCase):

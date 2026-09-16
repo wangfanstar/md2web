@@ -81,6 +81,8 @@ class AuthService:
         self._attempts = {}
         self._lock = threading.Lock()
         self._db_lock = threading.RLock()
+        # 会话凭据只存在进程内存：{session_id: {"username": ..., "password": ...}}
+        self._credentials = {}
 
     def _moment(self):
         return datetime.fromtimestamp(self.clock(), tz=timezone.utc)
@@ -92,6 +94,8 @@ class AuthService:
 
     def on_startup(self):
         """重启后不恢复需要密码的会话；同时记录审计。"""
+        with self._lock:
+            self._credentials = {}
         with self._db_lock, self.conn:
             self.conn.execute(
                 "UPDATE sessions SET revoked_at = ? WHERE revoked_at IS NULL",
@@ -269,6 +273,12 @@ class AuthService:
                 )
             token, csrf_token, expires_at = self._insert_session(user_id, moment, user_agent)
             database.audit(self.conn, "login", "ok", actor_id=user_id, resource=username)
+            session_row = self.conn.execute(
+                "SELECT id FROM sessions WHERE token_hash = ?", (_digest(token),)
+            ).fetchone()
+            if session_row is not None:
+                with self._lock:
+                    self._credentials[session_row["id"]] = {"username": username, "password": password}
         return {
             "token": token,
             "csrfToken": csrf_token,
@@ -320,6 +330,38 @@ class AuthService:
             },
         }
 
+    def credential_for(self, session_id):
+        """当前会话的 SVN 凭据（仅内存）；会话失效后立即丢弃。"""
+        with self._lock:
+            credential = self._credentials.get(int(session_id))
+        if credential is None:
+            return None
+        return credential["username"], credential["password"]
+
+    def remember_credential(self, session_id, username, password):
+        """管理员在本机登录后，提交时补充的 SVN 凭据（仅进程内存）。"""
+        with self._lock:
+            self._credentials[int(session_id)] = {"username": str(username), "password": str(password)}
+
+    def check_svn_credential(self, username, password):
+        """校验补充的 SVN 账号口令（用于管理员提交场景）。"""
+        if not self.configured():
+            raise AuthError("not_configured")
+        if not username or not password:
+            raise AuthError("invalid_request", "请输入 SVN 账号与密码")
+        key = self._rate_key("credential-check", username)
+        self._check_rate(key)
+        try:
+            self.svn.verify_credentials(self.config["auth"]["url"], username, password)
+        except SvnError as error:
+            self._record_attempt(key)
+            raise AuthError(error.code, str(error))
+        return True
+
+    def forget_credential(self, session_id):
+        with self._lock:
+            self._credentials.pop(int(session_id), None)
+
     def _touch(self, row):
         last_seen = _parse(row["last_seen_at"])
         if (self._moment() - last_seen).total_seconds() < TOUCH_INTERVAL:
@@ -332,6 +374,11 @@ class AuthService:
             database.audit(self.conn, "session_touch", "ok", actor_id=row["user_id"])
 
     def _revoke(self, token_hash, reason):
+        row = self.conn.execute(
+            "SELECT id FROM sessions WHERE token_hash = ?", (token_hash,)
+        ).fetchone()
+        if row is not None:
+            self.forget_credential(row["id"])
         with self._db_lock, self.conn:
             self.conn.execute(
                 "UPDATE sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL",
@@ -349,6 +396,7 @@ class AuthService:
             ).fetchone()
         if row is None:
             return False
+        self.forget_credential(row["id"])
         self._revoke(row["token_hash"], "logout")
         with self._db_lock, self.conn:
             database.audit(self.conn, "logout", "ok", actor_id=row["user_id"])
@@ -365,6 +413,8 @@ class AuthService:
             database.audit(self.conn, "session_reset", f"ok:{reason}")
 
     def revoke_all(self, reason="admin"):
+        with self._lock:
+            self._credentials = {}
         with self._db_lock, self.conn:
             self.conn.execute(
                 "UPDATE sessions SET revoked_at = ? WHERE revoked_at IS NULL",

@@ -21,6 +21,7 @@
     document: null,
     binding: null,
     conflict: null,
+    prepareOperation: null,
     lastFocus: null,
     split: 50,
     dragging: false,
@@ -369,7 +370,124 @@
     });
   }
 
+  function promptCredentials() {
+    var username = window.prompt('请输入 SVN 账号（用于本次提交）');
+    if (!username) {
+      return null;
+    }
+    var password = window.prompt('请输入 SVN 密码');
+    if (!password) {
+      return null;
+    }
+    return { svnUsername: username, svnPassword: password };
+  }
+
+  function commitWithCredentials(operationId, credentials) {
+    return authApi('__svn/commit', {
+      method: 'POST',
+      body: JSON.stringify(Object.assign({ operationId: operationId }, credentials || {}))
+    });
+  }
+
+  function startSvnCommit() {
+    if (!authAvailable()) {
+      setStatus('请先登录后再提交 SVN');
+      return;
+    }
+    var message = window.prompt('提交说明（将写入 SVN 日志）', 'docs: 更新 ' + state.resource.split('/').pop());
+    if (!message) {
+      return;
+    }
+    setStatus('正在准备提交（核对基线与差异）…');
+    authApi('__svn/prepare', {
+      method: 'POST',
+      body: JSON.stringify({ path: state.resource, message: message, expectedVersion: state.draftVersion || 0 })
+    }).then(function (payload) {
+      state.prepareOperation = payload;
+      showDiffPanel(
+        '目标库：' + payload.manifest.repositoryId + '（' + payload.manifest.mount + '）\n'
+        + '提交说明：' + payload.manifest.message + '\n\n'
+        + (payload.diff || '（无差异）')
+        + '\n\n点击下方「确认提交」写入 SVN；点「关闭」可稍后再提交。',
+        '审阅提交（确认后写入 SVN）'
+      );
+      var panels = ensurePanels();
+      if (panels) {
+        var head = panels.querySelector('.md-editor-panels-head');
+        if (head && !head.querySelector('[data-editor-action="svn-confirm"]')) {
+          var confirmButton = document.createElement('button');
+          confirmButton.type = 'button';
+          confirmButton.setAttribute('data-editor-action', 'svn-confirm');
+          confirmButton.textContent = '确认提交';
+          head.insertBefore(confirmButton, head.querySelector('[data-editor-action="discard-draft"]'));
+        }
+      }
+      setStatus('已生成审阅清单，请确认差异后提交');
+    }).catch(function (error) {
+      setStatus('准备提交失败：' + error.message);
+    });
+  }
+
+  function confirmSvnCommit() {
+    if (!state.prepareOperation) {
+      setStatus('没有待提交的审阅清单');
+      return;
+    }
+    var operationId = state.prepareOperation.operationId;
+    setStatus('正在提交 SVN…');
+    commitWithCredentials(operationId).then(function (payload) {
+      state.prepareOperation = null;
+      var result = payload.result || {};
+      setStatus('已提交 SVN：r' + result.svnRevision + '（站点将在重建后更新）');
+      showDiffPanel('提交成功：r' + result.svnRevision + '\n' + (result.message || ''));
+    }).catch(function (error) {
+      if (error.status === 401) {
+        var credentials = promptCredentials();
+        if (!credentials) {
+          setStatus('已取消提交（需要 SVN 账号密码）');
+          return;
+        }
+        commitWithCredentials(operationId, credentials).then(function (payload) {
+          state.prepareOperation = null;
+          var result = payload.result || {};
+          setStatus('已提交 SVN：r' + result.svnRevision + '（站点将在重建后更新）');
+        }).catch(function (retryError) {
+          setStatus('提交失败：' + retryError.message);
+        });
+        return;
+      }
+      setStatus('提交失败：' + error.message);
+    });
+  }
+
+  function showSvnLog() {
+    setStatus('正在读取 SVN 日志…');
+    authApi('__svn/log?path=' + encodeURIComponent(state.resource) + '&limit=20').then(function (payload) {
+      var entries = payload.entries || [];
+      var text = entries.map(function (entry) {
+        return 'r' + entry.revision + '  ' + String(entry.date || '').replace('T', ' ').slice(0, 19)
+          + '  ' + entry.author + '\n    ' + (entry.message || '').split('\n').join('\n    ');
+      }).join('\n\n');
+      showDiffPanel(text || '（暂无日志）', 'SVN 日志（当前账号可读范围）');
+      setStatus('');
+    }).catch(function (error) {
+      setStatus('读取 SVN 日志失败：' + error.message);
+    });
+  }
+
   function handlePanelAction(target, action) {
+    if (action === 'svn-commit') {
+      startSvnCommit();
+      return true;
+    }
+    if (action === 'svn-confirm') {
+      confirmSvnCommit();
+      return true;
+    }
+    if (action === 'svn-log') {
+      showSvnLog();
+      return true;
+    }
     if (action === 'history') {
       showHistoryPanel();
       return true;
@@ -1112,6 +1230,8 @@
       '<button type="button" data-editor-action="history">历史</button>',
       '<button type="button" data-editor-action="diff">差异</button>',
       '<button type="button" data-editor-action="load-latest">载入最新</button>',
+      '<button type="button" data-editor-action="svn-commit">提交 SVN…</button>',
+      '<button type="button" data-editor-action="svn-log">SVN 日志</button>',
       '<span class="md-editor-status" data-editor-status></span>',
       '<span class="md-editor-spacer"></span>',
       '<button type="button" data-editor-action="save">保存</button>',
@@ -1194,6 +1314,14 @@
     document.body.classList.add('md-editor-open');
     state.overlay.focus();
     updateBindingLabel();
+    var commitButton = state.overlay.querySelector('[data-editor-action="svn-commit"]');
+    var logButton = state.overlay.querySelector('[data-editor-action="svn-log"]');
+    if (commitButton) {
+      commitButton.hidden = !authAvailable();
+    }
+    if (logButton) {
+      logButton.hidden = !authAvailable();
+    }
     if (authAvailable()) {
       loadDocumentFromServer().then(function () {
         state.textarea.focus();

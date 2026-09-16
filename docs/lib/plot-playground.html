@@ -72,6 +72,11 @@
   @media (max-width: 860px) {
     .pg-panel { grid-template-columns: 1fr; }
   }
+
+/* mermaid 时序图：actor 名称的 <text> 继承了角色框的浅色填充，导致文字不可见 */
+svg text[class*="actor"] {
+  fill: #1f2a37 !important;
+}
 </style>
 </head>
 <body>
@@ -559,7 +564,23 @@
         primaryTextColor: '#1f2a37',
         lineColor: '#5b6b7c',
         secondaryColor: '#f4f7fa',
-        tertiaryColor: '#ffffff'
+        tertiaryColor: '#ffffff',
+        actorBkg: '#eef4fd',
+        actorBorder: '#1f6feb',
+        actorTextColor: '#1f2a37',
+        actorLineColor: '#5b6b7c',
+        signalColor: '#5b6b7c',
+        signalTextColor: '#1f2a37',
+        labelBoxBkgColor: '#eef4fd',
+        labelBoxBorderColor: '#1f6feb',
+        labelTextColor: '#1f2a37',
+        loopTextColor: '#1f2a37',
+        noteBkgColor: '#fef3c7',
+        noteBorderColor: '#b45309',
+        noteTextColor: '#1f2a37',
+        activationBkgColor: '#dbeafe',
+        activationBorderColor: '#1f6feb',
+        sequenceNumberColor: '#1f2a37'
       },
       flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: false }
     });

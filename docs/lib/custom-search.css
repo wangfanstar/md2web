@@ -961,3 +961,60 @@ body.hide-page-toc .docs-page-toc-restore {
 .docs-page-toc-hide:hover {
   color: var(--docs-accent, #1f6feb);
 }
+
+.docs-page-toc-item {
+  margin: 0;
+}
+
+.docs-page-toc-row {
+  align-items: center;
+  display: flex;
+  gap: 2px;
+}
+
+.docs-page-toc-toggle {
+  background: transparent;
+  border: 0;
+  color: #94a3b8;
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-size: 10px;
+  line-height: 1;
+  padding: 4px 3px;
+  width: 18px;
+}
+
+.docs-page-toc-toggle:hover {
+  color: var(--docs-accent, #1f6feb);
+}
+
+.docs-page-toc-toggle.is-placeholder {
+  cursor: default;
+  visibility: hidden;
+}
+
+.docs-page-toc-children {
+  border-left: 1px dashed #e3e8ee;
+  margin-left: 9px;
+  padding-left: 4px;
+}
+
+.docs-page-toc-item.is-collapsed > .docs-page-toc-children {
+  display: none;
+}
+
+.docs-page-toc-row .docs-page-toc-link {
+  flex: 1;
+  min-width: 0;
+}
+
+.docs-page-toc-link.is-active {
+  background: #eef4fd;
+  border-radius: 4px;
+  color: var(--docs-accent, #1f6feb);
+  font-weight: 600;
+}
+
+.docs-page-toc-link.is-active .docs-page-toc-index {
+  color: var(--docs-accent, #1f6feb);
+}

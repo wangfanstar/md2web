@@ -11,7 +11,7 @@ from pathlib import Path
 from flask import Flask, jsonify, make_response, request, send_from_directory
 
 from . import config as server_config
-from . import database, drafts
+from . import database, drafts, operations
 from .auth import AuthError
 from .config import authenticated_config, config_to_json, public_config, save_config
 from .documents import MdSaveError
@@ -368,26 +368,152 @@ def create_app(config, conn, auth_service, docs_dir):
         return cursor.lastrowid
 
     @app.route("/__md/publish", methods=["POST"])
-    @app.route("/__svn/prepare", methods=["POST"])
-    @app.route("/__svn/commit", methods=["POST"])
-    @app.route("/__svn/refresh", methods=["POST"])
-    def pending_write():
+    def pending_publish():
         session, rejected = require_session()
         if rejected:
             return rejected
         csrf_error = require_csrf(session)
         if csrf_error:
             return csrf_error
-        return json_error(501, "not_implemented", "该功能将在后续阶段启用（草稿 / SVN 提交）")
+        return json_error(501, "not_implemented", "未关联 SVN 的本地发布将在后续版本提供")
 
-    @app.get("/__svn/log")
+    # ---- 阶段三：SVN 提交与同步 ----
+
+    def credential_of(session):
+        return auth_service.credential_for(session["sessionId"])
+
     @app.get("/__svn/info")
-    @app.get("/__svn/status")
-    def pending_read():
+    def svn_info():
         session, rejected = require_session()
         if rejected:
             return rejected
-        return json_error(501, "not_implemented", "SVN 查询将在后续阶段启用")
+        path = request.args.get("path") or ""
+        binding = server_config.match_repository(config, path)
+        if binding is None:
+            return json_error(400, "no_binding", "该文档未关联 SVN")
+        try:
+            row = operations.ensure_binding(conn, binding, auth_service.svn, config, credential_of(session))
+        except operations.OperationError as error:
+            return json_error(error.status, "binding_error", error.message, **error.extra)
+        return jsonify({"ok": True, "binding": {
+            "id": binding["id"], "mount": binding["mount"], "targetUrl": binding["url"],
+            "repositoryUuid": row.get("repository_uuid"),
+            "publishedRevision": row.get("published_revision"),
+            "lastCheckedAt": row.get("last_checked_at"),
+            "syncError": row.get("sync_error"),
+        }})
+
+    @app.post("/__svn/prepare")
+    def svn_prepare():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        try:
+            result = operations.prepare_commit(
+                conn, session["user"]["id"], config, md_dir(),
+                payload.get("path"), payload.get("message"), payload.get("expectedVersion"),
+            )
+        except operations.OperationError as error:
+            return json_error(error.status, "prepare_error", error.message, **error.extra)
+        except MdSaveError as error:
+            return json_error(error.status, "invalid_path", error.message)
+        return jsonify({"ok": True, **result})
+
+    @app.post("/__svn/commit")
+    def svn_commit():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        credential = credential_of(session)
+        supplied_user = str(payload.get("svnUsername") or "").strip()
+        supplied_password = payload.get("svnPassword") or ""
+        if credential is None and supplied_user and supplied_password:
+            # 管理员（本机账号）没有 SVN 口令：提交时补充并校验，只存进程内存
+            try:
+                auth_service.check_svn_credential(supplied_user, supplied_password)
+            except AuthError as error:
+                return json_error(error.status, error.code, str(error))
+            auth_service.remember_credential(session["sessionId"], supplied_user, supplied_password)
+            credential = (supplied_user, supplied_password)
+        try:
+            result = operations.run_commit(
+                conn, auth_service.svn, config, md_dir(), config["storage"]["workspaces"],
+                payload.get("operationId"), session["user"]["id"], credential,
+            )
+        except operations.OperationError as error:
+            return json_error(error.status, "commit_error", error.message, **error.extra)
+        return jsonify({"ok": True, "result": result})
+
+    @app.get("/__operations/<operation_id>")
+    def operation_status(operation_id):
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        is_admin = (session["user"].get("role") or "user") == "admin"
+        row = operations.get_operation(conn, operation_id, None if is_admin else session["user"]["id"])
+        if row is None:
+            return json_error(404, "not_found", "操作不存在或无权访问")
+        return jsonify({"ok": True, "operation": {
+            "id": row["id"], "state": row["state"], "kind": row["kind"],
+            "svnRevision": row["svn_revision"], "errorCode": row["error_code"],
+            "message": row["message"], "createdAt": row["created_at"], "finishedAt": row["finished_at"],
+        }})
+
+    @app.get("/__svn/log")
+    def svn_log():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        path = request.args.get("path") or ""
+        binding = server_config.match_repository(config, path)
+        if binding is None:
+            return json_error(400, "no_binding", "该文档未关联 SVN")
+        try:
+            limit = min(50, max(1, int(request.args.get("limit") or 20)))
+        except (TypeError, ValueError):
+            limit = 20
+        username, password = credential_of(session) or (None, None)
+        import shutil as _shutil
+        import tempfile as _tempfile
+        config_dir = _tempfile.mkdtemp(prefix="md2web-svn-log-")
+        try:
+            entries = auth_service.svn.log(binding["url"], limit=limit, config_dir=config_dir,
+                                           username=username, password=password)
+        except Exception as error:  # SvnError 内部已脱敏
+            return json_error(502, "svn_log_failed", str(error))
+        finally:
+            _shutil.rmtree(config_dir, ignore_errors=True)
+        return jsonify({"ok": True, "entries": entries})
+
+    @app.post("/__svn/refresh")
+    def svn_refresh():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        targets = list(config.get("repositories") or [])
+        if payload.get("binding"):
+            targets = [repo for repo in targets if repo["id"] == payload.get("binding")]
+        results = []
+        for binding in targets:
+            try:
+                result = operations.sync_binding(conn, auth_service.svn, config, md_dir(), binding,
+                                                 credential_of(session))
+                results.append({"binding": binding["id"], "ok": True, **result})
+            except operations.OperationError as error:
+                results.append({"binding": binding["id"], "ok": False, "error": error.message})
+        return jsonify({"ok": True, "results": results})
 
     # ---- 静态站点（白名单，无目录列表） ----
 

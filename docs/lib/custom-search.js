@@ -629,6 +629,28 @@
 
   var TOC_HIDDEN_KEY = 'md2web:hide-page-toc';
 
+  var TOC_COLLAPSED_KEY = 'md2web:toc-collapsed';
+
+  function loadTocCollapsedMap() {
+    try {
+      var parsed = JSON.parse(localStorage.getItem(TOC_COLLAPSED_KEY) || '{}');
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  function saveTocCollapsedMap(map) {
+    try {
+      localStorage.setItem(TOC_COLLAPSED_KEY, JSON.stringify(map));
+    } catch (error) { /* 忽略隐私模式 */ }
+  }
+
+  function loadTocCollapsed() {
+    var map = loadTocCollapsedMap();
+    return map[currentRouteBase()] || [];
+  }
+
   function setTocHidden(hidden) {
     document.body.classList.toggle('hide-page-toc', !!hidden);
     ensureTocRestoreChip();
@@ -689,33 +711,96 @@
 
     var base = currentRouteBase();
     var counters = { 2: 0, 3: 0, 4: 0 };
-    toc.innerHTML = [
-'<div class="docs-page-toc-title"><span>' + escapeHtml(tocConfig.title || '本文目录') + '</span><button type="button" class="docs-page-toc-hide" title="隐藏本文目录">隐藏</button></div>',
-      '<div class="docs-page-toc-links">',
-      headings.map(function (heading) {
-        var level = parseInt(heading.tagName.slice(1), 10);
-        var href = base + '?id=' + encodeURIComponent(heading.id);
-        var number = '';
-        if (level >= 2 && level <= 4) {
-          counters[level] += 1;
-          for (var deeper = level + 1; deeper <= 4; deeper += 1) {
-            counters[deeper] = 0;
-          }
-          var parts = [];
-          for (var current = 2; current <= level; current += 1) {
-            parts.push(counters[current]);
-          }
-          number = '<span class="docs-page-toc-index">' + parts.join('.') + '</span>';
+    var collapsed = loadTocCollapsed();
+    var rootItems = [];
+    var stack = [];
+    headings.forEach(function (heading) {
+      var level = parseInt(heading.tagName.slice(1), 10);
+      var href = base + '?id=' + encodeURIComponent(heading.id);
+      var number = '';
+      if (level >= 2 && level <= 4) {
+        counters[level] += 1;
+        for (var deeper = level + 1; deeper <= 4; deeper += 1) {
+          counters[deeper] = 0;
         }
-        return [
-          '<a class="docs-page-toc-link level-' + level + '" data-page-toc-id="' + escapeHtml(heading.id) + '" href="' + escapeHtml(href) + '">',
-          number,
-          escapeHtml(heading.textContent),
-          '</a>'
-        ].join('');
-      }).join(''),
+        var parts = [];
+        for (var current = 2; current <= level; current += 1) {
+          parts.push(counters[current]);
+        }
+        number = '<span class="docs-page-toc-index">' + parts.join('.') + '</span>';
+      }
+      var item = {
+        id: heading.id,
+        level: level,
+        hasChildren: false,
+        linkHtml: '<a class="docs-page-toc-link level-' + level + '" data-page-toc-id="' + escapeHtml(heading.id)
+          + '" href="' + escapeHtml(href) + '">' + number + escapeHtml(heading.textContent) + '</a>',
+        children: []
+      };
+      while (stack.length && stack[stack.length - 1].level >= level) {
+        stack.pop();
+      }
+      if (stack.length) {
+        stack[stack.length - 1].children.push(item);
+        stack[stack.length - 1].hasChildren = true;
+      } else {
+        rootItems.push(item);
+      }
+      stack.push(item);
+    });
+
+    function renderTocItems(items) {
+      return items.map(function (item) {
+        var isCollapsed = item.hasChildren && collapsed.indexOf(item.id) >= 0;
+        return '<div class="docs-page-toc-item level-' + item.level + (isCollapsed ? ' is-collapsed' : '') + '"'
+          + ' data-toc-id="' + escapeHtml(item.id) + '">'
+          + '<div class="docs-page-toc-row">'
+          + (item.hasChildren
+            ? '<button type="button" class="docs-page-toc-toggle" data-toc-toggle="' + escapeHtml(item.id) + '" title="折叠/展开该章节">' + (isCollapsed ? '▸' : '▾') + '</button>'
+            : '<span class="docs-page-toc-toggle is-placeholder"></span>')
+          + item.linkHtml
+          + '</div>'
+          + (item.hasChildren ? '<div class="docs-page-toc-children">' + renderTocItems(item.children) + '</div>' : '')
+          + '</div>';
+      }).join('');
+    }
+
+    toc.innerHTML = [
+      '<div class="docs-page-toc-title"><span>' + escapeHtml(tocConfig.title || '本文目录')
+        + '</span><button type="button" class="docs-page-toc-hide" title="隐藏本文目录">隐藏</button></div>',
+      '<div class="docs-page-toc-links">',
+      renderTocItems(rootItems),
       '</div>'
     ].join('');
+    if (toc.getAttribute('data-toc-toggle-bound') !== '1') {
+      toc.setAttribute('data-toc-toggle-bound', '1');
+      toc.addEventListener('click', function (event) {
+        var toggle = event.target.closest && event.target.closest('[data-toc-toggle]');
+        if (!toggle) {
+          return;
+        }
+        event.preventDefault();
+        var item = toggle.closest('.docs-page-toc-item');
+        if (!item) {
+          return;
+        }
+        var isCollapsed = item.classList.toggle('is-collapsed');
+        toggle.textContent = isCollapsed ? '▸' : '▾';
+        var map = loadTocCollapsedMap();
+        var route = currentRouteBase();
+        var list = map[route] || [];
+        var id = item.getAttribute('data-toc-id');
+        if (isCollapsed) {
+          if (list.indexOf(id) === -1) {
+            list.push(id);
+          }
+        } else {
+          list = list.filter(function (value) { return value !== id; });
+        }
+        map[route] = list;
+        saveTocCollapsedMap(map);
+      });
+    }
     var tocHideButton = toc.querySelector('.docs-page-toc-hide');
     if (tocHideButton) {
       tocHideButton.addEventListener('click', function () {
@@ -723,6 +808,58 @@
       });
     }
     toc.classList.add('has-items');
+    updateActiveTocLink();
+  }
+
+  var tocActiveTimer = 0;
+
+  function updateActiveTocLink() {
+    var toc = state.pageToc;
+    if (!toc || !toc.classList.contains('has-items')) {
+      return;
+    }
+    var links = Array.prototype.slice.call(toc.querySelectorAll('.docs-page-toc-link'));
+    if (!links.length) {
+      return;
+    }
+    var offset = 140;
+    var activeId = null;
+    links.forEach(function (link) {
+      var id = link.getAttribute('data-page-toc-id');
+      var heading = id ? document.getElementById(id) : null;
+      if (heading && heading.getBoundingClientRect().top <= offset) {
+        activeId = id;
+      }
+    });
+    if (!activeId) {
+      activeId = links[0].getAttribute('data-page-toc-id');
+    }
+    links.forEach(function (link) {
+      var isActive = link.getAttribute('data-page-toc-id') === activeId;
+      link.classList.toggle('is-active', isActive);
+      if (!isActive) {
+        return;
+      }
+      var item = link.closest ? link.closest('.docs-page-toc-item') : null;
+      var previous = null;
+      while (item && item !== previous) {
+        item.classList.remove('is-collapsed');
+        var toggle = item.querySelector(':scope > .docs-page-toc-row > .docs-page-toc-toggle');
+        if (toggle && !toggle.classList.contains('is-placeholder')) {
+          toggle.textContent = '▾';
+        }
+        previous = item;
+        item = item.parentElement && item.parentElement.closest ? item.parentElement.closest('.docs-page-toc-item') : null;
+      }
+      if (link.scrollIntoView) {
+        try { link.scrollIntoView({ block: 'nearest' }); } catch (error) { /* 忽略 */ }
+      }
+    });
+  }
+
+  function scheduleActiveToc() {
+    window.clearTimeout(tocActiveTimer);
+    tocActiveTimer = window.setTimeout(updateActiveTocLink, 120);
   }
 
   function handleFilePageTocClick(event) {
@@ -2119,6 +2256,8 @@
     loadHistory();
     restoreTocPreference();
     window.addEventListener('hashchange', scheduleReadingModeBuild);
+    window.addEventListener('scroll', scheduleActiveToc, true);
+    window.addEventListener('hashchange', scheduleActiveToc);
     window.addEventListener('hashchange', function () {
       window.setTimeout(function () { installSidebarIcons(); }, 0);
     });
