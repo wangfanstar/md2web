@@ -724,6 +724,28 @@ class ServeTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class SourceDocumentsTests(unittest.TestCase):
+    """docs/md 是唯一需要人工维护的目录：防止源文档被误删或误替换。"""
+
+    EXPECTED = (
+        "docs/md/使用说明/快速开始.md",
+        "docs/md/使用说明/绘图示例.md",
+        "docs/md/硬件设计/时钟树设计.md",
+        "docs/md/硬件设计/寄存器手册.md",
+        "docs/md/软件工具链/编译工具链.md",
+        "docs/md/验证指南/仿真环境搭建.md",
+    )
+
+    def test_repo_source_documents_exist(self):
+        missing = [name for name in self.EXPECTED if not (ROOT / name).is_file()]
+        self.assertEqual(
+            missing, [],
+            "docs/md 源文档缺失（构建不会修改该目录，删除必须由人工确认）: " + ", ".join(missing),
+        )
+        for name in self.EXPECTED:
+            self.assertGreater((ROOT / name).stat().st_size, 0, name + " 为空文件")
+
+
 class Python36CompatibilityTests(unittest.TestCase):
     """保证随包发布的 Python 代码能在 Python 3.6.8（服务器环境）上解析并避免 3.7+ 专用 API。"""
 

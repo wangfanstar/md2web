@@ -3,16 +3,16 @@
 <div class="workspace-home">
 <p class="workspace-eyebrow">ENGINEERING KNOWLEDGE BASE</p>
 <p class="workspace-intro">从目录浏览，或直接搜索文件、命令与技术细节。</p>
-<div class="workspace-stats"><span>5 篇文档</span><span>4 个文件夹</span><span>离线可用</span></div>
+<div class="workspace-stats"><span>6 篇文档</span><span>4 个文件夹</span><span>离线可用</span></div>
 </div>
 
 ## 文件夹
 
 <div class="workspace-folder-grid">
-<a class="workspace-folder-card" href="#/md/%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E/%E7%BB%98%E5%9B%BE%E7%A4%BA%E4%BE%8B.md">
-<span class="workspace-folder-count">1 篇文档</span>
+<a class="workspace-folder-card" href="#/md/%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E/%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B.md">
+<span class="workspace-folder-count">2 篇文档</span>
 <h3>使用说明</h3>
-<span class="workspace-folder-preview">绘图示例</span>
+<span class="workspace-folder-preview">快速开始 · 绘图示例</span>
 </a>
 <a class="workspace-folder-card" href="#/md/%E7%A1%AC%E4%BB%B6%E8%AE%BE%E8%AE%A1/%E5%AF%84%E5%AD%98%E5%99%A8%E6%89%8B%E5%86%8C.md">
 <span class="workspace-folder-count">2 篇文档</span>
@@ -56,6 +56,7 @@
 ## 文档列表
 
 - **使用说明**
+  - [快速开始](md/使用说明/快速开始.md)
   - [绘图示例](md/使用说明/绘图示例.md)
 - **硬件设计**
   - [寄存器手册](md/硬件设计/寄存器手册.md)
