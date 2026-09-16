@@ -36,7 +36,16 @@ WRITE_PREFIXES = ("/__md/", "/__svn/", "/__operations/")
 DEFAULT_PIDFILE = ROOT / "data" / "serve.pid"
 
 
-class PreviewServer(http.server.ThreadingHTTPServer):
+if hasattr(http.server, "ThreadingHTTPServer"):
+    _ThreadingHTTPServer = http.server.ThreadingHTTPServer
+else:  # Python 3.6 及更早版本没有 ThreadingHTTPServer
+    import socketserver
+
+    class _ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+        daemon_threads = True
+
+
+class PreviewServer(_ThreadingHTTPServer):
     # Windows 的 SO_REUSEADDR 允许重复绑定同一端口，会掩盖端口占用检测
     allow_reuse_address = os.name != "nt"
 
@@ -120,8 +129,9 @@ def process_is_project_serve(pid):
             try:
                 result = subprocess.run(
                     [executable, "-NoProfile", "-NonInteractive", "-Command", script],
-                    capture_output=True,
-                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    universal_newlines=True,
                     timeout=15,
                 )
             except (OSError, subprocess.SubprocessError):
@@ -415,12 +425,17 @@ def run_authenticated_service(args, directory):
         from server.auth import AuthService
         from server.config import ConfigError, default_config, load_config, save_config
         from server.svn import SvnClient
-    except ModuleNotFoundError as error:
-        raise SystemExit(
-            "错误: 认证编辑服务需要 Flask 与 Waitress（缺少 " + str(error.name) + "）。\n"
-            "  安装: python -m pip install -r server/requirements.txt\n"
-            "  离线只读预览: python serve.py --preview"
-        )
+        from waitress import serve as waitress_serve
+    except (ModuleNotFoundError, ImportError) as error:
+        if sys.version_info < (3, 8):
+            print("警告: 当前 Python " + ".".join(str(v) for v in sys.version_info[:3])
+                  + " 过旧（认证服务需要 3.8+，Flask/Waitress 无法安装）。")
+        print("警告: 认证编辑服务需要 Flask 与 Waitress（缺少 " + str(error.name) + "），"
+              "已降级为只读预览。")
+        print("  安装依赖后可启用登录编辑: python -m pip install -r server/requirements.txt")
+        print("  指定其他版本解释器: python3.9 serve.py  或  PYTHON=python3.9 ./start_linux.sh")
+        args.preview = True
+        return None
 
     config_path = Path(args.config)
     if not config_path.exists():
@@ -478,7 +493,6 @@ def run_authenticated_service(args, directory):
         timer.daemon = True
         timer.start()
     try:
-        from waitress import serve as waitress_serve
         waitress_serve(app, host=bind, port=port, threads=8)
     except KeyboardInterrupt:
         print("\n已停止")
@@ -489,18 +503,27 @@ def run_authenticated_service(args, directory):
 
 
 def main(argv=None):
+    if sys.version_info < (3, 6):
+        raise SystemExit("错误: 需要 Python 3.6 及以上（当前 "
+                         + ".".join(str(v) for v in sys.version_info[:3]) + "）")
     args = parse_args(argv)
     directory = args.directory.expanduser().resolve()
     if not (directory / "index.html").exists():
         raise SystemExit(f"错误: {directory} 下没有 index.html，请先运行 python setup_docsify.py")
 
+    print("Python: " + sys.version.split()[0] + " (" + sys.executable + ")")
+    if sys.version_info < (3, 8):
+        print("提示: 该解释器低于 3.8，认证编辑服务不可用（会自动降级为只读预览）；"
+              "如需登录编辑请安装 Python 3.8+ 并设置 PYTHON 环境变量。")
     manage_instance(args.pidfile)
     write_pidfile(args.pidfile, os.getpid())
 
     if not args.preview:
         run_authenticated_service(args, directory)
-        remove_pidfile(args.pidfile)
-        return
+        if not args.preview:
+            remove_pidfile(args.pidfile)
+            return
+        print("已切换到只读预览模式。")
 
     if (ROOT / "setup_docsify.py").exists() and not args.no_build:
         rebuild_if_needed(directory)

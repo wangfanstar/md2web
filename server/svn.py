@@ -155,8 +155,9 @@ class SvnClient:
             completed = subprocess.run(
                 command,
                 input=stdin_text,
-                capture_output=True,
-                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
                 encoding="utf-8",
                 errors="replace",
                 timeout=timeout or self.timeout,
@@ -292,6 +293,12 @@ class SvnClient:
     def diff(self, path, config_dir=None, username=None, password=None):
         creds, stdin_text = self._credential_args(username, password)
         args = ["diff", "--non-interactive", "--no-auth-cache"] + creds + [str(path)]
+        return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
+
+    def add(self, path, config_dir=None, username=None, password=None):
+        """把新文件加入版本控制（已受控时 svn 会提示已存在，按成功处理）。"""
+        creds, stdin_text = self._credential_args(username, password)
+        args = ["add", "--parents", "--non-interactive", "--no-auth-cache"] + creds + [str(path)]
         return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
 
     def commit(self, path, message, config_dir=None, username=None, password=None):

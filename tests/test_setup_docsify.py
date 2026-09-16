@@ -615,6 +615,34 @@ class ServeTests(unittest.TestCase):
             finally:
                 stop_event.set()
 
+    def test_threading_http_server_fallback_defined(self):
+        serve = load_module("serve", "serve.py")
+        self.assertTrue(hasattr(serve, "_ThreadingHTTPServer"))
+        self.assertTrue(issubclass(serve.PreviewServer, serve._ThreadingHTTPServer))
+
+    def test_missing_auth_dependencies_downgrade_to_preview(self):
+        import sys
+        serve = load_module("serve", "serve.py")
+        tmp = Path(tempfile.mkdtemp(prefix="md2web-deps-"))
+        cached = sys.modules.pop("server.app", None)
+        try:
+            (tmp / "index.html").write_text("ok", encoding="utf-8")
+            args = serve.parse_args(["--no-browser", "--dir", str(tmp),
+                                     "--pidfile", str(tmp / "serve.pid"),
+                                     "--config", str(tmp / "config" / "server.local.json")])
+            with mock.patch.dict("sys.modules", {"flask": None}):
+                with redirect_stdout(io.StringIO()) as output:
+                    result = serve.run_authenticated_service(args, tmp)
+            self.assertIsNone(result)
+            self.assertTrue(args.preview)
+            self.assertIn("只读预览", output.getvalue())
+            self.assertFalse((tmp / "config" / "server.local.json").exists(),
+                             "降级时不应写入配置文件")
+        finally:
+            if cached is not None:
+                sys.modules["server.app"] = cached
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_manage_instance_stops_only_project_instance(self):
         serve = load_module("serve", "serve.py")
         tmp = Path(tempfile.mkdtemp(prefix="md2web-pid-"))

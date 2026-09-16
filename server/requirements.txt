@@ -1,4 +1,6 @@
-# 认证编辑服务依赖（阶段一）
+# 认证编辑服务依赖（Flask + Waitress）
+# 需要 Python 3.8+（Waitress 3 需要 3.9+）；Python 3.6 只能运行只读预览与构建。
+# 只有 3.6 的服务器：升级解释器，或 PYTHON=python3.9 ./start_linux.sh
 # 内网离线部署：在有网机器执行 python -m pip download -r server/requirements.txt -d wheels
 # 然后拷贝 wheels 目录到内网机器：python -m pip install --no-index --find-links wheels -r server/requirements.txt
 # 离线静态阅读（docs/index.html）不需要安装任何依赖。

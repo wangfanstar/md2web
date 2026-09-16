@@ -217,12 +217,14 @@ def run_commit(conn, svn_client, config, md_dir, workspace_root, operation_id, u
                             config_dir=config_dir, username=username, password=password)
         target_file = work_dir / "wc" / Path(*mount_relative.split("/"))
         target_file.parent.mkdir(parents=True, exist_ok=True)
+        is_new_file = False
         try:
             svn_client.update(target_file, depth="infinity", config_dir=config_dir,
                               username=username, password=password)
         except SvnError as error:
             if error.code not in ("not_found_remote",):
                 raise
+            is_new_file = True
         existing = documents.read_md_text(target_file) if target_file.is_file() else ""
         eol = documents.detect_eol(existing)
         content = documents.normalize_eol(operation_content(conn, manifest))
@@ -231,6 +233,8 @@ def run_commit(conn, svn_client, config, md_dir, workspace_root, operation_id, u
         target_file.parent.mkdir(parents=True, exist_ok=True)
         with open(target_file, "w", encoding="utf-8", newline="") as handle:
             handle.write(content)
+        if is_new_file:
+            svn_client.add(target_file, config_dir=config_dir, username=username, password=password)
         diff = svn_client.diff(target_file, config_dir=config_dir, username=username, password=password)
         if not str(diff or "").strip():
             raise OperationError(409, "远端内容与草稿一致，无需提交")
