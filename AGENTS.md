@@ -135,6 +135,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - SVN 提交会把文档引用的 `images/` 图片一起存档：`prepare_commit` 的清单含 `images` 列表（由 `documents.referenced_images` 解析 Markdown/HTML 图片引用），`run_commit` 复制到工作副本、必要时 `svn add`，并与文档同一次 `svn commit` 提交；图片不参与文本差异比对（冲突风险由用户确认）。
 - 编辑器布局：`.md-editor-body` 用 **flex**（大纲固定 210px → 源码区宽度由拖拽分栏设置 → 6px 分隔条 → 预览占剩余）；不要再改回「三列 grid」，否则新增大纲后预览会被挤到第二列并被遮挡（大纲宽度按可用区域计算拖拽百分比）。
 - 搜索结果阅读模式下：命中工具条（sticky，z-index 960）在上，操作行通过 `--reading-toolbar-h` 下移（z-index 940）两者同时可见；不要再把操作行隐藏或让两者同 top 重叠。
+- 放大查看按「整体适配」打开（`Math.min(1, fitScale())`）：大于视口的时序图/甘特图/四象限图会先缩小到完整可见，重渲染后以新 SVG 的 viewBox 刷新尺寸并重新适配，避免文字与线条被裁掉；需要细看再用「适应 / 1:1」或滚轮缩放。
 - 放大查看/导出禁止直接克隆已渲染的 SVG（会丢文字或箭头）：Mermaid 走 `MermaidRender.render(data-source)`，PacketDiag 走 `PacketDiagRerender(figure)`。
 - 本文目录固定靠窗口右缘（`--docs-toc-right`），左边缘为拖动手柄调整**宽度**（`md2web:toc-width`，写入 `--docs-toc-width`）；目录内容放在内层 `.docs-page-toc-scroll`，外层禁止横向滚动，拖动手柄才不会被滚动条带偏。
 - 忘记管理员密码用 `python serve.py --reset-admin-password`（`database.reset_admin_password` 强制写回默认值）；不要在网页接口里提供”重置为默认“的公开入口。

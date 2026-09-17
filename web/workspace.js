@@ -193,8 +193,15 @@
     if (!actions) { actions = document.createElement('div'); actions.className = 'workspace-page-actions'; section.insertBefore(actions, crumb.nextSibling); }
     if (!actions.querySelector('[data-workspace-copy-path]')) {
       var numbersHidden = document.body.classList.contains('hide-heading-numbers');
-      actions.innerHTML = '<button type="button" data-workspace-copy-path>复制路径</button><button type="button" data-workspace-source>查看源码</button><button type="button" data-workspace-edit>编辑 MD</button><button type="button" data-workspace-download-md>下载 MD</button><button type="button" data-workspace-export>下载本页</button><button type="button" data-workspace-numbers>' + (numbersHidden ? '显示序号' : '隐藏序号') + '</button>';
-      actions.querySelector('[data-workspace-copy-path]').addEventListener('click', function () { copyText(route ? 'docs/' + route + (/.md$/i.test(route) ? '' : '.md') : 'docs/README.md', this); });
+      actions.innerHTML = '<button type="button" data-workspace-copy-path title="复制当前页面链接（含 #/ 路由，可直接分享）">复制链接</button><button type="button" data-workspace-source>查看源码</button><button type="button" data-workspace-edit>编辑 MD</button><button type="button" data-workspace-download-md>下载 MD</button><button type="button" data-workspace-export>下载本页</button><button type="button" data-workspace-numbers>' + (numbersHidden ? '显示序号' : '隐藏序号') + '</button>';
+      actions.querySelector('[data-workspace-copy-path]').addEventListener('click', function () {
+        // 复制当前链接地址（浏览器地址栏里的完整 URL，含 #/ 路由），方便直接分享
+        var link = window.location.href;
+        if (route && window.location.hash.indexOf('#/' + route) === -1) {
+          link = window.location.origin + window.location.pathname + '#/' + route;
+        }
+        copyText(link, this);
+      });
       updateEditLabel(actions);
       actions.querySelector('[data-workspace-edit]').addEventListener('click', function () {
         var auth = window.SiteAuth && window.SiteAuth.snapshot ? window.SiteAuth.snapshot() : null;

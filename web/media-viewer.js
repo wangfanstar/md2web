@@ -444,20 +444,21 @@
     document.body.classList.add('media-viewer-open');
     state.x = 0;
     state.y = 0;
-    var isDiagram = source.tagName === 'svg' || !!source.querySelector('svg');
-    var initial;
-    if (isDiagram) {
-      // 图形按 100% 打开，保证文字可读；过大时可用平移或「适应」查看全貌
-      initial = 1;
-    } else {
-      var stage = stageSize();
-      initial = Math.min(
-        1,
-        Math.max(stage.width / state.natural.width, stage.height / state.natural.height)
-      );
-    }
-    state.scale = clamp(initial, MIN_SCALE, MAX_SCALE);
+    // 统一按「整体适配」打开：大于视口的图形会缩小到完整可见（不超过 100%），
+    // 避免时序图/甘特图/四象限图被裁掉文字与线条；需要细看时再放大或平移。
+    state.scale = clamp(Math.min(1, fitScale()), MIN_SCALE, MAX_SCALE);
     applyTransform();
+    if (state.pendingRender) {
+      state.pendingRender.then(function () {
+        if (state.renderedSizeChanged && state.overlay.classList.contains('is-open')) {
+          state.renderedSizeChanged = false;
+          state.scale = clamp(Math.min(1, fitScale()), MIN_SCALE, MAX_SCALE);
+          state.x = 0;
+          state.y = 0;
+          applyTransform();
+        }
+      });
+    }
     state.overlay.focus();
   }
 
