@@ -120,7 +120,9 @@ Windows 可双击 `start_windows.bat`，Linux 可执行 `sh start_linux.sh`。�
 
 接收方只需完整 `docs/` 文件夹和浏览器，无需 Python、Node.js 或网络。维护方需要 Python 3.8+；严格离线构建若提示缺少依赖，把另一份完整站点的对应 `docs/lib/` 文件复制过来即可。文档自己引用的远程图片/资源需提前改成本地相对路径，才能随站点离线分发。
 
-预览服务默认绑定 `0.0.0.0`，同一局域网内可访问，请勿在含敏感内容的文档站上使用；仅本机访问可执行 `python serve.py --bind 127.0.0.1`。
+监听地址：只读预览默认绑定 `0.0.0.0`（启动日志会打印「局域网访问: http://<本机IP>:8882」）；认证编辑服务默认只监听 `127.0.0.1`，需要局域网访问时执行 `python serve.py --bind 0.0.0.0`，或把 `config/server.local.json` 的 `server.bind` 改成 `"0.0.0.0"`。
+
+局域网打不开时先确认服务器防火墙放行端口：RHEL/CentOS 7 用 `sudo firewall-cmd --add-port=8882/tcp --permanent && sudo firewall-cmd --reload`，Ubuntu 用 `sudo ufw allow 8882/tcp`。开放到局域网后任何人都能看到登录页与文档，请务必修改默认管理员密码；只允许本机时用 `--bind 127.0.0.1`。
 
 ### 3. 分发与备份
 

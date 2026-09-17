@@ -1,9 +1,9 @@
 """跨平台预览 / 认证编辑服务入口。
 
-- 默认（无 --config）：**只读预览**。静态站点、自动重建与本机 AI 代理可用；
-  `/__md/*`、`/__svn/*` 等写接口一律拒绝（不再提供匿名保存）。
-- `--config`（默认 config/server.local.json）：启动认证编辑服务（Flask + Waitress，
-  Python 3.6.8+ 同一套依赖 server/requirements.txt）。匿名只读，登录后可编辑草稿并提交 SVN。
+- 默认启动**认证编辑服务**（Flask + Waitress，Python 3.6.8+ 同一套依赖 server/requirements.txt），
+  地址与端口取 `--config`（默认 config/server.local.json）：匿名只读，登录后可编辑草稿并提交 SVN。
+- `--preview`：只读预览。静态站点、自动重建与本机 AI 代理可用，写接口一律拒绝。
+- 监听地址：`--bind` 优先；认证服务其次取配置 server.bind（默认 127.0.0.1），预览默认 0.0.0.0。
 - 只管理本项目自身的实例（pidfile），不再扫描并终止所有 serve.py 进程。
 """
 
@@ -58,8 +58,8 @@ def parse_args(argv=None):
     )
     parser.add_argument("--port", type=int, default=8882, help="起始端口，默认 8882（0-65535）")
     parser.add_argument(
-        "--bind", default="0.0.0.0",
-        help="监听地址，默认 0.0.0.0（局域网可见；仅本机用 127.0.0.1）",
+        "--bind", default=None,
+        help="监听地址：认证服务默认取配置 server.bind（默认 127.0.0.1），预览默认 0.0.0.0；局域网访问用 0.0.0.0",
     )
     parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
     parser.add_argument(
@@ -429,6 +429,68 @@ class PreviewHandler(http.server.SimpleHTTPRequestHandler):
         super().log_message(fmt, *args)
 
 
+def resolve_bind(cli_bind, config_bind=None):
+    """监听地址：命令行优先，其次配置文件（认证服务），最后 0.0.0.0（预览）。"""
+    value = cli_bind if cli_bind else config_bind
+    value = str(value or "").strip()
+    return value or "0.0.0.0"
+
+
+def _is_usable_ipv4(address):
+    return bool(address) and not address.startswith("127.") and address != "0.0.0.0"
+
+
+def local_ipv4_addresses():
+    """本机局域网 IPv4 列表（不发起真实网络流量）。"""
+    addresses = []
+    try:
+        for address in socket.gethostbyname_ex(socket.gethostname())[2]:
+            if _is_usable_ipv4(address):
+                addresses.append(address)
+    except (OSError, socket.error):
+        pass
+    if not addresses:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.connect(("10.255.255.255", 1))
+            address = probe.getsockname()[0]
+            if _is_usable_ipv4(address):
+                addresses.append(address)
+        except (OSError, socket.error):
+            pass
+        finally:
+            probe.close()
+    return sorted(set(addresses))
+
+
+def access_urls(bind, port):
+    """返回 (本机地址, 其他可访问地址)：0.0.0.0 时给出局域网 IP。"""
+    local = "http://localhost:%d" % port
+    others = []
+    if is_loopback_host(bind):
+        return local, others
+    if bind in ("0.0.0.0", "::", "*"):
+        for address in local_ipv4_addresses():
+            others.append("http://%s:%d" % (address, port))
+    else:
+        others.append("http://%s:%d" % (bind, port))
+    return local, others
+
+
+def print_access_hints(bind, port):
+    """打印可访问地址；局域网监听时给出放行端口命令，本机监听时提示如何开放。"""
+    local, others = access_urls(bind, port)
+    print("本机访问: " + local)
+    for url in others:
+        print("局域网访问: " + url)
+    if others:
+        print("  若局域网打不开：确认服务器防火墙已放行端口，例如")
+        print("    RHEL/CentOS 7（root）: sudo firewall-cmd --add-port=%d/tcp --permanent && sudo firewall-cmd --reload" % port)
+        print("    Ubuntu/Debian: sudo ufw allow %d/tcp" % port)
+    elif is_loopback_host(bind):
+        print("当前仅本机可访问；需要局域网访问请加 --bind 0.0.0.0（或修改配置 server.bind）")
+
+
 def make_server(directory, bind, port):
     """从 port 起连续尝试 20 个端口，返回 (server, 实际端口)。"""
     handler = functools.partial(PreviewHandler, directory=str(directory))
@@ -506,9 +568,10 @@ def run_authenticated_service(args, directory):
         stop_watcher = start_watcher(docs_dir)
         print("已开启自动重建：docs/md 有变化时自动重建（每 2 秒检测）")
 
-    bind = config["server"]["bind"]
+    bind = resolve_bind(args.bind, config["server"]["bind"])
     port = config["server"]["port"]
     print(f"认证编辑服务: http://{bind}:{port}")
+    print_access_hints(bind, port)
     if config["auth"]["url"]:
         print(f"SVN 认证地址: {config['auth']['url']}")
     else:
@@ -565,9 +628,10 @@ def main(argv=None):
     else:
         stop_watcher = None
 
-    server, port = make_server(directory, args.bind, args.port)
+    bind = resolve_bind(args.bind)
+    server, port = make_server(directory, bind, args.port)
     print(f"预览目录: {directory}")
-    print(f"本机访问: http://localhost:{port}")
+    print_access_hints(bind, port)
     print("模式: 只读预览（写接口已停用；认证编辑去掉 --preview 即可）")
     if not args.no_browser:
         timer = threading.Timer(0.5, webbrowser.open, args=(f"http://localhost:{port}",))

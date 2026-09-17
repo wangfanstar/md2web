@@ -118,6 +118,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - **写接口只在认证服务中存在**：只读预览下 `/__md/*`、`/__svn/*` 一律 403；前端不得回退成“文件写入”或“匿名直存”。匿名 401、旧接口 410、未实现阶段 501，均有明确错误码。
 - SQLite 连接由 Waitress 多线程共享：`database.connect` 使用 `check_same_thread=False`，所有访问必须经 `AuthService._db_lock` 串行化；数据库写锁不得跨越 SVN 网络调用。
 - 服务启动只按 pidfile 终止本项目自身实例；不要再恢复“扫描并终止所有 serve.py 进程”的行为。
+- 监听地址解析：`serve.resolve_bind`（CLI `--bind` 优先，其次配置 `server.bind`，最后 `0.0.0.0`）；认证服务默认 `server.bind=127.0.0.1`（仅本机），局域网访问要 `--bind 0.0.0.0` 或改配置，并用 `firewall-cmd --add-port=<port>/tcp`（RHEL7）/ `ufw allow`（Ubuntu）放行端口；`print_access_hints` 负责打印「本机访问/局域网访问」与防火墙提示，别再写死 localhost。
 - 认证模式直接绑定配置端口：端口被占用时打印明确提示（不会自动换端口）；重复双击启动靠 pidfile 关闭旧实例。`start_windows.bat` 保持纯 ASCII（cmd 用 OEM 代码页解析，中文会破坏脚本）。
 - 认证依赖安装：`start_linux.sh` 在非 root 时优先 `--user` 安装（系统目录常不可写，直接装会 PermissionError），顺序为「离线 --user → 离线系统 → 联网 --user → 联网系统」；提示用户级失败时给出 sudo/--user 与 pip 升级命令。
 - 旧版 SQLite（RHEL7 自带 3.7.17）解析不了新版本写入的部分索引，打开数据库会报 `malformed database schema`：`database.connect` 会先移除这类索引（原文件留 `*.repair-*.bak`），仍失败则把库改名为 `*.corrupt-*.bak` 并重建；迁移 SQL 必须保持基础语法（`DatabaseTests.test_schema_sql_avoids_modern_only_features` 守护），不要用部分索引、表达式索引、CTE 或窗口函数。

@@ -389,6 +389,48 @@ class ServeTests(unittest.TestCase):
         self.assertTrue(serve.is_loopback_host("::1"))
         self.assertFalse(serve.is_loopback_host("192.168.1.8"))
 
+    def test_resolve_bind_cli_overrides_config(self):
+        serve = load_module("serve", "serve.py")
+        self.assertEqual(serve.resolve_bind("0.0.0.0", "127.0.0.1"), "0.0.0.0")
+        self.assertEqual(serve.resolve_bind(None, "127.0.0.1"), "127.0.0.1")
+        self.assertEqual(serve.resolve_bind(None, None), "0.0.0.0")
+        self.assertEqual(serve.resolve_bind("  ", ""), "0.0.0.0")
+        self.assertIsNone(serve.parse_args([]).bind, "--bind 默认应为 None（认证服务回落配置）")
+
+    def test_access_urls_reports_lan_and_local(self):
+        serve = load_module("serve", "serve.py")
+        serve.local_ipv4_addresses = lambda: ["192.168.1.50", "10.0.0.8"]
+        local, others = serve.access_urls("0.0.0.0", 8882)
+        self.assertEqual(local, "http://localhost:8882")
+        self.assertEqual(others, ["http://192.168.1.50:8882", "http://10.0.0.8:8882"])
+        local, others = serve.access_urls("127.0.0.1", 8882)
+        self.assertEqual(others, [], "仅本机监听不应给出局域网地址")
+        local, others = serve.access_urls("192.168.1.9", 8882)
+        self.assertEqual(others, ["http://192.168.1.9:8882"])
+
+    def test_local_ipv4_addresses_skips_loopback(self):
+        serve = load_module("serve", "serve.py")
+        for address in serve.local_ipv4_addresses():
+            self.assertFalse(address.startswith("127."), address)
+            self.assertNotEqual(address, "0.0.0.0")
+
+    def test_print_access_hints_firewall_commands(self):
+        import io
+        from contextlib import redirect_stdout
+        serve = load_module("serve", "serve.py")
+        serve.local_ipv4_addresses = lambda: ["192.168.1.50"]
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            serve.print_access_hints("0.0.0.0", 8882)
+        output = buffer.getvalue()
+        self.assertIn("http://192.168.1.50:8882", output)
+        self.assertIn("firewall-cmd --add-port=8882/tcp", output)
+        self.assertIn("ufw allow 8882/tcp", output)
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            serve.print_access_hints("127.0.0.1", 8882)
+        self.assertIn("--bind 0.0.0.0", buffer.getvalue())
+
     def test_ai_target_url_validation(self):
         serve = load_module("serve", "serve.py")
         self.assertEqual(serve.ai_target_url("https://api.example.com/v1/chat"), "https://api.example.com/v1/chat")
