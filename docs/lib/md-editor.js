@@ -219,6 +219,7 @@
       setStatus(doc.draft
         ? '已载入个人草稿 v' + doc.draft.version + '（未提交 SVN）'
         : '已载入已发布版本');
+      historyReset(state.textarea.value);
       return doc;
     });
   }
@@ -820,6 +821,71 @@
     return chain.catch(function () { /* 失败信息已在状态栏提示 */ });
   }
 
+  // ---------- 撤销 / 恢复 ----------
+
+  var HISTORY_LIMIT = 200;
+  var OUTLINE_PREF = 'md2web:editor-outline';
+
+  function historyReset(value) {
+    state.history = [value];
+    state.historyIndex = 0;
+  }
+
+  function historyRecord() {
+    if (!state.textarea) {
+      return;
+    }
+    var value = state.textarea.value;
+    var stack = state.history || [];
+    if (stack[state.historyIndex] === value) {
+      return;
+    }
+    stack = stack.slice(0, (state.historyIndex || 0) + 1);
+    stack.push(value);
+    if (stack.length > HISTORY_LIMIT) {
+      stack = stack.slice(stack.length - HISTORY_LIMIT);
+    }
+    state.history = stack;
+    state.historyIndex = stack.length - 1;
+  }
+
+  function scheduleHistory() {
+    window.clearTimeout(state.historyTimer);
+    state.historyTimer = window.setTimeout(historyRecord, 400);
+  }
+
+  function applyHistory(index) {
+    var stack = state.history || [];
+    if (index < 0 || index >= stack.length) {
+      return false;
+    }
+    state.historyIndex = index;
+    state.textarea.value = stack[index];
+    state.textarea.setSelectionRange(stack[index].length, stack[index].length);
+    afterContentChanged(true);
+    return true;
+  }
+
+  function undo() {
+    if (state.historyTimer) {
+      window.clearTimeout(state.historyTimer);
+      historyRecord();
+    }
+    if (applyHistory((state.historyIndex || 0) - 1)) {
+      setStatus('已撤销（Ctrl+Y 恢复）');
+    } else {
+      setStatus('没有可撤销的操作');
+    }
+  }
+
+  function redo() {
+    if (applyHistory((state.historyIndex || 0) + 1)) {
+      setStatus('已恢复');
+    } else {
+      setStatus('没有可恢复的操作');
+    }
+  }
+
   // ---------- 大纲导航（快速跳转章节） ----------
 
   function collectHeadings() {
@@ -886,6 +952,9 @@
     } else {
       closeOutline();
     }
+    try {
+      window.localStorage.setItem(OUTLINE_PREF, state.outline.hidden ? '0' : '1');
+    } catch (error) { /* 隐私模式忽略 */ }
   }
 
   function updateOutlineActive() {
@@ -1094,6 +1163,7 @@
   function afterContentChanged(immediate) {
     updateMetrics();
     refreshModifiedState();
+    scheduleHistory();
     if (state.outline && !state.outline.hidden) {
       scheduleOutline();
     }
@@ -1316,6 +1386,8 @@
       copy: function () { copySource(); },
       reload: function () { reloadSource(); },
       revert: function () { revert(); },
+      undo: function () { undo(); },
+      redo: function () { redo(); },
       outline: function () { toggleOutline(); },
       help: function () { toggleHelp(); },
       close: function () { close(); }
@@ -1351,6 +1423,9 @@
     { action: 'math', label: 'Σ 行内公式', title: '行内公式 $...$（Ctrl+M）' },
     { action: 'mathBlock', label: 'Σ 公式块', title: '公式块 $$...$$（Ctrl+Shift+M）' },
     { divider: true },
+    { action: 'undo', label: '↶', title: '撤销（Ctrl+Z）' },
+    { action: 'redo', label: '↷', title: '恢复（Ctrl+Y / Ctrl+Shift+Z）' },
+    { divider: true },
     { action: 'outline', label: '目录', title: '大纲导航：跳转到章节（Ctrl+Shift+H）' },
     { action: 'help', label: '快捷键', title: '快捷键说明（Ctrl+/）' }
   ];
@@ -1376,6 +1451,9 @@
     { key: 's', ctrl: true, shift: true, action: 'saveAs' },
     { key: '/', ctrl: true, action: 'help' },
     { key: 'h', ctrl: true, shift: true, action: 'outline' },
+    { key: 'z', ctrl: true, action: 'undo' },
+    { key: 'z', ctrl: true, shift: true, action: 'redo' },
+    { key: 'y', ctrl: true, action: 'redo' },
     { key: '1', ctrl: true, alt: true, action: 'h1' },
     { key: '2', ctrl: true, alt: true, action: 'h2' },
     { key: '3', ctrl: true, alt: true, action: 'h3' }
@@ -1595,8 +1673,8 @@
       '<button type="button" data-editor-action="close">关闭</button>',
       '</header>',
       '<div class="md-editor-toolbar">', toolbar, '</div>',
-      '<div class="md-editor-outline" data-editor-outline hidden></div>',
       '<div class="md-editor-body">',
+      '<aside class="md-editor-outline" data-editor-outline aria-label="文档大纲"></aside>',
       '<div class="md-editor-pane md-editor-pane-source">',
       '<pre class="md-editor-highlight" aria-hidden="true"></pre>',
       '<textarea class="md-editor-text" spellcheck="false" aria-label="Markdown 源文本" wrap="soft"></textarea>',
@@ -1627,7 +1705,8 @@
       '<li><code>Ctrl+Shift+G</code> Mermaid · <code>Ctrl+Shift+D</code> PacketDiag</li>',
       '<li><code>Tab</code> / <code>Shift+Tab</code> 缩进 · <code>Alt+↑/↓</code> 移动行</li>',
       '<li><code>Ctrl+S</code> 保存 · <code>Ctrl+Shift+S</code> 另存为 · <code>Esc</code> 关闭</li>',
-      '<li><code>Ctrl+Shift+H</code> 大纲导航 · 直接粘贴或拖入图片会自动上传到 <code>images/</code></li>',
+      '<li><code>Ctrl+Z</code> 撤销 · <code>Ctrl+Y</code>/<code>Ctrl+Shift+Z</code> 恢复 · <code>Ctrl+Shift+H</code> 大纲导航</li>',
+      '<li>直接粘贴或拖入图片会自动上传到文档同级 <code>images/</code></li>',
       '</ul>',
       '</div>',
       '<footer class="md-editor-foot">',
@@ -1679,6 +1758,11 @@
     state.textarea.value = '';
     state.highlight.innerHTML = '';
     state.preview.innerHTML = '';
+    historyReset('');
+    if (state.outline) {
+      state.outline.hidden = window.localStorage && window.localStorage.getItem(OUTLINE_PREF) === '0';
+      refreshOutline();
+    }
     setStatus('正在读取源文档…');
     state.overlay.classList.add('is-open');
     document.body.classList.add('md-editor-open');
@@ -1762,6 +1846,8 @@
     save: save,
     close: close,
     uploadImage: uploadImage,
+    undo: undo,
+    redo: redo,
     headings: collectHeadings,
     gotoHeading: gotoHeading,
     toggleOutline: toggleOutline

@@ -1,5 +1,6 @@
 """SQLite 访问层：连接设置、迁移、事务辅助与备份。"""
 
+import json
 import re
 import shutil
 import sqlite3
@@ -8,7 +9,7 @@ from pathlib import Path
 
 from .passwords import hash_password
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 5
 
 # 兼容目标：RHEL7 自带 SQLite 3.7.17（Python 3.6 的 sqlite3）。
 # Windows 端也必须只写这些版本能解析的对象，保证 data/ 数据库可在两个平台间直接共用。
@@ -327,6 +328,10 @@ def migrate(conn, logger=None):
                 conn.executescript(MIGRATION_V2_SQL)
             if version < 3:
                 conn.executescript(MIGRATION_V3_SQL)
+            if version < 4:
+                conn.executescript(MIGRATION_V4_SQL)
+            if version < 5:
+                conn.executescript(MIGRATION_V5_SQL)
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     sanitize_schema(conn, logger)
     return SCHEMA_VERSION
@@ -360,6 +365,31 @@ def sanitize_schema(conn, logger=None):
     for name in removed:
         _report(logger, "[提示] 已移除 SQLite %s 不兼容的数据库对象：%s" % (SQLITE_COMPAT_TARGET, name))
     return removed
+
+
+# v4：审计事件记录来源 IP（管理员界面查看登录与使用情况）
+MIGRATION_V4_SQL = """
+ALTER TABLE audit_events ADD COLUMN client_ip TEXT;
+"""
+
+
+# v5：文档快照与增删记录（管理员界面：文档更新时间/次数、文件夹大小、增删历史）
+MIGRATION_V5_SQL = """
+CREATE TABLE IF NOT EXISTS document_snapshots (
+    path TEXT PRIMARY KEY,
+    size INTEGER NOT NULL,
+    mtime INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS document_events (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    path TEXT NOT NULL,
+    size INTEGER,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_document_events_created ON document_events (created_at);
+"""
 
 
 def save_svn_credential(conn, auth_source_id, username, secret, now=None):
@@ -400,6 +430,165 @@ def delete_svn_credential(conn, auth_source_id, username):
             (auth_source_id, username),
         )
     return cursor.rowcount > 0
+
+
+def login_events(conn, since, limit=200):
+    """按 IP + 账号 + 结果聚合登录记录（管理员界面用）。"""
+    rows = conn.execute(
+        "SELECT client_ip, resource, result, COUNT(*) AS count, MAX(created_at) AS last_at"
+        " FROM audit_events WHERE action IN ('login', 'admin_login') AND created_at >= ?"
+        " GROUP BY client_ip, resource, result ORDER BY last_at DESC LIMIT ?",
+        (since, int(limit)),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def user_activity(conn, since):
+    """每个账号的使用情况：最后登录、草稿数、版本数、提交数与最近一次提交状态。"""
+    rows = conn.execute(
+        "SELECT u.id, u.svn_username AS username, u.role, u.disabled, u.last_login_at,"
+        " (SELECT COUNT(*) FROM drafts d WHERE d.user_id = u.id) AS drafts,"
+        " (SELECT COUNT(*) FROM revisions r WHERE r.actor_id = u.id) AS revisions,"
+        " (SELECT COUNT(*) FROM operations o WHERE o.actor_id = u.id) AS operations,"
+        " (SELECT COUNT(*) FROM operations o WHERE o.actor_id = u.id AND o.created_at >= ?) AS operations_since,"
+        " (SELECT o.state FROM operations o WHERE o.actor_id = u.id ORDER BY o.created_at DESC LIMIT 1) AS last_state,"
+        " (SELECT o.svn_revision FROM operations o WHERE o.actor_id = u.id AND o.svn_revision IS NOT NULL"
+        "    ORDER BY o.created_at DESC LIMIT 1) AS last_revision"
+        " FROM users u ORDER BY u.last_login_at IS NULL, u.last_login_at DESC, u.svn_username",
+        (since,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def recent_operations(conn, limit=30):
+    rows = conn.execute(
+        "SELECT o.id, o.kind, o.state, o.svn_revision, o.error_code, o.created_at, o.finished_at,"
+        " o.reviewed_manifest, u.svn_username AS username, u.role"
+        " FROM operations o LEFT JOIN users u ON u.id = o.actor_id"
+        " ORDER BY o.created_at DESC LIMIT ?",
+        (int(limit),),
+    ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        try:
+            manifest = json.loads(item.pop("reviewed_manifest") or "{}")
+        except ValueError:
+            manifest = {}
+        item["path"] = manifest.get("path")
+        item["repositoryId"] = manifest.get("repositoryId")
+        result.append(item)
+    return result
+
+
+def active_sessions(conn, now):
+    rows = conn.execute(
+        "SELECT s.id, s.user_id, s.created_at, s.last_seen_at, s.expires_at, s.user_agent,"
+        " u.svn_username AS username, u.role"
+        " FROM sessions s JOIN users u ON u.id = s.user_id"
+        " WHERE s.revoked_at IS NULL AND s.expires_at > ? ORDER BY s.last_seen_at DESC",
+        (now,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def document_snapshot_map(conn):
+    """当前记录的文档快照：{path: {"size":…, "mtime":…}}。"""
+    rows = conn.execute("SELECT path, size, mtime FROM document_snapshots").fetchall()
+    return {row["path"]: {"size": row["size"], "mtime": row["mtime"]} for row in rows}
+
+
+def record_document_changes(conn, entries, baseline=False, now=None):
+    """对比文档快照并记录 added/removed/modified；baseline=True 时只写快照不记事件。
+
+    entries: {path: {"size": int, "mtime": int}}
+    返回 {"added": [...], "removed": [...], "modified": [...]}
+    """
+    timestamp = now or now_iso()
+    previous = document_snapshot_map(conn)
+    changes = {"added": [], "removed": [], "modified": []}
+    for path, info in sorted(entries.items()):
+        old = previous.get(path)
+        if old is None:
+            changes["added"].append(path)
+        elif old["size"] != info["size"] or old["mtime"] != info["mtime"]:
+            changes["modified"].append(path)
+    for path in sorted(previous):
+        if path not in entries:
+            changes["removed"].append(path)
+    with conn:
+        for path in changes["added"] + changes["modified"]:
+            info = entries[path]
+            existing = previous.get(path)
+            if existing is None:
+                conn.execute(
+                    "INSERT INTO document_snapshots (path, size, mtime, updated_at) VALUES (?, ?, ?, ?)",
+                    (path, info["size"], info["mtime"], timestamp),
+                )
+            else:
+                conn.execute(
+                    "UPDATE document_snapshots SET size = ?, mtime = ?, updated_at = ? WHERE path = ?",
+                    (info["size"], info["mtime"], timestamp, path),
+                )
+        for path in changes["removed"]:
+            conn.execute("DELETE FROM document_snapshots WHERE path = ?", (path,))
+        if not baseline:
+            for kind in ("added", "removed", "modified"):
+                for path in changes[kind]:
+                    size = entries.get(path, {}).get("size")
+                    conn.execute(
+                        "INSERT INTO document_events (kind, path, size, created_at) VALUES (?, ?, ?, ?)",
+                        (kind, path, size, timestamp),
+                    )
+    if baseline:
+        return {"added": [], "removed": [], "modified": []}
+    return changes
+
+
+def document_events(conn, limit=200):
+    rows = conn.execute(
+        "SELECT kind, path, size, created_at FROM document_events ORDER BY id DESC LIMIT ?",
+        (int(limit),),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def document_update_counts(conn):
+    """每个文档的更新次数与最近更新时间（来自已发布提交记录）。"""
+    rows = conn.execute(
+        "SELECT reviewed_manifest, finished_at, created_at, svn_revision FROM operations"
+        " WHERE state = 'published' AND reviewed_manifest IS NOT NULL ORDER BY created_at",
+    ).fetchall()
+    stats = {}
+    for row in rows:
+        try:
+            manifest = json.loads(row["reviewed_manifest"] or "{}")
+        except ValueError:
+            continue
+        path = manifest.get("path")
+        if not path:
+            continue
+        item = stats.setdefault(path, {"count": 0, "lastAt": None, "lastRevision": None})
+        item["count"] += 1
+        item["lastAt"] = row["finished_at"] or row["created_at"]
+        item["lastRevision"] = row["svn_revision"]
+    return stats
+
+
+def audit_events(conn, limit=200):
+    rows = conn.execute(
+        "SELECT a.action, a.resource, a.result, a.created_at, a.client_ip, a.operation_id,"
+        " u.svn_username AS username, u.role"
+        " FROM audit_events a LEFT JOIN users u ON u.id = a.actor_id"
+        " ORDER BY a.id DESC LIMIT ?",
+        (int(limit),),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def user_count(conn):
+    row = conn.execute("SELECT COUNT(*) AS total, SUM(disabled) AS disabled FROM users").fetchone()
+    return {"total": int(row["total"] or 0), "disabled": int(row["disabled"] or 0)}
 
 
 def find_user(conn, auth_source_id, username):
@@ -471,10 +660,10 @@ def dump_backup(conn, destination):
     return dest
 
 
-def audit(conn, action, result, actor_id=None, resource=None, operation_id=None):
+def audit(conn, action, result, actor_id=None, resource=None, operation_id=None, client_ip=None):
     """写入审计记录；错误信息由调用方脱敏后再传入。"""
     conn.execute(
-        "INSERT INTO audit_events (actor_id, action, resource, operation_id, result, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?)",
-        (actor_id, action, resource, operation_id, result, now_iso()),
+        "INSERT INTO audit_events (actor_id, action, resource, operation_id, result, created_at, client_ip)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (actor_id, action, resource, operation_id, result, now_iso(), client_ip),
     )

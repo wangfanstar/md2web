@@ -106,6 +106,26 @@ def read_md_meta(md_dir, raw):
     }
 
 
+def scan_md_tree(md_dir):
+    """扫描 docs/md 下的 Markdown：返回 {"md/<相对路径>": {"size": int, "mtime": int}}。"""
+    root = Path(md_dir)
+    entries = {}
+    if not root.is_dir():
+        return entries
+    for path in sorted(root.rglob("*.md")):
+        if not path.is_file():
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        entries["md/" + path.relative_to(root).as_posix()] = {
+            "size": int(stat.st_size),
+            "mtime": int(stat.st_mtime),
+        }
+    return entries
+
+
 def image_stem(text):
     """把文档名整理成安全的文件名前缀（保留中文，非法字符换成 -）。"""
     value = IMAGE_UNSAFE.sub("-", str(text or "")).strip(" .-")

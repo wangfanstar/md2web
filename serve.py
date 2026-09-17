@@ -242,6 +242,25 @@ def rebuild_if_needed(directory):
     return True
 
 
+def start_document_recorder(auth_service, md_dir, interval=10.0):
+    """后台记录 docs/md 的增删改（管理员界面用）；返回停止事件。"""
+    stop_event = threading.Event()
+    state = {"first": True}
+
+    def run():
+        while not stop_event.is_set():
+            try:
+                auth_service.record_document_snapshot(md_dir)
+                state["first"] = False
+            except Exception as error:
+                print(f"警告: 文档变更记录失败: {error}")
+            stop_event.wait(interval)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return stop_event
+
+
 def start_watcher(directory, interval=2.0):
     """后台轮询 docs/md，有变化时自动重建；返回停止事件。"""
     stop_event = threading.Event()
@@ -619,10 +638,15 @@ def run_authenticated_service(args, directory):
     app = create_app(config, conn, auth_service, docs_dir)
 
     stop_watcher = None
+    stop_recorder = None
     if not args.no_build and (ROOT / "setup_docsify.py").exists():
         rebuild_if_needed(docs_dir)
         stop_watcher = start_watcher(docs_dir)
         print("已开启自动重建：docs/md 有变化时自动重建（每 2 秒检测）")
+    try:
+        stop_recorder = start_document_recorder(auth_service, docs_dir / "md")
+    except Exception as error:
+        print(f"警告: 无法启动文档变更记录: {error}")
 
     bind = resolve_bind(args.bind, config["server"]["bind"])
     port = resolve_port(args.port, config["server"]["port"])
@@ -654,6 +678,8 @@ def run_authenticated_service(args, directory):
     finally:
         if stop_watcher is not None:
             stop_watcher.set()
+        if stop_recorder is not None:
+            stop_recorder.set()
         conn.close()
 
 

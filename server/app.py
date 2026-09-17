@@ -6,6 +6,7 @@
 """
 
 import hmac
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import Flask, jsonify, make_response, request, send_from_directory
@@ -220,6 +221,81 @@ def create_app(config, conn, auth_service, docs_dir):
         payload = request.get_json(silent=True) or {}
         result = auth_service.test_auth_url(payload.get("url"))
         return jsonify({"ok": True, "result": result})
+
+    @app.get("/__admin/usage")
+    def admin_usage():
+        """管理员查看登录与使用情况：按 IP/账号聚合的登录记录、账号活动、最近提交、在线会话。"""
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        try:
+            days = int(request.args.get("days") or 7)
+        except (TypeError, ValueError):
+            days = 7
+        days = max(1, min(days, 90))
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return jsonify({
+            "ok": True,
+            "days": days,
+            "since": since,
+            "logins": database.login_events(conn, since),
+            "users": database.user_activity(conn, since),
+            "userCount": database.user_count(conn),
+            "operations": database.recent_operations(conn, 30),
+            "audit": database.audit_events(conn, 200),
+            "sessions": database.active_sessions(conn, now),
+            "repositoryCount": len(config.get("repositories") or []),
+        })
+
+    def scan_documents():
+        return server_documents.scan_md_tree(md_dir())
+
+    def folder_sizes(entries):
+        """按目录聚合文件大小与数量（含所有层级）。"""
+        folders = {}
+        for path, info in entries.items():
+            parts = path.split("/")
+            for depth in range(1, len(parts)):
+                folder = "/".join(parts[:depth])
+                item = folders.setdefault(folder, {"path": folder, "size": 0, "files": 0})
+                item["size"] += info["size"]
+                item["files"] += 1
+        return sorted(folders.values(), key=lambda item: item["size"], reverse=True)
+
+    @app.get("/__admin/documents")
+    def admin_documents():
+        """管理员查看文档统计：每个文档的大小/更新时间/更新次数、文件夹大小、增删记录。"""
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        try:
+            limit = int(request.args.get("limit") or 500)
+        except (TypeError, ValueError):
+            limit = 500
+        limit = max(1, min(limit, 5000))
+        entries = scan_documents()
+        counts = database.document_update_counts(conn)
+        documents = []
+        for path, info in sorted(entries.items()):
+            stat = counts.get(path) or {}
+            documents.append({
+                "path": path,
+                "size": info["size"],
+                "mtime": info["mtime"],
+                "updates": stat.get("count", 0),
+                "lastCommitAt": stat.get("lastAt"),
+                "lastRevision": stat.get("lastRevision"),
+            })
+        documents.sort(key=lambda item: item["mtime"], reverse=True)
+        return jsonify({
+            "ok": True,
+            "documents": documents[:limit],
+            "totalDocuments": len(documents),
+            "totalBytes": sum(item["size"] for item in documents),
+            "folders": folder_sizes(entries),
+            "events": database.document_events(conn, 200),
+        })
 
     @app.post("/__admin/password")
     def change_password():

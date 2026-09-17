@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  var state = { overlay: null, config: null, busy: false };
+  var state = { overlay: null, config: null, busy: false, documents: null, docSort: { key: "mtime", dir: -1 } };
 
   function escapeHtml(value) {
     return String(value).replace(/[&<>"']/g, function (char) {
@@ -53,6 +53,7 @@
       '<input type="text" data-repo="id" placeholder="id（如 hardware）" value="' + escapeHtml(item.id) + '">',
       '<input type="text" data-repo="mount" placeholder="docs 下的目录（如 md/硬件设计）" value="' + escapeHtml(item.mount) + '">',
       '<input type="text" data-repo="url" placeholder="SVN 地址 https://…" value="' + escapeHtml(item.url) + '">',
+      '<input type="text" data-repo="credential_group" placeholder="凭据分组（可选）" value="' + escapeHtml(item.credential_group || '') + '">',
       '<button type="button" data-settings-action="remove-repo" title="删除">×</button>',
       '</div>'
     ].join('');
@@ -157,7 +158,7 @@
       '</section>',
       '<section class="settings-section">',
       '<h4>仓库映射（docs 目录 ↔ SVN）</h4>',
-      '<p class="settings-note">按目录段最长前缀匹配；嵌套目录优先匹配更具体的挂载点。</p>',
+      '<p class="settings-note">每个文件夹都可以单独映射到一个 SVN 库（可添加多条，按目录段最长前缀匹配，嵌套目录优先更具体的挂载点）。提交时按文档所在目录自动选择对应仓库。</p>',
       '<div data-settings-repos>' + (config.repositories || []).map(repositoryRow).join('') + '</div>',
       '<div class="settings-row-actions"><button type="button" data-settings-action="add-repo">+ 添加映射</button></div>',
       '</section>',
@@ -180,6 +181,8 @@
       '</div>',
       '<label>参考源码路径<input type="text" data-config="ai.sourcePath" placeholder="如 D:/repo/firmware（可选，下发所有用户）" value="' + escapeHtml(ai.sourcePath || '') + '"></label>',
       '</section>',
+      usageSection(),
+      documentsSection(),
       '<section class="settings-section">',
       '<h4>修改管理员密码</h4>',
       '<div class="settings-grid">',
@@ -198,6 +201,203 @@
     ].join('');
     overlay.querySelector('[data-settings-save]').hidden = false;
     renderPersonalScope();
+    if (overlay.querySelector('[data-admin-usage]')) {
+      loadUsage();
+    }
+    if (overlay.querySelector('[data-admin-documents]')) {
+      loadDocuments();
+    }
+  }
+
+  function usageSection() {
+    var siteAuth = auth();
+    if (!(siteAuth && siteAuth.isAdmin && siteAuth.isAdmin())) {
+      return '';
+    }
+    return [
+      '<section class="settings-section">',
+      '<h4>使用情况（管理员）</h4>',
+      '<p class="settings-note">按 IP 与账号查看登录记录、账号使用量、最近提交与在线会话；数据来自本机审计表，最多保留在数据库里。</p>',
+      '<div class="settings-row-actions">',
+      '<label class="settings-inline">统计天数<input type="number" min="1" max="90" value="7" data-usage-days></label>',
+      '<button type="button" data-settings-action="load-usage">刷新使用情况</button>',
+      '</div>',
+      '<div class="settings-usage" data-admin-usage><p class="settings-note">点击「刷新使用情况」加载。</p></div>',
+      '</section>'
+    ].join('');
+  }
+
+  function usageTable(title, columns, rows) {
+    if (!rows.length) {
+      return '<div class="settings-usage-block"><strong>' + escapeHtml(title) + '</strong>'
+        + '<p class="settings-note">暂无记录</p></div>';
+    }
+    return '<div class="settings-usage-block"><strong>' + escapeHtml(title) + '</strong>'
+      + '<table class="settings-usage-table"><thead><tr>'
+      + columns.map(function (column) { return '<th>' + escapeHtml(column) + '</th>'; }).join('')
+      + '</tr></thead><tbody>'
+      + rows.map(function (cells) {
+        return '<tr>' + cells.map(function (cell) {
+          return '<td>' + escapeHtml(cell === null || cell === undefined ? '' : String(cell)) + '</td>';
+        }).join('') + '</tr>';
+      }).join('')
+      + '</tbody></table></div>';
+  }
+
+  function renderUsage(payload) {
+    var host = state.overlay && state.overlay.querySelector('[data-admin-usage]');
+    if (!host) {
+      return;
+    }
+    var logins = (payload.logins || []).map(function (item) {
+      return [item.client_ip || '未知', item.resource || '', item.result || '', item.count, item.last_at || ''];
+    });
+    var users = (payload.users || []).map(function (item) {
+      return [item.username, item.role === 'admin' ? '管理员' : '用户', item.last_login_at || '未登录',
+        item.drafts, item.revisions, item.operations, item.last_state || '', item.last_revision || ''];
+    });
+    var operations = (payload.operations || []).map(function (item) {
+      return [item.created_at || '', item.username || '', item.path || '', item.state || '',
+        item.svn_revision || '', item.error_code || ''];
+    });
+    var sessions = (payload.sessions || []).map(function (item) {
+      return [item.username || '', item.created_at || '', item.last_seen_at || '', item.expires_at || '',
+        (item.user_agent || '').slice(0, 40)];
+    });
+    var audit = (payload.audit || []).map(function (item) {
+      return [item.created_at || '', item.username || (item.role === 'admin' ? '管理员' : ''),
+        item.action || '', item.resource || '', item.result || '', item.client_ip || ''];
+    });
+    var count = payload.userCount || { total: 0, disabled: 0 };
+    host.innerHTML = [
+      '<p class="settings-note">用户总数：<b>' + count.total + '</b>（停用 ' + count.disabled + '）'
+        + ' · 在线会话：<b>' + sessions.length + '</b> · 仓库映射：<b>' + (payload.repositoryCount || 0) + '</b></p>',
+      usageTable('登录记录（按 IP/账号/结果聚合，近 ' + (payload.days || 7) + ' 天）',
+        ['IP', '账号', '结果', '次数', '最近一次'], logins),
+      usageTable('账号使用情况', ['账号', '角色', '最后登录', '草稿', '版本', '提交次数', '最近提交状态', '最近版本'], users),
+      usageTable('最近提交', ['时间', '账号', '文档', '状态', 'SVN 版本', '错误码'], operations),
+      usageTable('详细操作记录（审计，最近 200 条）', ['时间', '账号', '操作', '对象', '结果', 'IP'], audit),
+      usageTable('在线会话', ['账号', '登录时间', '最近活动', '过期时间', '浏览器'], sessions)
+    ].join('');
+  }
+
+  function loadUsage() {
+    var host = state.overlay && state.overlay.querySelector('[data-usage-days]');
+    var days = host ? Number(host.value) || 7 : 7;
+    setStatus('正在加载使用情况…');
+    api('__admin/usage?days=' + encodeURIComponent(days)).then(function (payload) {
+      renderUsage(payload);
+      setStatus('已更新使用情况（近 ' + (payload.days || days) + ' 天）');
+    }).catch(function (error) {
+      setStatus('加载使用情况失败：' + error.message, true);
+    });
+  }
+
+  function documentsSection() {
+    var siteAuth = auth();
+    if (!(siteAuth && siteAuth.isAdmin && siteAuth.isAdmin())) {
+      return '';
+    }
+    return [
+      '<section class="settings-section">',
+      '<h4>文档统计（管理员）</h4>',
+      '<p class="settings-note">每个文档的大小、更新时间与更新次数（更新次数来自已发布提交）；文件夹大小按层级累加；增删记录由服务后台每 10 秒扫描 docs/md 记录。点击表头可排序。</p>',
+      '<div class="settings-row-actions">',
+      '<button type="button" data-settings-action="load-documents">刷新文档统计</button>',
+      '</div>',
+      '<div class="settings-usage" data-admin-documents><p class="settings-note">点击「刷新文档统计」加载。</p></div>',
+      '</section>'
+    ].join('');
+  }
+
+  function sortDocuments(rows) {
+    var sort = state.docSort || { key: 'mtime', dir: -1 };
+    var key = sort.key;
+    var dir = sort.dir || -1;
+    return rows.slice().sort(function (left, right) {
+      var a = left[key];
+      var b = right[key];
+      if (typeof a === 'string' || typeof b === 'string') {
+        a = String(a === null || a === undefined ? '' : a);
+        b = String(b === null || b === undefined ? '' : b);
+        return a.localeCompare(b, 'zh-Hans-CN') * dir;
+      }
+      a = Number(a || 0);
+      b = Number(b || 0);
+      return (a - b) * dir;
+    });
+  }
+
+  function formatBytes(value) {
+    var size = Number(value || 0);
+    if (size < 1024) return size + ' B';
+    if (size < 1024 * 1024) return (size / 1024).toFixed(1) + ' KB';
+    return (size / (1024 * 1024)).toFixed(2) + ' MB';
+  }
+
+  function formatTime(value) {
+    if (!value) return '';
+    if (typeof value === 'number') {
+      var date = new Date(value * 1000);
+      return date.toLocaleString('zh-CN', { hour12: false });
+    }
+    return String(value);
+  }
+
+  function sortableHeader(label, key) {
+    var sort = state.docSort || {};
+    var marker = sort.key === key ? (sort.dir === -1 ? ' ▼' : ' ▲') : '';
+    return '<th><button type="button" class="settings-sort" data-doc-sort="' + key + '">'
+      + escapeHtml(label + marker) + '</button></th>';
+  }
+
+  function renderDocuments() {
+    var host = state.overlay && state.overlay.querySelector('[data-admin-documents]');
+    if (!host || !state.documents) {
+      return;
+    }
+    var payload = state.documents;
+    var rows = sortDocuments(payload.documents || []);
+    var documents = rows.map(function (item) {
+      return [item.path, formatBytes(item.size), formatTime(item.mtime), item.updates,
+        formatTime(item.lastCommitAt), item.lastRevision === null || item.lastRevision === undefined ? '' : item.lastRevision];
+    });
+    var folders = (payload.folders || []).map(function (item) {
+      return [item.path, formatBytes(item.size), item.files];
+    });
+    var events = (payload.events || []).map(function (item) {
+      return [item.created_at || '', item.kind === 'added' ? '新增' : (item.kind === 'removed' ? '删除' : '修改'),
+        item.path, item.size === null || item.size === undefined ? '' : formatBytes(item.size)];
+    });
+    var documentTable = '<div class="settings-usage-block"><strong>文档（共 '
+      + (payload.totalDocuments || 0) + ' 个，合计 ' + formatBytes(payload.totalBytes) + '）</strong>'
+      + '<table class="settings-usage-table"><thead><tr>'
+      + sortableHeader('文档', 'path')
+      + sortableHeader('大小', 'size')
+      + sortableHeader('更新时间', 'mtime')
+      + sortableHeader('更新次数', 'updates')
+      + '<th>最近提交</th><th>版本</th>'
+      + '</tr></thead><tbody>'
+      + (documents.length ? documents.map(function (cells) {
+        return '<tr>' + cells.map(function (cell) {
+          return '<td>' + escapeHtml(cell === null || cell === undefined ? '' : String(cell)) + '</td>';
+        }).join('') + '</tr>';
+      }).join('') : '<tr><td colspan="6">暂无文档</td></tr>')
+      + '</tbody></table></div>';
+    host.innerHTML = documentTable
+      + usageTable('文件夹大小（含子目录）', ['文件夹', '大小', '文档数'], folders)
+      + usageTable('文档增删记录（最近 200 条）', ['时间', '类型', '路径', '大小'], events);
+  }
+
+  function loadDocuments() {
+    setStatus('正在加载文档统计…');
+    api('__admin/documents').then(function (payload) {
+      state.documents = payload;
+      renderDocuments();
+      setStatus('已更新文档统计（' + (payload.totalDocuments || 0) + ' 个文档）');
+    }).catch(function (error) {
+      setStatus('加载文档统计失败：' + error.message, true);
+    });
   }
 
   function personalAiConfig() {
@@ -293,7 +493,8 @@
       return {
         id: row.querySelector('[data-repo="id"]').value.trim(),
         mount: row.querySelector('[data-repo="mount"]').value.trim(),
-        url: row.querySelector('[data-repo="url"]').value.trim()
+        url: row.querySelector('[data-repo="url"]').value.trim(),
+        credential_group: row.querySelector('[data-repo="credential_group"]').value.trim()
       };
     }).filter(function (repo) { return repo.id || repo.mount || repo.url; });
     return config;
@@ -423,6 +624,15 @@
         }
       } else if (action === 'test-auth') {
         testAuth();
+      } else if (action === 'load-usage') {
+        loadUsage();
+      } else if (action === 'load-documents') {
+        loadDocuments();
+      } else if (target.getAttribute && target.getAttribute('data-doc-sort')) {
+        var key = target.getAttribute('data-doc-sort');
+        var sort = state.docSort || { key: 'mtime', dir: -1 };
+        state.docSort = { key: key, dir: sort.key === key ? -sort.dir : -1 };
+        renderDocuments();
       } else if (action === 'change-password') {
         changePassword();
       }

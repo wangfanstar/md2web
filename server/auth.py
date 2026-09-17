@@ -12,7 +12,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import database, passwords
+from . import database, documents, passwords
 from .secrets import decrypt, encrypt
 from .svn import SvnError
 
@@ -202,18 +202,18 @@ class AuthService:
         if row is None or row["role"] != "admin" or row["disabled"]:
             self._record_attempt(key)
             with self._db_lock, self.conn:
-                database.audit(self.conn, "admin_login", "failed:unknown", resource=username)
+                database.audit(self.conn, "admin_login", "failed:unknown", resource=username, client_ip=client_ip)
             raise AuthError("auth_failed")
         if not passwords.verify_password(password, row["password_hash"]):
             self._record_attempt(key)
             with self._db_lock, self.conn:
-                database.audit(self.conn, "admin_login", "failed:password", actor_id=row["id"], resource=username)
+                database.audit(self.conn, "admin_login", "failed:password", actor_id=row["id"], resource=username, client_ip=client_ip)
             raise AuthError("auth_failed")
         moment = self._moment()
         with self._db_lock, self.conn:
             self.conn.execute("UPDATE users SET last_login_at = ? WHERE id = ?", (_iso(moment), row["id"]))
             token, csrf_token, expires_at = self._insert_session(row["id"], moment, user_agent)
-            database.audit(self.conn, "admin_login", "ok", actor_id=row["id"], resource=username)
+            database.audit(self.conn, "admin_login", "ok", actor_id=row["id"], resource=username, client_ip=client_ip)
         return {
             "token": token,
             "csrfToken": csrf_token,
@@ -253,7 +253,7 @@ class AuthService:
         except SvnError as error:
             self._record_attempt(key)
             with self._db_lock, self.conn:
-                database.audit(self.conn, "login", f"failed:{error.code}", resource=username)
+                database.audit(self.conn, "login", f"failed:{error.code}", resource=username, client_ip=client_ip)
             raise AuthError(error.code, str(error))
         moment = self._moment()
         with self._db_lock, self.conn:
@@ -262,7 +262,7 @@ class AuthService:
                 (self.auth_source_id, username),
             ).fetchone()
             if row is not None and row["disabled"]:
-                database.audit(self.conn, "login", "failed:disabled", actor_id=row["id"], resource=username)
+                database.audit(self.conn, "login", "failed:disabled", actor_id=row["id"], resource=username, client_ip=client_ip)
                 raise AuthError("disabled")
             if row is None:
                 cursor = self.conn.execute(
@@ -279,7 +279,7 @@ class AuthService:
                 )
             token, csrf_token, expires_at = self._insert_session(user_id, moment, user_agent)
             self._store_credential_locked(username, password)
-            database.audit(self.conn, "login", "ok", actor_id=user_id, resource=username)
+            database.audit(self.conn, "login", "ok", actor_id=user_id, resource=username, client_ip=client_ip)
             session_row = self.conn.execute(
                 "SELECT id FROM sessions WHERE token_hash = ?", (_digest(token),)
             ).fetchone()
@@ -338,6 +338,13 @@ class AuthService:
         }
 
     # ---- SVN 口令存储（本机密钥可逆加密，登录成功后更新，提交时复用） ----
+
+    def record_document_snapshot(self, md_dir):
+        """扫描 docs/md 并记录增删改（首次为基线，不产生事件）。"""
+        entries = documents.scan_md_tree(md_dir)
+        with self._db_lock, self.conn:
+            baseline = self.conn.execute("SELECT COUNT(*) FROM document_snapshots").fetchone()[0] == 0
+            return database.record_document_changes(self.conn, entries, baseline=baseline)
 
     def secret_key(self):
         return (self.config.get("security") or {}).get("secretKey") or ""

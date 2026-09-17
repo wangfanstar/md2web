@@ -755,21 +755,14 @@ svg text[class*="actor"] {
   fill: #1f2a37 !important;
 }
 
-/* 编辑器大纲导航：快速跳转到指定章节 */
+/* 编辑器大纲导航：固定在编辑区最左侧，占据布局空间，不遮挡内容 */
 .md-editor-outline {
-  background: var(--docs-surface, #ffffff);
-  border: 1px solid var(--docs-border, #e3e8ee);
-  border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
-  left: 16px;
-  max-height: 56%;
-  max-width: 320px;
-  min-width: 200px;
+  background: var(--docs-surface-soft, #fbfcfe);
+  border-right: 1px solid var(--docs-border, #e3e8ee);
+  flex: 0 0 210px;
+  height: 100%;
   overflow: auto;
-  padding: 6px;
-  position: absolute;
-  top: 92px;
-  z-index: 6;
+  padding: 8px 6px;
 }
 
 .md-editor-outline-item {

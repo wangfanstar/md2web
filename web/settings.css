@@ -222,3 +222,63 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* 管理员使用情况：登录记录 / 账号使用 / 最近提交 / 在线会话 */
+.settings-usage {
+  margin-top: 10px;
+}
+
+.settings-usage-block {
+  margin-bottom: 16px;
+}
+
+.settings-usage-block strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.settings-usage-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+
+.settings-usage-table th,
+.settings-usage-table td {
+  border-bottom: 1px solid var(--docs-border, #e3e8ee);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.settings-usage-table th {
+  color: var(--docs-muted, #57606a);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.settings-inline {
+  align-items: center;
+  display: inline-flex;
+  font-size: 12.5px;
+  gap: 6px;
+}
+
+.settings-inline input {
+  width: 72px;
+}
+
+.settings-sort {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+}
+
+.settings-sort:hover {
+  color: var(--docs-accent, #1f6feb);
+}

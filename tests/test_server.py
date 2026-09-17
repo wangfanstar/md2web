@@ -371,7 +371,7 @@ class DatabaseTests(ServerTestBase):
             self.assertEqual(server_database.migrate(conn), server_database.SCHEMA_VERSION)
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             for name in ("users", "sessions", "repo_bindings", "drafts", "revisions", "operations",
-                         "audit_events", "svn_credentials"):
+                         "audit_events", "svn_credentials", "document_snapshots", "document_events"):
                 self.assertIn(name, tables)
             self.assertEqual(conn.execute("PRAGMA foreign_keys").fetchone()[0], 1)
             self.assertEqual(server_database.migrate(conn), server_database.SCHEMA_VERSION)
@@ -425,7 +425,8 @@ class DatabaseTests(ServerTestBase):
 
     def test_schema_sql_avoids_modern_only_features(self):
         # 旧版 SQLite（RHEL7 3.7.17）只能是基础语法；Windows 端也必须如此，保证 data/ 可直接共用
-        for name in ("SCHEMA_SQL", "MIGRATION_V2_SQL", "MIGRATION_V3_SQL"):
+        for name in ("SCHEMA_SQL", "MIGRATION_V2_SQL", "MIGRATION_V3_SQL", "MIGRATION_V4_SQL",
+                     "MIGRATION_V5_SQL"):
             sql = getattr(server_database, name)
             self.assertEqual(server_database.sqlite_compat_issues(sql), [], name + " 含不兼容语法")
 
@@ -1652,6 +1653,202 @@ class SvnApiTests(ServerTestBase):
         status = self.client.get("/__operations/" + operation_id).get_json()["operation"]
         self.assertEqual(status["state"], "published")
         self.assertEqual(status["svnRevision"], 6)
+
+
+class AdminUsageTests(ServerTestBase):
+    """管理员使用情况：按 IP/账号查看登录记录与使用量，仅管理员可访问。"""
+
+    def setUp(self):
+        super().setUp()
+        self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
+        server_database.migrate(self.conn)
+        server_database.ensure_admin(self.conn)
+        self.config = server_config.load_config(self.write_config(), self.docs)
+        self.svn = FakeSvn()
+        self.auth = server_auth.AuthService(self.conn, self.svn, self.config)
+        self.auth.on_startup()
+        from server.app import create_app
+        self.app = create_app(self.config, self.conn, self.auth, self.docs)
+        self.client = self.app.test_client()
+
+    def tearDown(self):
+        self.conn.close()
+        super().tearDown()
+
+    def login(self, username, password, ip, client=None):
+        client = client or self.client
+        response = client.post("/__auth/login", json={"username": username, "password": password},
+                               environ_base={"REMOTE_ADDR": ip})
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        return client.get("/__auth/session").get_json()["csrfToken"]
+
+    def test_usage_requires_admin(self):
+        self.assertEqual(self.client.get("/__admin/usage").status_code, 401)
+        self.login("alice", "good", "10.0.0.5")
+        response = self.client.get("/__admin/usage")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["code"], "admin_required")
+
+    def test_usage_reports_logins_with_ip_and_activity(self):
+        self.login("alice", "good", "10.0.0.5")
+        csrf = self.client.get("/__auth/session").get_json()["csrfToken"]
+        self.client.post("/__auth/logout", json={}, headers={"X-CSRF-Token": csrf})
+        # 失败登录：直接走认证服务，模拟错误口令
+        self.svn.error = server_svn.SvnError("auth_failed")
+        try:
+            self.auth.login("alice", "bad", "10.0.0.9")
+        except server_auth.AuthError:
+            pass
+        self.svn.error = None
+        self.login("admin", "admin", "127.0.0.1")
+        response = self.client.get("/__admin/usage?days=7")
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        logins = {(item["client_ip"], item["resource"], item["result"]) for item in payload["logins"]}
+        self.assertIn(("10.0.0.5", "alice", "ok"), logins)
+        self.assertIn(("10.0.0.9", "alice", "failed:auth_failed"), logins)
+        self.assertIn(("127.0.0.1", "admin", "ok"), logins)
+        users = {item["username"]: item for item in payload["users"]}
+        self.assertIn("alice", users)
+        self.assertEqual(users["alice"]["operations"], 0)
+        self.assertTrue(users["alice"]["last_login_at"])
+        self.assertEqual(payload["days"], 7)
+        self.assertEqual(payload["repositoryCount"], len(self.config["repositories"]))
+        self.assertIn("sessions", payload)
+        self.assertIn("operations", payload)
+
+    def test_usage_days_is_clamped(self):
+        self.login("admin", "admin", "127.0.0.1")
+        payload = self.client.get("/__admin/usage?days=999").get_json()
+        self.assertEqual(payload["days"], 90)
+        payload = self.client.get("/__admin/usage?days=abc").get_json()
+        self.assertEqual(payload["days"], 7)
+
+
+class DocumentTrackingTests(ServerTestBase):
+    """文档快照/增删记录：基线不产生事件，后续新增/修改/删除各记一条。"""
+
+    def setUp(self):
+        super().setUp()
+        self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
+        server_database.migrate(self.conn)
+        self.md = self.docs / "md"
+        (self.md / "硬件设计").mkdir(parents=True, exist_ok=True)
+        (self.md / "硬件设计" / "时钟树设计.md").write_text("# A\n", encoding="utf-8")
+        (self.md / "a.md").write_text("# B\n", encoding="utf-8")
+
+    def tearDown(self):
+        self.conn.close()
+        super().tearDown()
+
+    def test_baseline_then_add_modify_remove(self):
+        first = server_database.record_document_changes(
+            self.conn, server_documents.scan_md_tree(self.md), baseline=True)
+        self.assertEqual(first, {"added": [], "removed": [], "modified": []})
+        self.assertEqual(server_database.document_events(self.conn), [])
+
+        (self.md / "新增.md").write_text("# 新\n", encoding="utf-8")
+        (self.md / "a.md").write_text("# B2\n", encoding="utf-8")
+        (self.md / "硬件设计" / "时钟树设计.md").unlink()
+        changes = server_database.record_document_changes(self.conn, server_documents.scan_md_tree(self.md))
+        self.assertEqual(changes["added"], ["md/新增.md"])
+        self.assertEqual(changes["modified"], ["md/a.md"])
+        self.assertEqual(changes["removed"], ["md/硬件设计/时钟树设计.md"])
+
+        events = server_database.document_events(self.conn)
+        kinds = {(item["kind"], item["path"]) for item in events}
+        self.assertIn(("added", "md/新增.md"), kinds)
+        self.assertIn(("modified", "md/a.md"), kinds)
+        self.assertIn(("removed", "md/硬件设计/时钟树设计.md"), kinds)
+
+        snapshot = server_database.document_snapshot_map(self.conn)
+        self.assertNotIn("md/硬件设计/时钟树设计.md", snapshot)
+        self.assertIn("md/新增.md", snapshot)
+
+    def test_update_counts_come_from_published_operations(self):
+        with self.conn:
+            cursor = self.conn.execute(
+                "INSERT INTO users (auth_source_id, svn_username, display_name, role, created_at)"
+                " VALUES ('src', 'alice', 'alice', 'user', 't')")
+            user_id = cursor.lastrowid
+            for index in range(2):
+                self.conn.execute(
+                    "INSERT INTO operations (id, actor_id, kind, state, reviewed_manifest, svn_revision,"
+                    " created_at, finished_at) VALUES (?, ?, 'commit', 'published', ?, ?, ?, ?)",
+                    ("op-%d" % index, user_id, json.dumps({"path": "md/a.md"}, ensure_ascii=False),
+                     10 + index, "2026-09-15T0%d:00:00Z" % index, "2026-09-15T0%d:10:00Z" % index))
+        counts = server_database.document_update_counts(self.conn)
+        self.assertEqual(counts["md/a.md"]["count"], 2)
+        self.assertEqual(counts["md/a.md"]["lastRevision"], 11)
+
+    def test_audit_events_expose_ip_and_user(self):
+        with self.conn:
+            cursor = self.conn.execute(
+                "INSERT INTO users (auth_source_id, svn_username, display_name, role, created_at)"
+                " VALUES ('src', 'alice', 'alice', 'user', 't')")
+            server_database.audit(self.conn, "login", "ok", actor_id=cursor.lastrowid,
+                                  resource="alice", client_ip="10.1.2.3")
+        rows = server_database.audit_events(self.conn)
+        self.assertEqual(rows[0]["client_ip"], "10.1.2.3")
+        self.assertEqual(rows[0]["username"], "alice")
+
+
+class AdminDocumentsTests(ServerTestBase):
+    """管理员文档统计接口：文档大小/更新时间/更新次数、文件夹大小、增删记录。"""
+
+    def setUp(self):
+        super().setUp()
+        self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
+        server_database.migrate(self.conn)
+        server_database.ensure_admin(self.conn)
+        self.config = server_config.load_config(self.write_config(), self.docs)
+        (self.docs / "md" / "硬件设计").mkdir(parents=True, exist_ok=True)
+        (self.docs / "md" / "硬件设计" / "时钟树设计.md").write_text("# 时钟树\n", encoding="utf-8")
+        (self.docs / "md" / "a.md").write_text("# A\n", encoding="utf-8")
+        self.svn = FakeSvn()
+        self.auth = server_auth.AuthService(self.conn, self.svn, self.config)
+        self.auth.on_startup()
+        from server.app import create_app
+        self.app = create_app(self.config, self.conn, self.auth, self.docs)
+        self.client = self.app.test_client()
+        self.client.post("/__auth/login", json={"username": "admin", "password": "admin"},
+                         environ_base={"REMOTE_ADDR": "127.0.0.1"})
+
+    def tearDown(self):
+        self.conn.close()
+        super().tearDown()
+
+    def test_documents_requires_admin(self):
+        anonymous = self.app.test_client()
+        self.assertEqual(anonymous.get("/__admin/documents").status_code, 401)
+        other = self.app.test_client()
+        other.post("/__auth/login", json={"username": "alice", "password": "good"})
+        self.assertEqual(other.get("/__admin/documents").status_code, 403)
+
+    def test_documents_reports_sizes_folders_and_events(self):
+        self.auth.record_document_snapshot(self.docs / "md")
+        (self.docs / "md" / "新文档.md").write_text("# 新\n", encoding="utf-8")
+        self.auth.record_document_snapshot(self.docs / "md")
+        payload = self.client.get("/__admin/documents").get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["totalDocuments"], 3)
+        self.assertGreater(payload["totalBytes"], 0)
+        paths = {item["path"] for item in payload["documents"]}
+        self.assertIn("md/硬件设计/时钟树设计.md", paths)
+        folders = {item["path"]: item for item in payload["folders"]}
+        self.assertIn("md", folders)
+        self.assertEqual(folders["md"]["files"], 3)
+        self.assertGreaterEqual(folders["md"]["size"], folders["md/硬件设计"]["size"])
+        kinds = {item["kind"] for item in payload["events"]}
+        self.assertIn("added", kinds)
+
+    def test_usage_payload_has_user_count_and_audit(self):
+        payload = self.client.get("/__admin/usage").get_json()
+        self.assertEqual(payload["userCount"]["total"], 1)
+        self.assertTrue(payload["audit"])
+        self.assertEqual(payload["audit"][0]["action"], "admin_login")
+        self.assertEqual(payload["audit"][0]["client_ip"], "127.0.0.1")
 
 
 class PathsTests(unittest.TestCase):
