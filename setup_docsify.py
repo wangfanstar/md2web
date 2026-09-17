@@ -166,6 +166,8 @@ PRISM_LANG_FALLBACK = {
 
 # 由前端插件渲染、不交给 Prism 的语言
 IGNORED_FENCE_LANGS = {"mermaid", "packetdiag"}
+# 纯文本围栏由 Prism 核心处理，不需要下载组件（prism-text/plain 并不存在，会 404）
+PLAIN_FENCE_LANGS = {"text", "plain", "plaintext", "txt"}
 
 SEARCH_DEPTH = 4
 
@@ -483,7 +485,7 @@ def collect_fence_languages(md_dir, md_files) -> set:
         text = (Path(md_dir) / rel).read_text(encoding="utf-8", errors="ignore")
         for match in fence_re.finditer(text):
             lang = match.group(1).lower()
-            if lang in IGNORED_FENCE_LANGS:
+            if lang in IGNORED_FENCE_LANGS or lang in PLAIN_FENCE_LANGS:
                 continue
             langs.add(lang)
     return langs

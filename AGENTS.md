@@ -28,19 +28,19 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | 路径 | 职责 |
 |------|------|
 | `setup_docsify.py` | 构建：扫描、编码校验、依赖复用/下载、Prism 组件、生成导航/首页/索引/离线数据/入口 |
-| `serve.py` | 跨平台入口：默认**只读预览**（静态站点 + 自动重建 + 本机 AI 代理，写接口一律 403）；`--config config/server.local.json` 启动认证编辑服务（Flask + Waitress）；按 pidfile 只管理本项目自身实例 |
-| `server/config.py` | 配置加载/校验：存储路径不得在 `docs/` 内、mount 唯一且禁止越界、URL 仅 http/https、仓库存目录段最长前缀匹配 |
+| `serve.py` | 跨平台入口：默认**只读预览**（静态站点 + 自动重建 + 本机 AI 代理，写接口一律 403）；`--config config/server.local.json` 启动认证编辑服务（Flask + Waitress）；按 pidfile 只管理本项目自身实例；认证模式后台线程：每 15 秒检查仓库同步到期（`start_repo_sync`）与每 10 秒记录文档增删（`start_document_recorder`） |
+| `server/config.py` | 配置加载/校验：存储路径不得在 `docs/` 内、mount 唯一且禁止越界、URL 仅 http/https、仓库存目录段最长前缀匹配；仓库映射支持每库 `syncIntervalSeconds`（0 = 不自动同步） |
 | `server/database.py` | SQLite 访问层：迁移 v5（users 含 role/password_hash，首次启动创建 admin/admin；svn_credentials 存加密口令；document_snapshots/document_events 记录文档快照与增删；audit_events 含 client_ip）、外键与 busy_timeout、`backup_to`、SQLite 3.7.17 兼容检查与清理 |
 | `server/svn.py` | 唯一的 svn 子进程入口：优先 `--password-from-stdin`，旧版客户端（RHEL7 1.7/1.8）自动回退 `--password`（`password_transport()` 可查询）；匿名可读检测、错误分类、info/log XML 解析、检出/稀疏更新/差异/提交/导出，超时与脱敏 |
 | `server/auth.py` | SVN 登录、本地管理员登录/改密、会话（token 只存摘要、闲置/绝对过期）、CSRF、限速、审计；SVN 口令登录成功后以本机密钥加密存入 `svn_credentials`（换密码重新登录会更新），提交时优先取库内最新口令；重启与认证源变更使 SVN 旧会话失效（保留管理员会话）；数据库访问串行化 |
 | `server/passwords.py` | 管理员口令哈希（PBKDF2-HMAC-SHA256）与校验 |
-| `server/operations.py` | 提交任务：审阅清单冻结、私有工作副本（稀疏检出）、UUID/URL 绑定核对、幂等 operation、状态机（prepared/running/svn_committed/published/failed/uncertain/needs_auth）、发布到 docs/md 与 published_revision、远端同步导出 |
+| `server/operations.py` | 提交任务与仓库同步：审阅清单冻结、私有工作副本（稀疏检出）、UUID/URL 绑定核对、幂等 operation、状态机（prepared/running/svn_committed/published/failed/uncertain/needs_auth）、发布到 docs/md 与 published_revision、远端同步导出；定时同步（`sync_due`/`sync_all`）跳过有活动草稿的文档并报告冲突，`remote_diff`/`remote_revision` 提供远端对比 |
 | `server/drafts.py` | 个人草稿与版本历史：乐观并发（expected_version → 409）、不可变 revision 全文快照、统一差异（published/draft/版本号）、放弃草稿 |
 | `server/documents.py` | 受管 Markdown 读写底层：路径校验、EOL 保持、唯一临时文件 + 原子替换、必填 `base_hash` 冲突检测 |
-| `server/app.py` | Flask 应用：`/__auth/session|login|logout`（含 `mode:admin`）、`GET/PUT /__config`、`POST /__config/test-auth`、`POST /__admin/password`、`GET /__admin/usage`（登录 IP/账号活动/用户数/审计）、`GET /__admin/documents`（文档更新时间与次数/文件夹大小/增删记录）（均要求管理员 + CSRF）、草稿接口（`/__md/document|draft|image|history|diff|revision|discard`）、SVN 接口（`/__svn/info|log|prepare|commit|refresh`、`/__operations/<id>`）、写接口守卫（匿名 401、旧 `/__md/save` 410）、静态分发白名单与安全响应头 |
+| `server/app.py` | Flask 应用：`/__auth/session|login|logout`（含 `mode:admin`）、`GET/PUT /__config`、`POST /__config/test-auth`、`POST /__admin/password`、`POST /__admin/sync`（立即同步仓库）、`GET /__admin/usage`（登录 IP/账号活动/用户数/审计）、`GET /__admin/documents`（文档更新时间与次数/文件夹大小/增删记录）（均要求管理员 + CSRF）、草稿接口（`/__md/document|draft|image|history|diff|revision|discard`）、SVN 接口（`/__svn/info|log|prepare|commit|refresh|status|remote-diff`、`/__operations/<id>`）、写接口守卫（匿名 401、旧 `/__md/save` 410）、静态分发白名单与安全响应头 |
 | `server/paths.py` | 静态分发禁止清单（点目录、`.svn`、`data/`、`config/`、临时/数据库/源码文件），预览与认证服务共用 |
 | `web/auth.js` / `.css` | 登录状态与弹窗（`window.SiteAuth`）：会话刷新、登录/退出、侧栏指示器、只读模式提示、管理员角色与 AI 默认值下发 |
-| `web/settings.js` / `.css` | 统一设置弹窗（`window.Settings`，侧栏单一入口）：本机 AI 设置、管理员登录、SVN 认证路径与测试、仓库映射增删（含凭据分组）、全站 AI 默认值、管理员改密，以及**管理员使用情况**（登录 IP/账号活动/用户数/审计）与**文档统计**（文档更新时间与次数、文件夹大小、增删记录，表头可排序） |
+| `web/settings.js` / `.css` | 统一设置弹窗（`window.Settings`，侧栏单一入口）：本机 AI 设置、管理员登录、SVN 认证路径与测试、仓库映射增删（含凭据分组与「更新频率」）、全站 AI 默认值、管理员改密，、「立即同步 SVN 库」，以及**管理员使用情况**（登录 IP/账号活动/用户数/审计）与**文档统计**（文档更新时间与次数、文件夹大小、增删记录，表头可排序） |
 | `web/sanitize.js` | 前端净化入口（`window.Sanitize`，基于离线 DOMPurify）：阅读/预览/AI 回答统一净化 |
 | `config/server.example.json` | 认证服务示例配置（可提交）；`config/server.local.json` 为真实配置，不提交（缺失时 `--config` 会自动生成默认文件） |
 | `tests/test_server.py` | 认证服务单元/HTTP 集成测试（配置、数据库、SVN 假 CLI、登录会话、静态白名单） |
@@ -51,7 +51,7 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `web/packetdiag-init.js` | docsify 插件：把 ```packetdiag 围栏渲染为报文图（figure 保留 `data-source`），失败回退源码；暴露 `PacketDiagRerender`（按源码重绘 data URL）与 `PacketDiagEnsureRendered`（导出前修复空白画布） |
 | `web/media-viewer.js` | 图片、Mermaid 图形与 PacketDiag 图形的全屏放大查看（放大时用 `MermaidRender.render(source)` 重渲染、PacketDiag 用 `PacketDiagRerender` 重绘，避免克隆丢字/丢箭头）与下载（Mermaid 导出 SVG/PNG，PacketDiag 导出 PNG） |
 | `web/page-export.js` | 「下载本页」：把当前文档导出为自包含 HTML（样式内联、Canvas/图片转 data URL、本文目录固定左侧导航；导出前会调用 `PacketDiagEnsureRendered` 重绘空白画布） |
-| `web/md-editor.js` | 「编辑 MD / 下载 MD」（含草稿、历史、差异、提交 SVN 与 SVN 日志）：双栏编辑器（左：可拖拽分栏的 Markdown 高亮源码；右：marked + Prism + Mermaid + PacketDiag + KaTeX 实时预览）、**左侧固定大纲导航**（不遮挡内容，点击跳转章节）、**撤销/恢复**（Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z）、粘贴或拖入图片自动上传到文档同级 `images/`（命名 `<文档名>-<时间戳>-<序号>.<扩展名>`，并插入引用）、工具栏与快捷键、`Ctrl+S` 直连写回；`window.MdEditor = { open, download, save, close, uploadImage, undo, redo }` |
+| `web/md-editor.js` | 「编辑 MD / 下载 MD」（含草稿、历史、差异、提交 SVN 与 SVN 日志）：双栏编辑器（左：可拖拽分栏的 Markdown 高亮源码；右：marked + Prism + Mermaid + PacketDiag + KaTeX 实时预览）、**左侧固定大纲导航**（不遮挡内容，点击跳转章节）、**撤销/恢复**（Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z）、**远端差异/提交后差异**（同步冲突时提示合并）、粘贴或拖入图片自动上传到文档同级 `images/`（命名 `<文档名>-<时间戳>-<序号>.<扩展名>`，并插入引用）、工具栏与快捷键、`Ctrl+S` 直连写回；`window.MdEditor = { open, download, save, close, uploadImage, undo, redo }` |
 | `web/math-init.js` | docsify 插件：`$...$` / `$$...$$` 等分隔符的 KaTeX 离线渲染；暴露 `window.MathRender.render` 供编辑器预览复用 |
 | `web/prism-init.js` | docsify 插件：`beforeEach` 阶段按围栏语言预载 Prism 组件，保证 docsify 渲染期即可高亮（docsify 内置 Prism 覆盖了 `window.Prism`，autoloader 必须在其之后加载） |
 | `web/ai-retrieval.js` | AI 助手的离线检索核心（纯函数，`window.AIRetrieval`）：分词（CJK 单字+双字）、从 `searchIndex`/Markdown 构建语料、TF-IDF 打分、摘录与上下文/消息组装；`tests/test_ai_retrieval.js` 覆盖 |
@@ -131,6 +131,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 登录接口会自动识别本机管理员账号（`auth_source_id = local-admin`）：直接用本地口令校验并以管理员身份登录，**不需要 SVN 校验**；普通账号仍走 SVN 认证路径。
 - 管理员界面数据来源：登录记录/使用量来自 `audit_events`（登录时记录 `client_ip`）、`operations` 与 `sessions`；文档更新时间/次数来自 `operations`（published），文件夹大小来自实时扫描 `docs/md`，增删记录由 `serve.py` 后台线程每 10 秒对比 `document_snapshots` 写入 `document_events`（首次为基线不产生事件）。
 - 生成的 `index.html` 会给自有资源加内容版本号（`version_asset_urls` → `lib/x.js?v=<sha1>`），改 `web/` 后必须重建才会更新版本号；排查「改了没生效/放大丢字」先确认浏览器拿到的是新脚本。
+- SVN 定时同步：`serve.py` 每 15 秒按各仓库 `syncIntervalSeconds`（留空用 `sync.interval_seconds`，0 关闭）判断到期，`svn info` 比对远端版本后导出更新 `docs/md`；**有活动草稿的文档不覆盖**，记入 `conflicts` 并把仓库 `sync_error` 标记为 `conflicts`，编辑器据此提示「远端已更新，请先合并」并提供「远端差异」；同步凭据来自环境变量 `sync.credential_name`（`用户名:口令`），未配置时按匿名读取。
 - 搜索结果阅读模式下：命中工具条（sticky，z-index 960）在上，操作行通过 `--reading-toolbar-h` 下移（z-index 940）两者同时可见；不要再把操作行隐藏或让两者同 top 重叠。
 - 放大查看/导出禁止直接克隆已渲染的 SVG（会丢文字或箭头）：Mermaid 走 `MermaidRender.render(data-source)`，PacketDiag 走 `PacketDiagRerender(figure)`。
 - 本文目录固定靠窗口右缘（`--docs-toc-right`），左边缘为拖动手柄调整**宽度**（`md2web:toc-width`，写入 `--docs-toc-width`）；目录内容放在内层 `.docs-page-toc-scroll`，外层禁止横向滚动，拖动手柄才不会被滚动条带偏。

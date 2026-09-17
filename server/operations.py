@@ -362,7 +362,7 @@ def sync_all(conn, svn_client, config, md_dir, credential=None, now=None, logger
             result = sync_binding(conn, svn_client, config, md_dir, binding, credential)
             result["binding"] = binding["mount"]
             results.append(result)
-            if logger is not None:
+            if logger is not None and (result.get("updated") or result.get("conflicts")):
                 logger("已同步 %s：r%s（%d 个文件，冲突 %d）"
                        % (binding["mount"], result.get("revision"), len(result.get("files") or []),
                           len(result.get("conflicts") or [])))
