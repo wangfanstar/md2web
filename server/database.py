@@ -1,5 +1,7 @@
 """SQLite 访问层：连接设置、迁移、事务辅助与备份。"""
 
+import re
+import shutil
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -124,18 +126,138 @@ def now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def connect(path):
-    """打开数据库：外键开启、busy_timeout、行工厂。"""
+def connect(path, logger=None):
+    """打开数据库：外键开启、busy_timeout、行工厂。
+
+    旧版 SQLite（< 3.8，如 RHEL7 自带 3.7.17）无法解析部分索引等对象，
+    打开会报 "malformed database schema"；此时先尝试移除这类索引，
+    仍失败则备份原文件并重建（本地草稿/会话会丢失）。
+    """
     db_path = Path(path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    # Waitress 多线程处理请求：连接允许跨线程使用，由调用方（AuthService）串行化访问
+    try:
+        return open_connection(db_path)
+    except sqlite3.DatabaseError as error:
+        _report(logger, "[警告] 数据库无法直接打开（SQLite %s）：%s" % (sqlite3.sqlite_version, error))
+    if repair_unsupported_indexes(db_path, logger):
+        try:
+            return open_connection(db_path)
+        except sqlite3.DatabaseError as error:
+            _report(logger, "[警告] 移除不支持的索引后仍无法打开：%s" % (error))
+    backup = backup_unusable_database(db_path)
+    _report(
+        logger,
+        "[警告] 原数据库已备份为 %s 并自动重建；本地草稿与会话丢失，管理员密码恢复为默认 admin/admin。" % backup,
+    )
+    return open_connection(db_path)
+
+
+def open_connection(db_path):
+    """建立连接：外键、busy_timeout、行工厂；Waitress 多线程由调用方串行化访问。"""
     conn = sqlite3.connect(str(db_path), timeout=10.0, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA busy_timeout = 5000")
-    conn.execute("PRAGMA journal_mode = DELETE")
-    conn.execute("PRAGMA synchronous = FULL")
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.execute("PRAGMA journal_mode = DELETE")
+        conn.execute("PRAGMA synchronous = FULL")
+    except sqlite3.Error:
+        conn.close()
+        raise
     return conn
+
+
+def _report(logger, message):
+    if logger is not None:
+        logger(message)
+    else:
+        print(message)
+
+
+def _needs_newer_sqlite(sql):
+    """判断索引定义是否使用旧版 SQLite 不支持的特性（部分索引/表达式索引）。"""
+    upper = sql.upper()
+    if re.search(r"\bWHERE\b", upper):
+        return True
+    start = upper.find("(")
+    end = upper.rfind(")")
+    if start != -1 and end > start:
+        columns = upper[start + 1:end]
+        if "(" in columns:
+            return True
+    return False
+
+
+def repair_unsupported_indexes(db_path, logger=None):
+    """从 schema 中移除本机 SQLite 无法解析的索引；返回是否修改了数据库。"""
+    db_path = Path(db_path)
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=10.0)
+    except sqlite3.Error as error:
+        _report(logger, "[警告] 无法打开数据库以修复索引：%s" % error)
+        return False
+    try:
+        conn.execute("PRAGMA writable_schema = ON")
+        rows = conn.execute("SELECT type, name, sql FROM sqlite_master").fetchall()
+        victims = [
+            row[1]
+            for row in rows
+            if row[0] == "index" and row[2] and _needs_newer_sqlite(str(row[2]))
+        ]
+        if not victims:
+            return False
+        backup = copy_database_file(db_path, ".repair")
+        for name in victims:
+            conn.execute("DELETE FROM sqlite_master WHERE type = 'index' AND name = ?", (name,))
+        conn.commit()
+        conn.execute("PRAGMA writable_schema = RESET")
+        _report(
+            logger,
+            "[提示] 已移除本机 SQLite(%s) 不支持的索引：%s（原文件备份：%s）"
+            % (sqlite3.sqlite_version, ", ".join(victims), backup),
+        )
+        return True
+    except sqlite3.Error as error:
+        _report(logger, "[警告] 移除不支持的索引失败：%s" % error)
+        return False
+    finally:
+        try:
+            conn.close()
+        except sqlite3.Error:
+            pass
+
+
+def _timestamp():
+    return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def copy_database_file(db_path, label):
+    """复制数据库文件用于留档（修复前备份）。"""
+    target = Path("%s%s-%s.bak" % (db_path, label, _timestamp()))
+    try:
+        shutil.copy2(str(db_path), str(target))
+    except OSError as error:
+        _report(None, "[警告] 备份数据库失败：%s" % error)
+    return target
+
+
+def backup_unusable_database(db_path):
+    """把无法使用的数据库文件（含 -wal/-shm/-journal）改名留档，避免半损坏文件被再次读取。"""
+    db_path = Path(db_path)
+    target = Path("%s.corrupt-%s.bak" % (db_path, _timestamp()))
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        source = Path("%s%s" % (db_path, suffix))
+        if not source.exists():
+            continue
+        destination = Path("%s%s" % (target, suffix))
+        try:
+            shutil.move(str(source), str(destination))
+        except OSError:
+            try:
+                source.unlink()
+            except OSError:
+                pass
+    return target
 
 
 def schema_version(conn):

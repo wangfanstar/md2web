@@ -780,9 +780,9 @@ class LauncherScriptsTests(unittest.TestCase):
             self.skipTest("git 不可用")
         result = subprocess.run(
             ["git", "-C", str(ROOT), "ls-files", "-s", "start_linux.sh"],
-            capture_output=True, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
-        line = (result.stdout or "").strip()
+        line = (result.stdout or b"").decode("utf-8", "replace").strip()
         if not line:
             self.skipTest("非 git 工作副本")
         self.assertTrue(line.startswith("100755"), "start_linux.sh 需要可执行位: " + line)
@@ -835,10 +835,16 @@ class Python36CompatibilityTests(unittest.TestCase):
         "zoneinfo": "zoneinfo 需要 3.9+",
     }
 
+    SKIP_MARKERS = ("SQLITE", "兼容", "3.7+", "3.8+", "3.9+", "as_text=True")
+
     def shipped_files(self):
         files = [ROOT / "serve.py", ROOT / "setup_docsify.py"]
         files += sorted((ROOT / "server").glob("*.py"))
         return files
+
+    def compatibility_files(self):
+        # 测试脚本也在 Python 3.6 上运行，同样受 3.7+ API 限制
+        return self.shipped_files() + sorted((ROOT / "tests").glob("*.py"))
 
     def test_sources_parse_as_python36(self):
         import ast
@@ -855,9 +861,9 @@ class Python36CompatibilityTests(unittest.TestCase):
 
     def test_sources_avoid_newer_only_apis(self):
         problems = []
-        for path in self.shipped_files():
+        for path in self.compatibility_files():
             for number, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
-                if "SQLITE" in line or "兼容" in line:
+                if any(marker in line for marker in self.SKIP_MARKERS):
                     continue
                 for needle, reason in self.FORBIDDEN.items():
                     if needle in line:

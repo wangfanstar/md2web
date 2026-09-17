@@ -394,6 +394,68 @@ class DatabaseTests(ServerTestBase):
         finally:
             conn.close()
 
+    def test_schema_sql_avoids_modern_only_features(self):
+        # 旧版 SQLite（<3.8，如 RHEL7 3.7.17）不支持部分索引；建表 SQL 必须保持基础语法
+        for name in ("SCHEMA_SQL", "MIGRATION_V2_SQL"):
+            sql = getattr(server_database, name).upper()
+            for statement in sql.split(";"):
+                if "INDEX" in statement:
+                    self.assertNotIn(" WHERE ", statement, "%s 使用了部分索引" % name)
+        self.assertNotIn("WITHOUT ROWID", server_database.SCHEMA_SQL.upper())
+
+    def _corrupt_schema_entry(self, path, where, sql):
+        conn = sqlite3.connect(str(path))
+        try:
+            conn.execute("PRAGMA writable_schema = ON")
+            conn.execute("UPDATE sqlite_master SET sql = ? WHERE %s" % where, (sql,))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_unsupported_index_is_removed_and_database_reopens(self):
+        path = self.tmp / "data" / "db.sqlite3"
+        conn = server_database.connect(path)
+        server_database.migrate(conn)
+        conn.close()
+        # 模拟旧版 SQLite 记录的部分索引：本机也无法解析 -> 首次打开即失败
+        self._corrupt_schema_entry(
+            path,
+            "type = 'index' AND name = 'idx_sessions_user'",
+            "CREATE INDEX idx_sessions_user ON sessions (user_id) WHERE",  # 语法不完整：本机也无法解析 -> 走修复分支
+        )
+        messages = []
+        conn = server_database.connect(path, logger=messages.append)
+        try:
+            self.assertEqual(server_database.migrate(conn), server_database.SCHEMA_VERSION)
+            names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+            self.assertNotIn("idx_sessions_user", names)
+        finally:
+            conn.close()
+        self.assertTrue(list((self.tmp / "data").glob("*.repair-*.bak")), "修复前应留备份")
+        self.assertTrue(any("已移除" in message for message in messages), messages)
+
+    def test_unreadable_database_is_backed_up_and_recreated(self):
+        path = self.tmp / "data" / "db.sqlite3"
+        conn = server_database.connect(path)
+        server_database.migrate(conn)
+        conn.close()
+        self._corrupt_schema_entry(
+            path,
+            "type = 'table' AND name = 'users'",
+            "CREATE TABLE users (broken sql here",
+        )
+        messages = []
+        conn = server_database.connect(path, logger=messages.append)
+        try:
+            self.assertEqual(server_database.migrate(conn), server_database.SCHEMA_VERSION)
+            server_database.ensure_admin(conn)
+            self.assertIsNotNone(server_database.find_user(conn, server_database.LOCAL_ADMIN_SOURCE, "admin"))
+        finally:
+            conn.close()
+        backups = list((self.tmp / "data").glob("*.corrupt-*.bak"))
+        self.assertEqual(len(backups), 1, backups)
+        self.assertTrue(any("已备份" in message for message in messages), messages)
+
 
 class FakeSvn:
     def __init__(self, error=None, info=None, anonymous=False):

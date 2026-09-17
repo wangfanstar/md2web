@@ -120,6 +120,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 服务启动只按 pidfile 终止本项目自身实例；不要再恢复“扫描并终止所有 serve.py 进程”的行为。
 - 认证模式直接绑定配置端口：端口被占用时打印明确提示（不会自动换端口）；重复双击启动靠 pidfile 关闭旧实例。`start_windows.bat` 保持纯 ASCII（cmd 用 OEM 代码页解析，中文会破坏脚本）。
 - 认证依赖安装：`start_linux.sh` 在非 root 时优先 `--user` 安装（系统目录常不可写，直接装会 PermissionError），顺序为「离线 --user → 离线系统 → 联网 --user → 联网系统」；提示用户级失败时给出 sudo/--user 与 pip 升级命令。
+- 旧版 SQLite（RHEL7 自带 3.7.17）解析不了新版本写入的部分索引，打开数据库会报 `malformed database schema`：`database.connect` 会先移除这类索引（原文件留 `*.repair-*.bak`），仍失败则把库改名为 `*.corrupt-*.bak` 并重建；迁移 SQL 必须保持基础语法（`DatabaseTests.test_schema_sql_avoids_modern_only_features` 守护），不要用部分索引、表达式索引、CTE 或窗口函数。
 - 离线依赖包位于 `server/wheels/`（cp36 + manylinux1 x86_64，含 MarkupSafe 的 manylinux wheel 与本地构建的 blinker/dataclasses 纯 Python wheel，`*.whl` 在 `.gitattributes` 中标记为 binary）；新增/升级依赖时同步更新该目录，`OfflineWheelsTests` 会校验覆盖度。
 - `start_linux.sh` 必须保持 LF + 可执行位（`.gitattributes` 已声明 `*.sh text eol=lf`）；脚本内置 CRLF 自愈（`sh start_linux.sh` 也会去 CR 后重执行），`start_windows.bat` 必须纯 ASCII。
 - `--svn-command` 支持带空格的路径（Windows 用双引号包住）；测试用假 svn 可执行文件注入，真实认证需要能连通的强制认证 SVN 路径。
