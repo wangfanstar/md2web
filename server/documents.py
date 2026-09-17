@@ -3,13 +3,28 @@
 供发布服务与后续阶段（草稿、本地发布）复用；HTTP 层不得传入 force 绕过冲突检查。
 """
 
+import base64
+import binascii
 import hashlib
 import io
 import os
+import re
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 MD_MAX_BODY = 8 * 1024 * 1024
+IMAGE_MAX_BYTES = 8 * 1024 * 1024
+IMAGE_TYPES = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+}
+IMAGE_DIR_NAME = "images"
+IMAGE_STEM_MAX = 60
+IMAGE_UNSAFE = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
 
 
 class MdSaveError(Exception):
@@ -88,6 +103,104 @@ def read_md_meta(md_dir, raw):
         "exists": True,
         "mtime": int(path.stat().st_mtime),
         "hash": text_hash(text),
+    }
+
+
+def image_stem(text):
+    """把文档名整理成安全的文件名前缀（保留中文，非法字符换成 -）。"""
+    value = IMAGE_UNSAFE.sub("-", str(text or "")).strip(" .-")
+    value = re.sub(r"-{2,}", "-", value)
+    if len(value) > IMAGE_STEM_MAX:
+        value = value[:IMAGE_STEM_MAX].rstrip(" .-")
+    return value or "document"
+
+
+def image_extension(mime_type):
+    """返回受支持的图片扩展名；不支持时抛 MdSaveError(415)。"""
+    extension = IMAGE_TYPES.get(str(mime_type or "").strip().lower())
+    if not extension:
+        raise MdSaveError(415, "仅支持 PNG/JPEG/GIF/WebP 图片（不支持 SVG 等格式）")
+    return extension
+
+
+def decode_image_data(data):
+    """严格解码 base64 图片数据；空内容抛 400，超限抛 413。"""
+    value = str(data or "").strip()
+    if not value:
+        raise MdSaveError(400, "缺少图片数据 data（base64）")
+    if value.startswith("data:") and "," in value:
+        value = value.split(",", 1)[1]
+    try:
+        blob = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        raise MdSaveError(400, "图片数据不是合法的 base64")
+    if not blob:
+        raise MdSaveError(400, "图片内容为空")
+    if len(blob) > IMAGE_MAX_BYTES:
+        raise MdSaveError(413, "图片过大（上限 %d MB）" % (IMAGE_MAX_BYTES // (1024 * 1024)))
+    return blob
+
+
+def document_image_dir(md_dir, raw):
+    """返回 (文档路径, 图片目录)：图片目录为文档同级的 images/。"""
+    path = resolve_md_file(md_dir, raw)
+    if not path.is_file():
+        raise MdSaveError(404, "源文件不存在：" + normalize_md_path(raw))
+    return path, path.parent / IMAGE_DIR_NAME
+
+
+def next_image_sequence(directory, stem):
+    """扫描同目录图片，返回该文档可用的下一个序号。"""
+    pattern = re.compile(r"^" + re.escape(stem) + r"-(\d+)-")
+    highest = 0
+    if directory.is_dir():
+        for entry in sorted(directory.iterdir()):
+            if not entry.is_file():
+                continue
+            match = pattern.match(entry.name)
+            if match:
+                highest = max(highest, int(match.group(1)))
+    return highest + 1
+
+
+def save_document_image(md_dir, raw, mime_type, data, now=None):
+    """把粘贴的图片写入文档同级 images/，返回相对路径（供 Markdown 引用）。
+
+    命名规则：<文档名>-<序号>-<时间戳>.<扩展名>，例如 时钟树设计-1-20260917-113045.png
+    """
+    extension = image_extension(mime_type)
+    blob = decode_image_data(data)
+    path, directory = document_image_dir(md_dir, raw)
+    stem = image_stem(path.stem)
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise MdSaveError(400, "无法创建图片目录：%s" % error)
+    sequence = next_image_sequence(directory, stem)
+    stamp = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
+    name = "%s-%d-%s%s" % (stem, sequence, stamp, extension)
+    target = directory / name
+    handle = tempfile.NamedTemporaryFile(
+        mode="wb", delete=False, dir=str(directory), prefix="." + name + ".", suffix=".tmp",
+    )
+    tmp_path = Path(handle.name)
+    try:
+        with handle:
+            handle.write(blob)
+        os.replace(tmp_path, target)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+    relative = IMAGE_DIR_NAME + "/" + name
+    return {
+        "path": relative,
+        "name": name,
+        "sequence": sequence,
+        "bytes": len(blob),
+        "document": normalize_md_path(raw),
     }
 
 

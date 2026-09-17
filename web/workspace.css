@@ -754,3 +754,60 @@ body.md-editor-open {
 svg text[class*="actor"] {
   fill: #1f2a37 !important;
 }
+
+/* 编辑器大纲导航：快速跳转到指定章节 */
+.md-editor-outline {
+  background: var(--docs-surface, #ffffff);
+  border: 1px solid var(--docs-border, #e3e8ee);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
+  left: 16px;
+  max-height: 56%;
+  max-width: 320px;
+  min-width: 200px;
+  overflow: auto;
+  padding: 6px;
+  position: absolute;
+  top: 92px;
+  z-index: 6;
+}
+
+.md-editor-outline-item {
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: var(--docs-text, #24292f);
+  cursor: pointer;
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow: hidden;
+  padding: 4px 8px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.md-editor-outline-item:hover {
+  background: rgba(31, 111, 235, 0.08);
+}
+
+.md-editor-outline-item.is-active {
+  background: rgba(31, 111, 235, 0.14);
+  color: var(--docs-accent, #1f6feb);
+}
+
+.md-editor-outline-item.level-1 { font-weight: 600; }
+.md-editor-outline-item.level-2 { padding-left: 18px; }
+.md-editor-outline-item.level-3 { padding-left: 30px; color: var(--docs-muted, #57606a); }
+.md-editor-outline-item.level-4,
+.md-editor-outline-item.level-5,
+.md-editor-outline-item.level-6 { padding-left: 42px; color: var(--docs-muted, #57606a); }
+
+.md-editor-outline-empty {
+  color: var(--docs-muted, #57606a);
+  font-size: 12px;
+  margin: 0;
+  padding: 8px 10px;
+}

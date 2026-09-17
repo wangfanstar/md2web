@@ -1,5 +1,6 @@
 import importlib.util
 import io
+import base64
 import json
 import shutil
 import sqlite3
@@ -1166,6 +1167,90 @@ class DraftApiTests(ServerTestBase):
         response = self.client.post("/__md/discard", json={"path": "md/a.md"}, headers=headers)
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(self.client.get("/__md/document?path=md/a.md").get_json()["document"]["draft"])
+
+
+class ImageUploadTests(ServerTestBase):
+    """编辑器粘贴图片：写入文档同级 images/，命名 <文档名>-<序号>-<时间戳>.<扩展名>。"""
+
+    PNG = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAE"
+           "hQGAhKmMIQAAAABJRU5ErkJggg==")
+
+    def setUp(self):
+        super().setUp()
+        self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
+        server_database.migrate(self.conn)
+        self.config = server_config.load_config(self.write_config(), self.docs)
+        self.svn = FakeSvn()
+        self.auth = server_auth.AuthService(self.conn, self.svn, self.config)
+        self.auth.on_startup()
+        from server.app import create_app
+        self.app = create_app(self.config, self.conn, self.auth, self.docs)
+        self.client = self.app.test_client()
+        target = self.docs / "md" / "硬件设计"
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "时钟树设计.md").write_text("# 时钟树\n", encoding="utf-8")
+        self.path = "md/硬件设计/时钟树设计.md"
+        self.client.post("/__auth/login", json={"username": "alice", "password": "good"})
+        self.csrf = self.client.get("/__auth/session").get_json()["csrfToken"]
+
+    def tearDown(self):
+        self.conn.close()
+        super().tearDown()
+
+    def upload(self, mime="image/png", data=None, path=None, csrf=True):
+        headers = {"X-CSRF-Token": self.csrf} if csrf else {}
+        return self.client.post("/__md/image", headers=headers, json={
+            "path": path if path is not None else self.path,
+            "type": mime,
+            "data": self.PNG if data is None else data,
+        })
+
+    def test_upload_writes_images_folder_with_sequence_and_timestamp(self):
+        response = self.upload()
+        self.assertEqual(response.status_code, 200, response.get_json())
+        payload = response.get_json()
+        self.assertEqual(payload["path"], "images/" + payload["name"])
+        self.assertTrue(payload["name"].startswith("时钟树设计-1-"), payload["name"])
+        self.assertTrue(payload["name"].endswith(".png"), payload["name"])
+        target = self.docs / "md" / "硬件设计" / "images" / payload["name"]
+        self.assertTrue(target.is_file())
+        self.assertEqual(target.read_bytes(), base64.b64decode(self.PNG))
+        self.assertEqual(payload["sequence"], 1)
+        second = self.upload().get_json()
+        self.assertTrue(second["name"].startswith("时钟树设计-2-"), second["name"])
+        self.assertEqual(second["sequence"], 2)
+        third = self.upload(mime="image/jpeg").get_json()
+        self.assertTrue(third["name"].endswith(".jpg"), third["name"])
+        self.assertEqual(third["sequence"], 3)
+
+    def test_upload_accepts_extensionless_and_data_url(self):
+        payload = self.upload(path="md/硬件设计/时钟树设计",
+                              data="data:image/png;base64," + self.PNG).get_json()
+        self.assertTrue(payload["name"].startswith("时钟树设计-"), payload["name"])
+
+    def test_upload_requires_login_and_csrf(self):
+        anonymous = self.app.test_client()
+        response = anonymous.post("/__md/image", json={"path": self.path, "type": "image/png", "data": self.PNG})
+        self.assertEqual(response.status_code, 401)
+        response = self.upload(csrf=False)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["code"], "csrf_failed")
+
+    def test_upload_rejects_unsupported_and_invalid_payloads(self):
+        self.assertEqual(self.upload(mime="image/svg+xml").status_code, 415)
+        self.assertEqual(self.upload(data="not-base64!!").status_code, 400)
+        self.assertEqual(self.upload(data="").status_code, 400)
+        self.assertEqual(self.upload(path="md/../escape.md").status_code, 400)
+        self.assertEqual(self.upload(path="README.md").status_code, 400)
+        self.assertEqual(self.upload(path="md/硬件设计/不存在.md").status_code, 404)
+        with mock.patch.object(server_documents, "IMAGE_MAX_BYTES", 10):
+            self.assertEqual(self.upload().status_code, 413)
+
+    def test_uploaded_image_is_served_statically(self):
+        name = self.upload().get_json()["name"]
+        response = self.client.get("/md/硬件设计/images/" + name)
+        self.assertEqual(response.status_code, 200, name)
+        self.assertEqual(response.data, base64.b64decode(self.PNG))
 
 
 class SvnOperationTests(ServerTestBase):

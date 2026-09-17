@@ -260,7 +260,40 @@
       pre.appendChild(button);
     });
   }
-  function enhance() { decorateTree(); addBreadcrumb(); addCodeButtons(); }
+  function docDirectory() {
+    var route = currentRoute().replace(/^#/, '').split('?')[0];
+    if (!route || route === '/') return '';
+    var parts = route.split('/');
+    parts.pop();
+    if (!parts.length || parts[0] !== 'md') return '';
+    return parts.join('/');
+  }
+
+  // docsify 会把文档里的相对图片改写成站点根（/images/x.png），这里改回文档所在目录，
+  // 保证「图片放在文档同级 images/ 并用相对路径引用」的约定在站点上可用
+  function resolveRelativeImages() {
+    var directory = docDirectory();
+    if (!directory) return;
+    var base = directory + '/';
+    all('.markdown-section img[src]').forEach(function (image) {
+      if (image.getAttribute('data-md2web-resolved') === '1') return;
+      var source = image.getAttribute('src') || '';
+      var resolved = null;
+      if (/^\/images\//.test(source)) {
+        resolved = base + source.slice(1);
+      } else if (/^\.\/images\//.test(source)) {
+        resolved = base + source.slice(2);
+      } else if (/^images\//.test(source)) {
+        resolved = base + source;
+      }
+      if (resolved) {
+        image.setAttribute('src', resolved);
+        image.setAttribute('data-md2web-resolved', '1');
+      }
+    });
+  }
+
+  function enhance() { decorateTree(); addBreadcrumb(); addCodeButtons(); resolveRelativeImages(); }
   function schedule() { clearTimeout(state.timer); state.timer = setTimeout(enhance, 40); }
   function init() {
     try { if (localStorage.getItem(STORAGE.numbers) === '0') document.body.classList.add('hide-heading-numbers'); } catch (_) {}

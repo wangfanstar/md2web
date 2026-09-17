@@ -11,7 +11,7 @@ from pathlib import Path
 from flask import Flask, jsonify, make_response, request, send_from_directory
 
 from . import config as server_config
-from . import database, drafts, operations
+from . import database, documents as server_documents, drafts, operations
 from .auth import AuthError
 from .config import authenticated_config, config_to_json, public_config, save_config
 from .documents import MdSaveError
@@ -286,6 +286,24 @@ def create_app(config, conn, auth_service, docs_dir):
         except drafts.DraftError as error:
             return json_error(error.status, "draft_conflict" if error.status == 409 else "draft_error",
                               error.message, **error.extra)
+        return jsonify({"ok": True, **result})
+
+    @app.post("/__md/image")
+    def upload_image():
+        """粘贴图片：写入文档同级 images/，命名 <文档名>-<序号>-<时间戳>.<扩展名>。"""
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        try:
+            result = server_documents.save_document_image(
+                md_dir(), payload.get("path"), payload.get("type"), payload.get("data"),
+            )
+        except MdSaveError as error:
+            return json_error(error.status, "image_error", error.message)
         return jsonify({"ok": True, **result})
 
     @app.get("/__md/revision")

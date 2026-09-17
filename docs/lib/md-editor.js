@@ -629,6 +629,7 @@
     var line = before.split('\n').length;
     var column = index - before.lastIndexOf('\n');
     state.metricsEl.textContent = '行 ' + line + ' · 列 ' + column + ' · ' + value.length + ' 字';
+    updateOutlineActive();
   }
 
   // ---------- Markdown 语法高亮（左侧层级区分） ----------
@@ -721,13 +722,293 @@
     state.highlight.scrollLeft = state.textarea.scrollLeft;
   }
 
+  // ---------- 粘贴图片（写入文档同级 images/） ----------
+
+  var IMAGE_MIME_FALLBACK = 'image/png';
+
+  function readFileAsDataUrl(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result || '')); };
+      reader.onerror = function () { reject(new Error('读取图片失败')); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function clipboardImageFiles(dataTransfer) {
+    var files = [];
+    if (!dataTransfer) {
+      return files;
+    }
+    if (dataTransfer.items && dataTransfer.items.length) {
+      Array.prototype.forEach.call(dataTransfer.items, function (item) {
+        if (item.kind === 'file' && /^image\//i.test(item.type || '')) {
+          var file = item.getAsFile();
+          if (file) {
+            files.push(file);
+          }
+        }
+      });
+    }
+    if (!files.length && dataTransfer.files) {
+      Array.prototype.forEach.call(dataTransfer.files, function (file) {
+        if (/^image\//i.test(file.type || '')) {
+          files.push(file);
+        }
+      });
+    }
+    return files;
+  }
+
+  function imageAltText(file) {
+    var name = String((file && file.name) || '').replace(/\.[^.]+$/, '');
+    return name || '图片';
+  }
+
+  function insertImageMarkdown(relativePath, altText) {
+    insertBlock('![' + (altText || '图片') + '](' + relativePath + ')\n');
+  }
+
+  function insertEmbeddedImage(dataUrl, altText, note) {
+    insertBlock('![' + (altText || '图片') + '](' + dataUrl + ')\n');
+    setStatus(note);
+  }
+
+  function uploadImage(file, altText) {
+    var type = file.type || IMAGE_MIME_FALLBACK;
+    var alt = altText || imageAltText(file);
+    if (file.size > 8 * 1024 * 1024) {
+      setStatus('图片过大（上限 8 MB）：' + (file.name || ''));
+      return Promise.reject(new Error('图片过大'));
+    }
+    if (state.localMode || !authAvailable()) {
+      return readFileAsDataUrl(file).then(function (dataUrl) {
+        insertEmbeddedImage(dataUrl, alt, '本地模式：图片已内嵌为 data URL（未写入 images/ 目录）');
+        return { embedded: true };
+      });
+    }
+    setStatus('正在上传图片' + (file.name ? ' ' + file.name : '') + ' …');
+    return readFileAsDataUrl(file).then(function (dataUrl) {
+      return authApi('__md/image', {
+        method: 'POST',
+        body: JSON.stringify({ path: state.resource, type: type, data: dataUrl })
+      });
+    }).then(function (payload) {
+      insertImageMarkdown(payload.path, alt);
+      setStatus('已插入图片 ' + payload.path + '（序号 ' + payload.sequence + '）');
+      return payload;
+    }).catch(function (error) {
+      var status = error && error.status;
+      if (status === 401 || status === 403 || status === 404 || status === 501 || !status) {
+        return readFileAsDataUrl(file).then(function (dataUrl) {
+          insertEmbeddedImage(dataUrl, alt, '未登录或只读模式：图片已内嵌为 data URL（未写入 images/ 目录）');
+          return { embedded: true };
+        });
+      }
+      setStatus('图片上传失败：' + message(error));
+      throw error;
+    });
+  }
+
+  function handleImageFiles(files, altText) {
+    var chain = Promise.resolve();
+    files.forEach(function (file) {
+      chain = chain.then(function () {
+        return uploadImage(file, altText || imageAltText(file));
+      });
+    });
+    return chain.catch(function () { /* 失败信息已在状态栏提示 */ });
+  }
+
+  // ---------- 大纲导航（快速跳转章节） ----------
+
+  function collectHeadings() {
+    var value = state.textarea ? state.textarea.value : '';
+    var lines = value.split('\n');
+    var headings = [];
+    var offset = 0;
+    var inFence = false;
+    lines.forEach(function (line) {
+      if (/^\s*(```|~~~)/.test(line)) {
+        inFence = !inFence;
+      } else if (!inFence) {
+        var match = /^ {0,3}(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
+        if (match) {
+          headings.push({
+            level: match[1].length,
+            text: match[2].replace(/[*_`~]/g, '').trim(),
+            start: offset,
+            end: offset + line.length,
+            line: headings.length
+          });
+        }
+      }
+      offset += line.length + 1;
+    });
+    return headings;
+  }
+
+  function refreshOutline() {
+    if (!state.outline) {
+      return;
+    }
+    state.headings = collectHeadings();
+    if (!state.headings.length) {
+      state.outline.innerHTML = '<p class="md-editor-outline-empty">当前文档没有标题（用 H1–H3 分级）</p>';
+      return;
+    }
+    state.outline.innerHTML = state.headings.map(function (heading, index) {
+      return '<button type="button" class="md-editor-outline-item level-' + heading.level + '"'
+        + ' data-outline-index="' + index + '" title="' + escapeHtml(heading.text) + '">'
+        + escapeHtml(heading.text) + '</button>';
+    }).join('');
+    updateOutlineActive();
+  }
+
+  function scheduleOutline() {
+    window.clearTimeout(state.outlineTimer);
+    state.outlineTimer = window.setTimeout(refreshOutline, 200);
+  }
+
+  function closeOutline() {
+    if (state.outline) {
+      state.outline.hidden = true;
+    }
+  }
+
+  function toggleOutline() {
+    if (!state.outline) {
+      return;
+    }
+    if (state.outline.hidden) {
+      refreshOutline();
+      state.outline.hidden = false;
+    } else {
+      closeOutline();
+    }
+  }
+
+  function updateOutlineActive() {
+    if (!state.outline || state.outline.hidden || !state.headings || !state.textarea) {
+      return;
+    }
+    var caret = state.textarea.selectionStart || 0;
+    var active = 0;
+    state.headings.forEach(function (heading, index) {
+      if (heading.start <= caret) {
+        active = index;
+      }
+    });
+    var items = state.outline.querySelectorAll('[data-outline-index]');
+    Array.prototype.forEach.call(items, function (item) {
+      var isActive = Number(item.getAttribute('data-outline-index')) === active;
+      item.classList.toggle('is-active', isActive);
+      if (isActive && item.scrollIntoView) {
+        item.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  }
+
+  function headingContentOffset(heading) {
+    var pre = state.highlight;
+    if (!pre) {
+      return null;
+    }
+    try {
+      var walker = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT, null);
+      var consumed = 0;
+      var node = walker.nextNode();
+      while (node) {
+        var length = node.nodeValue.length;
+        if (heading.start <= consumed + length) {
+          var range = document.createRange();
+          range.setStart(node, Math.max(0, heading.start - consumed));
+          range.setEnd(node, Math.max(0, heading.start - consumed));
+          var rect = range.getBoundingClientRect();
+          var preRect = pre.getBoundingClientRect();
+          return rect.top - preRect.top + pre.scrollTop;
+        }
+        consumed += length;
+        node = walker.nextNode();
+      }
+    } catch (error) {
+      return null;
+    }
+    return null;
+  }
+
+  function gotoHeading(heading) {
+    var textarea = state.textarea;
+    if (!textarea || !heading) {
+      return;
+    }
+    textarea.focus();
+    textarea.setSelectionRange(heading.start, heading.end);
+    var offset = headingContentOffset(heading);
+    if (offset !== null) {
+      var top = Math.max(0, offset - textarea.clientHeight * 0.3);
+      textarea.scrollTop = top;
+      if (state.highlight) {
+        state.highlight.scrollTop = top;
+      }
+    }
+    updateMetrics();
+    updateOutlineActive();
+    setStatus('已跳到：' + heading.text);
+  }
+
+  function bindOutlineEvents() {
+    if (!state.outline) {
+      return;
+    }
+    state.outline.addEventListener('click', function (event) {
+      var item = event.target.closest ? event.target.closest('[data-outline-index]') : null;
+      if (!item) {
+        return;
+      }
+      event.preventDefault();
+      var index = Number(item.getAttribute('data-outline-index'));
+      gotoHeading((state.headings || [])[index]);
+    });
+  }
+
   // ---------- 实时预览（marked + Prism + Mermaid + PacketDiag + KaTeX） ----------
+
+  function documentBaseUrl() {
+    var parts = String(state.resource || '').split('/');
+    parts.pop();
+    if (!parts.length) {
+      return '';
+    }
+    return parts.map(encodeURIComponent).join('/') + '/';
+  }
+
+  function resolvePreviewAssets() {
+    var preview = state.preview;
+    if (!preview) {
+      return;
+    }
+    var base = documentBaseUrl();
+    if (!base) {
+      return;
+    }
+    var nodes = preview.querySelectorAll('img[src], a[href]');
+    Array.prototype.forEach.call(nodes, function (node) {
+      var attribute = node.tagName === 'IMG' ? 'src' : 'href';
+      var value = node.getAttribute(attribute) || '';
+      if (!value || /^([a-z][a-z0-9+.-]*:|\/\/|#|\/)/i.test(value)) {
+        return;
+      }
+      node.setAttribute(attribute, base + value);
+    });
+  }
 
   function enhancePreview(token) {
     var preview = state.preview;
     if (!preview) {
       return;
     }
+    resolvePreviewAssets();
     var codes = Array.prototype.slice.call(preview.querySelectorAll('pre > code'));
     var mermaidNodes = [];
     codes.forEach(function (code) {
@@ -813,6 +1094,9 @@
   function afterContentChanged(immediate) {
     updateMetrics();
     refreshModifiedState();
+    if (state.outline && !state.outline.hidden) {
+      scheduleOutline();
+    }
     if (immediate) {
       updateHighlight();
       updatePreview();
@@ -1032,6 +1316,7 @@
       copy: function () { copySource(); },
       reload: function () { reloadSource(); },
       revert: function () { revert(); },
+      outline: function () { toggleOutline(); },
       help: function () { toggleHelp(); },
       close: function () { close(); }
     };
@@ -1066,6 +1351,7 @@
     { action: 'math', label: 'Σ 行内公式', title: '行内公式 $...$（Ctrl+M）' },
     { action: 'mathBlock', label: 'Σ 公式块', title: '公式块 $$...$$（Ctrl+Shift+M）' },
     { divider: true },
+    { action: 'outline', label: '目录', title: '大纲导航：跳转到章节（Ctrl+Shift+H）' },
     { action: 'help', label: '快捷键', title: '快捷键说明（Ctrl+/）' }
   ];
 
@@ -1089,6 +1375,7 @@
     { key: 's', ctrl: true, action: 'save' },
     { key: 's', ctrl: true, shift: true, action: 'saveAs' },
     { key: '/', ctrl: true, action: 'help' },
+    { key: 'h', ctrl: true, shift: true, action: 'outline' },
     { key: '1', ctrl: true, alt: true, action: 'h1' },
     { key: '2', ctrl: true, alt: true, action: 'h2' },
     { key: '3', ctrl: true, alt: true, action: 'h3' }
@@ -1191,6 +1478,27 @@
     state.textarea.addEventListener('input', function () {
       afterContentChanged(false);
     });
+    state.textarea.addEventListener('paste', function (event) {
+      var files = clipboardImageFiles(event.clipboardData);
+      if (!files.length) {
+        return;
+      }
+      event.preventDefault();
+      handleImageFiles(files, files.length === 1 ? imageAltText(files[0]) : '');
+    });
+    state.textarea.addEventListener('dragover', function (event) {
+      if (clipboardImageFiles(event.dataTransfer).length) {
+        event.preventDefault();
+      }
+    });
+    state.textarea.addEventListener('drop', function (event) {
+      var files = clipboardImageFiles(event.dataTransfer);
+      if (!files.length) {
+        return;
+      }
+      event.preventDefault();
+      handleImageFiles(files, files.length === 1 ? imageAltText(files[0]) : '');
+    });
     state.textarea.addEventListener('scroll', function () {
       if (state.highlight) {
         state.highlight.scrollTop = state.textarea.scrollTop;
@@ -1200,6 +1508,8 @@
     ['click', 'keyup', 'select'].forEach(function (name) {
       state.textarea.addEventListener(name, updateMetrics);
     });
+
+    bindOutlineEvents();
 
     var divider = state.overlay.querySelector('.md-editor-divider');
     divider.addEventListener('mousedown', function (event) {
@@ -1223,6 +1533,10 @@
       }
       if (event.key === 'Escape') {
         event.stopPropagation();
+        if (state.outline && !state.outline.hidden) {
+          closeOutline();
+          return;
+        }
         close();
         return;
       }
@@ -1281,6 +1595,7 @@
       '<button type="button" data-editor-action="close">关闭</button>',
       '</header>',
       '<div class="md-editor-toolbar">', toolbar, '</div>',
+      '<div class="md-editor-outline" data-editor-outline hidden></div>',
       '<div class="md-editor-body">',
       '<div class="md-editor-pane md-editor-pane-source">',
       '<pre class="md-editor-highlight" aria-hidden="true"></pre>',
@@ -1312,6 +1627,7 @@
       '<li><code>Ctrl+Shift+G</code> Mermaid · <code>Ctrl+Shift+D</code> PacketDiag</li>',
       '<li><code>Tab</code> / <code>Shift+Tab</code> 缩进 · <code>Alt+↑/↓</code> 移动行</li>',
       '<li><code>Ctrl+S</code> 保存 · <code>Ctrl+Shift+S</code> 另存为 · <code>Esc</code> 关闭</li>',
+      '<li><code>Ctrl+Shift+H</code> 大纲导航 · 直接粘贴或拖入图片会自动上传到 <code>images/</code></li>',
       '</ul>',
       '</div>',
       '<footer class="md-editor-foot">',
@@ -1330,6 +1646,7 @@
     state.statusEl = overlay.querySelector('[data-editor-status]');
     state.modeEl = overlay.querySelector('[data-editor-mode]');
     state.metricsEl = overlay.querySelector('[data-editor-metrics]');
+    state.outline = overlay.querySelector('[data-editor-outline]');
     applySplit(loadSplit());
     bindOverlay();
   }
@@ -1443,6 +1760,10 @@
     openLocal: function () { open({ local: true }); },
     download: download,
     save: save,
-    close: close
+    close: close,
+    uploadImage: uploadImage,
+    headings: collectHeadings,
+    gotoHeading: gotoHeading,
+    toggleOutline: toggleOutline
   };
 }());
