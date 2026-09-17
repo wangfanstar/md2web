@@ -31,7 +31,7 @@
     'img, svg, canvas { height: auto; max-width: 100%; }',
     '.mermaid, .packetdiag-figure { margin: 18px 0; text-align: center; }',
     'hr { border: 0; border-top: 1px solid #e3e8ee; margin: 28px 0; }',
-    'body { margin: 0; }',
+    'body { margin: 0 0 0 268px; }',
     '.page-toc { background: #fbfcfe; border-right: 1px solid #e3e8ee; bottom: 0; left: 0;',
     '  overflow: auto; padding: 22px 16px 32px; position: fixed; top: 0; width: 268px; }',
     '.page-toc strong { color: #24344a; display: block; font-size: 13px; margin-bottom: 10px; }',
@@ -42,10 +42,11 @@
     '.page-toc a:hover { background: #eef2f6; color: #1f6feb; }',
     '.page-toc .toc-level-3 { padding-left: 14px; }',
     '.page-toc .toc-level-4 { padding-left: 28px; }',
-    '.page { margin-left: 268px; max-width: 1000px; padding: 30px 40px 60px; }',
+    '.page { margin: 0 auto; max-width: 1000px; padding: 30px 40px 60px; }',
     '@media (max-width: 900px) {',
     '  .page-toc { border-bottom: 1px solid #e3e8ee; border-right: 0; position: static; width: auto; }',
-    '  .page { margin-left: 0; padding: 20px 18px 48px; }',
+    '  body { margin-left: 0; }',
+    '  .page { padding: 20px 18px 48px; }',
     '}'
   ].join('\n');
 
