@@ -58,6 +58,8 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `web/ai-assistant.js` / `.css` | AI 助手聊天面板与独立配置弹窗（`window.AIAssistant`）：设置面板（服务商预设、接口地址、模型、Key、代理策略，Key 仅存 localStorage）、**资料范围勾选**（按文件夹/文档过滤检索）、**上传文档**（.md/.txt，仅本机 localStorage，≤512 KB）、本地检索 + 引用来源、OpenAI/Anthropic 风格流式 SSE 解析、直连失败自动走 `/__ai/chat` 代理；侧栏「AI 配置」图标与对话面板 ⚙ 均可打开配置 |
 | `tests/test_ai_retrieval.js` | AI 检索算法测试（`node --test`） |
 | `web/plot-playground.html` | 独立绘图在线预览页（Mermaid 全部类型模板 + PacketDiag 增强控件与完整语法说明、一键复制源码、下载），构建复制到 `docs/lib/`；`docs/md/使用说明/绘图示例.md` 与之保持全部样例同步（`tests/test_setup_docsify.py::DrawingExamplesTests` 校验） |
+| `web/md2web_config.html` / `web/md2web-config.js` | 仓库配置页（构建复制到 `docs/md2web_config.html`）：管理员登录后配置 SVN 地址、`docs/md` 下的文件夹、更新频率、只读/允许合入、分组，并支持「创建并拉取」（`POST /__admin/provision`：目录不存在时创建并从 SVN 导出） |
+| `docs/index.html` / `index_<仓库>.html` / `index_all.html` | 构建生成：总览页（按分组列出各仓库入口 + 跨仓库搜索）、每仓库入口页（独立侧栏/搜索索引/离线快照，带只读与允许合入标记）、全部文档合并视图 |
 | `docs/md/` | 唯一需要人工维护的源文档目录 |
 | `docs/lib/` | 离线依赖 + 生成资源，不要手工修改 |
 | `docs/` 其余文件 | `index.html`、`README.md`、`_sidebar.md`、`search-index.json`、`offline-data.js` 等，均由构建生成 |
@@ -133,6 +135,8 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 生成的 `index.html` 会给自有资源加内容版本号（`version_asset_urls` → `lib/x.js?v=<sha1>`），改 `web/` 后必须重建才会更新版本号；排查「改了没生效/放大丢字」先确认浏览器拿到的是新脚本。
 - SVN 定时同步：`serve.py` 每 15 秒按各仓库 `syncIntervalSeconds`（留空用 `sync.interval_seconds`，0 关闭）判断到期，`svn info` 比对远端版本后导出更新 `docs/md`；**有活动草稿的文档不覆盖**，记入 `conflicts` 并把仓库 `sync_error` 标记为 `conflicts`，编辑器据此提示「远端已更新，请先合并」并提供「远端差异」；同步凭据来自环境变量 `sync.credential_name`（`用户名:口令`），未配置时按匿名读取。
 - SVN 提交会把文档引用的 `images/` 图片一起存档：`prepare_commit` 的清单含 `images` 列表（由 `documents.referenced_images` 解析 Markdown/HTML 图片引用），`run_commit` 复制到工作副本、必要时 `svn add`，并与文档同一次 `svn commit` 提交；图片不参与文本差异比对（冲突风险由用户确认）。
+- 多仓库站点：`setup_docsify.load_repositories()` 读 `config/server.local.json` 的 repositories（id/mount/url/group/readOnly/allowCommit/syncIntervalSeconds）；每个仓库生成 `index_<仓库>.html` + `_sidebar_<仓库>.md` + `search-index_<仓库>.json` + `lib/offline-data_<仓库>.js`，根 `index.html` 是分组总览，`index_all.html` 是合并视图。仓库页的 docsify `alias` 必须同时映射 `/_sidebar.md` 与 `/.*/_sidebar.md`（否则首页路由会加载全局侧栏，把其它仓库的文档列出来）；搜索索引每条记录带 `site`，跨仓库结果会先跳到对应入口页。
+- 仓库写权限：`readOnly` / `allowCommit=false` 的仓库在 `/__svn/prepare`、`/__svn/commit` 返回 403 （`repo_read_only` / `repo_commit_disabled`），编辑器也会提示只读；`PUT /__config` 与「创建并拉取」后会触发站点重建。
 - 编辑器布局：`.md-editor-body` 用 **flex**（大纲固定 210px → 源码区宽度由拖拽分栏设置 → 6px 分隔条 → 预览占剩余）；不要再改回「三列 grid」，否则新增大纲后预览会被挤到第二列并被遮挡（大纲宽度按可用区域计算拖拽百分比）。
 - 搜索结果阅读模式下：命中工具条（sticky，z-index 960）在上，操作行通过 `--reading-toolbar-h` 下移（z-index 940）两者同时可见；不要再把操作行隐藏或让两者同 top 重叠。
 - 放大查看按「整体适配」打开（`Math.min(1, fitScale())`）：大于视口的时序图/甘特图/四象限图会先缩小到完整可见，重渲染后以新 SVG 的 viewBox 刷新尺寸并重新适配，避免文字与线条被裁掉；需要细看再用「适应 / 1:1」或滚轮缩放。

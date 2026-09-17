@@ -577,6 +577,84 @@ DOCSIFY_SLUG_STRIP_RE = re.compile(
 )
 
 
+def load_repositories():
+    """读取 config/server.local.json 里的仓库映射（缺失时返回空列表）。
+
+    返回 [{id, mount, url, group, read_only, allow_commit, sync_interval}]
+    """
+    candidates = [ROOT / "config" / "server.local.json", ROOT / "config" / "server.example.json"]
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            continue
+        items = raw.get("repositories") or []
+        repos = []
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+            repo_id = str(item.get("id") or "").strip()
+            mount = str(item.get("mount") or "").strip().strip("/")
+            if not repo_id or not mount:
+                continue
+            repos.append({
+                "id": repo_id,
+                "mount": mount,
+                "url": str(item.get("url") or "").strip(),
+                "group": str(item.get("group") or item.get("credential_group") or "默认").strip() or "默认",
+                "read_only": bool(item.get("readOnly", False)),
+                "allow_commit": bool(item.get("allowCommit", True)),
+                "sync_interval": item.get("syncIntervalSeconds"),
+            })
+        if repos or items == []:
+            return repos
+    return []
+
+
+def mount_subpath(mount):
+    """把 md/<子目录> 归一为 <子目录>（去掉开头的 md/）。"""
+    value = str(mount or "").strip().strip("/")
+    if value.startswith("md/"):
+        value = value[3:]
+    return value.strip("/")
+
+
+def repo_for_route(route, repos):
+    """按目录段最长前缀匹配文档所属仓库；返回 (repo, 相对仓库的路径) 或 (None, route)。"""
+    rel = str(route or "").strip().lstrip("/")
+    if rel.startswith("md/"):
+        rel = rel[3:]
+    best = None
+    best_sub = ""
+    for repo in repos or []:
+        sub = mount_subpath(repo["mount"])
+        if not sub:
+            continue
+        if rel == sub or rel.startswith(sub + "/"):
+            if len(sub) > len(best_sub):
+                best = repo
+                best_sub = sub
+    if best is None:
+        return None, rel
+    relative = rel[len(best_sub):].lstrip("/")
+    return best, relative
+
+
+def repo_page_name(repo_id):
+    """每个仓库一个入口页：index_<仓库名>.html。"""
+    safe = re.sub(r"[^0-9A-Za-z._-]+", "-", str(repo_id or "")).strip("-") or "repo"
+    return "index_" + safe + ".html"
+
+
+def files_for_mount(md_files, mount):
+    sub = mount_subpath(mount)
+    if not sub:
+        return []
+    return [rel for rel in md_files if rel == sub or rel.startswith(sub + "/")]
+
+
 def _slugify_heading(text: str, seen: dict) -> str:
     """精确复刻 Docsify 4.13.1 的 slugify，保证搜索锚点与页面标题 id 一致。
 
@@ -680,11 +758,11 @@ def build_page_index(route_path: str, content: str, depth: int, page_title: str 
     return index
 
 
-def generate_search_index(md_files, title="文档中心", depth=SEARCH_DEPTH):
+def generate_search_index(md_files, title="文档中心", depth=SEARCH_DEPTH, path=None, repos=None, include_readme=True, site=None):
     """在构建时生成 search-index.json，避免浏览器 localStorage 配额限制。"""
     index = {}
     readme = DOCS_DIR / "README.md"
-    if readme.exists():
+    if include_readme and readme.exists():
         index["/"] = build_page_index("/", read_markdown(readme), depth, title)
 
     for rel in md_files:
@@ -692,34 +770,41 @@ def generate_search_index(md_files, title="文档中心", depth=SEARCH_DEPTH):
         index[route] = build_page_index(
             route, read_markdown(MD_DIR / rel), depth, Path(rel).stem
         )
+        entry = index[route]
+        if repos:
+            repo, _ = repo_for_route(route, repos)
+        else:
+            repo = None
+        entry['site'] = site or (repo_page_name(repo['id']) if repo else 'index_all.html')
 
-    index_path = DOCS_DIR / "search-index.json"
+    index_path = Path(path) if path else (DOCS_DIR / "search-index.json")
     index_path.write_text(
         json.dumps(index, ensure_ascii=False, separators=(",", ":")),
         encoding="utf-8",
     )
     size_mb = index_path.stat().st_size / (1024 * 1024)
-    print(f"  [生成] search-index.json ({len(index)} 页, {size_mb:.1f} MB)")
+    print(f"  [生成] {index_path.name} ({len(index)} 页, {size_mb:.1f} MB)")
 
 
-def generate_offline_data(md_files):
+def generate_offline_data(md_files, path=None, search_index_path=None, sidebar="_sidebar.md", include_readme=True):
     """内嵌 Markdown 和搜索索引，使 file:// 直接打开时绕过 XHR/fetch 限制。"""
     LIB_DIR.mkdir(parents=True, exist_ok=True)
     content = {}
-    for name in ("README.md", "_sidebar.md"):
-        path = DOCS_DIR / name
-        if path.exists():
-            content[name] = read_markdown(path)
+    names = (["README.md"] if include_readme else []) + [sidebar]
+    for name in names:
+        item = DOCS_DIR / name
+        if item.exists():
+            content[name] = read_markdown(item)
     for rel in md_files:
         content[f"md/{rel}"] = read_markdown(MD_DIR / rel)
 
     search_index = {}
-    search_index_path = DOCS_DIR / "search-index.json"
-    if search_index_path.exists():
-        search_index = json.loads(search_index_path.read_text(encoding="utf-8"))
+    index_path = Path(search_index_path) if search_index_path else (DOCS_DIR / "search-index.json")
+    if index_path.exists():
+        search_index = json.loads(index_path.read_text(encoding="utf-8"))
 
     payload = {"content": content, "searchIndex": search_index}
-    data_path = LIB_DIR / "offline-data.js"
+    data_path = Path(path) if path else (LIB_DIR / "offline-data.js")
     data_path.write_text(
         "window.__DOCSIFY_OFFLINE_DATA__ = "
         + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -763,18 +848,18 @@ def render_doc_tree(node, route_prefix, indent, lines, link, preserve_folders=Fa
         )
 
 
-def generate_sidebar(md_files):
+def generate_sidebar(md_files, path=None, heading="目录"):
     """生成 _sidebar.md 侧边栏文件"""
     lines = ["- **文档列表**"]
     tree = build_doc_tree(md_files)
     render_doc_tree(tree, "/md", "  ", lines, lambda route: route, preserve_folders=True)
 
-    sidebar_path = DOCS_DIR / "_sidebar.md"
+    sidebar_path = Path(path) if path else (DOCS_DIR / "_sidebar.md")
     sidebar_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"  [生成] _sidebar.md ({len(lines) - 1} 项)")
 
 
-def generate_readme(md_files, title="文档中心"):
+def generate_readme(md_files, title="文档中心", path=None):
     """生成 README.md 作为首页索引"""
     folders = {str(parent) for rel in md_files for parent in Path(rel).parents if str(parent) != "."}
     lines = [f"# {html.escape(title)}", "", '<div class="workspace-home">',
@@ -814,7 +899,7 @@ def generate_readme(md_files, title="文档中心"):
     render_doc_tree(tree, "md", "", lines, lambda route: route, preserve_folders=True)
     lines.extend(['', '</details>', ''])
 
-    readme_path = DOCS_DIR / "README.md"
+    readme_path = Path(path) if path else (DOCS_DIR / "README.md")
     readme_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("  [生成] README.md (首页索引)")
 
@@ -832,11 +917,22 @@ def version_asset_urls(html_text):
     return re.sub(r'(src="|href=")(lib/[^"?]+\.(?:js|css))(")', replace, html_text)
 
 
-def generate_index_html(title="文档中心"):
+def generate_index_html(title="文档中心", path=None, page_name="index.html", site_name=None,
+                         sidebar="_sidebar.md", search_index="search-index.json",
+                         offline_data="lib/offline-data.js", homepage=None,
+                         read_only=False, allow_commit=True, repo=None):
     """生成 index.html"""
     prism_lang_map_js = json.dumps(PRISM_LANG_FALLBACK, ensure_ascii=False)
     title_html = html.escape(title)
     title_js = json.dumps(title, ensure_ascii=False).replace("<", "\\u003c")
+    name_js = json.dumps(site_name or title, ensure_ascii=False).replace("<", "\\u003c")
+    sidebar_path = "/" + str(sidebar).lstrip("/")
+    search_index_path = str(search_index)
+    offline_data_path = str(offline_data)
+    homepage_js = json.dumps(str(homepage), ensure_ascii=False) if homepage else "false"
+    read_only_js = "true" if read_only else "false"
+    allow_commit_js = "true" if allow_commit else "false"
+    repo_js = json.dumps(repo or {}, ensure_ascii=False).replace("<", "\\u003c")
     html_text = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -854,18 +950,23 @@ def generate_index_html(title="文档中心"):
   <link rel="stylesheet" href="lib/settings.css">
 </head>
 <body>
-  <script src="lib/offline-data.js"></script>
+  <script src="{offline_data_path}"></script>
   <script src="lib/offline-file.js"></script>
   <div id="app">加载中...</div>
   <script>
     window.$docsify = {{
-      name: {title_js},
+      name: {name_js},
       repo: '',
       loadSidebar: true,
       alias: {{
-        '/.*/_sidebar.md': '/_sidebar.md',
+        '/_sidebar.md': '{sidebar_path}',
+        '/.*/_sidebar.md': '{sidebar_path}',
       }},
+      homepage: {homepage_js},
       coverpage: false,
+      repoReadOnly: {read_only_js},
+      repoAllowCommit: {allow_commit_js},
+      repoInfo: {repo_js},
       subMaxLevel: 0,
       auto2top: true,
       noEmoji: true,
@@ -896,7 +997,7 @@ def generate_index_html(title="文档中心"):
         }});
       }}],
       customSearch: {{
-        indexPath: 'search-index.json',
+        indexPath: '{search_index_path}',
         maxSidebarResults: 8,
         maxDialogResults: 50,
         minQueryLength: 2,
@@ -942,9 +1043,186 @@ def generate_index_html(title="文档中心"):
 </body>
 </html>
 """
-    index_path = DOCS_DIR / "index.html"
+    index_path = Path(path) if path else (DOCS_DIR / "index.html")
     index_path.write_text(version_asset_urls(html_text), encoding="utf-8")
-    print("  [生成] index.html")
+    print(f"  [生成] {index_path.name}")
+
+
+MASTER_STYLE = """
+  :root { color-scheme: light; }
+  body { background: #f7f9fb; color: #1f2a37; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 28px 20px 60px; }
+  .wrap { margin: 0 auto; max-width: 1080px; }
+  h1 { font-size: 24px; margin: 0 0 6px; }
+  .sub { color: #57606a; font-size: 13px; margin: 0 0 18px; }
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+  .tools input { border: 1px solid #d5dee8; border-radius: 8px; flex: 1 1 260px; font: inherit; padding: 8px 12px; }
+  .tools a, .tools button { background: #fff; border: 1px solid #d5dee8; border-radius: 8px; color: #1f6feb; cursor: pointer; font: inherit; padding: 8px 14px; text-decoration: none; }
+  .tools a:hover, .tools button:hover { border-color: #1f6feb; }
+  h2 { font-size: 15px; margin: 22px 0 10px; color: #57606a; }
+  .cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+  .card { background: #fff; border: 1px solid #e3e8ee; border-radius: 10px; color: inherit; display: block; padding: 14px 16px; text-decoration: none; }
+  .card:hover { border-color: #1f6feb; box-shadow: 0 6px 18px rgba(15, 23, 42, .08); }
+  .card strong { display: block; font-size: 15px; margin-bottom: 4px; }
+  .card span { color: #57606a; display: block; font-size: 12.5px; overflow-wrap: anywhere; }
+  .badge { background: #eef4fd; border-radius: 999px; color: #1f6feb; display: inline-block; font-size: 11px; margin-left: 6px; padding: 1px 8px; }
+  .badge.readonly { background: #fff7ed; color: #b45309; }
+  .results { margin: 6px 0 18px; }
+  .results a { background: #fff; border: 1px solid #e3e8ee; border-radius: 8px; color: inherit; display: block; margin-bottom: 6px; padding: 8px 12px; text-decoration: none; }
+  .results a:hover { border-color: #1f6feb; }
+  .results small { color: #6b7a89; display: block; }
+  .empty { color: #57606a; font-size: 13px; }
+"""
+
+MASTER_SCRIPT = """
+  var repos = window.__MD2WEB_REPOS__ || [];
+  var index = null;
+  var input = document.querySelector('[data-master-search]');
+  var results = document.querySelector('[data-master-results]');
+  function load() {
+    if (index) { return Promise.resolve(index); }
+    return fetch('search-index.json').then(function (r) { return r.json(); }).then(function (data) {
+      index = data; return data;
+    }).catch(function () { index = {}; return index; });
+  }
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, function (char) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char];
+    });
+  }
+  function search(query) {
+    load().then(function (data) {
+      var keyword = String(query || '').trim().toLowerCase();
+      if (keyword.length < 2) { results.innerHTML = ''; return; }
+      var hits = [];
+      Object.keys(data).forEach(function (route) {
+        var page = data[route] || {};
+        var title = page.title || route;
+        var headings = (page.headings || []).map(function (item) { return item.text || ''; }).join(' ');
+        if ((title + ' ' + headings + ' ' + route).toLowerCase().indexOf(keyword) === -1) { return; }
+        hits.push({ route: route, title: title, site: page.site || 'index_all.html', headings: headings.slice(0, 80) });
+      });
+      hits = hits.slice(0, 40);
+      results.innerHTML = hits.length
+        ? hits.map(function (hit) {
+          var href = hit.site + '#/' + hit.route.replace(/^\\//, '');
+          return '<a href="' + escapeHtml(href) + '"><strong>' + escapeHtml(hit.title) + '</strong>'
+            + '<small>' + escapeHtml(hit.site) + ' · ' + escapeHtml(hit.route) + '</small>'
+            + (hit.headings ? '<small>' + escapeHtml(hit.headings) + '</small>' : '') + '</a>';
+        }).join('')
+        : '<p class="empty">没有匹配的文档</p>';
+    });
+  }
+  if (input) {
+    input.addEventListener('input', function () { search(input.value); });
+    input.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        var first = results.querySelector('a');
+        if (first) { window.location.href = first.getAttribute('href'); }
+      }
+    });
+  }
+"""
+
+
+def cleanup_repo_artifacts(repos):
+    """删除已不在配置里的仓库入口页/侧栏/索引/离线数据，避免遗留旧仓库页面。"""
+    keep = {repo["id"] for repo in repos}
+    removed = []
+    patterns = [
+        ("index_*.html", lambda name: name[len("index_"):-len(".html")]),
+        ("_sidebar_*.md", lambda name: name[len("_sidebar_"):-len(".md")]),
+        ("search-index_*.json", lambda name: name[len("search-index_"):-len(".json")]),
+    ]
+    for pattern, extract in patterns:
+        for path in sorted(DOCS_DIR.glob(pattern)):
+            if path.name in ("index_all.html",):
+                continue
+            repo_id = extract(path.name)
+            if repo_id not in keep:
+                try:
+                    path.unlink()
+                    removed.append(path.name)
+                except OSError:
+                    pass
+    for path in sorted(LIB_DIR.glob("offline-data_*.js")):
+        repo_id = path.name[len("offline-data_"):-len(".js")]
+        if repo_id not in keep:
+            try:
+                path.unlink()
+                removed.append(path.name)
+            except OSError:
+                pass
+    if removed:
+        print(f"  [清理] 已删除 {len(removed)} 个不再使用的仓库产物：{', '.join(removed[:6])}")
+
+
+def generate_master_index_html(repos, title="文档中心", all_page="index_all.html", config_page="md2web_config.html"):
+    """生成总览首页 index.html：按仓库分组列出各仓库入口页，并提供跨仓库搜索。"""
+    groups = {}
+    for repo in repos:
+        groups.setdefault(repo["group"], []).append(repo)
+    sections = []
+    for group in sorted(groups):
+        cards = []
+        for repo in groups[group]:
+            badges = ''
+            if repo.get("read_only"):
+                badges += '<span class="badge readonly">只读</span>'
+            if not repo.get("allow_commit", True):
+                badges += '<span class="badge readonly">禁止合入</span>'
+            cards.append(
+                '<a class="card" href="' + repo_page_name(repo["id"]) + '">'
+                + '<strong>' + html.escape(str(repo["id"])) + badges + '</strong>'
+                + '<span>目录：' + html.escape(str(repo["mount"])) + '</span>'
+                + '<span>' + html.escape(str(repo.get("url") or "（未填写 SVN 地址）")) + '</span>'
+                + '</a>'
+            )
+        sections.append('<h2>' + html.escape(str(group)) + '</h2><div class="cards">' + ''.join(cards) + '</div>')
+    if not repos:
+        sections.append('<p class="empty">还没有配置仓库：请在 <a href="' + config_page + '">' + config_page
+                        + '</a> 中添加 SVN 仓库与目录映射，然后重新构建或等待自动同步。</p>')
+    page = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{html.escape(title)}</title>
+  <style>{MASTER_STYLE}</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>{html.escape(title)}</h1>
+    <p class="sub">按仓库分组浏览：每个仓库一个独立入口页（含独立搜索索引），下方搜索会同时检索全部仓库。</p>
+    <div class="tools">
+      <input type="search" placeholder="搜索全部仓库的文档（回车打开第一条）" data-master-search aria-label="搜索全部仓库">
+      <a href="{all_page}">全部文档（合并视图）</a>
+      <a href="{config_page}">仓库配置</a>
+    </div>
+    <div class="results" data-master-results></div>
+    {''.join(sections)}
+  </div>
+  <script>window.__MD2WEB_REPOS__ = {json.dumps(repos, ensure_ascii=False)};</script>
+  <script>{MASTER_SCRIPT}</script>
+</body>
+</html>
+"""
+    index_path = DOCS_DIR / "index.html"
+    index_path.write_text(page, encoding="utf-8")
+    print(f"  [生成] index.html（总览：{len(repos)} 个仓库 / {len(groups)} 个分组）")
+
+
+def generate_config_page():
+    """把配置页（web/md2web_config.html + web/md2web-config.js）复制到 docs/。"""
+    html_source = ROOT / "web" / "md2web_config.html"
+    js_source = ROOT / "web" / "md2web-config.js"
+    if not html_source.is_file():
+        return
+    LIB_DIR.mkdir(parents=True, exist_ok=True)
+    if js_source.is_file():
+        (LIB_DIR / "md2web-config.js").write_text(js_source.read_text(encoding="utf-8"), encoding="utf-8")
+    html_text = html_source.read_text(encoding="utf-8")
+    (DOCS_DIR / "md2web_config.html").write_text(version_asset_urls(html_text), encoding="utf-8")
+    print("  [生成] md2web_config.html（仓库配置页）")
 
 
 def main(argv=None):
@@ -967,10 +1245,21 @@ def main(argv=None):
 
     try:
         if args.index_only:
-            print("=== 仅刷新搜索索引（跳过依赖与站点文件生成） ===\n")
-            generate_search_index(md_files, args.title)
+            print("=== 只刷新搜索索引与离线数据（不重新生成站点文件） ===\n")
+            repos = load_repositories()
+            generate_search_index(md_files, args.title, repos=repos)
             generate_offline_data(md_files)
-            print("\n=== 搜索索引刷新完成 ===")
+            for repo in repos:
+                repo_files = files_for_mount(md_files, repo["mount"])
+                search_index = f"search-index_{repo['id']}.json"
+                sidebar = f"_sidebar_{repo['id']}.md"
+                generate_search_index(repo_files, args.title, path=DOCS_DIR / search_index,
+                                      repos=repos, include_readme=False,
+                                      site=repo_page_name(repo["id"]))
+                generate_offline_data(repo_files, path=LIB_DIR / f"offline-data_{repo['id']}.js",
+                                      search_index_path=DOCS_DIR / search_index, sidebar=sidebar,
+                                      include_readme=False)
+            print("\n=== 索引刷新完成 ===")
             return
 
         print("1. 检查离线依赖...")
@@ -980,12 +1269,39 @@ def main(argv=None):
         ensure_prism_components(MD_DIR, md_files, offline=args.offline)
         generate_custom_search_assets()
 
-        print("2. 生成导航、首页与搜索索引...")
+        print("2. 生成导航、首页、搜索索引...")
+        repos = load_repositories()
         generate_sidebar(md_files)
         generate_readme(md_files, args.title)
-        generate_search_index(md_files, args.title)
+        generate_search_index(md_files, args.title, repos=repos)
         generate_offline_data(md_files)
-        generate_index_html(args.title)
+
+        print("3. 生成多仓库页面（每仓库一个入口 + 总览 + 配置页）...")
+        cleanup_repo_artifacts(repos)
+        generate_index_html(args.title, path=DOCS_DIR / "index_all.html", site_name=args.title,
+                            repo={"all": True})
+        for repo in repos:
+            sub = mount_subpath(repo["mount"])
+            repo_files = files_for_mount(md_files, repo["mount"])
+            page = repo_page_name(repo["id"])
+            sidebar = f"_sidebar_{repo['id']}.md"
+            search_index = f"search-index_{repo['id']}.json"
+            offline_data = f"lib/offline-data_{repo['id']}.js"
+            generate_sidebar(repo_files, path=DOCS_DIR / sidebar, heading=repo["id"])
+            generate_search_index(repo_files, args.title, path=DOCS_DIR / search_index,
+                                  repos=repos, include_readme=False, site=page)
+            generate_offline_data(repo_files, path=LIB_DIR / f"offline-data_{repo['id']}.js",
+                                  search_index_path=DOCS_DIR / search_index, sidebar=sidebar,
+                                  include_readme=False)
+            homepage = f"md/{sub}/README.md" if (MD_DIR / sub / "README.md").is_file() else (
+                f"md/{repo_files[0]}" if repo_files else None)
+            generate_index_html(args.title, path=DOCS_DIR / page, page_name=page,
+                                site_name=f"{repo['id']} · {args.title}",
+                                sidebar=sidebar, search_index=search_index, offline_data=offline_data,
+                                homepage=homepage, read_only=repo.get("read_only", False),
+                                allow_commit=repo.get("allow_commit", True), repo=repo)
+        generate_master_index_html(repos, args.title)
+        generate_config_page()
 
         print("\n=== 构建完成 ===")
         print("\n启动本地预览: python serve.py")

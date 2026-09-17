@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>md2web 仓库配置</title>
+  <style>
+    :root { color-scheme: light; }
+    body { background: #f7f9fb; color: #1f2a37; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 26px 18px 60px; }
+    .wrap { margin: 0 auto; max-width: 1180px; }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    .sub { color: #57606a; font-size: 13px; margin: 0 0 16px; }
+    .panel { background: #fff; border: 1px solid #e3e8ee; border-radius: 10px; margin-bottom: 14px; padding: 14px 16px; }
+    .panel h2 { font-size: 14px; margin: 0 0 10px; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; }
+    label { color: #475569; display: flex; flex-direction: column; font-size: 11.5px; gap: 4px; }
+    input, select { border: 1px solid #d5dee8; border-radius: 6px; font: inherit; font-size: 13px; padding: 6px 8px; }
+    input[type="checkbox"] { align-self: flex-start; height: 16px; width: 16px; }
+    button { background: #fff; border: 1px solid #d5dee8; border-radius: 6px; color: #1f6feb; cursor: pointer; font: inherit; font-size: 13px; padding: 6px 12px; }
+    button:hover { border-color: #1f6feb; }
+    button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+    button.danger { color: #b91c1c; }
+    table { border-collapse: collapse; font-size: 12.5px; width: 100%; }
+    th, td { border-bottom: 1px solid #eef2f6; padding: 6px 8px; text-align: left; vertical-align: top; }
+    th { color: #57606a; font-weight: 600; white-space: nowrap; }
+    td input[type="text"], td input[type="number"] { width: 100%; min-width: 90px; }
+    .status { border-radius: 6px; font-size: 12.5px; margin-top: 10px; padding: 8px 10px; }
+    .status.ok { background: #ecfdf5; color: #047857; }
+    .status.error { background: #fef2f2; color: #b91c1c; }
+    .hint { color: #6b7a89; font-size: 12px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .flag { align-items: center; display: inline-flex; gap: 6px; font-size: 12.5px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>md2web 仓库配置</h1>
+    <p class="sub">配置 SVN 仓库地址、对应 <code>docs/md</code> 下的文件夹、更新频率、是否允许合入与是否只读，并按分组展示。
+      保存后站点会自动重建：每个仓库生成一个入口页 <code>index_&lt;仓库名&gt;.html</code>，根目录 <code>index.html</code> 为分组总览。</p>
+
+    <section class="panel" data-config-login hidden>
+      <h2>管理员登录</h2>
+      <div class="row">
+        <label>用户名<input type="text" data-login-username value="admin" autocomplete="username"></label>
+        <label>密码<input type="password" data-login-password autocomplete="current-password"></label>
+        <button class="primary" type="button" data-action="login">登录</button>
+      </div>
+      <p class="hint">默认管理员账号 <code>admin / admin</code>（仅用于本页与站点设置，合入 SVN 时需要另外的 SVN 账号）。</p>
+    </section>
+
+    <section class="panel" data-config-main hidden>
+      <h2>仓库列表</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>仓库 ID</th><th>md 下文件夹</th><th>SVN 地址</th><th>分组</th>
+            <th>更新频率（秒）</th><th>只读</th><th>允许合入</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody data-repo-rows></tbody>
+      </table>
+      <div class="actions">
+        <button type="button" data-action="add-repo">+ 添加仓库</button>
+        <button class="primary" type="button" data-action="save">保存配置并重建站点</button>
+        <button type="button" data-action="sync">立即同步 SVN 库</button>
+        <a href="index.html"><button type="button">返回总览</button></a>
+      </div>
+      <div class="status" data-status hidden></div>
+      <p class="hint">「创建并拉取」会在目录不存在时自动创建 <code>docs/md/&lt;文件夹&gt;</code> 并从 SVN 导出内容；
+        更新频率留空使用全局默认（设置 → SVN 与仓库），填 0 表示不自动同步。</p>
+    </section>
+
+    <section class="panel" data-config-file hidden>
+      <h2>当前为离线浏览（file://）</h2>
+      <p class="hint">仓库配置需要认证服务：请用 <code>python serve.py</code> 启动后访问
+        <code>http://localhost:8882/md2web_config.html</code>。</p>
+    </section>
+  </div>
+  <script src="lib/md2web-config.js?v=9b32f0f9bc"></script>
+</body>
+</html>

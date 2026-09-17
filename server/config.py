@@ -158,6 +158,9 @@ def load_config(path, docs_dir, allow_incomplete=False):
             "mount": mount,
             "url": _check_url(item.get("url"), f"repositories[{index}].url"),
             "credential_group": str(item.get("credential_group") or credential_group).strip() or credential_group,
+            "group": str(item.get("group") or "").strip() or str(item.get("credential_group") or credential_group).strip() or "默认",
+            "read_only": bool(item.get("readOnly", False)),
+            "allow_commit": bool(item.get("allowCommit", True)),
             "sync_interval": sync_interval,
         })
 
@@ -231,7 +234,8 @@ def config_to_json(config):
         "sync": dict(config["sync"]),
         "repositories": [
             {"id": repo["id"], "mount": repo["mount"], "url": repo["url"],
-             "credential_group": repo["credential_group"],
+             "credential_group": repo["credential_group"], "group": repo.get("group") or "默认",
+             "readOnly": bool(repo.get("read_only")), "allowCommit": bool(repo.get("allow_commit", True)),
              "syncIntervalSeconds": repo.get("sync_interval")}
             for repo in config["repositories"]
         ],

@@ -431,6 +431,27 @@ def remote_diff(conn, svn_client, config, md_dir, binding, document_path, creden
     }
 
 
+def provision_repository(conn, svn_client, config, md_dir, binding, credential=None):
+    """创建 docs/md 下的仓库目录（不存在时）并从 SVN 拉取内容，供配置页「创建并拉取」。"""
+    mount = binding["mount"]
+    parts = mount.split("/")
+    if len(parts) < 2 or parts[0] != "md":
+        raise OperationError(400, "仓库目录必须是 md 下的子目录：" + mount)
+    target = Path(md_dir) / Path(*parts[1:])
+    created = not target.exists()
+    target.mkdir(parents=True, exist_ok=True)
+    ensure_binding(conn, binding, svn_client, config, credential)
+    result = sync_binding(conn, svn_client, config, md_dir, binding, credential)
+    return {
+        "mount": mount,
+        "path": str(target),
+        "created": created,
+        "revision": result.get("revision"),
+        "files": result.get("files") or [],
+        "conflicts": result.get("conflicts") or [],
+    }
+
+
 def sync_binding(conn, svn_client, config, md_dir, binding, credential=None):
     """把绑定仓库的远端内容同步到 docs/md（导出快照后只覆盖受管 Markdown）。"""
     row = _binding_row(conn, binding) or ensure_binding(conn, binding, svn_client, config, credential)

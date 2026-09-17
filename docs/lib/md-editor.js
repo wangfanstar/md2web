@@ -448,9 +448,25 @@
     });
   }
 
+  function repoWriteRestriction() {
+    var config = window.$docsify || {};
+    if (config.repoReadOnly) {
+      return '该仓库已设置为只读：只能浏览与下载，禁止提交。';
+    }
+    if (config.repoAllowCommit === false) {
+      return '该仓库已关闭合入（允许合入 = 否）：请联系管理员在仓库配置页开启。';
+    }
+    return '';
+  }
+
   function startSvnCommit() {
     if (!authAvailable()) {
       setStatus('请先登录后再提交 SVN');
+      return;
+    }
+    var restriction = repoWriteRestriction();
+    if (restriction) {
+      setStatus(restriction);
       return;
     }
     if (state.readOnlyHome) {
@@ -1865,6 +1881,11 @@
     }
     state.titleEl.textContent = displayPath(state.resource);
     state.modeEl.textContent = state.localMode ? '仅本地查看源码' : saveModeLabel();
+    var restriction = repoWriteRestriction();
+    if (restriction && !state.localMode) {
+      state.modeEl.textContent += ' · 只读仓库';
+      setStatus(restriction);
+    }
     if (state.overlay) {
       saveButton = state.overlay.querySelector('[data-editor-action="save"]');
       if (saveButton) {

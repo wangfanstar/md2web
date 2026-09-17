@@ -28,7 +28,7 @@ FEATURES = {"editDraft": True, "svnCommit": False, "localPublish": False}
 MAX_BODY = 2 * 1024 * 1024
 
 
-def create_app(config, conn, auth_service, docs_dir):
+def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
     docs_root = Path(docs_dir).resolve()
     app = Flask(__name__, static_folder=None)
     app.config["MAX_CONTENT_LENGTH"] = MAX_BODY
@@ -209,6 +209,11 @@ def create_app(config, conn, auth_service, docs_dir):
         config.clear()
         config.update(loaded)
         auth_service.on_config_changed()
+        if on_config_changed is not None:
+            try:
+                on_config_changed()
+            except Exception:
+                pass
         return jsonify({"ok": True, "config": public_config_json(), "authConfigured": bool(config["auth"]["url"])})
 
     @app.post("/__config/test-auth")
@@ -297,6 +302,37 @@ def create_app(config, conn, auth_service, docs_dir):
             "folders": folder_sizes(entries),
             "events": database.document_events(conn, 200),
         })
+
+    @app.post("/__admin/provision")
+    def admin_provision():
+        """创建 docs/md 下的仓库目录并从 SVN 拉取（配置页「创建并拉取」）。"""
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        repo_id = str(payload.get("id") or "").strip()
+        binding = None
+        for repo in config.get("repositories") or []:
+            if repo["id"] == repo_id:
+                binding = repo
+                break
+        if binding is None:
+            return json_error(404, "not_found", "没有找到仓库：" + repo_id)
+        credential = credential_of(session) or auth_service.sync_credential()
+        try:
+            result = operations.provision_repository(conn, auth_service.svn, config, md_dir(), binding,
+                                                     credential)
+        except operations.OperationError as error:
+            return json_error(error.status, "provision_error", error.message, **error.extra)
+        if on_config_changed is not None:
+            try:
+                on_config_changed()
+            except Exception:
+                pass
+        return jsonify({"ok": True, "result": result})
 
     @app.post("/__admin/sync")
     def admin_sync():
@@ -497,6 +533,16 @@ def create_app(config, conn, auth_service, docs_dir):
 
     # ---- 阶段三：SVN 提交与同步 ----
 
+    def repo_write_guard(binding):
+        """只读仓库或关闭合入的仓库：拒绝写操作。"""
+        if binding is None:
+            return None
+        if binding.get("read_only"):
+            return json_error(403, "repo_read_only", "该仓库已设置为只读，禁止提交")
+        if not binding.get("allow_commit", True):
+            return json_error(403, "repo_commit_disabled", "该仓库已关闭合入（允许合入 = 否）")
+        return None
+
     def commit_diff(operation_id):
         """本次提交的差异（来自冻结清单里的草稿版本快照）。"""
         row = conn.execute("SELECT reviewed_manifest FROM operations WHERE id = ?",
@@ -557,6 +603,9 @@ def create_app(config, conn, auth_service, docs_dir):
         if csrf_error:
             return csrf_error
         payload = request.get_json(silent=True) or {}
+        guard = repo_write_guard(server_config.match_repository(config, payload.get("path") or ""))
+        if guard is not None:
+            return guard
         try:
             result = operations.prepare_commit(
                 conn, session["user"]["id"], config, md_dir(),
@@ -578,6 +627,17 @@ def create_app(config, conn, auth_service, docs_dir):
         if csrf_error:
             return csrf_error
         payload = request.get_json(silent=True) or {}
+        operation_row = conn.execute("SELECT reviewed_manifest FROM operations WHERE id = ?",
+                                     (payload.get("operationId"),)).fetchone()
+        if operation_row is not None:
+            try:
+                operation_manifest = json.loads(operation_row["reviewed_manifest"] or "{}")
+            except ValueError:
+                operation_manifest = {}
+            guard = repo_write_guard(
+                server_config.match_repository(config, operation_manifest.get("path") or ""))
+            if guard is not None:
+                return guard
         credential = credential_of(session)
         supplied_user = str(payload.get("svnUsername") or "").strip()
         supplied_password = payload.get("svnPassword") or ""

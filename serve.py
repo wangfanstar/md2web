@@ -661,7 +661,20 @@ def run_authenticated_service(args, directory):
         auth_service.revoke_all("auth_source_changed")
 
     docs_dir = directory if (directory / "index.html").exists() else ROOT / "docs"
-    app = create_app(config, conn, auth_service, docs_dir)
+    rebuild_lock = threading.Lock()
+
+    def rebuild_sites():
+        """配置变更后重建站点（多仓库入口页/总览页需要重新生成）。"""
+        if not (ROOT / "setup_docsify.py").exists():
+            return
+        with rebuild_lock:
+            try:
+                rebuild()
+                print("配置已变更：站点已按新的仓库映射重建（含各仓库入口页与总览页）")
+            except Exception as error:
+                print(f"警告: 配置变更后重建失败: {error}")
+
+    app = create_app(config, conn, auth_service, docs_dir, on_config_changed=rebuild_sites)
 
     stop_watcher = None
     stop_recorder = None

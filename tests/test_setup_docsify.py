@@ -879,6 +879,69 @@ class SourceDocumentsTests(unittest.TestCase):
             self.assertGreater((ROOT / name).stat().st_size, 0, name + " 为空文件")
 
 
+class MultiRepoTests(TempDirTestCase):
+    """多仓库站点：每仓库一个入口页 + 分组总览页 + 独立搜索/离线数据。"""
+
+    REPOS = [
+        {"id": "hardware", "mount": "md/硬件设计", "url": "https://svn.example.invalid/hardware/",
+         "group": "硬件", "read_only": False, "allow_commit": True, "sync_interval": 120},
+        {"id": "software", "mount": "md/软件工具链", "url": "https://svn.example.invalid/software/",
+         "group": "软件", "read_only": True, "allow_commit": False, "sync_interval": None},
+    ]
+
+    def test_repo_page_name_and_mount_subpath(self):
+        self.assertEqual(self.module.repo_page_name("hardware"), "index_hardware.html")
+        self.assertEqual(self.module.repo_page_name("a/b c"), "index_a-b-c.html")
+        self.assertEqual(self.module.mount_subpath("md/硬件设计"), "硬件设计")
+
+    def test_repo_for_route_uses_longest_prefix(self):
+        repos = self.REPOS + [{"id": "deep", "mount": "md/硬件设计/接口", "group": "硬件",
+                               "read_only": False, "allow_commit": True, "sync_interval": None}]
+        repo, relative = self.module.repo_for_route("/md/硬件设计/接口/uart.md", repos)
+        self.assertEqual(repo["id"], "deep")
+        self.assertEqual(relative, "uart.md")
+        repo, relative = self.module.repo_for_route("/md/硬件设计/时钟树设计.md", repos)
+        self.assertEqual(repo["id"], "hardware")
+        self.assertEqual(relative, "时钟树设计.md")
+        repo, relative = self.module.repo_for_route("/md/其他/x.md", repos)
+        self.assertIsNone(repo)
+
+    def test_files_for_mount_filters_documents(self):
+        files = ["硬件设计/a.md", "硬件设计/b/c.md", "软件工具链/d.md"]
+        self.assertEqual(self.module.files_for_mount(files, "md/硬件设计"),
+                         ["硬件设计/a.md", "硬件设计/b/c.md"])
+
+    def test_master_page_lists_groups_and_links(self):
+        self.module.generate_master_index_html(self.REPOS, "测试站")
+        html = (self.docs / "index.html").read_text(encoding="utf-8")
+        self.assertIn("index_hardware.html", html)
+        self.assertIn("index_software.html", html)
+        self.assertIn("硬件", html)
+        self.assertIn("软件", html)
+        self.assertIn("只读", html)
+        self.assertIn("index_all.html", html)
+        self.assertIn("md2web_config.html", html)
+
+    def test_repo_page_uses_own_sidebar_index_and_flags(self):
+        lib = self.docs / "lib"
+        lib.mkdir(parents=True, exist_ok=True)
+        for name in ("custom-search.js", "workspace.js", "settings.js"):
+            (lib / name).write_text("// " + name + "\n", encoding="utf-8")
+        repo = self.REPOS[1]
+        self.module.generate_index_html("测试站", path=self.docs / "index_software.html",
+                                        sidebar="_sidebar_software.md",
+                                        search_index="search-index_software.json",
+                                        offline_data="lib/offline-data_software.js",
+                                        read_only=repo["read_only"], allow_commit=repo["allow_commit"],
+                                        repo=repo)
+        html = (self.docs / "index_software.html").read_text(encoding="utf-8")
+        self.assertIn("_sidebar_software.md", html)
+        self.assertIn("search-index_software.json", html)
+        self.assertIn("offline-data_software.js", html)
+        self.assertIn("repoReadOnly: true", html)
+        self.assertIn("repoAllowCommit: false", html)
+
+
 class AssetVersionTests(TempDirTestCase):
     """index.html 里的本地 lib 资源要带内容版本号，避免浏览器缓存旧脚本（修复放大丢字等问题）。"""
 

@@ -122,14 +122,20 @@
     return compactText(trimmed).length >= config.minQueryLength;
   }
 
-  function routeToHash(slug) {
-    if (!slug || slug === '/') {
-      return '#/';
+  function routeToHash(slug, site) {
+    // 多仓库站点：结果条目带 site（index_<仓库>.html），跨仓库时先切到对应入口页
+    var hash = '#/';
+    if (slug && slug !== '/') {
+      hash = slug.charAt(0) === '#' ? slug : '#' + slug;
     }
-    if (slug.charAt(0) === '#') {
-      return slug;
+    var page = String(site || '').trim();
+    if (page && page !== 'index_all.html') {
+      var current = String(window.location.pathname || '').split('/').pop() || 'index.html';
+      if (page !== current) {
+        return page + hash;
+      }
     }
-    return '#' + slug;
+    return hash;
   }
 
   function titleFromRoute(route) {
@@ -1273,7 +1279,7 @@
 
         items.push({
           slug: slug,
-          url: routeToHash(slug),
+          url: routeToHash(slug, page && page.site),
           route: route,
           pageTitle: pageTitle,
           headingTitle: headingTitle,

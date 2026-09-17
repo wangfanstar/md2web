@@ -2042,6 +2042,99 @@ class AdminDocumentsTests(ServerTestBase):
         self.assertEqual(payload["audit"][0]["client_ip"], "127.0.0.1")
 
 
+class MultiRepoServerTests(ServerTestBase):
+    """多仓库服务端：只读/禁止合入校验、创建并拉取、配置变更回调。"""
+
+    def setUp(self):
+        super().setUp()
+        self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
+        server_database.migrate(self.conn)
+        server_database.ensure_admin(self.conn)
+        self.config_path = self.write_config({"repositories": [
+            {"id": "hardware", "mount": "md/硬件设计", "url": "https://svn.example.invalid/svn/hardware/trunk/docs/"},
+            {"id": "locked", "mount": "md/锁定库", "url": "https://svn.example.invalid/svn/locked/trunk/docs/",
+             "readOnly": True},
+            {"id": "nocommit", "mount": "md/禁止合入", "url": "https://svn.example.invalid/svn/nc/trunk/docs/",
+             "allowCommit": False, "group": "受限"},
+        ]})
+        self.config = server_config.load_config(self.config_path, self.docs)
+        (self.docs / "md" / "锁定库").mkdir(parents=True, exist_ok=True)
+        (self.docs / "md" / "锁定库" / "a.md").write_text("# A\n", encoding="utf-8")
+        (self.docs / "md" / "禁止合入").mkdir(parents=True, exist_ok=True)
+        (self.docs / "md" / "禁止合入" / "b.md").write_text("# B\n", encoding="utf-8")
+        self.calls = []
+        self.svn = FakeSvn()
+        self.auth = server_auth.AuthService(self.conn, self.svn, self.config)
+        self.auth.on_startup()
+        from server.app import create_app
+        self.app = create_app(self.config, self.conn, self.auth, self.docs,
+                              on_config_changed=lambda: self.calls.append("rebuild"))
+        self.client = self.app.test_client()
+        self.client.post("/__auth/login", json={"username": "admin", "password": "admin"})
+
+    def tearDown(self):
+        self.conn.close()
+        super().tearDown()
+
+    def csrf(self):
+        return self.client.get("/__auth/session").get_json()["csrfToken"]
+
+    def test_config_roundtrips_group_and_flags(self):
+        payload = server_config.config_to_json(self.config)
+        repos = {item["id"]: item for item in payload["repositories"]}
+        self.assertEqual(repos["locked"]["readOnly"], True)
+        self.assertEqual(repos["nocommit"]["allowCommit"], False)
+        self.assertEqual(repos["nocommit"]["group"], "受限")
+        self.assertEqual(repos["hardware"]["allowCommit"], True)
+
+    def test_prepare_rejected_for_readonly_and_no_commit_repos(self):
+        headers = {"X-CSRF-Token": self.csrf()}
+        response = self.client.post("/__svn/prepare", json={"path": "md/锁定库/a.md", "message": "m"},
+                                    headers=headers)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["code"], "repo_read_only")
+        response = self.client.post("/__svn/prepare", json={"path": "md/禁止合入/b.md", "message": "m"},
+                                    headers=headers)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["code"], "repo_commit_disabled")
+
+    def test_provision_creates_folder_and_pulls(self):
+        state_path = self.tmp / "svn-state.json"
+        state_path.write_text(json.dumps({
+            "files": {"手册.md": "# 手册\n"}, "revision": 9, "log": [], "wc": {},
+            "uuid": "11111111-2222-3333-4444-555555555555"}, ensure_ascii=False), encoding="utf-8")
+        self.env = mock.patch.dict("os.environ", {"FAKE_SVN_STATE": str(state_path)})
+        self.env.start()
+        try:
+            fake = self.tmp / "fake_svn.py"
+            fake.write_text(FAKE_SVN, encoding="utf-8")
+            self.auth.svn = server_svn.SvnClient(command=(sys.executable, str(fake)), timeout=5)
+            payload = self.config["repositories"][0]
+            payload = next(repo for repo in self.config["repositories"] if repo["id"] == "hardware")
+            result = server_operations.provision_repository(self.conn, self.auth.svn, self.config,
+                                                            self.docs / "md", payload, ("alice", "good"))
+            self.assertTrue(result["created"])
+            target = self.docs / "md" / "硬件设计" / "手册.md"
+            self.assertTrue(target.is_file(), result)
+            self.assertIn("手册.md", result["files"])
+        finally:
+            self.env.stop()
+
+    def test_provision_endpoint_requires_admin_and_repo(self):
+        anonymous = self.app.test_client()
+        self.assertEqual(anonymous.post("/__admin/provision", json={"id": "hardware"}).status_code, 401)
+        headers = {"X-CSRF-Token": self.csrf()}
+        response = self.client.post("/__admin/provision", json={"id": "missing"}, headers=headers)
+        self.assertEqual(response.status_code, 404)
+
+    def test_config_save_triggers_rebuild_callback(self):
+        payload = server_config.config_to_json(self.config)
+        headers = {"X-CSRF-Token": self.csrf()}
+        response = self.client.put("/__config", json=payload, headers=headers)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertIn("rebuild", self.calls)
+
+
 class PathsTests(unittest.TestCase):
     def test_blocked_paths(self):
         blocked = (".svn/entries", "md/.hidden/a.md", "data/db.sqlite3", "config/server.local.json",

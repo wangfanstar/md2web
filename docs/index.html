@@ -4,101 +4,92 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>文档中心</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f6feb'/%3E%3Cpath d='M9 8.5h14v2.6H9zm0 6h14v2.6H9zm0 6h9v2.6H9z' fill='%23fff'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="lib/prism.min.css?v=aa405e2bcb">
-  <link rel="stylesheet" href="lib/katex/katex.min.css?v=df649691f6">
-  <link rel="stylesheet" href="lib/docsify.min.css?v=9e7c5d0ec5">
-  <link rel="stylesheet" href="lib/custom-search.css?v=bc722f81fa">
-  <link rel="stylesheet" href="lib/workspace.css?v=5614966f30">
-  <link rel="stylesheet" href="lib/ai-assistant.css?v=c62e5041ed">
-  <link rel="stylesheet" href="lib/auth.css?v=f87bcd6f72">
-  <link rel="stylesheet" href="lib/settings.css?v=a86612d83f">
+  <style>
+  :root { color-scheme: light; }
+  body { background: #f7f9fb; color: #1f2a37; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 28px 20px 60px; }
+  .wrap { margin: 0 auto; max-width: 1080px; }
+  h1 { font-size: 24px; margin: 0 0 6px; }
+  .sub { color: #57606a; font-size: 13px; margin: 0 0 18px; }
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+  .tools input { border: 1px solid #d5dee8; border-radius: 8px; flex: 1 1 260px; font: inherit; padding: 8px 12px; }
+  .tools a, .tools button { background: #fff; border: 1px solid #d5dee8; border-radius: 8px; color: #1f6feb; cursor: pointer; font: inherit; padding: 8px 14px; text-decoration: none; }
+  .tools a:hover, .tools button:hover { border-color: #1f6feb; }
+  h2 { font-size: 15px; margin: 22px 0 10px; color: #57606a; }
+  .cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+  .card { background: #fff; border: 1px solid #e3e8ee; border-radius: 10px; color: inherit; display: block; padding: 14px 16px; text-decoration: none; }
+  .card:hover { border-color: #1f6feb; box-shadow: 0 6px 18px rgba(15, 23, 42, .08); }
+  .card strong { display: block; font-size: 15px; margin-bottom: 4px; }
+  .card span { color: #57606a; display: block; font-size: 12.5px; overflow-wrap: anywhere; }
+  .badge { background: #eef4fd; border-radius: 999px; color: #1f6feb; display: inline-block; font-size: 11px; margin-left: 6px; padding: 1px 8px; }
+  .badge.readonly { background: #fff7ed; color: #b45309; }
+  .results { margin: 6px 0 18px; }
+  .results a { background: #fff; border: 1px solid #e3e8ee; border-radius: 8px; color: inherit; display: block; margin-bottom: 6px; padding: 8px 12px; text-decoration: none; }
+  .results a:hover { border-color: #1f6feb; }
+  .results small { color: #6b7a89; display: block; }
+  .empty { color: #57606a; font-size: 13px; }
+</style>
 </head>
 <body>
-  <script src="lib/offline-data.js?v=17ecfcf9f6"></script>
-  <script src="lib/offline-file.js?v=9e57b7a7e9"></script>
-  <div id="app">加载中...</div>
+  <div class="wrap">
+    <h1>文档中心</h1>
+    <p class="sub">按仓库分组浏览：每个仓库一个独立入口页（含独立搜索索引），下方搜索会同时检索全部仓库。</p>
+    <div class="tools">
+      <input type="search" placeholder="搜索全部仓库的文档（回车打开第一条）" data-master-search aria-label="搜索全部仓库">
+      <a href="index_all.html">全部文档（合并视图）</a>
+      <a href="md2web_config.html">仓库配置</a>
+    </div>
+    <div class="results" data-master-results></div>
+    <p class="empty">还没有配置仓库：请在 <a href="md2web_config.html">md2web_config.html</a> 中添加 SVN 仓库与目录映射，然后重新构建或等待自动同步。</p>
+  </div>
+  <script>window.__MD2WEB_REPOS__ = [];</script>
   <script>
-    window.$docsify = {
-      name: "文档中心",
-      repo: '',
-      loadSidebar: true,
-      alias: {
-        '/.*/_sidebar.md': '/_sidebar.md',
-      },
-      coverpage: false,
-      subMaxLevel: 0,
-      auto2top: true,
-      noEmoji: true,
-      plugins: [function (hook) {
-        // Prism 无对应组件的语言（cuda/p4/asm 等）改用近似语法高亮，源 md 不受影响
-        var langMap = {"cuda": "cpp", "p4": "c", "asm": "nasm"};
-        hook.beforeEach(function (content) {
-          var inFence = false, fenceChar = '';
-          return content.split('\n').map(function (line) {
-            var m = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
-            if (m) {
-              var marker = m[1].charAt(0);
-              if (!inFence) {
-                inFence = true; fenceChar = marker;
-                var lm = m[2].match(/^\s*([A-Za-z0-9_+#.-]+)/);
-                if (lm) {
-                  var target = langMap[lm[1].toLowerCase()];
-                  if (target) {
-                    return line.replace(lm[1], target);
-                  }
-                }
-              } else if (marker === fenceChar) {
-                inFence = false; fenceChar = '';
-              }
-            }
-            return line;
-          }).join('\n');
-        });
-      }],
-      customSearch: {
-        indexPath: 'search-index.json',
-        maxSidebarResults: 8,
-        maxDialogResults: 50,
-        minQueryLength: 2,
-      },
-      customToc: {
-        enabled: true,
-        minLevel: 2,
-        maxLevel: 4,
-        title: '本文目录',
-      },
-    }
-  </script>
-  <script src="lib/docsify.min.js?v=file-router-3"></script>
-  <script src="lib/prism-autoloader.min.js?v=b7aa0333d8"></script>
-  <script>
-    // docsify 会覆盖 window.Prism，因此 autoloader 必须在 docsify 之后加载；
-    // 语言组件改从本地 lib/components/ 加载，运行时不请求 CDN
-    if (window.Prism && Prism.plugins && Prism.plugins.autoloader) {
-      Prism.plugins.autoloader.languages_path = 'lib/components/';
-    }
-  </script>
-  <script src="lib/prism-init.js?v=b0f4445ad6"></script>
-  <script src="lib/front-matter.min.js?v=a6e389495a"></script>
-  <script src="lib/marked.min.js?v=c74cc46804"></script>
-  <script src="lib/purify.min.js?v=2230c2d462"></script>
-  <script src="lib/sanitize.js?v=f96a551681"></script>
-  <script src="lib/katex/katex.min.js?v=4881bfc93a"></script>
-  <script src="lib/katex/auto-render.min.js?v=61e52860f7"></script>
-  <script src="lib/math-init.js?v=c70b13c7e4"></script>
-  <script src="lib/custom-search.js?v=a8cd6c8222"></script>
-  <script src="lib/workspace.js?v=81cd880b19"></script>
-  <script src="lib/mermaid.min.js?v=4e251a46db"></script>
-  <script src="lib/mermaid-init.js?v=046bf9cfc2"></script>
-  <script src="lib/packetdiag.js?v=14dcd247cc"></script>
-  <script src="lib/packetdiag-init.js?v=cf2440b8fd"></script>
-  <script src="lib/media-viewer.js?v=970897e7f6"></script>
-  <script src="lib/page-export.js?v=bacd3511e2"></script>
-  <script src="lib/md-editor.js?v=6dab477d22"></script>
-  <script src="lib/ai-retrieval.js?v=33c00133c7"></script>
-  <script src="lib/ai-assistant.js?v=921db2acf5"></script>
-  <script src="lib/auth.js?v=4bc844eb51"></script>
-  <script src="lib/settings.js?v=b90393e0bf"></script>
+  var repos = window.__MD2WEB_REPOS__ || [];
+  var index = null;
+  var input = document.querySelector('[data-master-search]');
+  var results = document.querySelector('[data-master-results]');
+  function load() {
+    if (index) { return Promise.resolve(index); }
+    return fetch('search-index.json').then(function (r) { return r.json(); }).then(function (data) {
+      index = data; return data;
+    }).catch(function () { index = {}; return index; });
+  }
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, function (char) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char];
+    });
+  }
+  function search(query) {
+    load().then(function (data) {
+      var keyword = String(query || '').trim().toLowerCase();
+      if (keyword.length < 2) { results.innerHTML = ''; return; }
+      var hits = [];
+      Object.keys(data).forEach(function (route) {
+        var page = data[route] || {};
+        var title = page.title || route;
+        var headings = (page.headings || []).map(function (item) { return item.text || ''; }).join(' ');
+        if ((title + ' ' + headings + ' ' + route).toLowerCase().indexOf(keyword) === -1) { return; }
+        hits.push({ route: route, title: title, site: page.site || 'index_all.html', headings: headings.slice(0, 80) });
+      });
+      hits = hits.slice(0, 40);
+      results.innerHTML = hits.length
+        ? hits.map(function (hit) {
+          var href = hit.site + '#/' + hit.route.replace(/^\//, '');
+          return '<a href="' + escapeHtml(href) + '"><strong>' + escapeHtml(hit.title) + '</strong>'
+            + '<small>' + escapeHtml(hit.site) + ' · ' + escapeHtml(hit.route) + '</small>'
+            + (hit.headings ? '<small>' + escapeHtml(hit.headings) + '</small>' : '') + '</a>';
+        }).join('')
+        : '<p class="empty">没有匹配的文档</p>';
+    });
+  }
+  if (input) {
+    input.addEventListener('input', function () { search(input.value); });
+    input.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        var first = results.querySelector('a');
+        if (first) { window.location.href = first.getAttribute('href'); }
+      }
+    });
+  }
+</script>
 </body>
 </html>
