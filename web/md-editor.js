@@ -291,9 +291,53 @@
       el.textContent = '未登录（只读）';
       return;
     }
-    el.textContent = state.binding
-      ? '目标库 ' + state.binding.id + ' · ' + state.binding.mount
-      : '未关联 SVN';
+    if (!state.binding) {
+      el.textContent = '未关联 SVN';
+      return;
+    }
+    var label = '目标库 ' + state.binding.id + ' · ' + state.binding.mount;
+    var status = state.syncStatus;
+    if (status) {
+      var revision = status.remoteRevision || status.publishedRevision;
+      if (revision) {
+        label += ' · r' + revision;
+      }
+      if (status.needsMerge) {
+        label += ' · 远端已更新，请先合并（远端差异）';
+      } else if (status.syncError && status.syncError !== 'conflicts') {
+        label += ' · 同步异常（' + status.syncError + '）';
+      }
+    }
+    el.textContent = label;
+  }
+
+  function refreshSyncStatus() {
+    if (!authAvailable() || state.localMode || state.readOnlyHome) {
+      state.syncStatus = null;
+      updateBindingLabel();
+      return Promise.resolve(null);
+    }
+    return authApi('__svn/status?path=' + encodeURIComponent(state.resource)).then(function (payload) {
+      state.syncStatus = payload.status || null;
+      updateBindingLabel();
+      return state.syncStatus;
+    }).catch(function () {
+      state.syncStatus = null;
+      updateBindingLabel();
+      return null;
+    });
+  }
+
+  function showRemoteDiff() {
+    setStatus('正在读取远端差异…');
+    return authApi('__svn/remote-diff?path=' + encodeURIComponent(state.resource)).then(function (payload) {
+      showDiffPanel(payload.diff || '（远端与本地内容一致）',
+        '远端 r' + (payload.remoteRevision || '?') + ' ↔ 本地');
+      setStatus('远端差异已打开（合并后保存草稿并提交）');
+    }).catch(function (error) {
+      showDiffPanel('读取远端差异失败：' + error.message, '远端差异');
+      setStatus('读取远端差异失败：' + error.message);
+    });
   }
 
   function ensurePanels() {
@@ -468,6 +512,7 @@
         var result = payload.result || {};
         window.SiteAuth.refresh();
         setStatus('已提交 SVN：r' + result.svnRevision + '（站点将在重建后更新）');
+        afterCommit(result);
       }).catch(function (error) {
         setStatus('提交失败：' + error.message);
       });
@@ -478,7 +523,7 @@
       state.prepareOperation = null;
       var result = payload.result || {};
       setStatus('已提交 SVN：r' + result.svnRevision + '（站点将在重建后更新）');
-      showDiffPanel('提交成功：r' + result.svnRevision + '\n' + (result.message || ''));
+      afterCommit(result);
     }).catch(function (error) {
       if (error.status === 401) {
         var credentials = promptCredentials();
@@ -490,12 +535,29 @@
           state.prepareOperation = null;
           var result = payload.result || {};
           setStatus('已提交 SVN：r' + result.svnRevision + '（站点将在重建后更新）');
+          afterCommit(result);
         }).catch(function (retryError) {
           setStatus('提交失败：' + retryError.message);
         });
         return;
       }
       setStatus('提交失败：' + error.message);
+    });
+  }
+
+  function afterCommit(result) {
+    var head = '提交成功：r' + result.svnRevision + '\n' + (result.message || '')
+      + '\n' + result.path + '\n';
+    if (result.diff) {
+      showDiffPanel(head + '\n本次提交差异：\n' + result.diff, '本次提交差异（已写入 SVN）');
+    } else {
+      showDiffPanel(head + '\n（本次没有文本差异）', '本次提交结果');
+    }
+    refreshSyncStatus().then(function (status) {
+      var button = state.overlay.querySelector('[data-editor-action="remote-diff"]');
+      if (button) {
+        button.hidden = !(status && status.needsMerge);
+      }
     });
   }
 
@@ -1395,6 +1457,7 @@
       undo: function () { undo(); },
       redo: function () { redo(); },
       outline: function () { toggleOutline(); },
+      'remote-diff': function () { showRemoteDiff(); },
       help: function () { toggleHelp(); },
       close: function () { close(); }
     };
@@ -1668,6 +1731,7 @@
       '<button type="button" data-editor-action="load-latest">载入最新</button>',
       '<button type="button" data-editor-action="svn-commit">提交 SVN…</button>',
       '<button type="button" data-editor-action="svn-log">SVN 日志</button>',
+      '<button type="button" data-editor-action="remote-diff" hidden>远端差异</button>',
       '<span class="md-editor-status" data-editor-status></span>',
       '<span class="md-editor-spacer"></span>',
       '<button type="button" data-editor-action="save">保存</button>',
@@ -1822,6 +1886,15 @@
     if (authAvailable()) {
       loadDocumentFromServer().then(function () {
         state.textarea.focus();
+        return refreshSyncStatus();
+      }).then(function (status) {
+        var button = state.overlay.querySelector('[data-editor-action="remote-diff"]');
+        if (button) {
+          button.hidden = !(status && status.needsMerge);
+        }
+        if (status && status.needsMerge) {
+          setStatus('远端已有新版本（r' + (status.remoteRevision || '?') + '），你的草稿基于旧版本：请点「远端差异」查看后合并');
+        }
       }).catch(function (error) {
         setStatus('读取服务端基线失败：' + message(error));
       });

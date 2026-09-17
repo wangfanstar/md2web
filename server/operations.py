@@ -9,9 +9,11 @@
 
 import json
 import os
+import calendar
 import re
 import shutil
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -303,6 +305,116 @@ def publish_committed(conn, md_dir, rel, content, revision, binding_id):
     return path
 
 
+def active_draft_paths(conn):
+    """存在活动草稿的文档路径集合（同步时跳过，避免覆盖正在编辑的内容）。"""
+    rows = conn.execute("SELECT DISTINCT document_path FROM drafts WHERE state = 'active'").fetchall()
+    return {row[0] for row in rows}
+
+
+def sync_interval_of(binding, config):
+    """仓库的自动同步间隔（秒）：仓库自身配置优先，其次全局 sync.interval_seconds，0 表示不自动同步。"""
+    interval = binding.get("sync_interval")
+    if interval is None:
+        interval = (config.get("sync") or {}).get("interval_seconds", 120)
+    try:
+        return float(interval)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def sync_due(row, interval_seconds, now=None):
+    """判断仓库是否到期需要同步（基于 repo_bindings.last_checked_at）。"""
+    if interval_seconds is None or float(interval_seconds) <= 0:
+        return False
+    last = (row or {}).get("last_checked_at") if row else None
+    if not last:
+        return True
+    moment = now or time.time()
+    try:
+        checked = _parse_iso(str(last))
+    except ValueError:
+        return True
+    return (moment - checked) >= float(interval_seconds)
+
+
+def _parse_iso(value):
+    """解析 YYYY-mm-ddTHH:MM:SSZ（保持 Python 3.6 兼容，不用 fromisoformat）。"""
+    text = str(value or "").strip().replace("Z", "")
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
+        try:
+            return calendar.timegm(time.strptime(text, fmt))
+        except ValueError:
+            continue
+    raise ValueError("时间格式不正确: " + value)
+
+
+def sync_all(conn, svn_client, config, md_dir, credential=None, now=None, logger=None):
+    """按各仓库的同步频率拉取远端更新；返回每个仓库的结果汇总。"""
+    moment = now or time.time()
+    results = []
+    for binding in config.get("repositories") or []:
+        interval = sync_interval_of(binding, config)
+        row = _binding_row(conn, binding)
+        row_dict = _row_dict(row)
+        if not sync_due(row_dict, interval, moment):
+            continue
+        try:
+            result = sync_binding(conn, svn_client, config, md_dir, binding, credential)
+            result["binding"] = binding["mount"]
+            results.append(result)
+            if logger is not None:
+                logger("已同步 %s：r%s（%d 个文件，冲突 %d）"
+                       % (binding["mount"], result.get("revision"), len(result.get("files") or []),
+                          len(result.get("conflicts") or [])))
+        except OperationError as error:
+            results.append({"binding": binding["mount"], "error": str(error), "status": error.status})
+            if logger is not None:
+                logger("同步 %s 失败：%s" % (binding["mount"], error))
+    return results
+
+
+def remote_revision(conn, svn_client, config, binding, credential=None):
+    """查询仓库当前远端版本（用于同步状态展示）。"""
+    username, password = credential or (None, None)
+    config_dir = tempfile.mkdtemp(prefix="md2web-svn-info-")
+    try:
+        info = svn_client.info(binding["url"], config_dir, username=username, password=password)
+        return int(info.get("revision") or 0)
+    except SvnError as error:
+        raise OperationError(502, f"查询远端版本失败：{error}")
+    finally:
+        shutil.rmtree(config_dir, ignore_errors=True)
+
+
+def remote_diff(conn, svn_client, config, md_dir, binding, document_path, credential=None):
+    """返回远端最新内容与本地文件的统一差异（用于合并前的对比）。"""
+    username, password = credential or (None, None)
+    row = _binding_row(conn, binding)
+    published = int(row["published_revision"] or 0) if row else 0
+    mount = binding["mount"]
+    relative = str(document_path)[len(mount):].lstrip("/")
+    url = binding["url"].rstrip("/") + "/" + relative
+    config_dir = tempfile.mkdtemp(prefix="md2web-svn-diff-")
+    try:
+        info = svn_client.info(binding["url"], config_dir, username=username, password=password)
+        remote_revision = int(info.get("revision") or 0)
+        remote_text = svn_client.cat(url, revision=remote_revision, config_dir=config_dir,
+                                     username=username, password=password)
+    except SvnError as error:
+        raise OperationError(502, f"读取远端内容失败：{error}")
+    finally:
+        shutil.rmtree(config_dir, ignore_errors=True)
+    local_path = documents.resolve_md_file(md_dir, document_path)
+    local_text = documents.read_md_text(local_path) if local_path.is_file() else ""
+    return {
+        "diff": documents.unified_text_diff(local_text, remote_text, "本地", "远端 r%d" % remote_revision,
+                                            name=document_path),
+        "remoteRevision": remote_revision,
+        "publishedRevision": published,
+        "path": document_path,
+    }
+
+
 def sync_binding(conn, svn_client, config, md_dir, binding, credential=None):
     """把绑定仓库的远端内容同步到 docs/md（导出快照后只覆盖受管 Markdown）。"""
     row = _binding_row(conn, binding) or ensure_binding(conn, binding, svn_client, config, credential)
@@ -318,14 +430,21 @@ def sync_binding(conn, svn_client, config, md_dir, binding, credential=None):
                 with conn:
                     conn.execute("UPDATE repo_bindings SET last_checked_at = ?, sync_error = NULL WHERE id = ?",
                                  (database.now_iso(), row["id"]))
-            return {"updated": False, "revision": remote_revision, "files": []}
+            return {"updated": False, "revision": remote_revision, "files": [], "conflicts": []}
         svn_client.export(binding["url"], staging, revision=remote_revision, force=True,
                           config_dir=config_dir, username=username, password=password)
         mount_dir = Path(md_dir) / Path(*binding["mount"].split("/")[1:])
+        draft_paths = active_draft_paths(conn)
         files = []
+        conflicts = []
         for source in sorted(staging.rglob("*.md")):
             relative = source.relative_to(staging)
             target = mount_dir / relative
+            document_path = binding["mount"] + "/" + str(relative).replace("\\", "/")
+            if document_path in draft_paths:
+                # 有人正在编辑（存在活动草稿）：不覆盖本地文件，提示合并
+                conflicts.append(document_path)
+                continue
             target.parent.mkdir(parents=True, exist_ok=True)
             text = source.read_text(encoding="utf-8")
             handle = tempfile.NamedTemporaryFile(
@@ -347,11 +466,12 @@ def sync_binding(conn, svn_client, config, md_dir, binding, credential=None):
         with conn:
             conn.execute(
                 "UPDATE repo_bindings SET published_revision = ?, last_checked_at = ?,"
-                " sync_error = NULL, updated_at = ? WHERE id = ?",
-                (remote_revision, database.now_iso(), database.now_iso(), row["id"]),
+                " sync_error = ?, updated_at = ? WHERE id = ?",
+                (remote_revision, database.now_iso(), "conflicts" if conflicts else None,
+                 database.now_iso(), row["id"]),
             )
             database.audit(conn, "operation_sync", "ok", resource=binding["mount"])
-        return {"updated": True, "revision": remote_revision, "files": files}
+        return {"updated": True, "revision": remote_revision, "files": files, "conflicts": conflicts}
     except SvnError as error:
         if row:
             with conn:

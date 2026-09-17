@@ -242,6 +242,32 @@ def rebuild_if_needed(directory):
     return True
 
 
+def start_repo_sync(auth_service, md_dir, interval=15.0):
+    """后台按各仓库配置的频率同步 SVN 库；返回停止事件。"""
+    stop_event = threading.Event()
+    seen_errors = {}
+
+    def logger(message):
+        # 同一仓库的错误只提示一次，避免刷屏
+        if "失败" in message:
+            if seen_errors.get(message):
+                return
+            seen_errors[message] = True
+        print(message)
+
+    def run():
+        while not stop_event.is_set():
+            try:
+                auth_service.sync_repositories(md_dir, logger=logger)
+            except Exception as error:
+                print(f"警告: 定时同步 SVN 失败: {error}")
+            stop_event.wait(interval)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return stop_event
+
+
 def start_document_recorder(auth_service, md_dir, interval=10.0):
     """后台记录 docs/md 的增删改（管理员界面用）；返回停止事件。"""
     stop_event = threading.Event()
@@ -647,6 +673,14 @@ def run_authenticated_service(args, directory):
         stop_recorder = start_document_recorder(auth_service, docs_dir / "md")
     except Exception as error:
         print(f"警告: 无法启动文档变更记录: {error}")
+    stop_sync = None
+    try:
+        stop_sync = start_repo_sync(auth_service, docs_dir / "md")
+        intervals = [repo.get("sync_interval") for repo in config.get("repositories") or []]
+        if config.get("repositories"):
+            print("已开启 SVN 定时同步：按各仓库配置的频率拉取更新（仓库行里的「更新频率」，0 表示不自动同步）")
+    except Exception as error:
+        print(f"警告: 无法启动 SVN 定时同步: {error}")
 
     bind = resolve_bind(args.bind, config["server"]["bind"])
     port = resolve_port(args.port, config["server"]["port"])
@@ -680,6 +714,8 @@ def run_authenticated_service(args, directory):
             stop_watcher.set()
         if stop_recorder is not None:
             stop_recorder.set()
+        if stop_sync is not None:
+            stop_sync.set()
         conn.close()
 
 

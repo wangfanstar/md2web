@@ -6,6 +6,7 @@
 """
 
 import hmac
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -297,6 +298,18 @@ def create_app(config, conn, auth_service, docs_dir):
             "events": database.document_events(conn, 200),
         })
 
+    @app.post("/__admin/sync")
+    def admin_sync():
+        """管理员立即按频率同步所有配置了 SVN 的仓库（返回每个仓库的结果）。"""
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        results = auth_service.sync_repositories(md_dir())
+        return jsonify({"ok": True, "results": results})
+
     @app.post("/__admin/password")
     def change_password():
         session, rejected = require_admin()
@@ -484,6 +497,22 @@ def create_app(config, conn, auth_service, docs_dir):
 
     # ---- 阶段三：SVN 提交与同步 ----
 
+    def commit_diff(operation_id):
+        """本次提交的差异（来自冻结清单里的草稿版本快照）。"""
+        row = conn.execute("SELECT reviewed_manifest FROM operations WHERE id = ?",
+                           (operation_id,)).fetchone()
+        if row is None:
+            return ""
+        try:
+            manifest = json.loads(row["reviewed_manifest"] or "{}")
+        except ValueError:
+            return ""
+        revision_id = manifest.get("draftRevisionId")
+        if not revision_id:
+            return ""
+        revision = conn.execute("SELECT unified_diff FROM revisions WHERE id = ?", (revision_id,)).fetchone()
+        return (revision["unified_diff"] or "") if revision else ""
+
     def credential_of(session):
         """提交/绑定时使用的 SVN 凭据：优先数据库中最新的（登录成功即更新），其次会话内存。"""
         stored = auth_service.stored_credential(session.get("user"))
@@ -568,6 +597,7 @@ def create_app(config, conn, auth_service, docs_dir):
         except operations.OperationError as error:
             credential_invalidated(session, error)
             return json_error(error.status, "commit_error", error.message, **error.extra)
+        result["diff"] = commit_diff(payload.get("operationId"))
         return jsonify({"ok": True, "result": result})
 
     @app.get("/__operations/<operation_id>")
@@ -584,6 +614,64 @@ def create_app(config, conn, auth_service, docs_dir):
             "svnRevision": row["svn_revision"], "errorCode": row["error_code"],
             "message": row["message"], "createdAt": row["created_at"], "finishedAt": row["finished_at"],
         }})
+
+    @app.get("/__svn/status")
+    def svn_status():
+        """文档同步状态：远端版本、已发布版本、最近检查时间、同步错误、是否有活动草稿冲突。"""
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        path = request.args.get("path") or ""
+        binding = server_config.match_repository(config, path)
+        if binding is None:
+            return json_error(400, "no_binding", "该文档未配置 SVN 仓库")
+        row = conn.execute("SELECT * FROM repo_bindings WHERE mount_path = ?", (binding["mount"],)).fetchone()
+        draft = conn.execute(
+            "SELECT COUNT(*) FROM drafts WHERE state = 'active' AND document_path = ?", (path,),
+        ).fetchone()[0]
+        credential = credential_of(session) or auth_service.sync_credential()
+        remote_revision = None
+        if credential is not None:
+            try:
+                remote_revision = operations.remote_revision(conn, auth_service.svn, config, binding, credential)
+            except operations.OperationError:
+                remote_revision = None
+        published = int(row["published_revision"] or 0) if row else 0
+        sync_error = row["sync_error"] if row else None
+        needs_merge = bool(draft) and (
+            sync_error == "conflicts" or (remote_revision is not None and remote_revision > published)
+        )
+        return jsonify({"ok": True, "status": {
+            "binding": {"id": binding["id"], "mount": binding["mount"], "url": binding["url"]},
+            "remoteRevision": remote_revision,
+            "publishedRevision": published,
+            "lastCheckedAt": row["last_checked_at"] if row else None,
+            "syncError": sync_error,
+            "hasDraft": bool(draft),
+            "needsMerge": needs_merge,
+            "intervalSeconds": operations.sync_interval_of(binding, config),
+            "syncCredential": bool(auth_service.sync_credential()),
+        }})
+
+    @app.get("/__svn/remote-diff")
+    def svn_remote_diff():
+        """远端最新内容与本地文件的统一差异（合并前对比）。"""
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        path = request.args.get("path") or ""
+        binding = server_config.match_repository(config, path)
+        if binding is None:
+            return json_error(400, "no_binding", "该文档未配置 SVN 仓库")
+        credential = credential_of(session)
+        if credential is None and not auth_service.sync_credential():
+            return json_error(401, "needs_auth", "需要 SVN 凭据：请登录 SVN 账号，或配置同步凭据环境变量")
+        try:
+            result = operations.remote_diff(conn, auth_service.svn, config, md_dir(), binding, path,
+                                            credential or auth_service.sync_credential())
+        except operations.OperationError as error:
+            return json_error(error.status, "remote_diff_error", error.message)
+        return jsonify({"ok": True, **result})
 
     @app.get("/__svn/log")
     def svn_log():

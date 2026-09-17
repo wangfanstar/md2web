@@ -145,11 +145,20 @@ def load_config(path, docs_dir, allow_incomplete=False):
         if mount in seen_mounts:
             raise ConfigError(f"repository.mount 重复: {mount}")
         seen_mounts.add(mount)
+        sync_interval = item.get("syncIntervalSeconds", None)
+        if sync_interval is not None:
+            try:
+                sync_interval = float(sync_interval)
+            except (TypeError, ValueError):
+                raise ConfigError(f"repositories[{index}].syncIntervalSeconds 必须是数值（秒，0 表示不自动同步）")
+            if sync_interval < 0:
+                raise ConfigError(f"repositories[{index}].syncIntervalSeconds 不能为负数")
         repositories.append({
             "id": repo_id,
             "mount": mount,
             "url": _check_url(item.get("url"), f"repositories[{index}].url"),
             "credential_group": str(item.get("credential_group") or credential_group).strip() or credential_group,
+            "sync_interval": sync_interval,
         })
 
     ai_raw = raw.get("ai") or {}
@@ -222,7 +231,8 @@ def config_to_json(config):
         "sync": dict(config["sync"]),
         "repositories": [
             {"id": repo["id"], "mount": repo["mount"], "url": repo["url"],
-             "credential_group": repo["credential_group"]}
+             "credential_group": repo["credential_group"],
+             "syncIntervalSeconds": repo.get("sync_interval")}
             for repo in config["repositories"]
         ],
         "ai": dict(config["ai"]),

@@ -4,6 +4,7 @@
 """
 
 import base64
+import difflib
 import binascii
 import hashlib
 import io
@@ -104,6 +105,18 @@ def read_md_meta(md_dir, raw):
         "mtime": int(path.stat().st_mtime),
         "hash": text_hash(text),
     }
+
+
+def unified_text_diff(before, after, before_label="之前", after_label="之后", name=""):
+    """返回两段文本的统一差异（difflib），供同步冲突与提交结果展示。"""
+    lines = difflib.unified_diff(
+        normalize_eol(before or "").split("\n"),
+        normalize_eol(after or "").split("\n"),
+        fromfile=("%s %s" % (name, before_label)).strip(),
+        tofile=("%s %s" % (name, after_label)).strip(),
+        lineterm="",
+    )
+    return "\n".join(lines)
 
 
 def scan_md_tree(md_dir):

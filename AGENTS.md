@@ -130,6 +130,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 本机管理员账号只能本地编辑（草稿）与配置；提交 SVN 时要求补充 SVN 账号（仅会话内存），界面与提示不得暗示本机账号可直接合入。
 - 登录接口会自动识别本机管理员账号（`auth_source_id = local-admin`）：直接用本地口令校验并以管理员身份登录，**不需要 SVN 校验**；普通账号仍走 SVN 认证路径。
 - 管理员界面数据来源：登录记录/使用量来自 `audit_events`（登录时记录 `client_ip`）、`operations` 与 `sessions`；文档更新时间/次数来自 `operations`（published），文件夹大小来自实时扫描 `docs/md`，增删记录由 `serve.py` 后台线程每 10 秒对比 `document_snapshots` 写入 `document_events`（首次为基线不产生事件）。
+- 生成的 `index.html` 会给自有资源加内容版本号（`version_asset_urls` → `lib/x.js?v=<sha1>`），改 `web/` 后必须重建才会更新版本号；排查「改了没生效/放大丢字」先确认浏览器拿到的是新脚本。
 - 搜索结果阅读模式下：命中工具条（sticky，z-index 960）在上，操作行通过 `--reading-toolbar-h` 下移（z-index 940）两者同时可见；不要再把操作行隐藏或让两者同 top 重叠。
 - 放大查看/导出禁止直接克隆已渲染的 SVG（会丢文字或箭头）：Mermaid 走 `MermaidRender.render(data-source)`，PacketDiag 走 `PacketDiagRerender(figure)`。
 - 本文目录固定靠窗口右缘（`--docs-toc-right`），左边缘为拖动手柄调整**宽度**（`md2web:toc-width`，写入 `--docs-toc-width`）；目录内容放在内层 `.docs-page-toc-scroll`，外层禁止横向滚动，拖动手柄才不会被滚动条带偏。

@@ -2,6 +2,7 @@
 
 import argparse
 import html
+import hashlib
 import json
 import re
 import shutil
@@ -816,6 +817,19 @@ def generate_readme(md_files, title="文档中心"):
     print("  [生成] README.md (首页索引)")
 
 
+def version_asset_urls(html_text):
+    """给本地 lib/*.js|css 引用加内容版本号（?v=<sha1 前 10 位>），避免浏览器缓存旧脚本。"""
+    def replace(match):
+        prefix, path, suffix = match.group(1), match.group(2), match.group(3)
+        candidate = DOCS_DIR / path
+        if not candidate.is_file():
+            return match.group(0)
+        digest = hashlib.sha1(candidate.read_bytes()).hexdigest()[:10]
+        return prefix + path + "?v=" + digest + suffix
+
+    return re.sub(r'(src="|href=")(lib/[^"?]+\.(?:js|css))(")', replace, html_text)
+
+
 def generate_index_html(title="文档中心"):
     """生成 index.html"""
     prism_lang_map_js = json.dumps(PRISM_LANG_FALLBACK, ensure_ascii=False)
@@ -927,7 +941,7 @@ def generate_index_html(title="文档中心"):
 </html>
 """
     index_path = DOCS_DIR / "index.html"
-    index_path.write_text(html_text, encoding="utf-8")
+    index_path.write_text(version_asset_urls(html_text), encoding="utf-8")
     print("  [生成] index.html")
 
 

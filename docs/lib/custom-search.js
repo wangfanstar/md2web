@@ -2128,7 +2128,6 @@
       '<span class="custom-search-input-icon">🔍</span>',
       '<button type="button" class="custom-search-filter-toggle" data-role="filter-toggle" title="搜索范围与模式" aria-label="搜索范围与模式" aria-expanded="false">⚙</button>',
       '<input type="search" class="custom-search-sidebar-input" placeholder="搜索文档（/ 聚焦，Ctrl+K 全局）" aria-label="搜索文档">',
-      '<button type="button" class="custom-search-filter-toggle" data-role="filter-toggle" title="搜索范围与模式" aria-label="搜索范围与模式" aria-expanded="false">⚙</button>',
       '<button type="button" class="custom-search-input-btn" data-role="clear-search" aria-label="清空搜索">×</button>',
       '</div>',
       searchFiltersHtml(),

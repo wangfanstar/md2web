@@ -222,6 +222,25 @@ if command == "commit":
     print("Committed revision %d." % state["revision"])
     sys.exit(0)
 
+if command == "cat":
+    url = args[-1]
+    name = url.rstrip("/").split("/")[-1]
+    state = load_state()
+    files = state.get("files", {})
+    content = files.get(name)
+    if content is None:
+        for relative, value in files.items():
+            if relative.split("/")[-1] == name:
+                content = value
+                break
+    if content is None:
+        sys.stderr.write("svn: E160013: File not found\n")
+        sys.exit(1)
+    # 以 UTF-8 字节写出，避免 Windows 控制台代码页破坏中文
+    sys.stdout.buffer.write(content.encode("utf-8"))
+    sys.stdout.buffer.flush()
+    sys.exit(0)
+
 if command == "export":
     url = args[1]
     target = Path(args[2])
@@ -1509,6 +1528,60 @@ class SvnOperationTests(ServerTestBase):
         self.assertEqual(ctx.exception.status, 409)
         self.assertIn("UUID", str(ctx.exception))
 
+    def test_sync_due_respects_interval(self):
+        now = 1000.0
+        self.assertFalse(server_operations.sync_due(None, 0, now))
+        self.assertFalse(server_operations.sync_due({"last_checked_at": None}, 0, now))
+        self.assertTrue(server_operations.sync_due({"last_checked_at": None}, 60, now))
+        self.assertFalse(server_operations.sync_due({"last_checked_at": "1970-01-01T00:16:30Z"}, 60, now))
+        self.assertTrue(server_operations.sync_due({"last_checked_at": "1970-01-01T00:15:00Z"}, 60, now))
+        self.assertEqual(server_operations.sync_interval_of({"sync_interval": None}, self.config), 120.0)
+        self.assertEqual(server_operations.sync_interval_of({"sync_interval": 0}, self.config), 0.0)
+
+    def test_sync_skips_document_with_active_draft_and_reports_conflict(self):
+        binding = server_config.match_repository(self.config, self.document_path)
+        server_operations.sync_binding(self.conn, self.svn, self.config, self.md_dir, binding, ("alice", "good"))
+        self.make_draft("# 时钟树设计\n\n本地草稿基线\n")
+        with self.conn:
+            self.conn.execute("UPDATE repo_bindings SET published_revision = 2 WHERE mount_path = 'md/硬件设计'")
+        state = self.repo_state()
+        state["files"]["时钟树设计.md"] = "# 时钟树设计\n\n远端新版本\n"
+        state["revision"] = 7
+        self.state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+        result = server_operations.sync_binding(self.conn, self.svn, self.config, self.md_dir, binding, ("alice", "good"))
+        self.assertEqual(result["revision"], 7)
+        self.assertEqual(result["files"], [])
+        self.assertEqual(result["conflicts"], ["md/硬件设计/时钟树设计.md"])
+        self.assertIn("远端基线", self.published_file.read_text(encoding="utf-8"))
+        row = self.conn.execute("SELECT * FROM repo_bindings WHERE mount_path = 'md/硬件设计'").fetchone()
+        self.assertEqual(row["sync_error"], "conflicts")
+        self.assertEqual(row["published_revision"], 7)
+
+    def test_sync_all_skips_repositories_without_due_interval(self):
+        for repo in self.config["repositories"]:
+            repo["sync_interval"] = 0
+        self.assertEqual(server_operations.sync_all(self.conn, self.svn, self.config, self.md_dir,
+                                                    ("alice", "good")), [])
+        for repo in self.config["repositories"]:
+            repo["sync_interval"] = 3600
+        server_operations.sync_binding(self.conn, self.svn, self.config, self.md_dir,
+                                       server_config.match_repository(self.config, self.document_path),
+                                       ("alice", "good"))
+        # 刚同步过的仓库（有 last_checked_at）不应再次同步
+        results = server_operations.sync_all(self.conn, self.svn, self.config, self.md_dir, ("alice", "good"))
+        self.assertNotIn("md/硬件设计", [item.get("binding") for item in results])
+
+    def test_remote_diff_compares_local_and_remote(self):
+        binding = server_config.match_repository(self.config, self.document_path)
+        state = self.repo_state()
+        state["files"]["时钟树设计.md"] = "# 时钟树设计\n\n远端更新内容\n"
+        self.state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+        result = server_operations.remote_diff(self.conn, self.svn, self.config, self.md_dir, binding,
+                                               self.document_path, ("alice", "good"))
+        self.assertEqual(result["remoteRevision"], 3)
+        self.assertIn("时钟树设计.md", result["diff"])
+        self.assertIn("远端更新内容", result["diff"])
+
     def test_sync_binding_exports_and_tracks_revision(self):
         binding = server_config.match_repository(self.config, self.document_path)
         first = server_operations.sync_binding(self.conn, self.svn, self.config, self.md_dir, binding,
@@ -1636,6 +1709,47 @@ class SvnApiTests(ServerTestBase):
         self.assertIsNone(self.conn.execute("SELECT * FROM svn_credentials").fetchone(),
                           "口令失效后应清理旧密文")
 
+    def test_status_and_remote_diff_endpoints(self):
+        headers_csrf = self.login()
+        headers = {"X-CSRF-Token": headers_csrf}
+        self.client.put("/__md/draft", json={"path": "md/硬件设计/时钟树设计.md", "content": "# A\n\n草稿\n",
+                                             "expectedVersion": 0}, headers=headers)
+        with self.conn:
+            self.conn.execute("UPDATE repo_bindings SET published_revision = 5, sync_error = 'conflicts'"
+                              " WHERE mount_path = 'md/硬件设计'")
+        status = self.client.get("/__svn/status?path=md/硬件设计/时钟树设计.md").get_json()["status"]
+        self.assertTrue(status["hasDraft"])
+        self.assertTrue(status["needsMerge"], status)
+        self.assertEqual(status["remoteRevision"], 5)
+        self.assertEqual(status["publishedRevision"], 5)
+        self.assertEqual(status["syncError"], "conflicts")
+
+        # 让远端内容与本地不同，才能看到差异
+        state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        state["files"]["时钟树设计.md"] = "# A\n\n远端新内容\n"
+        state["revision"] = 6
+        self.state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+        remote = self.client.get("/__svn/remote-diff?path=md/硬件设计/时钟树设计.md").get_json()
+        self.assertTrue(remote["ok"], remote)
+        self.assertIn("时钟树设计.md", remote["diff"])
+        self.assertIn("远端新内容", remote["diff"])
+        self.assertEqual(remote["remoteRevision"], 6)
+
+        self.assertEqual(self.client.get("/__svn/status?path=md/其他/x.md").status_code, 400)
+
+    def test_commit_response_includes_diff(self):
+        headers_csrf = self.login()
+        headers = {"X-CSRF-Token": headers_csrf}
+        self.client.put("/__md/draft", json={"path": "md/硬件设计/时钟树设计.md", "content": "# A\n\n提交内容\n",
+                                             "expectedVersion": 0}, headers=headers)
+        prepared = self.client.post("/__svn/prepare", json={"path": "md/硬件设计/时钟树设计.md",
+                                                            "message": "docs: 带差异", "expectedVersion": 1},
+                                    headers=headers).get_json()
+        committed = self.client.post("/__svn/commit", json={"operationId": prepared["operationId"]},
+                                     headers=headers).get_json()
+        self.assertTrue(committed["ok"], committed)
+        self.assertIn("提交内容", committed["result"]["diff"])
+
     def test_prepare_then_commit_via_api(self):
         headers_csrf = self.login()
         headers = {"X-CSRF-Token": headers_csrf}
@@ -1717,6 +1831,13 @@ class AdminUsageTests(ServerTestBase):
         self.assertEqual(payload["repositoryCount"], len(self.config["repositories"]))
         self.assertIn("sessions", payload)
         self.assertIn("operations", payload)
+
+    def test_admin_sync_requires_admin(self):
+        self.assertEqual(self.client.post("/__admin/sync", json={}).status_code, 401)
+        self.login("alice", "good", "10.0.0.5")
+        response = self.client.post("/__admin/sync", json={},
+                                    headers={"X-CSRF-Token": self.client.get("/__auth/session").get_json()["csrfToken"]})
+        self.assertEqual(response.status_code, 403)
 
     def test_usage_days_is_clamped(self):
         self.login("admin", "admin", "127.0.0.1")

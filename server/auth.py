@@ -7,12 +7,13 @@
 """
 
 import hashlib
+import os
 import secrets
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import database, documents, passwords
+from . import database, documents, operations, passwords
 from .secrets import decrypt, encrypt
 from .svn import SvnError
 
@@ -338,6 +339,26 @@ class AuthService:
         }
 
     # ---- SVN 口令存储（本机密钥可逆加密，登录成功后更新，提交时复用） ----
+
+    def sync_credential(self):
+        """定时同步用的只读凭据：环境变量 sync.credential_name 的 "用户名:口令"（可选）。"""
+        name = str((self.config.get("sync") or {}).get("credential_name") or "").strip()
+        if not name:
+            return None
+        value = os.environ.get(name) or ""
+        if ":" not in value:
+            return None
+        user, _, password = value.partition(":")
+        if not user.strip() or not password:
+            return None
+        return (user.strip(), password)
+
+    def sync_repositories(self, md_dir, logger=None):
+        """按各仓库频率拉取远端更新（跳过有活动草稿的文档并报告冲突）。"""
+        credential = self.sync_credential()
+        with self._db_lock:
+            return operations.sync_all(self.conn, self.svn, self.config, md_dir,
+                                       credential=credential, logger=logger)
 
     def record_document_snapshot(self, md_dir):
         """扫描 docs/md 并记录增删改（首次为基线，不产生事件）。"""

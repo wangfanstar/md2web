@@ -302,6 +302,15 @@ class SvnClient:
         match = re.search(r"Committed revision (\d+)", output or "")
         return int(match.group(1)) if match else None
 
+    def cat(self, url, revision=None, config_dir=None, username=None, password=None):
+        """读取远端文件内容（svn cat），用于与本地草稿/已发布内容做差异对比。"""
+        creds, stdin_text = self._credential_args(username, password)
+        args = ["cat", "--non-interactive", "--no-auth-cache"] + creds
+        if revision is not None:
+            args += ["-r", str(int(revision))]
+        args.append(url)
+        return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
+
     def log(self, target, limit=50, config_dir=None, username=None, password=None, revision=None):
         creds, stdin_text = self._credential_args(username, password)
         args = ["log", "--xml", "--limit", str(int(limit)), "--non-interactive", "--no-auth-cache"]

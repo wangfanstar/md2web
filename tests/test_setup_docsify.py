@@ -879,6 +879,37 @@ class SourceDocumentsTests(unittest.TestCase):
             self.assertGreater((ROOT / name).stat().st_size, 0, name + " 为空文件")
 
 
+class AssetVersionTests(TempDirTestCase):
+    """index.html 里的本地 lib 资源要带内容版本号，避免浏览器缓存旧脚本（修复放大丢字等问题）。"""
+
+    def test_local_assets_are_versioned(self):
+        self.write_doc("使用说明/a.md", "# A\n")
+        lib = self.docs / "lib"
+        lib.mkdir(parents=True, exist_ok=True)
+        for name in ("mermaid-init.js", "media-viewer.js", "md-editor.js", "workspace.css"):
+            (lib / name).write_text("/* " + name + " */\n", encoding="utf-8")
+        self.module.generate_index_html("测试站")
+        html = (self.docs / "index.html").read_text(encoding="utf-8")
+        for name in ("lib/mermaid-init.js", "lib/media-viewer.js", "lib/md-editor.js", "lib/workspace.css"):
+            self.assertIn(name + "?v=", html, name + " 缺少内容版本号")
+
+    def test_version_changes_with_content(self):
+        target = self.docs / "lib"
+        target.mkdir(parents=True, exist_ok=True)
+        script = target / "demo.js"
+        script.write_text("console.log(1);\n", encoding="utf-8")
+        first = self.module.version_asset_urls('<script src="lib/demo.js"></script>')
+        script.write_text("console.log(2);\n", encoding="utf-8")
+        second = self.module.version_asset_urls('<script src="lib/demo.js"></script>')
+        self.assertNotEqual(first, second)
+        self.assertIn("lib/demo.js?v=", first)
+        # 已带查询串或缺失文件保持原样
+        self.assertEqual(self.module.version_asset_urls('<script src="lib/demo.js?v=1"></script>'),
+                         '<script src="lib/demo.js?v=1"></script>')
+        self.assertEqual(self.module.version_asset_urls('<script src="lib/missing.js"></script>'),
+                         '<script src="lib/missing.js"></script>')
+
+
 class Python36CompatibilityTests(unittest.TestCase):
     """保证随包发布的 Python 代码能在 Python 3.6.8（服务器环境）上解析并避免 3.7+ 专用 API。"""
 

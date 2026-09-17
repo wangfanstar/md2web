@@ -54,6 +54,8 @@
       '<input type="text" data-repo="mount" placeholder="docs 下的目录（如 md/硬件设计）" value="' + escapeHtml(item.mount) + '">',
       '<input type="text" data-repo="url" placeholder="SVN 地址 https://…" value="' + escapeHtml(item.url) + '">',
       '<input type="text" data-repo="credential_group" placeholder="凭据分组（可选）" value="' + escapeHtml(item.credential_group || '') + '">',
+      '<input type="number" min="0" step="30" data-repo="syncIntervalSeconds" placeholder="更新频率（秒，0=不同步）" value="'
+        + escapeHtml(item.syncIntervalSeconds === null || item.syncIntervalSeconds === undefined ? '' : String(item.syncIntervalSeconds)) + '">',
       '<button type="button" data-settings-action="remove-repo" title="删除">×</button>',
       '</div>'
     ].join('');
@@ -160,7 +162,7 @@
       '<h4>仓库映射（docs 目录 ↔ SVN）</h4>',
       '<p class="settings-note">每个文件夹都可以单独映射到一个 SVN 库（可添加多条，按目录段最长前缀匹配，嵌套目录优先更具体的挂载点）。提交时按文档所在目录自动选择对应仓库。</p>',
       '<div data-settings-repos>' + (config.repositories || []).map(repositoryRow).join('') + '</div>',
-      '<div class="settings-row-actions"><button type="button" data-settings-action="add-repo">+ 添加映射</button></div>',
+      '<p class="settings-note">「更新频率（秒）」留空表示用下方「默认更新频率」；填 0 表示该库不自动同步。自动同步会跳过正在编辑（有活动草稿）的文档并提示合并。</p>','<div class="settings-row-actions"><button type="button" data-settings-action="add-repo">+ 添加映射</button><button type="button" data-settings-action="sync-now">立即同步 SVN 库</button></div>',
       '</section>',
       '<section class="settings-section">',
       '<h4>AI 助手（全站默认值）</h4>',
@@ -195,7 +197,7 @@
       '<h4>其他</h4>',
       '<div class="settings-grid">',
       '<label>同步凭据环境变量<input type="text" data-config="sync.credential_name" placeholder="如 MD2WEB_SVN_READONLY" value="' + escapeHtml(sync.credential_name || '') + '"></label>',
-      '<label>检查间隔（秒）<input type="number" step="10" min="10" data-config="sync.interval_seconds" value="' + escapeHtml(String(sync.interval_seconds || 120)) + '"></label>',
+      '<label>默认更新频率（秒）<input type="number" step="10" min="10" data-config="sync.interval_seconds" value="' + escapeHtml(String(sync.interval_seconds || 120)) + '"></label>',
       '</div>',
       '</section>'
     ].join('');
@@ -400,6 +402,28 @@
     });
   }
 
+  function syncNow() {
+    setStatus('正在同步 SVN 库（跳过正在编辑的文档）…');
+    api('__admin/sync', { method: 'POST', body: JSON.stringify({}) }).then(function (payload) {
+      var results = payload.results || [];
+      if (!results.length) {
+        setStatus('没有到期的仓库（或未配置仓库映射）');
+        return;
+      }
+      var lines = results.map(function (item) {
+        if (item.error) {
+          return item.binding + '：失败（' + item.error + '）';
+        }
+        return item.binding + '：r' + (item.revision || '?')
+          + '，更新 ' + ((item.files || []).length) + ' 个文件'
+          + ((item.conflicts || []).length ? '，冲突 ' + item.conflicts.length + ' 个（正在编辑，未覆盖）' : '');
+      });
+      setStatus('同步完成：' + lines.join('；'));
+    }).catch(function (error) {
+      setStatus('同步失败：' + error.message, true);
+    });
+  }
+
   function personalAiConfig() {
     return (window.AIAssistant && window.AIAssistant.getConfig && window.AIAssistant.getConfig()) || { scope: [] };
   }
@@ -494,7 +518,12 @@
         id: row.querySelector('[data-repo="id"]').value.trim(),
         mount: row.querySelector('[data-repo="mount"]').value.trim(),
         url: row.querySelector('[data-repo="url"]').value.trim(),
-        credential_group: row.querySelector('[data-repo="credential_group"]').value.trim()
+        credential_group: row.querySelector('[data-repo="credential_group"]').value.trim(),
+        syncIntervalSeconds: (function () {
+          var field = row.querySelector('[data-repo="syncIntervalSeconds"]');
+          var value = field ? field.value.trim() : '';
+          return value === '' ? null : Number(value);
+        }())
       };
     }).filter(function (repo) { return repo.id || repo.mount || repo.url; });
     return config;
@@ -626,6 +655,8 @@
         testAuth();
       } else if (action === 'load-usage') {
         loadUsage();
+      } else if (action === 'sync-now') {
+        syncNow();
       } else if (action === 'load-documents') {
         loadDocuments();
       } else if (target.getAttribute && target.getAttribute('data-doc-sort')) {
