@@ -148,6 +148,8 @@
         }
         placeholder.innerHTML = '';
         var svgClone = svg.cloneNode(true);
+        // 无法按源码重渲染时（例如外部 SVG）：把 HTML 标签的 foreignObject 转成 SVG 文本，避免丢文字
+        simplifyForeignObjects(svgClone);
         svgClone.removeAttribute('width');
         svgClone.removeAttribute('height');
         svgClone.style.maxWidth = 'none';

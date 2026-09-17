@@ -170,8 +170,8 @@ def document_image_dir(md_dir, raw):
 
 
 def next_image_sequence(directory, stem):
-    """扫描同目录图片，返回该文档可用的下一个序号。"""
-    pattern = re.compile(r"^" + re.escape(stem) + r"-(\d+)-")
+    """扫描同目录图片，返回该文档可用的下一个序号（命名形如 文档名-20260917-113045-1.png）。"""
+    pattern = re.compile(r"^" + re.escape(stem) + r"-\d{8}-\d{6}-(\d+)\.")
     highest = 0
     if directory.is_dir():
         for entry in sorted(directory.iterdir()):
@@ -186,7 +186,7 @@ def next_image_sequence(directory, stem):
 def save_document_image(md_dir, raw, mime_type, data, now=None):
     """把粘贴的图片写入文档同级 images/，返回相对路径（供 Markdown 引用）。
 
-    命名规则：<文档名>-<序号>-<时间戳>.<扩展名>，例如 时钟树设计-1-20260917-113045.png
+    命名规则：<文档名>-<时间戳>-<序号>.<扩展名>，例如 时钟树设计-20260917-113045-1.png
     """
     extension = image_extension(mime_type)
     blob = decode_image_data(data)
@@ -198,7 +198,7 @@ def save_document_image(md_dir, raw, mime_type, data, now=None):
         raise MdSaveError(400, "无法创建图片目录：%s" % error)
     sequence = next_image_sequence(directory, stem)
     stamp = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
-    name = "%s-%d-%s%s" % (stem, sequence, stamp, extension)
+    name = "%s-%s-%d%s" % (stem, stamp, sequence, extension)
     target = directory / name
     handle = tempfile.NamedTemporaryFile(
         mode="wb", delete=False, dir=str(directory), prefix="." + name + ".", suffix=".tmp",

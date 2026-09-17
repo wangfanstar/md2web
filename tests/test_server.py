@@ -1309,23 +1309,23 @@ class ImageUploadTests(ServerTestBase):
         self.assertEqual(response.status_code, 200, response.get_json())
         payload = response.get_json()
         self.assertEqual(payload["path"], "images/" + payload["name"])
-        self.assertTrue(payload["name"].startswith("时钟树设计-1-"), payload["name"])
+        self.assertRegex(payload["name"], r"^时钟树设计-\d{8}-\d{6}-1\.png$")
         self.assertTrue(payload["name"].endswith(".png"), payload["name"])
         target = self.docs / "md" / "硬件设计" / "images" / payload["name"]
         self.assertTrue(target.is_file())
         self.assertEqual(target.read_bytes(), base64.b64decode(self.PNG))
         self.assertEqual(payload["sequence"], 1)
         second = self.upload().get_json()
-        self.assertTrue(second["name"].startswith("时钟树设计-2-"), second["name"])
+        self.assertRegex(second["name"], r"^时钟树设计-\d{8}-\d{6}-2\.png$")
         self.assertEqual(second["sequence"], 2)
         third = self.upload(mime="image/jpeg").get_json()
-        self.assertTrue(third["name"].endswith(".jpg"), third["name"])
+        self.assertRegex(third["name"], r"^时钟树设计-\d{8}-\d{6}-3\.jpg$")
         self.assertEqual(third["sequence"], 3)
 
     def test_upload_accepts_extensionless_and_data_url(self):
         payload = self.upload(path="md/硬件设计/时钟树设计",
                               data="data:image/png;base64," + self.PNG).get_json()
-        self.assertTrue(payload["name"].startswith("时钟树设计-"), payload["name"])
+        self.assertRegex(payload["name"], r"^时钟树设计-\d{8}-\d{6}-\d+\.png$")
 
     def test_upload_requires_login_and_csrf(self):
         anonymous = self.app.test_client()

@@ -782,11 +782,15 @@
       setStatus('图片过大（上限 8 MB）：' + (file.name || ''));
       return Promise.reject(new Error('图片过大'));
     }
-    if (state.localMode || !authAvailable()) {
+    if (state.localMode) {
       return readFileAsDataUrl(file).then(function (dataUrl) {
         insertEmbeddedImage(dataUrl, alt, '本地模式：图片已内嵌为 data URL（未写入 images/ 目录）');
         return { embedded: true };
       });
+    }
+    if (!authAvailable()) {
+      setStatus('请先用 SVN 账号登录后再粘贴图片：图片会保存到文档同级 images/ 并插入引用');
+      return Promise.reject(new Error('需要登录后才能上传图片'));
     }
     setStatus('正在上传图片' + (file.name ? ' ' + file.name : '') + ' …');
     return readFileAsDataUrl(file).then(function (dataUrl) {
@@ -1088,11 +1092,13 @@
         var container = document.createElement('div');
         container.className = 'mermaid';
         container.textContent = code.textContent;
+        container.setAttribute('data-source', code.textContent);
         pre.parentNode.replaceChild(container, pre);
         mermaidNodes.push(container);
       } else if (name === 'packetdiag' && window.PacketDiag) {
         var figure = document.createElement('figure');
         figure.className = 'packetdiag-figure';
+        figure.setAttribute('data-source', code.textContent);
         var canvas = document.createElement('canvas');
         canvas.setAttribute('role', 'img');
         figure.appendChild(canvas);
