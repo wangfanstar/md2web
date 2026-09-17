@@ -203,6 +203,12 @@ if command == "diff":
             print("+" + line)
     sys.exit(0)
 
+if command == "add":
+    targets = [item for item in args[1:] if not item.startswith("-")]
+    if targets:
+        print("A         " + targets[-1])
+    sys.exit(0)
+
 if command == "commit":
     if MODE == "auth_fail":
         sys.stderr.write("svn: E170001: Authentication failed\n")
@@ -211,9 +217,24 @@ if command == "commit":
         sys.stderr.write("svn: E160028: File is out of date\n")
         sys.exit(1)
     record_credential(args)
-    relative = repo_relative(args[1])
+    targets = []
+    for item in args[1:]:
+        if item.startswith("-"):
+            break
+        targets.append(item)
     state = load_state()
-    state.setdefault("files", {})[relative] = Path(args[1]).read_text(encoding="utf-8")
+    for target in targets:
+        path = Path(target)
+        if path.is_dir():
+            for child in sorted(path.rglob("*")):
+                if child.is_file():
+                    relative = repo_relative(str(child))
+                    if relative:
+                        state.setdefault("files", {})[relative] = child.read_text(encoding="utf-8", errors="replace")
+            continue
+        relative = repo_relative(str(path))
+        if relative:
+            state.setdefault("files", {})[relative] = path.read_text(encoding="utf-8", errors="replace")
     state["revision"] = int(state.get("revision", 0)) + 1
     state.setdefault("log", []).insert(0, {"revision": state["revision"], "author": "alice",
                                            "date": "2026-09-15T08:00:00.000000Z",
@@ -594,6 +615,37 @@ class FakeSvn:
         if self.error and self.error.code in ("unreachable", "timeout", "cert_error"):
             raise self.error
         return self.anonymous
+
+
+class ReferencedImagesTests(ServerTestBase):
+    """文档引用的 images 图片解析：用于提交时一并存档。"""
+
+    def setUp(self):
+        super().setUp()
+        self.md = self.docs / "md"
+        self.doc_dir = self.md / "硬件设计"
+        (self.doc_dir / "images").mkdir(parents=True, exist_ok=True)
+        (self.doc_dir / "doc.md").write_text("# x\n", encoding="utf-8")
+        (self.doc_dir / "images" / "a.png").write_bytes(b"PNG-A")
+        (self.doc_dir / "images" / "b.jpg").write_bytes(b"JPG-B")
+
+    def test_parses_markdown_and_html_references(self):
+        content = "\n".join([
+            "# t",
+            "![图片](images/a.png)",
+            '<img src="images/b.jpg">',
+            "![越界](../secret.png)",
+            "![不存在](images/none.png)",
+            "![带说明](images/a.png \"标题\")",
+        ])
+        self.assertEqual(server_documents.referenced_images(self.md, "md/硬件设计/doc.md", content),
+                         ["images/a.png", "images/b.jpg"])
+
+    def test_ignores_traversal_and_missing_files(self):
+        self.assertEqual(server_documents.referenced_images(
+            self.md, "md/硬件设计/doc.md", "![x](images/../../secret.png)"), [])
+        self.assertEqual(server_documents.referenced_images(
+            self.md, "md/硬件设计/doc.md", "![x](images/missing.png)"), [])
 
 
 class DocumentsTests(ServerTestBase):
@@ -1455,6 +1507,24 @@ class SvnOperationTests(ServerTestBase):
         binding = self.conn.execute("SELECT * FROM repo_bindings WHERE mount_path = 'md/硬件设计'").fetchone()
         self.assertEqual(binding["published_revision"], 4)
         self.assertEqual(binding["repository_uuid"], "11111111-2222-3333-4444-555555555555")
+
+    def test_commit_includes_referenced_images(self):
+        images = self.mount_dir / "images"
+        images.mkdir(parents=True, exist_ok=True)
+        (images / "shot.png").write_text("PNG-CONTENT", encoding="utf-8")
+        content = "# 时钟树设计\n\n远端基线\n\n![图](images/shot.png)\n"
+        server_drafts.save_draft(self.conn, self.alice, self.md_dir, self.document_path, content, expected_version=0)
+        prepared = server_operations.prepare_commit(self.conn, self.alice, self.config, self.md_dir,
+                                                    self.document_path, "docs: 带图片", expected_version=1)
+        self.assertEqual(prepared["manifest"]["images"], ["images/shot.png"])
+        result = server_operations.run_commit(self.conn, self.svn, self.config, self.md_dir, self.workspaces,
+                                              prepared["operationId"], self.alice, ("alice", "good"))
+        self.assertEqual(result["state"], "published")
+        self.assertEqual(result["images"], ["shot.png"])
+        state = self.repo_state()
+        self.assertIn("images/shot.png", state["files"])
+        self.assertEqual(state["files"]["images/shot.png"], "PNG-CONTENT")
+        self.assertIn("时钟树设计.md", state["files"])
 
     def test_commit_is_idempotent(self):
         self.make_draft()

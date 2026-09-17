@@ -1,7 +1,8 @@
 (function () {
   'use strict';
 
-  var state = { overlay: null, config: null, busy: false, documents: null, docSort: { key: "mtime", dir: -1 } };
+  var state = { overlay: null, config: null, busy: false, documents: null,
+    docSort: { key: "mtime", dir: -1 }, tab: null };
 
   function escapeHtml(value) {
     return String(value).replace(/[&<>"']/g, function (char) {
@@ -75,7 +76,7 @@
     }
     var config = window.AIAssistant.getConfig() || {};
     return [
-      '<section class="settings-section">',
+      '<section class="settings-section" data-settings-tab="ai">',
       '<h4>AI 助手（我的设置，仅本机浏览器）</h4>',
       '<p class="settings-note">接口与 Key 只保存在浏览器 localStorage；「参考源码路径」会随提问发给模型，便于引用代码库中的位置。</p>',
       '<div class="settings-grid">',
@@ -102,6 +103,87 @@
     ].join('');
   }
 
+  var TABS = [
+    { id: 'ai', label: 'AI 助手' },
+    { id: 'repo', label: 'SVN 与仓库' },
+    { id: 'account', label: '账号' },
+    { id: 'query', label: '信息查询' }
+  ];
+  var TAB_STORAGE = 'md2web:settings-tab';
+
+  function availableTabs() {
+    var body = state.overlay && state.overlay.querySelector('[data-settings-body]');
+    if (!body) {
+      return [];
+    }
+    var present = {};
+    Array.prototype.forEach.call(body.querySelectorAll('[data-settings-tab]'), function (node) {
+      present[node.getAttribute('data-settings-tab')] = true;
+    });
+    return TABS.filter(function (item) { return present[item.id]; });
+  }
+
+  function switchTab(id) {
+    var body = state.overlay && state.overlay.querySelector('[data-settings-body]');
+    if (!body) {
+      return;
+    }
+    var tabs = availableTabs();
+    var wanted = tabs.some(function (item) { return item.id === id; }) ? id : (tabs[0] && tabs[0].id);
+    if (!wanted) {
+      return;
+    }
+    state.tab = wanted;
+    Array.prototype.forEach.call(body.querySelectorAll('[data-settings-tab]'), function (node) {
+      node.hidden = node.getAttribute('data-settings-tab') !== wanted;
+    });
+    Array.prototype.forEach.call(body.querySelectorAll('[data-settings-tab-button]'), function (button) {
+      var active = button.getAttribute('data-settings-tab-button') === wanted;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    var saveButton = state.overlay.querySelector('[data-settings-save]');
+    if (saveButton) {
+      saveButton.hidden = !(wanted === 'ai' || wanted === 'repo');
+    }
+    try {
+      window.localStorage.setItem(TAB_STORAGE, wanted);
+    } catch (error) { /* 隐私模式忽略 */ }
+    if (wanted === 'query') {
+      loadUsage();
+      loadDocuments();
+    }
+  }
+
+  function renderTabs() {
+    var body = state.overlay && state.overlay.querySelector('[data-settings-body]');
+    if (!body) {
+      return;
+    }
+    var tabs = availableTabs();
+    if (!tabs.length) {
+      return;
+    }
+    var bar = body.querySelector('.settings-tabs');
+    if (!bar) {
+      bar = document.createElement('nav');
+      bar.className = 'settings-tabs';
+      bar.setAttribute('role', 'tablist');
+      body.insertBefore(bar, body.firstChild);
+    }
+    bar.innerHTML = tabs.map(function (item) {
+      return '<button type="button" role="tab" data-settings-tab-button="' + item.id + '"'
+        + ' aria-selected="false">' + escapeHtml(item.label) + '</button>';
+    }).join('');
+    var saved = null;
+    try {
+      saved = window.localStorage.getItem(TAB_STORAGE);
+    } catch (error) {
+      saved = null;
+    }
+    switchTab(state.tab || saved || tabs[0].id);
+  }
+
   function renderForm() {
     var overlay = state.overlay;
     var body = overlay.querySelector('[data-settings-body]');
@@ -114,6 +196,7 @@
         + '<p class="settings-note">离线浏览（file://）为只读模式，无法修改服务端配置。请通过'
         + ' <code>python serve.py</code> 启动认证服务后访问。</p></section>';
       overlay.querySelector('[data-settings-save]').hidden = true;
+      renderTabs();
       renderPersonalScope();
       return;
     }
@@ -128,16 +211,18 @@
         + '</ol>'
         + '<p class="settings-note">默认管理员账号：<code>admin / admin</code>（首次登录后请尽快修改密码）。</p></section>';
       overlay.querySelector('[data-settings-save]').hidden = true;
+      renderTabs();
       renderPersonalScope();
       return;
     }
     if (!(siteAuth && siteAuth.isAdmin())) {
       body.innerHTML = personalAiSection()
-        + '<section class="settings-section"><h4>服务端设置（管理员）</h4>'
+        + '<section class="settings-section" data-settings-tab="account"><h4>服务端设置（管理员）</h4>'
         + '<p class="settings-note">SVN 认证路径、仓库映射与全站 AI 默认值需要管理员账号登录。</p>'
         + '<div class="settings-row-actions"><button type="button" data-settings-action="open-login">登录（本机管理员或 SVN 账号）</button></div>'
         + '<p class="settings-note">默认管理员账号 <code>admin / admin</code>（本机账号，仅本地编辑；合入 SVN 时再提供 SVN 账号）。</p></section>';
       overlay.querySelector('[data-settings-save]').hidden = true;
+      renderTabs();
       renderPersonalScope();
       return;
     }
@@ -147,7 +232,7 @@
     var ai = config.ai || {};
     var sync = config.sync || {};
     body.innerHTML = personalAiSection() + [
-      '<section class="settings-section">',
+      '<section class="settings-section" data-settings-tab="repo">',
       '<h4>SVN 认证路径</h4>',
       '<p class="settings-note">必须是<b>强制账号密码认证</b>的 SVN 路径（允许匿名访问的路径会被拒绝）。例如只读的 <code>/svn/accounts/auth-check/</code>。</p>',
       '<label>认证路径 URL<input type="text" data-config="auth.url" placeholder="https://svn.example.com/svn/accounts/auth-check/" value="' + escapeHtml(authConfig.url || '') + '"></label>',
@@ -158,13 +243,13 @@
       '</div>',
       '<div class="settings-row-actions"><button type="button" data-settings-action="test-auth">测试认证路径</button></div>',
       '</section>',
-      '<section class="settings-section">',
+      '<section class="settings-section" data-settings-tab="repo">',
       '<h4>仓库映射（docs 目录 ↔ SVN）</h4>',
       '<p class="settings-note">每个文件夹都可以单独映射到一个 SVN 库（可添加多条，按目录段最长前缀匹配，嵌套目录优先更具体的挂载点）。提交时按文档所在目录自动选择对应仓库。</p>',
       '<div data-settings-repos>' + (config.repositories || []).map(repositoryRow).join('') + '</div>',
       '<p class="settings-note">「更新频率（秒）」留空表示用下方「默认更新频率」；填 0 表示该库不自动同步。自动同步会跳过正在编辑（有活动草稿）的文档并提示合并。</p>','<div class="settings-row-actions"><button type="button" data-settings-action="add-repo">+ 添加映射</button><button type="button" data-settings-action="sync-now">立即同步 SVN 库</button></div>',
       '</section>',
-      '<section class="settings-section">',
+      '<section class="settings-section" data-settings-tab="ai">',
       '<h4>AI 助手（全站默认值）</h4>',
       '<p class="settings-note">这里配置的值会下发给所有登录用户；未填写的项沿用各人浏览器中的本地配置。API Key 建议使用团队内共享的低权限 Key。</p>',
       '<div class="settings-grid">',
@@ -185,7 +270,7 @@
       '</section>',
       usageSection(),
       documentsSection(),
-      '<section class="settings-section">',
+      '<section class="settings-section" data-settings-tab="account">',
       '<h4>修改管理员密码</h4>',
       '<div class="settings-grid">',
       '<label>当前密码<input type="password" data-admin="current" autocomplete="off"></label>',
@@ -193,7 +278,7 @@
       '</div>',
       '<div class="settings-row-actions"><button type="button" data-settings-action="change-password">修改密码</button></div>',
       '</section>',
-      '<section class="settings-section">',
+      '<section class="settings-section" data-settings-tab="repo">',
       '<h4>其他</h4>',
       '<div class="settings-grid">',
       '<label>同步凭据环境变量<input type="text" data-config="sync.credential_name" placeholder="如 MD2WEB_SVN_READONLY" value="' + escapeHtml(sync.credential_name || '') + '"></label>',
@@ -201,14 +286,8 @@
       '</div>',
       '</section>'
     ].join('');
-    overlay.querySelector('[data-settings-save]').hidden = false;
+    renderTabs();
     renderPersonalScope();
-    if (overlay.querySelector('[data-admin-usage]')) {
-      loadUsage();
-    }
-    if (overlay.querySelector('[data-admin-documents]')) {
-      loadDocuments();
-    }
   }
 
   function usageSection() {
@@ -217,7 +296,7 @@
       return '';
     }
     return [
-      '<section class="settings-section">',
+      '<section class="settings-section" data-settings-tab="query">',
       '<h4>使用情况（管理员）</h4>',
       '<p class="settings-note">按 IP 与账号查看登录记录、账号使用量、最近提交与在线会话；数据来自本机审计表，最多保留在数据库里。</p>',
       '<div class="settings-row-actions">',
@@ -301,7 +380,7 @@
       return '';
     }
     return [
-      '<section class="settings-section">',
+      '<section class="settings-section" data-settings-tab="query">',
       '<h4>文档统计（管理员）</h4>',
       '<p class="settings-note">每个文档的大小、更新时间与更新次数（更新次数来自已发布提交）；文件夹大小按层级累加；增删记录由服务后台每 10 秒扫描 docs/md 记录。点击表头可排序。</p>',
       '<div class="settings-row-actions">',
@@ -655,6 +734,8 @@
         testAuth();
       } else if (action === 'load-usage') {
         loadUsage();
+      } else if (target.getAttribute && target.getAttribute('data-settings-tab-button')) {
+        switchTab(target.getAttribute('data-settings-tab-button'));
       } else if (action === 'sync-now') {
         syncNow();
       } else if (action === 'load-documents') {

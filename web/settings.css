@@ -282,3 +282,35 @@
 .settings-sort:hover {
   color: var(--docs-accent, #1f6feb);
 }
+
+/* 设置弹窗：分类 Tab（AI 助手 / SVN 与仓库 / 账号 / 信息查询） */
+.settings-tabs {
+  border-bottom: 1px solid var(--docs-border, #e3e8ee);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.settings-tabs button {
+  background: none;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
+  color: var(--docs-muted, #57606a);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+}
+
+.settings-tabs button:hover {
+  color: var(--docs-accent, #1f6feb);
+}
+
+.settings-tabs button.is-active {
+  background: rgba(31, 111, 235, 0.08);
+  border-bottom-color: var(--docs-accent, #1f6feb);
+  color: var(--docs-accent, #1f6feb);
+  font-weight: 600;
+}

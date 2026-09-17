@@ -290,14 +290,22 @@ class SvnClient:
         args += creds
         return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
 
+    def add(self, path, config_dir=None, username=None, password=None):
+        """把新文件加入版本控制（已纳管时报错由调用方忽略）。"""
+        creds, stdin_text = self._credential_args(username, password)
+        args = ["add", "--parents", "--non-interactive", "--no-auth-cache"] + creds + [str(path)]
+        return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
+
     def diff(self, path, config_dir=None, username=None, password=None):
         creds, stdin_text = self._credential_args(username, password)
         args = ["diff", "--non-interactive", "--no-auth-cache"] + creds + [str(path)]
         return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
 
     def commit(self, path, message, config_dir=None, username=None, password=None):
+        """提交文件或目录（path 可以是单个路径或路径列表）。"""
+        targets = [str(item) for item in path] if isinstance(path, (list, tuple)) else [str(path)]
         creds, stdin_text = self._credential_args(username, password)
-        args = ["commit", str(path), "-m", str(message), "--non-interactive", "--no-auth-cache"] + creds
+        args = ["commit"] + targets + ["-m", str(message), "--non-interactive", "--no-auth-cache"] + creds
         output = self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
         match = re.search(r"Committed revision (\d+)", output or "")
         return int(match.group(1)) if match else None

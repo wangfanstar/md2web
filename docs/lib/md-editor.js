@@ -467,9 +467,11 @@
       body: JSON.stringify({ path: state.resource, message: message, expectedVersion: state.draftVersion || 0 })
     }).then(function (payload) {
       state.prepareOperation = payload;
+      var images = payload.manifest.images || [];
       showDiffPanel(
         '目标库：' + payload.manifest.repositoryId + '（' + payload.manifest.mount + '）\n'
-        + '提交说明：' + payload.manifest.message + '\n\n'
+        + '提交说明：' + payload.manifest.message + '\n'
+        + '随文档存档的图片：' + (images.length ? images.join('、') : '（无）') + '\n\n'
         + (payload.diff || '（无差异）')
         + '\n\n点击下方「确认提交」写入 SVN；点「关闭」可稍后再提交。',
         '审阅提交（确认后写入 SVN）'
@@ -547,7 +549,8 @@
 
   function afterCommit(result) {
     var head = '提交成功：r' + result.svnRevision + '\n' + (result.message || '')
-      + '\n' + result.path + '\n';
+      + '\n' + result.path + '\n'
+      + ((result.images || []).length ? '已一并存档图片：' + result.images.join('、') + '\n' : '');
     if (result.diff) {
       showDiffPanel(head + '\n本次提交差异：\n' + result.diff, '本次提交差异（已写入 SVN）');
     } else {

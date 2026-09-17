@@ -119,6 +119,37 @@ def unified_text_diff(before, after, before_label="之前", after_label="之后"
     return "\n".join(lines)
 
 
+def referenced_images(md_dir, document_path, content):
+    """解析文档中引用的 images/ 图片，返回存在的相对文件名列表（如 ["images/a.png"]）。
+
+    支持 Markdown 图片语法与 <img src>；忽略越界路径与不存在的文件。
+    """
+    text = str(content or "")
+    names = []
+    patterns = (
+        re.compile(r"!\[[^\]]*\]\(\s*<?(images/[^)\s>]+)>?[^)]*\)"),
+        re.compile(r"""<img[^>]+src=["'](images/[^"']+)["']""", re.I),
+    )
+    for pattern in patterns:
+        for match in pattern.finditer(text):
+            name = match.group(1).strip()
+            if name not in names:
+                names.append(name)
+    doc_path = resolve_md_file(md_dir, document_path)
+    doc_dir = doc_path.parent.resolve()
+    found = []
+    for name in names:
+        if ".." in name.split("/"):
+            continue
+        try:
+            candidate = (doc_path.parent / name).resolve()
+            if candidate.is_file() and doc_dir in candidate.parents:
+                found.append(name)
+        except OSError:
+            continue
+    return found
+
+
 def scan_md_tree(md_dir):
     """扫描 docs/md 下的 Markdown：返回 {"md/<相对路径>": {"size": int, "mtime": int}}。"""
     root = Path(md_dir)
