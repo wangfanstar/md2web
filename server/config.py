@@ -86,7 +86,7 @@ def load_config(path, docs_dir, allow_incomplete=False):
     base = config_path.resolve().parent
 
     server_raw = raw.get("server") or {}
-    bind = str(server_raw.get("bind") or "127.0.0.1").strip()
+    bind = str(server_raw.get("bind") or "0.0.0.0").strip()
     if not bind:
         raise ConfigError("server.bind 不能为空")
     port = server_raw.get("port", 8882)
@@ -236,7 +236,7 @@ def save_config(path, payload, docs_dir):
 def default_config():
     """首次启动时写入的默认配置（SVN 地址留空，待管理员在网页设置中填写）。"""
     return {
-        "server": {"bind": "127.0.0.1", "port": 8882, "secure_cookies": False},
+        "server": {"bind": "0.0.0.0", "port": 8882, "secure_cookies": False},
         "auth": {
             "url": "",
             "credential_group": "default",

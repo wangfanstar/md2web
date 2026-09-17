@@ -395,13 +395,55 @@ class DatabaseTests(ServerTestBase):
             conn.close()
 
     def test_schema_sql_avoids_modern_only_features(self):
-        # 旧版 SQLite（<3.8，如 RHEL7 3.7.17）不支持部分索引；建表 SQL 必须保持基础语法
+        # 旧版 SQLite（RHEL7 3.7.17）只能是基础语法；Windows 端也必须如此，保证 data/ 可直接共用
         for name in ("SCHEMA_SQL", "MIGRATION_V2_SQL"):
-            sql = getattr(server_database, name).upper()
-            for statement in sql.split(";"):
-                if "INDEX" in statement:
-                    self.assertNotIn(" WHERE ", statement, "%s 使用了部分索引" % name)
-        self.assertNotIn("WITHOUT ROWID", server_database.SCHEMA_SQL.upper())
+            sql = getattr(server_database, name)
+            self.assertEqual(server_database.sqlite_compat_issues(sql), [], name + " 含不兼容语法")
+
+    def test_sqlite_compat_issues_flags_modern_constructs(self):
+        issues = server_database.sqlite_compat_issues
+        self.assertEqual(issues("CREATE INDEX i ON t (a, b)"), [])
+        self.assertEqual(issues("SELECT * FROM t WHERE a = ?"), [])
+        self.assertTrue(issues("CREATE INDEX i ON t (a) WHERE a > 0", "index"), "部分索引应被标记")
+        self.assertTrue(
+            issues("CREATE UNIQUE INDEX idx_users_local_admin ON users (auth_source_id) WHERE role = 'admin'", "index"),
+            "旧版本创建的本地管理员部分索引应被标记",
+        )
+        self.assertTrue(issues("CREATE INDEX i ON t (lower(a))", "index"), "表达式索引应被标记")
+        self.assertTrue(issues("INSERT INTO t (a) VALUES (1) ON CONFLICT (a) DO UPDATE SET a = 2"), "UPSERT 应被标记")
+        self.assertTrue(issues("WITH x AS (SELECT 1) SELECT * FROM x"), "WITH 开头应被标记")
+        self.assertTrue(issues("SELECT COUNT(*) OVER (PARTITION BY a) FROM t"), "窗口函数应被标记")
+        self.assertTrue(issues("SELECT a FROM t ORDER BY a NULLS LAST"), "NULLS LAST 应被标记")
+        self.assertTrue(issues("CREATE TABLE t (a, b, UNIQUE (a)) STRICT"), "STRICT 表应被标记")
+        self.assertTrue(issues("CREATE TABLE t (a, b GENERATED ALWAYS AS (a + 1))"), "生成列应被标记")
+        self.assertTrue(issues("SELECT json_extract(a, '$.b') FROM t"), "JSON 函数应被标记")
+        self.assertTrue(issues("DELETE FROM t RETURNING id"), "RETURNING 应被标记")
+        self.assertTrue(issues("ALTER TABLE t DROP COLUMN a"), "DROP COLUMN 应被标记")
+        self.assertTrue(issues("SELECT * FROM a RIGHT JOIN b ON a.id = b.id"), "RIGHT JOIN 应被标记")
+
+    def test_migrate_removes_sqlite37_incompatible_objects(self):
+        path = self.tmp / "data" / "db.sqlite3"
+        conn = server_database.connect(path)
+        server_database.migrate(conn)
+        with conn:
+            conn.execute("CREATE UNIQUE INDEX idx_users_local_admin ON users (auth_source_id) WHERE role = 'admin'")
+            conn.execute("CREATE INDEX idx_expression_demo ON users (lower(svn_username))")
+        messages = []
+        self.assertEqual(server_database.migrate(conn, logger=messages.append), server_database.SCHEMA_VERSION)
+        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+        self.assertNotIn("idx_users_local_admin", names)
+        self.assertNotIn("idx_expression_demo", names)
+        self.assertTrue(any("已移除" in message for message in messages), messages)
+        # 迁移后所有对象都必须是 3.7.17 可解析的
+        for row in conn.execute("SELECT type, name, sql FROM sqlite_master WHERE type IN ('index', 'trigger', 'view')"):
+            sql = row[2] or ""
+            if not sql:
+                continue
+            self.assertEqual(
+                server_database.sqlite_compat_issues(sql, row[0]), [],
+                "对象 %s 仍不兼容 SQLite 3.7.17" % row[1],
+            )
+        conn.close()
 
     def _corrupt_schema_entry(self, path, where, sql):
         conn = sqlite3.connect(str(path))

@@ -10,6 +10,44 @@ from .passwords import hash_password
 
 SCHEMA_VERSION = 2
 
+# 兼容目标：RHEL7 自带 SQLite 3.7.17（Python 3.6 的 sqlite3）。
+# Windows 端也必须只写这些版本能解析的对象，保证 data/ 数据库可在两个平台间直接共用。
+SQLITE_COMPAT_TARGET = "3.7.17"
+
+MODERN_SQL_PATTERNS = (
+    (re.compile(r"\bWITHOUT\s+ROWID\b", re.I), "WITHOUT ROWID 表需要 SQLite 3.8.2+"),
+    (re.compile(r"\)\s*STRICT\b", re.I), "STRICT 表需要 SQLite 3.37+"),
+    (re.compile(r"\bGENERATED\s+ALWAYS\b", re.I), "生成列需要 SQLite 3.31+"),
+    (re.compile(r"\bRETURNING\b", re.I), "RETURNING 需要 SQLite 3.35+"),
+    (re.compile(r"\bOVER\s*\(", re.I), "窗口函数需要 SQLite 3.25+"),
+    (re.compile(r"\bNULLS\s+(FIRST|LAST)\b", re.I), "NULLS FIRST/LAST 需要 SQLite 3.30+"),
+    (re.compile(r"\bFILTER\s*\(\s*WHERE\b", re.I), "聚合 FILTER 需要 SQLite 3.30+"),
+    (re.compile(r"\b(DROP|RENAME)\s+COLUMN\b", re.I), "ALTER TABLE DROP/RENAME COLUMN 需要 SQLite 3.25+/3.35+"),
+    (re.compile(r"\bON\s+CONFLICT\b[^;]*\bDO\s+(UPDATE|NOTHING)\b", re.I), "UPSERT 需要 SQLite 3.24+"),
+    (re.compile(r"(?m)^\s*WITH\b", re.I), "WITH 作为语句开头需要 SQLite 3.8.3+"),
+    (re.compile(r"\b(IIF|FORMAT|UNIXEPOCH|TIMEDIFF)\s*\(", re.I), "该函数需要 SQLite 3.32+"),
+    (re.compile(r"->>?|\bJSON_(EXTRACT|SET|INSERT|ARRAY|OBJECT|VALID|TYPE|QUOTE)\b", re.I), "JSON 功能需要 SQLite 3.38+/JSON1 扩展"),
+    (re.compile(r"\b(FULL|RIGHT)\s+(OUTER\s+)?JOIN\b", re.I), "RIGHT/FULL JOIN 需要 SQLite 3.39+"),
+    (re.compile(r"\bMATERIALIZED\b", re.I), "CTE MATERIALIZED 需要 SQLite 3.35+"),
+    (re.compile(r"\bCREATE\s+(UNIQUE\s+)?INDEX\b[^;]*\bWHERE\b", re.I), "部分索引需要 SQLite 3.8+"),
+)
+
+
+def sqlite_compat_issues(sql, object_type=None):
+    """返回 SQL 中 SQLite 3.7.17 不支持的问题列表（空列表表示兼容）。"""
+    issues = []
+    source = str(sql or "")
+    for pattern, reason in MODERN_SQL_PATTERNS:
+        if pattern.search(source):
+            issues.append(reason)
+    if object_type == "index":
+        upper = source.upper()
+        start = upper.find("(")
+        end = upper.rfind(")")
+        if start != -1 and end > start and "(" in upper[start + 1:end]:
+            issues.append("表达式索引需要 SQLite 3.9+")
+    return issues
+
 SCHEMA_SQL = """
 CREATE TABLE users (
     id INTEGER PRIMARY KEY,
@@ -264,18 +302,48 @@ def schema_version(conn):
     return int(conn.execute("PRAGMA user_version").fetchone()[0])
 
 
-def migrate(conn):
-    """按 user_version 迁移；重复执行安全。"""
+def migrate(conn, logger=None):
+    """按 user_version 迁移；重复执行安全；完成后清理 SQLite 3.7.17 不兼容对象。"""
     version = schema_version(conn)
-    if version >= SCHEMA_VERSION:
-        return version
-    with conn:
-        if version < 1:
-            conn.executescript(SCHEMA_SQL)
-        if version < 2:
-            conn.executescript(MIGRATION_V2_SQL)
-        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    if version < SCHEMA_VERSION:
+        with conn:
+            if version < 1:
+                conn.executescript(SCHEMA_SQL)
+            if version < 2:
+                conn.executescript(MIGRATION_V2_SQL)
+            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    sanitize_schema(conn, logger)
     return SCHEMA_VERSION
+
+
+def sanitize_schema(conn, logger=None):
+    """移除 SQLite 3.7.17（RHEL7）无法解析的索引/触发器/视图，返回被移除的名称列表。
+
+    Windows 端启动时也会执行，保证本地写出的 data/ 数据库可直接拷到 RHEL7 使用。
+    """
+    removed = []
+    try:
+        rows = conn.execute(
+            "SELECT type, name, sql FROM sqlite_master WHERE type IN ('index', 'trigger', 'view')"
+        ).fetchall()
+    except sqlite3.Error as error:
+        _report(logger, "[警告] 无法检查数据库对象：%s" % error)
+        return removed
+    for row in rows:
+        object_type, name, sql = row[0], row[1], row[2] or ""
+        if not sql or not sqlite_compat_issues(sql, object_type):
+            continue
+        quoted = name.replace('"', '""')
+        try:
+            with conn:
+                conn.execute('DROP %s IF EXISTS "%s"' % (object_type.upper(), quoted))
+        except sqlite3.Error as error:
+            _report(logger, "[警告] 无法移除不兼容的 %s %s：%s" % (object_type, name, error))
+            continue
+        removed.append(name)
+    for name in removed:
+        _report(logger, "[提示] 已移除 SQLite %s 不兼容的数据库对象：%s" % (SQLITE_COMPAT_TARGET, name))
+    return removed
 
 
 def find_user(conn, auth_source_id, username):

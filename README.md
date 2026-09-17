@@ -120,9 +120,9 @@ Windows 可双击 `start_windows.bat`，Linux 可执行 `sh start_linux.sh`。�
 
 接收方只需完整 `docs/` 文件夹和浏览器，无需 Python、Node.js 或网络。维护方需要 Python 3.8+；严格离线构建若提示缺少依赖，把另一份完整站点的对应 `docs/lib/` 文件复制过来即可。文档自己引用的远程图片/资源需提前改成本地相对路径，才能随站点离线分发。
 
-监听地址：只读预览默认绑定 `0.0.0.0`（启动日志会打印「局域网访问: http://<本机IP>:8882」）；认证编辑服务默认只监听 `127.0.0.1`，需要局域网访问时执行 `python serve.py --bind 0.0.0.0`，或把 `config/server.local.json` 的 `server.bind` 改成 `"0.0.0.0"`。
+监听地址：**默认监听所有网卡（`0.0.0.0`）**，启动日志会打印「局域网访问: http://<本机IP>:8882」；只允许本机访问用 `python serve.py --bind 127.0.0.1`，端口用 `--port 8891` 覆盖（也可改 `config/server.local.json` 的 `server.bind`/`server.port`）。启动脚本（`start_linux.sh` / `start_windows.bat`）同样默认按局域网开放。
 
-局域网打不开时先确认服务器防火墙放行端口：RHEL/CentOS 7 用 `sudo firewall-cmd --add-port=8882/tcp --permanent && sudo firewall-cmd --reload`，Ubuntu 用 `sudo ufw allow 8882/tcp`。开放到局域网后任何人都能看到登录页与文档，请务必修改默认管理员密码；只允许本机时用 `--bind 127.0.0.1`。
+局域网打不开时先确认服务器防火墙放行端口：RHEL/CentOS 7 用 `sudo firewall-cmd --add-port=8882/tcp --permanent && sudo firewall-cmd --reload`，Ubuntu 用 `sudo ufw allow 8882/tcp`（服务启动时会检测 firewalld/ufw 并提示对应命令）。局域网内任何人都能看到登录页与文档，请务必修改默认管理员密码；只允许本机时用 `--bind 127.0.0.1`。
 
 ### 3. 分发与备份
 
@@ -151,3 +151,4 @@ Python 测试全程离线（临时目录 + 伪依赖），覆盖扫描与导航�
 - **文件名限制**：文件名包含 `#`、`?`、`%`、`[`、`]` 时链接与搜索路由可能失效，请避免使用这些字符
 - **想彻底重建**：删除 `docs/` 中除 `md/` 外的生成文件后重新构建（依赖缺失时需要联网一次）
 - **认证服务启动报 `malformed database schema`**：本机 SQLite 版本较旧（如 RHEL7 自带 3.7.17）无法解析数据库里由新版本写入的索引；服务启动时会自动移除这类索引（原文件留 `*.repair-*.bak`），若仍不可用则把库备份为 `*.corrupt-*.bak` 后重建（本地草稿丢失、管理员密码恢复为默认 `admin/admin`）
+- **`data/` 数据库跨平台共用**：程序只写入 SQLite 3.7.17（RHEL7）能解析的对象，启动时也会清理历史遗留的不兼容索引，因此 Windows 上生成的 `data/` 可以直接拷到旧版 Linux 继续使用；反之亦然

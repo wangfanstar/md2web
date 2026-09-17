@@ -56,7 +56,7 @@ def parse_args(argv=None):
         "--dir", dest="directory", type=Path, default=ROOT / "docs",
         help="要预览的目录，默认脚本同级的 docs/",
     )
-    parser.add_argument("--port", type=int, default=8882, help="起始端口，默认 8882（0-65535）")
+    parser.add_argument("--port", type=int, default=None, help="端口：认证服务默认取配置 server.port，预览默认 8882（0-65535）")
     parser.add_argument(
         "--bind", default=None,
         help="监听地址：认证服务默认取配置 server.bind（默认 127.0.0.1），预览默认 0.0.0.0；局域网访问用 0.0.0.0",
@@ -88,7 +88,7 @@ def parse_args(argv=None):
         help="svn 可执行文件（可含参数，如 \"C:/Program Files/.../svn.exe\"）；默认使用 PATH 中的 svn",
     )
     args = parser.parse_args(argv)
-    if not 0 <= args.port <= 65535:
+    if args.port is not None and not 0 <= args.port <= 65535:
         parser.error("端口必须在 0-65535 之间")
     return args
 
@@ -429,6 +429,15 @@ class PreviewHandler(http.server.SimpleHTTPRequestHandler):
         super().log_message(fmt, *args)
 
 
+def resolve_port(cli_port, config_port=None):
+    """端口：命令行优先，其次配置文件（认证服务），最后 8882（预览）。"""
+    if cli_port is not None:
+        return int(cli_port)
+    if config_port is not None:
+        return int(config_port)
+    return 8882
+
+
 def resolve_bind(cli_bind, config_bind=None):
     """监听地址：命令行优先，其次配置文件（认证服务），最后 0.0.0.0（预览）。"""
     value = cli_bind if cli_bind else config_bind
@@ -477,18 +486,58 @@ def access_urls(bind, port):
     return local, others
 
 
-def print_access_hints(bind, port):
+def _command_output(command, timeout=3):
+    """执行只读检测命令并返回输出（失败或超时返回 None）。"""
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+    except (OSError, ValueError):
+        return None
+    try:
+        output, _ = process.communicate(timeout=timeout)
+    except Exception:
+        try:
+            process.kill()
+            process.communicate()
+        except Exception:
+            pass
+        return None
+    if process.returncode != 0:
+        return None
+    return (output or b"").decode("utf-8", "replace")
+
+
+def firewall_hint_lines(port):
+    """按本机防火墙实际情况给出放行命令（检测不到时给出通用命令）。"""
+    state = _command_output(["firewall-cmd", "--state"])
+    if state and "running" in state:
+        return ["检测到 firewalld 正在运行，需要用 root 放行端口：",
+                "      sudo firewall-cmd --add-port=%d/tcp --permanent && sudo firewall-cmd --reload" % port]
+    status = _command_output(["ufw", "status"])
+    if status and status.strip().lower().startswith("status: active"):
+        return ["检测到 ufw 已启用，需要放行端口：",
+                "      sudo ufw allow %d/tcp" % port]
+    return ["若局域网打不开：确认服务器防火墙已放行端口，例如",
+            "      RHEL/CentOS 7（root）: sudo firewall-cmd --add-port=%d/tcp --permanent && sudo firewall-cmd --reload" % port,
+            "      Ubuntu/Debian: sudo ufw allow %d/tcp" % port]
+
+
+def print_access_hints(bind, port, config_path=None):
     """打印可访问地址；局域网监听时给出放行端口命令，本机监听时提示如何开放。"""
     local, others = access_urls(bind, port)
     print("本机访问: " + local)
     for url in others:
         print("局域网访问: " + url)
     if others:
-        print("  若局域网打不开：确认服务器防火墙已放行端口，例如")
-        print("    RHEL/CentOS 7（root）: sudo firewall-cmd --add-port=%d/tcp --permanent && sudo firewall-cmd --reload" % port)
-        print("    Ubuntu/Debian: sudo ufw allow %d/tcp" % port)
+        for line in firewall_hint_lines(port):
+            print("  " + line if not line.startswith("      ") else "  " + line.strip())
+        print("  提示: 已监听所有网卡（局域网内均可访问登录页），仅本机使用请加 --bind 127.0.0.1")
     elif is_loopback_host(bind):
-        print("当前仅本机可访问；需要局域网访问请加 --bind 0.0.0.0（或修改配置 server.bind）")
+        print("当前仅本机可访问；需要局域网访问请加 --bind 0.0.0.0"
+              + ("，或把 %s 的 server.bind 改为 '0.0.0.0'" % config_path if config_path else "（或修改配置 server.bind）"))
 
 
 def make_server(directory, bind, port):
@@ -569,14 +618,15 @@ def run_authenticated_service(args, directory):
         print("已开启自动重建：docs/md 有变化时自动重建（每 2 秒检测）")
 
     bind = resolve_bind(args.bind, config["server"]["bind"])
-    port = config["server"]["port"]
+    port = resolve_port(args.port, config["server"]["port"])
     print(f"认证编辑服务: http://{bind}:{port}")
-    print_access_hints(bind, port)
+    print_access_hints(bind, port, args.config)
     if config["auth"]["url"]:
         print(f"SVN 认证地址: {config['auth']['url']}")
     else:
         print("SVN 认证地址: 未配置（请在网页右上角/侧栏「设置」中用 admin 登录后填写）")
     print(f"数据库: {database_path}")
+    print(f"数据库兼容目标: SQLite {database.SQLITE_COMPAT_TARGET}（Windows 与 RHEL7 可直接共用 data/）")
     print(f"工作副本目录: {workspaces}")
     print("匿名可阅读；写接口要求 SVN 账号登录（阶段一实现登录边界）")
     if not args.no_browser:
@@ -629,7 +679,7 @@ def main(argv=None):
         stop_watcher = None
 
     bind = resolve_bind(args.bind)
-    server, port = make_server(directory, bind, args.port)
+    server, port = make_server(directory, bind, resolve_port(args.port))
     print(f"预览目录: {directory}")
     print_access_hints(bind, port)
     print("模式: 只读预览（写接口已停用；认证编辑去掉 --preview 即可）")

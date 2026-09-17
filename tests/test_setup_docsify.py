@@ -396,6 +396,11 @@ class ServeTests(unittest.TestCase):
         self.assertEqual(serve.resolve_bind(None, None), "0.0.0.0")
         self.assertEqual(serve.resolve_bind("  ", ""), "0.0.0.0")
         self.assertIsNone(serve.parse_args([]).bind, "--bind 默认应为 None（认证服务回落配置）")
+        self.assertIsNone(serve.parse_args([]).port, "--port 默认应为 None（认证服务回落配置）")
+        self.assertEqual(serve.resolve_port(None, 8800), 8800)
+        self.assertEqual(serve.resolve_port(8891, 8800), 8891)
+        self.assertEqual(serve.resolve_port(None, None), 8882)
+        self.assertEqual(serve.resolve_port(None, 8891), 8891)
 
     def test_access_urls_reports_lan_and_local(self):
         serve = load_module("serve", "serve.py")
@@ -828,6 +833,21 @@ class LauncherScriptsTests(unittest.TestCase):
         if not line:
             self.skipTest("非 git 工作副本")
         self.assertTrue(line.startswith("100755"), "start_linux.sh 需要可执行位: " + line)
+
+    def test_launchers_default_to_lan_bind(self):
+        linux = (ROOT / "start_linux.sh").read_text(encoding="utf-8")
+        self.assertIn("--bind 0.0.0.0", linux, "start_linux.sh 默认应监听所有网卡")
+        self.assertIn("--bind 127.0.0.1", linux, "应提示仅本机监听的用法")
+        windows = (ROOT / "start_windows.bat").read_text(encoding="ascii")
+        self.assertIn("--bind 0.0.0.0", windows, "start_windows.bat 默认应监听所有网卡")
+        self.assertIn("%APP_ARGS%", windows)
+
+    def test_default_config_binds_all_interfaces(self):
+        from server import config as server_config
+        example = json.loads((ROOT / "config" / "server.example.json").read_text(encoding="utf-8"))
+        self.assertEqual(example["server"]["bind"], "0.0.0.0", "示例配置应默认局域网可访问")
+        default = server_config.default_config()
+        self.assertEqual(default["server"]["bind"], "0.0.0.0")
 
     def test_start_windows_is_ascii_only(self):
         raw = (ROOT / "start_windows.bat").read_bytes()

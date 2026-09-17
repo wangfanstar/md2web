@@ -3,6 +3,7 @@
 #   - 默认认证编辑服务（Python 3.6.8+ 同一套依赖：server/requirements.txt）
 #   - 缺少依赖时自动安装：非 root 优先 --user（避免系统目录权限不足），优先离线包 server/wheels
 #   - 仍失败则降级为只读预览（无写接口）
+#   - 默认监听所有网卡（局域网可访问），仅本机使用：./start_linux.sh --bind 127.0.0.1
 #   - 强制只读预览：./start_linux.sh --preview
 #   - 指定解释器：PYTHON=python3.9 ./start_linux.sh
 #   - 若从 Windows 拷贝导致 CRLF 报 “No such file or directory”：
@@ -73,6 +74,17 @@ if ! "$PY" -c "import flask, waitress" >/dev/null 2>&1; then
     echo "          $PY -m pip install --user --no-index --find-links server/wheels -r server/requirements.txt" >&2
     echo "        老版本 pip 先升级：$PY -m pip install --user --upgrade 'pip<22'" >&2
   fi
+fi
+
+# 默认监听所有网卡（局域网可访问）；仅本机使用请在命令行加 --bind 127.0.0.1
+has_bind=0
+for arg in "$@"; do
+  case "$arg" in
+    --bind|--bind=*) has_bind=1 ;;
+  esac
+done
+if [ "$has_bind" -eq 0 ]; then
+  set -- "$@" --bind 0.0.0.0
 fi
 
 exec "$PY" serve.py "$@"
