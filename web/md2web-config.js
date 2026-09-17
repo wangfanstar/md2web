@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  var state = { config: null, csrf: '', authenticated: false, busy: false };
+  var state = { config: null, csrf: '', authenticated: false, editable: false, busy: false };
 
   function query(selector, root) {
     return (root || document).querySelector(selector);
@@ -47,26 +47,34 @@
   function showPanels() {
     var fileMode = window.location.protocol === 'file:';
     query('[data-config-file]').hidden = !fileMode;
-    query('[data-config-main]').hidden = fileMode || !state.authenticated;
+    query('[data-config-main]').hidden = fileMode;
     query('[data-config-login]').hidden = fileMode || state.authenticated;
+    var hint = query('[data-edit-hint]');
+    if (hint) {
+      hint.hidden = state.editable;
+    }
+    all('[data-action="save"], [data-action="sync"], [data-action="add-repo"]').forEach(function (button) {
+      button.disabled = !state.editable;
+    });
   }
 
   function repoRow(repo) {
     var item = repo || {};
+    var disabled = state.editable ? '' : ' disabled';
     var interval = item.syncIntervalSeconds === null || item.syncIntervalSeconds === undefined
       ? '' : String(item.syncIntervalSeconds);
     return [
       '<tr data-repo-row>',
-      '<td><input type="text" data-repo="id" value="' + escapeHtml(item.id) + '" placeholder="如 hardware"></td>',
-      '<td><input type="text" data-repo="mount" value="' + escapeHtml(item.mount) + '" placeholder="如 md/硬件设计"></td>',
-      '<td><input type="text" data-repo="url" value="' + escapeHtml(item.url) + '" placeholder="https://svn.example.com/svn/xxx/trunk/docs/"></td>',
-      '<td><input type="text" data-repo="group" value="' + escapeHtml(item.group || '默认') + '" placeholder="默认"></td>',
-      '<td><input type="number" min="0" step="30" data-repo="syncIntervalSeconds" value="' + escapeHtml(interval) + '" placeholder="默认"></td>',
-      '<td><label class="flag"><input type="checkbox" data-repo="readOnly"' + (item.readOnly ? ' checked' : '') + '>只读</label></td>',
-      '<td><label class="flag"><input type="checkbox" data-repo="allowCommit"' + (item.allowCommit === false ? '' : ' checked') + '>允许合入</label></td>',
+      '<td><input type="text" data-repo="id" value="' + escapeHtml(item.id) + '" placeholder="如 hardware"' + disabled + '></td>',
+      '<td><input type="text" data-repo="mount" value="' + escapeHtml(item.mount) + '" placeholder="如 md/硬件设计"' + disabled + '></td>',
+      '<td><input type="text" data-repo="url" value="' + escapeHtml(item.url) + '" placeholder="https://svn.example.com/svn/xxx/trunk/docs/"' + disabled + '></td>',
+      '<td><input type="text" data-repo="group" value="' + escapeHtml(item.group || '默认') + '" placeholder="默认"' + disabled + '></td>',
+      '<td><input type="number" min="0" step="30" data-repo="syncIntervalSeconds" value="' + escapeHtml(interval) + '" placeholder="默认"' + disabled + '></td>',
+      '<td><label class="flag"><input type="checkbox" data-repo="readOnly"' + (item.readOnly ? ' checked' : '') + disabled + '>只读</label></td>',
+      '<td><label class="flag"><input type="checkbox" data-repo="allowCommit"' + (item.allowCommit === false ? '' : ' checked') + disabled + '>允许合入</label></td>',
       '<td><div class="actions">'
-        + '<button type="button" data-action="provision">创建并拉取</button>'
-        + '<button type="button" class="danger" data-action="remove-repo">删除</button>'
+        + '<button type="button" data-action="provision"' + disabled + '>创建并拉取</button>'
+        + '<button type="button" class="danger" data-action="remove-repo"' + disabled + '>删除</button>'
         + '</div></td>',
       '</tr>'
     ].join('');
@@ -107,11 +115,19 @@
       state.authenticated = !!payload.authenticated && !!(payload.user && payload.user.role === 'admin');
       state.csrf = payload.csrfToken || '';
       if (!state.authenticated) {
+        // 未登录：用公开配置先展示所有仓库（只读），登录后即可编辑
+        state.editable = false;
+        state.config = { repositories: (payload.site && payload.site.repositories) || [] };
+        renderRepos();
         showPanels();
-        return null;
+        setStatus(state.config.repositories.length
+          ? '当前为只读展示：登录管理员账号后可直接修改并保存。'
+          : '还没有仓库：登录管理员账号后点「+ 添加仓库」开始配置。');
+        return state.config;
       }
       return api('__config').then(function (configPayload) {
         state.config = configPayload.config || {};
+        state.editable = true;
         renderRepos();
         showPanels();
         return state.config;

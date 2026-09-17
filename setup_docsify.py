@@ -859,7 +859,7 @@ def generate_sidebar(md_files, path=None, heading="目录"):
     print(f"  [生成] _sidebar.md ({len(lines) - 1} 项)")
 
 
-def generate_readme(md_files, title="文档中心", path=None):
+def generate_readme(md_files, title="文档中心", path=None, repos=None):
     """生成 README.md 作为首页索引"""
     folders = {str(parent) for rel in md_files for parent in Path(rel).parents if str(parent) != "."}
     lines = [f"# {html.escape(title)}", "", '<div class="workspace-home">',
@@ -899,6 +899,30 @@ def generate_readme(md_files, title="文档中心", path=None):
     render_doc_tree(tree, "md", "", lines, lambda route: route, preserve_folders=True)
     lines.extend(['', '</details>', ''])
 
+    if repos:
+        lines = [f"# {title}", "", "按分组浏览各仓库文档（点击进入对应仓库入口页）：", ""]
+        groups = {}
+        for repo in repos:
+            groups.setdefault(repo["group"], []).append(repo)
+        for group in sorted(groups):
+            lines.append(f"## {group}")
+            lines.append("")
+            for repo in groups[group]:
+                flags = []
+                if repo.get("read_only"):
+                    flags.append("只读")
+                if not repo.get("allow_commit", True):
+                    flags.append("禁止合入")
+                suffix = ("（" + "、".join(flags) + "）") if flags else ""
+                page = repo_page_name(repo["id"])
+                lines.append(f'- <a href="{page}">{repo["id"]}</a> · `{repo["mount"]}`{suffix}')
+            lines.append("")
+        lines += ["## 其他", "", f"- [全部文档（合并视图）](index_all.html)", ""]
+        readme_path = Path(path) if path else (DOCS_DIR / "README.md")
+        readme_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print("  [生成] README.md（分组总览）")
+        return
+
     readme_path = Path(path) if path else (DOCS_DIR / "README.md")
     readme_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("  [生成] README.md (首页索引)")
@@ -920,7 +944,8 @@ def version_asset_urls(html_text):
 def generate_index_html(title="文档中心", path=None, page_name="index.html", site_name=None,
                          sidebar="_sidebar.md", search_index="search-index.json",
                          offline_data="lib/offline-data.js", homepage=None,
-                         read_only=False, allow_commit=True, repo=None):
+                         read_only=False, allow_commit=True, repo=None, repos=None,
+                         route_sidebar=False):
     """生成 index.html"""
     prism_lang_map_js = json.dumps(PRISM_LANG_FALLBACK, ensure_ascii=False)
     title_html = html.escape(title)
@@ -929,6 +954,12 @@ def generate_index_html(title="文档中心", path=None, page_name="index.html",
     sidebar_path = "/" + str(sidebar).lstrip("/")
     search_index_path = str(search_index)
     offline_data_path = str(offline_data)
+    route_sidebar_js = "true" if route_sidebar else "false"
+    repo_list_js = json.dumps([
+        {"id": item["id"], "sub": mount_subpath(item["mount"]),
+         "sidebar": f"_sidebar_{item['id']}.md"}
+        for item in (repos or [])
+    ], ensure_ascii=False).replace("<", "\\u003c")
     homepage_js = json.dumps(str(homepage), ensure_ascii=False) if homepage else "false"
     read_only_js = "true" if read_only else "false"
     allow_commit_js = "true" if allow_commit else "false"
@@ -964,6 +995,9 @@ def generate_index_html(title="文档中心", path=None, page_name="index.html",
       }},
       homepage: {homepage_js},
       coverpage: false,
+      routeSidebar: {route_sidebar_js},
+      relativePath: {route_sidebar_js},
+      repoList: {repo_list_js},
       repoReadOnly: {read_only_js},
       repoAllowCommit: {allow_commit_js},
       repoInfo: {repo_js},
@@ -1272,14 +1306,14 @@ def main(argv=None):
         print("2. 生成导航、首页、搜索索引...")
         repos = load_repositories()
         generate_sidebar(md_files)
-        generate_readme(md_files, args.title)
+        generate_readme(md_files, args.title, repos=repos)
         generate_search_index(md_files, args.title, repos=repos)
         generate_offline_data(md_files)
 
         print("3. 生成多仓库页面（每仓库一个入口 + 总览 + 配置页）...")
         cleanup_repo_artifacts(repos)
         generate_index_html(args.title, path=DOCS_DIR / "index_all.html", site_name=args.title,
-                            repo={"all": True})
+                            repo={"all": True}, repos=repos, route_sidebar=True)
         for repo in repos:
             sub = mount_subpath(repo["mount"])
             repo_files = files_for_mount(md_files, repo["mount"])

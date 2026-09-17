@@ -325,7 +325,13 @@ def public_config(config):
     """给未登录前端的配置视图：不含认证地址、AI Key 与任何凭据。"""
     ai = config.get("ai") or {}
     return {
-        "repositories": [{"id": repo["id"], "mount": repo["mount"]} for repo in config.get("repositories") or []],
+        "repositories": [
+            {"id": repo["id"], "mount": repo["mount"], "url": repo["url"],
+             "group": repo.get("group") or "默认", "readOnly": bool(repo.get("read_only")),
+             "allowCommit": bool(repo.get("allow_commit", True)),
+             "syncIntervalSeconds": repo.get("sync_interval")}
+            for repo in config.get("repositories") or []
+        ],
         "sessionHours": config["auth"]["session_hours"],
         "idleMinutes": config["auth"]["idle_minutes"],
         "authConfigured": bool(config["auth"]["url"]),

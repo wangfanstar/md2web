@@ -300,7 +300,63 @@
     });
   }
 
-  function enhance() { decorateTree(); addBreadcrumb(); addCodeButtons(); resolveRelativeImages(); }
+  // index_all.html：左侧只显示当前文档所在文件夹（仓库）的导航目录
+  function filterByCurrentRepo() {
+    var config = window.$docsify || {};
+    if (!config.routeSidebar) {
+      return;
+    }
+    var repos = config.repoList || [];
+    var host = document.querySelector('.sidebar-nav');
+    if (!host) {
+      return;
+    }
+    var route = String(window.location.hash || '#/').replace(/^#\/?/, '').split('?')[0].replace(/^\/+/, '');
+    try {
+      route = decodeURIComponent(route);
+    } catch (error) { /* 保留原值 */ }
+    var rel = route.indexOf('md/') === 0 ? route.slice(3) : route;
+    var repo = null;
+    var bestLength = -1;
+    repos.forEach(function (item) {
+      var sub = String(item.sub || '').replace(/^\/+|\/+$/g, '');
+      if (sub && (rel === sub || rel.indexOf(sub + '/') === 0) && sub.length > bestLength) {
+        repo = item;
+        bestLength = sub.length;
+      }
+    });
+    var prefix = repo ? '/md/' + repo.sub + '/' : null;
+    var items = all('li', host);
+    items.forEach(function (li) {
+      var link = null;
+      for (var index = 0; index < li.children.length; index += 1) {
+        if (li.children[index].tagName === 'A') {
+          link = li.children[index];
+          break;
+        }
+      }
+      if (!link) {
+        return;
+      }
+      var href = (link.getAttribute('href') || '').replace(/^#/, '');
+      if (href.indexOf('/md/') === -1) {
+        li.hidden = false;
+        return;
+      }
+      li.hidden = !!(prefix && href.indexOf(prefix) === -1);
+    });
+    // 分组：没有可见子项时一起隐藏
+    items.slice().reverse().forEach(function (li) {
+      var children = [];
+      all(':scope > ul > li', li).forEach(function (child) { children.push(child); });
+      if (!children.length) {
+        return;
+      }
+      li.hidden = !children.some(function (child) { return !child.hidden; });
+    });
+  }
+
+  function enhance() { decorateTree(); filterByCurrentRepo(); addBreadcrumb(); addCodeButtons(); resolveRelativeImages(); }
   function schedule() { clearTimeout(state.timer); state.timer = setTimeout(enhance, 40); }
   function init() {
     try { if (localStorage.getItem(STORAGE.numbers) === '0') document.body.classList.add('hide-heading-numbers'); } catch (_) {}
