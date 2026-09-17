@@ -490,9 +490,8 @@ body.media-viewer-open {
 }
 
 .md-editor-body {
-  display: grid;
+  display: flex;
   flex: 1;
-  grid-template-columns: 50% 6px 50%;
   min-height: 0;
 }
 
@@ -500,6 +499,20 @@ body.media-viewer-open {
   min-width: 0;
   overflow: hidden;
   position: relative;
+}
+
+/* 左：源码（宽度由拖拽分栏设置）· 中：分隔条 · 右：预览；大纲固定在编辑区最左侧 */
+.md-editor-pane-source {
+  flex: 0 0 auto;
+  width: 50%;
+}
+
+.md-editor-pane-preview {
+  flex: 1 1 auto;
+}
+
+.md-editor-divider {
+  flex: 0 0 6px;
 }
 
 .md-editor-pane-preview {
@@ -641,8 +654,20 @@ body.media-viewer-open {
 
 @media (max-width: 900px) {
   .md-editor-body {
-    grid-template-columns: 1fr !important;
-    grid-template-rows: 1fr 1fr;
+    flex-direction: column;
+  }
+
+  .md-editor-pane-source,
+  .md-editor-pane-preview {
+    flex: 1 1 50%;
+    width: auto;
+  }
+
+  .md-editor-outline {
+    flex: 0 0 auto;
+    height: auto;
+    max-height: 30%;
+    width: 100%;
   }
 
   .md-editor-divider {

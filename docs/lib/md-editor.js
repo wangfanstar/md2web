@@ -1587,9 +1587,9 @@
 
   function applySplit(percent) {
     state.split = Math.min(78, Math.max(22, percent));
-    var body = state.overlay.querySelector('.md-editor-body');
-    if (body) {
-      body.style.gridTemplateColumns = state.split + '% 6px ' + (100 - state.split) + '%';
+    var source = state.overlay.querySelector('.md-editor-pane-source');
+    if (source) {
+      source.style.width = state.split + '%';
     }
     try {
       localStorage.setItem(SPLIT_STORAGE, String(state.split));
@@ -1668,7 +1668,11 @@
         return;
       }
       var bodyRect = state.overlay.querySelector('.md-editor-body').getBoundingClientRect();
-      applySplit(((event.clientX - bodyRect.left) / bodyRect.width) * 100);
+      var outlineWidth = state.outline && !state.outline.hidden ? state.outline.getBoundingClientRect().width : 0;
+      var dividerWidth = 6;
+      var available = Math.max(1, bodyRect.width - outlineWidth - dividerWidth);
+      var offset = event.clientX - (bodyRect.left + outlineWidth);
+      applySplit((offset / available) * 100);
     });
     document.addEventListener('mouseup', function () {
       state.dragging = false;
