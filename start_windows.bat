@@ -37,7 +37,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo The browser will open http://localhost:3000
+echo The browser will open http://localhost:8882
 echo Default administrator: admin / admin  (change it in Settings after first login)
 echo Press Ctrl+C to stop the service.
 echo.

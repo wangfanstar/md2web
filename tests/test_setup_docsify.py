@@ -724,6 +724,39 @@ class ServeTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class OfflineWheelsTests(unittest.TestCase):
+    """Linux 离线依赖包：server/wheels 必须覆盖 requirements.txt 的全部依赖。"""
+
+    def test_wheels_cover_requirements(self):
+        import re
+
+        requirement_lines = []
+        for line in (ROOT / "server" / "requirements.txt").read_text(encoding="ascii").split("\n"):
+            line = line.split("#", 1)[0].strip()
+            if line:
+                requirement_lines.append(line)
+        wheel_names = [path.name.lower() for path in (ROOT / "server" / "wheels").glob("*.whl")]
+        self.assertTrue(wheel_names, "缺少 server/wheels 离线包")
+        missing = []
+        for entry in requirement_lines:
+            spec = entry.split(";", 1)[0].strip()
+            match = re.match(r"([A-Za-z0-9_.-]+)==([^\s]+)", spec)
+            if not match:
+                continue
+            name = match.group(1).lower().replace("-", "_")
+            version = match.group(2)
+            if not any(wheel.startswith(name + "-" + version + "-") for wheel in wheel_names):
+                missing.append(entry)
+        self.assertEqual(missing, [], "离线包缺少: " + ", ".join(missing))
+
+    def test_wheels_include_linux_markupsafe(self):
+        names = [path.name for path in (ROOT / "server" / "wheels").glob("*.whl")]
+        self.assertTrue(
+            any("manylinux" in name.lower() and "markupsafe" in name.lower() for name in names),
+            "缺少 MarkupSafe 的 manylinux cp36 wheel",
+        )
+
+
 class LauncherScriptsTests(unittest.TestCase):
     """启动脚本的行尾/权限约定：Linux 脚本必须 LF 且可执行，Windows 脚本保持 CRLF。"""
 

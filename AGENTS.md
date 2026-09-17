@@ -73,9 +73,10 @@ python setup_docsify.py                 # 完整构建（依赖已存在时全�
 python setup_docsify.py --index-only    # 仅重建搜索索引与离线数据
 python setup_docsify.py --title "我的文档"
 python setup_docsify.py --offline       # 严格离线：依赖缺失时报错，不尝试下载
-python3 -m pip install -r server/requirements.txt  # 认证编辑服务依赖（3.6.8+ 通用，仅认证模式需要）
+python3 -m pip install --no-index --find-links server/wheels -r server/requirements.txt  # 离线包（Linux x86_64 + cp36，已随仓库提供）
+python3 -m pip install -r server/requirements.txt  # 联网安装（3.6.8+ 通用，仅认证模式需要）
 python serve.py                         # 默认认证编辑服务（认证模式下需先安装上面的依赖）
-python serve.py --preview               # 只读预览 http://localhost:3000（无写接口）
+python serve.py --preview               # 只读预览 http://localhost:8882（无写接口）
 python serve.py --reset-admin-password  # 忘记管理员密码时强制恢复为默认 admin/admin
 python -m unittest discover -s tests -v
 node --test tests/test_search.js
@@ -117,6 +118,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - SQLite 连接由 Waitress 多线程共享：`database.connect` 使用 `check_same_thread=False`，所有访问必须经 `AuthService._db_lock` 串行化；数据库写锁不得跨越 SVN 网络调用。
 - 服务启动只按 pidfile 终止本项目自身实例；不要再恢复“扫描并终止所有 serve.py 进程”的行为。
 - 认证模式直接绑定配置端口：端口被占用时打印明确提示（不会自动换端口）；重复双击启动靠 pidfile 关闭旧实例。`start_windows.bat` 保持纯 ASCII（cmd 用 OEM 代码页解析，中文会破坏脚本）。
+- 离线依赖包位于 `server/wheels/`（cp36 + manylinux1 x86_64，含 MarkupSafe 的 manylinux wheel 与本地构建的 blinker/dataclasses 纯 Python wheel，`*.whl` 在 `.gitattributes` 中标记为 binary）；新增/升级依赖时同步更新该目录，`OfflineWheelsTests` 会校验覆盖度。
 - `start_linux.sh` 必须保持 LF + 可执行位（`.gitattributes` 已声明 `*.sh text eol=lf`）；脚本内置 CRLF 自愈（`sh start_linux.sh` 也会去 CR 后重执行），`start_windows.bat` 必须纯 ASCII。
 - `--svn-command` 支持带空格的路径（Windows 用双引号包住）；测试用假 svn 可执行文件注入，真实认证需要能连通的强制认证 SVN 路径。
 - 本地管理员默认 `admin / admin`（PBKDF2 存库）：仅用于网页「设置」；部署后必须尽快改密。修改 SVN 认证路径只失效 SVN 用户会话，管理员会话保留。

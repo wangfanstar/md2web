@@ -56,7 +56,7 @@ def parse_args(argv=None):
         "--dir", dest="directory", type=Path, default=ROOT / "docs",
         help="要预览的目录，默认脚本同级的 docs/",
     )
-    parser.add_argument("--port", type=int, default=3000, help="起始端口，默认 3000（0-65535）")
+    parser.add_argument("--port", type=int, default=8882, help="起始端口，默认 8882（0-65535）")
     parser.add_argument(
         "--bind", default="0.0.0.0",
         help="监听地址，默认 0.0.0.0（局域网可见；仅本机用 127.0.0.1）",
@@ -459,7 +459,8 @@ def run_authenticated_service(args, directory):
     except (ModuleNotFoundError, ImportError) as error:
         print("警告: 未安装认证编辑服务依赖（缺少 " + str(error.name) + "），已降级为只读预览。")
         print("  当前解释器: Python " + ".".join(str(v) for v in sys.version_info[:3]))
-        print("  安装依赖后可启用登录编辑: python3 -m pip install -r server/requirements.txt")
+        print("  离线安装（推荐）: python3 -m pip install --no-index --find-links server/wheels -r server/requirements.txt")
+        print("  联网安装: python3 -m pip install -r server/requirements.txt")
         print("  pip 过旧时先执行: python3 -m pip install --upgrade \"pip<22\"")
         args.preview = True
         return None

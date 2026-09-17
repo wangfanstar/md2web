@@ -18,6 +18,12 @@
 - 数学公式：`$...$` / `$$...$$` 由 KaTeX 离线渲染（编辑器预览与文档页一致）
 - AI 助手：右下角对话面板 + 侧栏设置图标（设置与 AI 配置合一），本地检索后再发给可配置的大模型（OpenAI 兼容 / DeepSeek / Ollama / Anthropic），支持资料范围勾选与上传文档、带引用来源跳转；Key 仅存浏览器本地，跨域时经本机 `serve.py` 代理
 - 登录与权限（阶段一）：`python serve.py --config config/server.local.json` 启动认证编辑服务（Flask + Waitress + SQLite + SVN CLI），SVN 账号密码登录、会话/CSRF、匿名只读、静态分发白名单与前端内容净化；离线 `file://` 保持只读
+
+内网/无外网环境可用离线依赖包（已随仓库提供 Linux x86_64 + Python 3.6 的 wheels）：
+```bash
+python3 -m pip install --no-index --find-links server/wheels -r server/requirements.txt
+```
+其他平台（如 aarch64、Python 3.8+）可用 `python -m pip download -r server/requirements.txt -d server/wheels` 重新下载；`start_linux.sh` 在缺少依赖时会自动优先使用该离线包。
 - 网页端「设置」（侧栏 HOME 图标旁，单一入口）：本机 AI 设置（含**参考源码路径**与资料范围，仅浏览器 localStorage）+ 服务端设置（默认管理员 admin/admin；SVN 认证路径、仓库映射、全站 AI 默认值），保存后热应用；配置与数据库均在 `docs/` 之外、不入库提交
 - 管理员可用本机账号直接登录编辑（不需要 SVN 校验）；提交 SVN 时补充一次 SVN 账号（仅进程内存）
 - 管理员密码：默认 `admin / admin`（PBKDF2 存库），可在「设置」中修改；忘记密码时用 `python serve.py --reset-admin-password` 强制恢复为默认值
@@ -73,7 +79,7 @@ docs/md/
 
 ```bash
 python setup_docsify.py     # 首次构建需联网下载依赖，之后离线可用
-python serve.py             # 打开 http://localhost:3000
+python serve.py             # 打开 http://localhost:8882
 ```
 
 | 场景 | 命令 |

@@ -6,5 +6,5 @@ __pycache__/
 
 # 认证编辑服务：本机数据与真实配置不得提交
 data/
-wheels/
+# 离线依赖包随仓库提供，见 server/wheels/（不要忽略）
 config/server.local.json

@@ -973,8 +973,8 @@ def main(argv=None):
 
         print("\n=== 构建完成 ===")
         print("\n启动本地预览: python serve.py")
-        print("本机打开: http://localhost:3000")
-        print("局域网访问: http://<这台机器的IP>:3000")
+        print("本机打开: http://localhost:8882")
+        print("局域网访问: http://<这台机器的IP>:8882")
     except (BuildError, OSError, UnicodeDecodeError) as error:
         print(f"  错误: {error}")
         sys.exit(1)
