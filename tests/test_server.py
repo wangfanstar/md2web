@@ -33,6 +33,7 @@ from server import config as server_config  # noqa: E402
 from server import database as server_database  # noqa: E402
 from server import documents as server_documents  # noqa: E402
 from server import paths as server_paths  # noqa: E402
+from server import secrets as server_secrets  # noqa: E402
 from server import svn as server_svn  # noqa: E402
 
 FAKE_SVN = r'''import json
@@ -55,6 +56,30 @@ def load_state():
 def save_state(state):
     if STATE_PATH:
         Path(STATE_PATH).write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+
+def credential_from_args(args):
+    """支持 --password-from-stdin（新版）与 --password（旧版回退）。"""
+    username = None
+    password = None
+    if "--username" in args:
+        username = args[args.index("--username") + 1]
+    if "--password-from-stdin" in args:
+        password = sys.stdin.readline().strip()
+    elif "--password" in args:
+        password = args[args.index("--password") + 1]
+    return username, password
+
+
+def record_credential(args):
+    """记录收到的凭据（--password-from-stdin 会读取 stdin，只读一次）并返回。"""
+    username, password = credential_from_args(args)
+    if username is None and password is None:
+        return username, password
+    state = load_state()
+    state["credentials"] = {"username": username, "password": password}
+    save_state(state)
+    return username, password
 
 
 def repo_relative(path):
@@ -118,9 +143,7 @@ if command == "info":
     if MODE == "cert":
         sys.stderr.write("svn: E230001: Server SSL certificate verification failed\n")
         sys.exit(1)
-    password = None
-    if "--password-from-stdin" in args:
-        password = sys.stdin.readline().strip()
+    username, password = record_credential(args)
     if MODE == "anon":
         state = load_state()
         emit_info(revision=state.get("revision", 0), uuid="22222222-3333-4444-5555-666666666666")
@@ -181,9 +204,13 @@ if command == "diff":
     sys.exit(0)
 
 if command == "commit":
+    if MODE == "auth_fail":
+        sys.stderr.write("svn: E170001: Authentication failed\n")
+        sys.exit(1)
     if MODE == "commit_conflict":
         sys.stderr.write("svn: E160028: File is out of date\n")
         sys.exit(1)
+    record_credential(args)
     relative = repo_relative(args[1])
     state = load_state()
     state.setdefault("files", {})[relative] = Path(args[1]).read_text(encoding="utf-8")
@@ -343,7 +370,8 @@ class DatabaseTests(ServerTestBase):
         try:
             self.assertEqual(server_database.migrate(conn), server_database.SCHEMA_VERSION)
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            for name in ("users", "sessions", "repo_bindings", "drafts", "revisions", "operations", "audit_events"):
+            for name in ("users", "sessions", "repo_bindings", "drafts", "revisions", "operations",
+                         "audit_events", "svn_credentials"):
                 self.assertIn(name, tables)
             self.assertEqual(conn.execute("PRAGMA foreign_keys").fetchone()[0], 1)
             self.assertEqual(server_database.migrate(conn), server_database.SCHEMA_VERSION)
@@ -397,7 +425,7 @@ class DatabaseTests(ServerTestBase):
 
     def test_schema_sql_avoids_modern_only_features(self):
         # 旧版 SQLite（RHEL7 3.7.17）只能是基础语法；Windows 端也必须如此，保证 data/ 可直接共用
-        for name in ("SCHEMA_SQL", "MIGRATION_V2_SQL"):
+        for name in ("SCHEMA_SQL", "MIGRATION_V2_SQL", "MIGRATION_V3_SQL"):
             sql = getattr(server_database, name)
             self.assertEqual(server_database.sqlite_compat_issues(sql), [], name + " 含不兼容语法")
 
@@ -500,6 +528,35 @@ class DatabaseTests(ServerTestBase):
         self.assertTrue(any("已备份" in message for message in messages), messages)
 
 
+class SecretsTests(unittest.TestCase):
+    """本机可逆加密：SVN 口令落库前必须可解密还原，且能发现密钥不符/篡改。"""
+
+    def test_encrypt_decrypt_roundtrip(self):
+        key = server_secrets.generate_key()
+        for value in ("good", "含中文的口令-123", "a" * 300):
+            token = server_secrets.encrypt(key, value)
+            self.assertTrue(token.startswith("v1:"), token[:8])
+            self.assertNotIn(value, token)
+            self.assertEqual(server_secrets.decrypt(key, token), value)
+
+    def test_wrong_key_or_tampered_ciphertext_is_rejected(self):
+        key = server_secrets.generate_key()
+        other = server_secrets.generate_key()
+        token = server_secrets.encrypt(key, "good")
+        with self.assertRaises(ValueError):
+            server_secrets.decrypt(other, token)
+        payload = token.split(":", 1)[1]
+        tampered = "v1:" + payload[:-4] + ("AAAA" if not payload.endswith("AAAA") else "BBBB")
+        with self.assertRaises(ValueError):
+            server_secrets.decrypt(key, tampered)
+        with self.assertRaises(ValueError):
+            server_secrets.decrypt(key, "not-a-token")
+
+    def test_nonce_makes_ciphertext_unique(self):
+        key = server_secrets.generate_key()
+        self.assertNotEqual(server_secrets.encrypt(key, "good"), server_secrets.encrypt(key, "good"))
+
+
 class FakeSvn:
     def __init__(self, error=None, info=None, anonymous=False):
         self.error = error
@@ -566,12 +623,18 @@ class SvnTests(ServerTestBase):
         self.assertEqual(self.client.version(), "1.14.2")
         self.assertTrue(self.client.supports_password_from_stdin())
 
-    def test_unsupported_password_from_stdin(self):
-        with mock.patch.dict("os.environ", {"FAKE_SVN_MODE": "no_stdin"}):
+    def test_password_fallback_when_stdin_unsupported(self):
+        # 旧版 svn（如 RHEL7 1.7/1.8）没有 --password-from-stdin：应回退到 --password 而不是报错
+        state_path = self.tmp / "fallback-state.json"
+        state_path.write_text(json.dumps({"files": {}, "revision": 1, "log": [], "wc": {},
+                                          "uuid": "11111111-2222-3333-4444-555555555555"}), encoding="utf-8")
+        with mock.patch.dict("os.environ", {"FAKE_SVN_MODE": "no_stdin", "FAKE_SVN_STATE": str(state_path)}):
             client = server_svn.SvnClient(command=(sys.executable, str(self.fake)), timeout=2)
-            with self.assertRaises(server_svn.SvnError) as ctx:
-                client.verify_credentials("https://svn.example.invalid/auth-check/", "alice", "good")
-            self.assertEqual(ctx.exception.code, "unsupported")
+            self.assertEqual(client.password_transport(), "argv")
+            info = client.verify_credentials("https://svn.example.invalid/auth-check/", "alice", "good")
+            self.assertEqual(info["uuid"], "11111111-2222-3333-4444-555555555555")
+        recorded = json.loads(state_path.read_text(encoding="utf-8")).get("credentials")
+        self.assertEqual(recorded, {"username": "alice", "password": "good"})
 
     def test_verify_credentials_success(self):
         info = self.client.verify_credentials("https://svn.example.invalid/auth-check/", "alice", "good")
@@ -660,6 +723,41 @@ class AuthTests(ServerTestBase):
             self.auth.login("alice", "bad", "127.0.0.1")
         self.assertEqual(ctx.exception.status, 401)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM users").fetchone()[0], 0)
+
+    def test_login_stores_encrypted_svn_credential(self):
+        self.auth.login("alice", "good", "127.0.0.1")
+        row = self.conn.execute("SELECT * FROM svn_credentials").fetchone()
+        self.assertIsNotNone(row, "登录成功后应保存口令")
+        self.assertNotIn("good", row["secret"], "库里不能是明文")
+        self.assertEqual(server_secrets.decrypt(self.auth.secret_key(), row["secret"]), "good")
+        self.assertEqual(row["svn_username"], "alice")
+
+    def test_new_password_updates_stored_credential(self):
+        self.auth.login("alice", "first", "127.0.0.1")
+        self.auth.login("alice", "second", "127.0.0.1")
+        row = self.conn.execute("SELECT * FROM svn_credentials").fetchone()
+        self.assertEqual(server_secrets.decrypt(self.auth.secret_key(), row["secret"]), "second")
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM svn_credentials").fetchone()[0], 1)
+
+    def test_failed_login_keeps_stored_credential(self):
+        self.auth.login("alice", "good", "127.0.0.1")
+        self.svn.error = server_svn.SvnError("auth_failed")
+        with self.assertRaises(server_auth.AuthError):
+            self.auth.login("alice", "wrong", "127.0.0.1")
+        row = self.conn.execute("SELECT * FROM svn_credentials").fetchone()
+        self.assertEqual(server_secrets.decrypt(self.auth.secret_key(), row["secret"]), "good")
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM users").fetchone()[0], 1)
+
+    def test_stored_credential_roundtrip_and_forget(self):
+        self.auth.login("alice", "good", "127.0.0.1")
+        user = self.conn.execute("SELECT * FROM users WHERE svn_username = 'alice'").fetchone()
+        self.assertEqual(self.auth.stored_credential(user), ("alice", "good"))
+        self.assertTrue(self.auth.forget_stored_credential(user))
+        self.assertIsNone(self.auth.stored_credential(user))
+        # 管理员本机账号没有 SVN 口令
+        server_database.ensure_admin(self.conn)
+        admin = self.conn.execute("SELECT * FROM users WHERE role = 'admin'").fetchone()
+        self.assertIsNone(self.auth.stored_credential(admin))
 
     def test_anonymous_auth_path_is_reported_as_service_error(self):
         self.svn.error = server_svn.SvnError("anonymous_allowed")
@@ -1488,6 +1586,54 @@ class SvnApiTests(ServerTestBase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["entries"][0]["revision"], 5)
         self.assertEqual(payload["entries"][0]["message"], "docs")
+
+    def test_commit_uses_stored_credential_without_session_memory(self):
+        """模拟重启/换标签页：会话内存没有口令时，提交应使用数据库里已保存的最新口令。"""
+        headers_csrf = self.login()
+        headers = {"X-CSRF-Token": headers_csrf}
+        stored = self.conn.execute("SELECT * FROM svn_credentials").fetchone()
+        self.assertIsNotNone(stored, "登录后应已保存口令")
+        self.auth._credentials = {}
+        self.client.put("/__md/draft", json={"path": "md/硬件设计/时钟树设计.md", "content": "# A\n\n草稿\n",
+                                             "expectedVersion": 0}, headers=headers)
+        prepared = self.client.post("/__svn/prepare", json={"path": "md/硬件设计/时钟树设计.md",
+                                                            "message": "docs: 存储口令提交", "expectedVersion": 1},
+                                    headers=headers).get_json()
+        self.assertTrue(prepared["ok"], prepared)
+        committed = self.client.post("/__svn/commit", json={"operationId": prepared["operationId"]},
+                                     headers=headers).get_json()
+        self.assertTrue(committed["ok"], committed)
+        self.assertEqual(committed["result"]["state"], "published")
+        recorded = json.loads(self.state_path.read_text(encoding="utf-8")).get("credentials")
+        self.assertEqual(recorded, {"username": "alice", "password": "good"})
+
+    def test_commit_with_updated_password_uses_latest_stored(self):
+        """换密码后重新登录：数据库应更新，随后提交使用新口令。"""
+        self.login()
+        response = self.client.post("/__auth/login", json={"username": "alice", "password": "good"})
+        self.assertEqual(response.status_code, 200)
+        with self.conn:
+            self.conn.execute("UPDATE svn_credentials SET secret = ? WHERE svn_username = 'alice'",
+                              (server_secrets.encrypt(self.auth.secret_key(), "newpass"),))
+        self.auth._credentials = {}
+        self.assertEqual(self.auth.stored_credential(
+            self.conn.execute("SELECT * FROM users WHERE svn_username = 'alice'").fetchone()),
+            ("alice", "newpass"))
+
+    def test_commit_auth_failure_clears_stored_credential(self):
+        headers_csrf = self.login()
+        headers = {"X-CSRF-Token": headers_csrf}
+        self.client.put("/__md/draft", json={"path": "md/硬件设计/时钟树设计.md", "content": "# A\n\n草稿\n",
+                                             "expectedVersion": 0}, headers=headers)
+        prepared = self.client.post("/__svn/prepare", json={"path": "md/硬件设计/时钟树设计.md",
+                                                            "message": "m", "expectedVersion": 1},
+                                    headers=headers).get_json()
+        with mock.patch.dict("os.environ", {"FAKE_SVN_MODE": "auth_fail"}):
+            response = self.client.post("/__svn/commit", json={"operationId": prepared["operationId"]},
+                                        headers=headers)
+        self.assertEqual(response.status_code, 401)
+        self.assertIsNone(self.conn.execute("SELECT * FROM svn_credentials").fetchone(),
+                          "口令失效后应清理旧密文")
 
     def test_prepare_then_commit_via_api(self):
         headers_csrf = self.login()

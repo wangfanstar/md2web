@@ -89,6 +89,8 @@ def ensure_binding(conn, binding, svn_client, config, credential=None):
     try:
         info = svn_client.info(binding["url"], config_dir, username=username, password=password)
     except SvnError as error:
+        if error.code == "auth_failed":
+            raise OperationError(401, "SVN 账号或口令无效，请重新输入后再提交")
         if row is not None:
             return row
         raise OperationError(502, f"无法读取仓库信息：{error}")
@@ -248,6 +250,9 @@ def run_commit(conn, svn_client, config, md_dir, workspace_root, operation_id, u
     except OperationError:
         raise
     except SvnError as error:
+        if error.code == "auth_failed":
+            _set_state(conn, operation_id, "needs_auth", error_code="auth_failed")
+            raise OperationError(401, "SVN 账号或口令无效，请重新输入后再提交")
         uncertain = error.code in ("timeout", "unreachable", "failed")
         _set_state(conn, operation_id, "uncertain" if uncertain else "failed",
                    error_code=error.code, finished_at=database.now_iso())

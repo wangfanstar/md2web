@@ -389,7 +389,7 @@
     if (!username) {
       return null;
     }
-    var password = window.prompt(prefix + '请输入该 SVN 账号的密码（仅用于本次合入，留在进程内存）');
+    var password = window.prompt(prefix + '的密码（加密保存到本机数据库，供后续提交复用；换密码后重新登录会自动更新）');
     if (!password) {
       return null;
     }

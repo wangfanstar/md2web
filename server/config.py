@@ -10,6 +10,8 @@ import re
 import tempfile
 from pathlib import Path
 
+from .secrets import generate_key
+
 DEFAULT_SESSION_HOURS = 8
 DEFAULT_IDLE_MINUTES = 30
 DEFAULT_SYNC_INTERVAL = 120
@@ -85,6 +87,13 @@ def load_config(path, docs_dir, allow_incomplete=False):
             raise ConfigError("配置文件必须是 JSON 对象")
     base = config_path.resolve().parent
 
+    security_raw = raw.get("security") or {}
+    secret_key = str(security_raw.get("secretKey") or "").strip()
+    secret_generated = False
+    if not secret_key:
+        secret_key = generate_key()
+        secret_generated = True
+
     server_raw = raw.get("server") or {}
     bind = str(server_raw.get("bind") or "0.0.0.0").strip()
     if not bind:
@@ -158,6 +167,7 @@ def load_config(path, docs_dir, allow_incomplete=False):
 
     return {
         "path": config_path.resolve(),
+        "security": {"secretKey": secret_key, "generated": secret_generated},
         "server": {"bind": bind, "port": port, "secure_cookies": secure_cookies},
         "auth": {
             "url": auth_url,
@@ -181,9 +191,23 @@ def load_config(path, docs_dir, allow_incomplete=False):
     }
 
 
+def ensure_secret_key(config, docs_dir):
+    """把新生成的 security.secretKey 写回配置文件（失败时仅警告，密钥仍在内存中）。"""
+    if not config.get("security", {}).get("generated"):
+        return config
+    try:
+        saved = save_config(config["path"], config_to_json(config), docs_dir)
+        saved["security"]["generated"] = False
+        return saved
+    except Exception as error:  # 配置只读等情况：本次运行仍可用，重启会重新生成
+        print("[警告] 无法写入 security.secretKey（%s）；SVN 口令将在重启后需要重新登录" % error)
+        config["security"]["generated"] = False
+        return config
+
+
 def config_to_json(config):
-    """把已加载配置还原成文件结构（供设置界面读取）。"""
-    return {
+    """把已加载配置还原成文件结构（含 security，供写回磁盘；API 层返回前需剥离）。"""
+    data = {
         "server": dict(config["server"]),
         "auth": {
             "url": config["auth"]["url"],
@@ -203,12 +227,30 @@ def config_to_json(config):
         ],
         "ai": dict(config["ai"]),
     }
+    if config.get("security", {}).get("secretKey"):
+        data["security"] = {"secretKey": config["security"]["secretKey"]}
+    return data
 
 
 def save_config(path, payload, docs_dir):
-    """校验并原子写入配置文件，返回加载后的配置。"""
+    """校验并原子写入配置文件，返回加载后的配置。
+
+    载荷里没有 security.secretKey 时保留磁盘上的原值（网页端不应接触该密钥）。
+    """
     if not isinstance(payload, dict):
         raise ConfigError("配置必须是 JSON 对象")
+    payload = json.loads(json.dumps(payload))
+    secret = str(((payload.get("security") or {}).get("secretKey")) or "").strip()
+    if not secret:
+        existing = ""
+        existing_path = Path(path)
+        if existing_path.is_file():
+            try:
+                raw_existing = json.loads(existing_path.read_text(encoding="utf-8"))
+                existing = str(((raw_existing.get("security") or {}).get("secretKey")) or "").strip()
+            except (json.JSONDecodeError, OSError):
+                existing = ""
+        payload["security"] = {"secretKey": existing or generate_key()}
     config_path = Path(path)
     config_path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
@@ -236,6 +278,7 @@ def save_config(path, payload, docs_dir):
 def default_config():
     """首次启动时写入的默认配置（SVN 地址留空，待管理员在网页设置中填写）。"""
     return {
+        "security": {"secretKey": generate_key()},
         "server": {"bind": "0.0.0.0", "port": 8882, "secure_cookies": False},
         "auth": {
             "url": "",

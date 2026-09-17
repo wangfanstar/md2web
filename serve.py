@@ -564,7 +564,7 @@ def run_authenticated_service(args, directory):
         from server import database
         from server.app import create_app
         from server.auth import AuthService
-        from server.config import ConfigError, default_config, load_config, save_config
+        from server.config import ConfigError, default_config, ensure_secret_key, load_config, save_config
         from server.svn import SvnClient
         from waitress import serve as waitress_serve
     except (ModuleNotFoundError, ImportError) as error:
@@ -585,6 +585,7 @@ def run_authenticated_service(args, directory):
         print(f"已生成默认配置: {config_path}（SVN 认证路径与仓库映射可在网页「设置」中填写）")
     try:
         config = load_config(config_path, directory, allow_incomplete=True)
+        config = ensure_secret_key(config, directory)
     except ConfigError as error:
         raise SystemExit(f"错误: {error}")
 
@@ -603,6 +604,12 @@ def run_authenticated_service(args, directory):
         print(f"已强制恢复管理员密码: {reset_user or 'admin'} / admin（请登录后立即修改）")
 
     svn_client = SvnClient(command=split_command(args.svn_command) if args.svn_command else ("svn",))
+    try:
+        transport = svn_client.password_transport()
+    except Exception:  # svn 不存在/不可用时不阻塞启动，登录时再给出明确错误
+        transport = None
+    if transport == "argv":
+        print("提示: 当前 svn 客户端不支持 --password-from-stdin，将用命令行参数传递口令（仅本机可见，建议升级 svn 1.10+）")
     auth_service = AuthService(conn, svn_client, config)
     auth_service.on_startup()
     if auth_service.auth_source_changed():

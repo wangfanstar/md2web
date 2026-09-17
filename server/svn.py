@@ -16,7 +16,7 @@ from pathlib import Path
 
 ERROR_MESSAGES = {
     "not_found": "未找到 svn 客户端，请先安装 Subversion 命令行工具",
-    "unsupported": "svn 客户端不支持 --password-from-stdin，无法安全传递口令",
+    "unsupported": "svn 客户端不支持该操作（请升级 svn 或改用受支持的参数）",
     "anonymous_allowed": "认证路径允许匿名访问，无法用于验证账号密码，请管理员改为强制认证路径",
     "auth_failed": "账号或密码错误",
     "unreachable": "无法连接 SVN 服务",
@@ -215,8 +215,6 @@ class SvnClient:
             raise SvnError("auth_failed", detail="用户名为空")
         if password is None or password == "":
             raise SvnError("auth_failed", detail="密码为空")
-        if not self.supports_password_from_stdin():
-            raise SvnError("unsupported")
         own_config = None
         if config_dir is None:
             own_config = tempfile.mkdtemp(prefix="md2web-svn-")
@@ -224,18 +222,10 @@ class SvnClient:
         try:
             if self.anonymous_readable(url, config_dir):
                 raise SvnError("anonymous_allowed")
+            creds, stdin_text = self._credential_args(username, password)
             completed = self._run(
-                [
-                    "info",
-                    "--xml",
-                    "--non-interactive",
-                    "--no-auth-cache",
-                    "--username",
-                    str(username),
-                    "--password-from-stdin",
-                    url,
-                ],
-                stdin_text=str(password) + "\n",
+                ["info", "--xml", "--non-interactive", "--no-auth-cache"] + creds + [url],
+                stdin_text=stdin_text,
                 config_dir=config_dir,
             )
             if completed.returncode != 0:
@@ -254,16 +244,26 @@ class SvnClient:
                 except OSError:
                     pass
 
+    def password_transport(self):
+        """口令传递方式：stdin（svn 1.10+ 的 --password-from-stdin）或 argv（旧客户端）。"""
+        return "stdin" if self.supports_password_from_stdin() else "argv"
+
     def _credential_args(self, username=None, password=None):
+        """构造账号口令参数。
+
+        新版 svn 用 --password-from-stdin（口令不进进程命令行）；旧版（如 RHEL7 的 1.7/1.8）
+        没有该选项，回退到 --non-interactive --password，保证仍能认证与提交。
+        """
         args = []
         stdin_text = None
         if username:
             args += ["--username", str(username)]
         if password:
-            if not self.supports_password_from_stdin():
-                raise SvnError("unsupported")
-            args.append("--password-from-stdin")
-            stdin_text = str(password) + "\n"
+            if self.supports_password_from_stdin():
+                args.append("--password-from-stdin")
+                stdin_text = str(password) + "\n"
+            else:
+                args += ["--password", str(password)]
         return args, stdin_text
 
     def _run_checked(self, args, stdin_text=None, config_dir=None, timeout=None):
@@ -324,16 +324,8 @@ class SvnClient:
 
     def info(self, url, config_dir, username=None, password=None):
         """读取配置中仓库的远程信息；绑定场景可带当前会话凭据。"""
-        args = ["info", "--xml", "--non-interactive", "--no-auth-cache"]
-        stdin_text = None
-        if username:
-            args += ["--username", str(username)]
-        if password:
-            if not self.supports_password_from_stdin():
-                raise SvnError("unsupported")
-            args.append("--password-from-stdin")
-            stdin_text = str(password) + "\n"
-        args.append(url)
+        creds, stdin_text = self._credential_args(username, password)
+        args = ["info", "--xml", "--non-interactive", "--no-auth-cache"] + creds + [url]
         completed = self._run(args, stdin_text=stdin_text, config_dir=config_dir)
         if completed.returncode != 0:
             raise SvnError(classify_error(completed.stderr), detail=completed.stderr)

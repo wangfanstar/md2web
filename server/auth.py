@@ -13,6 +13,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from . import database, passwords
+from .secrets import decrypt, encrypt
 from .svn import SvnError
 
 RATE_LIMIT_MAX = 5
@@ -277,6 +278,7 @@ class AuthService:
                     (_iso(moment), user_id),
                 )
             token, csrf_token, expires_at = self._insert_session(user_id, moment, user_agent)
+            self._store_credential_locked(username, password)
             database.audit(self.conn, "login", "ok", actor_id=user_id, resource=username)
             session_row = self.conn.execute(
                 "SELECT id FROM sessions WHERE token_hash = ?", (_digest(token),)
@@ -335,6 +337,74 @@ class AuthService:
             },
         }
 
+    # ---- SVN 口令存储（本机密钥可逆加密，登录成功后更新，提交时复用） ----
+
+    def secret_key(self):
+        return (self.config.get("security") or {}).get("secretKey") or ""
+
+    def _store_credential_locked(self, username, password):
+        """调用方需持有 _db_lock：保存/更新该账号的 SVN 口令密文。"""
+        username = str(username or "").strip()
+        if not username or password is None or password == "":
+            return False
+        key = self.secret_key()
+        if not key:
+            return False
+        try:
+            secret = encrypt(key, password)
+        except ValueError:
+            return False
+        database.save_svn_credential(self.conn, self.auth_source_id, username, secret)
+        return True
+
+    def store_credential(self, username, password):
+        with self._db_lock:
+            return self._store_credential_locked(username, password)
+
+    def _user_field(self, user, key, default=None):
+        """会话里的用户可能是 dict 或 sqlite3.Row，缺字段时返回默认值。"""
+        try:
+            value = user[key]
+        except (KeyError, IndexError, TypeError):
+            return default
+        return default if value is None else value
+
+    def stored_credential(self, user):
+        """按用户记录读取已保存的口令；返回 (username, password) 或 None。"""
+        if not user:
+            return None
+        username = str(self._user_field(user, "svn_username", "")
+                       or self._user_field(user, "username", "")).strip()
+        source = self._user_field(user, "auth_source_id", None)
+        if source is None and str(self._user_field(user, "role", "user")) == "admin":
+            return None  # 本机管理员必须显式提供 SVN 账号
+        source = str(source or self.auth_source_id).strip()
+        if not username or source == database.LOCAL_ADMIN_SOURCE:
+            return None
+        with self._db_lock:
+            row = database.find_svn_credential(self.conn, source, username)
+        if row is None:
+            return None
+        try:
+            return username, decrypt(self.secret_key(), row["secret"])
+        except (ValueError, TypeError):
+            return None
+
+    def forget_stored_credential(self, user):
+        """口令失效时清理数据库中的旧密文（下次提交会重新要求登录）。"""
+        if not user:
+            return False
+        username = str(self._user_field(user, "svn_username", "")
+                       or self._user_field(user, "username", "")).strip()
+        source = self._user_field(user, "auth_source_id", None)
+        if source is None and str(self._user_field(user, "role", "user")) == "admin":
+            return False
+        source = str(source or self.auth_source_id).strip()
+        if not username or source == database.LOCAL_ADMIN_SOURCE:
+            return False
+        with self._db_lock:
+            return database.delete_svn_credential(self.conn, source, username)
+
     def credential_for(self, session_id):
         """当前会话的 SVN 凭据（仅内存）；会话失效后立即丢弃。"""
         with self._lock:
@@ -344,10 +414,10 @@ class AuthService:
         return credential["username"], credential["password"]
 
     def remember_credential(self, session_id, username, password):
-        """管理员在本机登录后，提交时补充的 SVN 凭据（仅进程内存）。"""
+        """补充/更新的 SVN 凭据：写入会话内存，并加密保存到数据库供后续提交复用。"""
         with self._lock:
             self._credentials[int(session_id)] = {"username": str(username), "password": str(password)}
-
+        self.store_credential(username, password)
     def check_svn_credential(self, username, password):
         """校验补充的 SVN 账号口令（用于管理员提交场景）。"""
         if not self.configured():

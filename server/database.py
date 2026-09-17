@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .passwords import hash_password
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # 兼容目标：RHEL7 自带 SQLite 3.7.17（Python 3.6 的 sqlite3）。
 # Windows 端也必须只写这些版本能解析的对象，保证 data/ 数据库可在两个平台间直接共用。
@@ -153,6 +153,20 @@ CREATE INDEX idx_operations_actor ON operations (actor_id, created_at);
 MIGRATION_V2_SQL = """
 ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user';
 ALTER TABLE users ADD COLUMN password_hash TEXT;
+"""
+
+# v3：SVN 账号口令（本机密钥可逆加密），登录成功后更新，提交 SVN 时复用最新口令
+MIGRATION_V3_SQL = """
+CREATE TABLE IF NOT EXISTS svn_credentials (
+    id INTEGER PRIMARY KEY,
+    auth_source_id TEXT NOT NULL,
+    svn_username TEXT NOT NULL,
+    secret TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (auth_source_id, svn_username)
+);
+CREATE INDEX IF NOT EXISTS idx_svn_credentials_user ON svn_credentials (auth_source_id, svn_username);
 """
 
 LOCAL_ADMIN_SOURCE = "local-admin"
@@ -311,6 +325,8 @@ def migrate(conn, logger=None):
                 conn.executescript(SCHEMA_SQL)
             if version < 2:
                 conn.executescript(MIGRATION_V2_SQL)
+            if version < 3:
+                conn.executescript(MIGRATION_V3_SQL)
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     sanitize_schema(conn, logger)
     return SCHEMA_VERSION
@@ -344,6 +360,46 @@ def sanitize_schema(conn, logger=None):
     for name in removed:
         _report(logger, "[提示] 已移除 SQLite %s 不兼容的数据库对象：%s" % (SQLITE_COMPAT_TARGET, name))
     return removed
+
+
+def save_svn_credential(conn, auth_source_id, username, secret, now=None):
+    """写入/更新 SVN 口令密文（按 认证源+用户名 唯一）；返回是否新建。"""
+    timestamp = now or now_iso()
+    existing = conn.execute(
+        "SELECT id FROM svn_credentials WHERE auth_source_id = ? AND svn_username = ?",
+        (auth_source_id, username),
+    ).fetchone()
+    with conn:
+        if existing is None:
+            conn.execute(
+                "INSERT INTO svn_credentials (auth_source_id, svn_username, secret, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (auth_source_id, username, secret, timestamp, timestamp),
+            )
+            return True
+        conn.execute(
+            "UPDATE svn_credentials SET secret = ?, updated_at = ? WHERE id = ?",
+            (secret, timestamp, existing["id"]),
+        )
+    return False
+
+
+def find_svn_credential(conn, auth_source_id, username):
+    if not auth_source_id or not username:
+        return None
+    return conn.execute(
+        "SELECT * FROM svn_credentials WHERE auth_source_id = ? AND svn_username = ?",
+        (auth_source_id, username),
+    ).fetchone()
+
+
+def delete_svn_credential(conn, auth_source_id, username):
+    with conn:
+        cursor = conn.execute(
+            "DELETE FROM svn_credentials WHERE auth_source_id = ? AND svn_username = ?",
+            (auth_source_id, username),
+        )
+    return cursor.rowcount > 0
 
 
 def find_user(conn, auth_source_id, username):

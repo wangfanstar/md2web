@@ -136,7 +136,7 @@
       '<div class="site-auth-backdrop" data-auth-close></div>',
       '<form class="site-auth-panel">',
       '<h3>登录 SVN 账号</h3>',
-      '<p class="site-auth-hint">普通用户用 SVN 账号登录（仅用于向 SVN 服务器验证，不写入数据库）；管理员可用本机账号（默认 <b>admin / admin</b>）登录，仅本地编辑与保存草稿，合入 SVN 时需再提供 SVN 账号。</p>',
+      '<p class="site-auth-hint">普通用户用 SVN 账号登录：口令先经 SVN 验证，成功后以本机密钥加密保存在服务端数据库，供后续提交复用（换密码后重新登录会自动更新）。管理员可用本机账号（默认 <b>admin / admin</b>），仅本地编辑与保存草稿，合入 SVN 时需再提供 SVN 账号。</p>',
       '<label>用户名<input type="text" name="username" autocomplete="username" required></label>',
       '<label>密码<input type="password" name="password" autocomplete="current-password" required></label>',
       '<p class="site-auth-error" data-auth-error></p>',

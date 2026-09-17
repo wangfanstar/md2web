@@ -31,8 +31,8 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `serve.py` | 跨平台入口：默认**只读预览**（静态站点 + 自动重建 + 本机 AI 代理，写接口一律 403）；`--config config/server.local.json` 启动认证编辑服务（Flask + Waitress）；按 pidfile 只管理本项目自身实例 |
 | `server/config.py` | 配置加载/校验：存储路径不得在 `docs/` 内、mount 唯一且禁止越界、URL 仅 http/https、仓库存目录段最长前缀匹配 |
 | `server/database.py` | SQLite 访问层：7 张表迁移 v2（users 含 role/password_hash，首次启动创建 admin/admin）、外键与 busy_timeout、`backup_to` |
-| `server/svn.py` | 唯一的 svn 子进程入口：`--password-from-stdin`（口令绝不进 argv）、匿名可读检测、错误分类（含冲突/远端不存在）、info/log XML 解析、检出/稀疏更新/差异/提交/导出，超时与脱敏 |
-| `server/auth.py` | SVN 登录、本地管理员登录/改密、会话（token 只存摘要、闲置/绝对过期）、CSRF、限速、审计；重启与认证源变更使 SVN 旧会话失效（保留管理员会话）；数据库访问串行化 |
+| `server/svn.py` | 唯一的 svn 子进程入口：优先 `--password-from-stdin`，旧版客户端（RHEL7 1.7/1.8）自动回退 `--password`（`password_transport()` 可查询）；匿名可读检测、错误分类、info/log XML 解析、检出/稀疏更新/差异/提交/导出，超时与脱敏 |
+| `server/auth.py` | SVN 登录、本地管理员登录/改密、会话（token 只存摘要、闲置/绝对过期）、CSRF、限速、审计；SVN 口令登录成功后以本机密钥加密存入 `svn_credentials`（换密码重新登录会更新），提交时优先取库内最新口令；重启与认证源变更使 SVN 旧会话失效（保留管理员会话）；数据库访问串行化 |
 | `server/passwords.py` | 管理员口令哈希（PBKDF2-HMAC-SHA256）与校验 |
 | `server/operations.py` | 提交任务：审阅清单冻结、私有工作副本（稀疏检出）、UUID/URL 绑定核对、幂等 operation、状态机（prepared/running/svn_committed/published/failed/uncertain/needs_auth）、发布到 docs/md 与 published_revision、远端同步导出 |
 | `server/drafts.py` | 个人草稿与版本历史：乐观并发（expected_version → 409）、不可变 revision 全文快照、统一差异（published/draft/版本号）、放弃草稿 |
@@ -135,7 +135,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 忘记管理员密码用 `python serve.py --reset-admin-password`（`database.reset_admin_password` 强制写回默认值）；不要在网页接口里提供”重置为默认“的公开入口。
 - `PUT /__config` 为热应用：校验 → 原子写配置文件 → 原地更新内存配置 → 重建认证源摘要；AI 默认值（含 Key）只下发给已登录用户，匿名会话不下发。
 - 草稿保存必须带 `expectedVersion`（或 `baseHash`）；版本不符返回 409 且不回写任何文件——不要恢复“再次保存强制覆盖”。
-- 提交只用**当前会话的 SVN 凭据**（登录时记入进程内存，退出/过期/重启即失效）；管理员本机账号没有 SVN 口令，提交时补充并立即校验，`needs_auth` 状态允许带凭据重试。
+- 提交使用的 SVN 凭据：优先数据库里最新保存的（登录成功即加密更新），其次当前会话内存；管理员本机账号没有 SVN 口令，提交时补充并立即校验并保存，`needs_auth` 状态允许带凭据重试；口令被 SVN 拒绝时自动清理库内旧密文；旧版 svn 客户端不支持 `--password-from-stdin` 时回退到命令行参数（仅本机可见，建议升级）
 - 提交状态机与幂等：同一 `operationId` 重复提交直接返回已有结果；不确定（超时/断网）标记 `uncertain` 且绝不自动重试；发布写 docs/md 前核对 hash，站点重建由 watcher 完成。
 - 服务默认按认证模式启动（`--preview` 才是只读预览）；缺少 Flask/Waitress 时给出安装提示，不静默回退匿名写。
 - 搜索的排除词语法为 `-词`，短语为 `"词 组"`；改动 `parseQuery` 时注意与 UI 提示保持一致。

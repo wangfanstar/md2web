@@ -178,12 +178,18 @@ def create_app(config, conn, auth_service, docs_dir):
             return None, json_error(403, "admin_required", "需要管理员账号登录后才能修改配置")
         return session, None
 
+    def public_config_json():
+        """配置视图：剥离 security.secretKey（网页端不应接触本机加密密钥）。"""
+        data = config_to_json(config)
+        data.pop("security", None)
+        return data
+
     @app.get("/__config")
     def read_config():
         session, rejected = require_admin()
         if rejected:
             return rejected
-        return jsonify({"ok": True, "config": config_to_json(config)})
+        return jsonify({"ok": True, "config": public_config_json()})
 
     @app.put("/__config")
     def write_config():
@@ -201,7 +207,7 @@ def create_app(config, conn, auth_service, docs_dir):
         config.clear()
         config.update(loaded)
         auth_service.on_config_changed()
-        return jsonify({"ok": True, "config": config_to_json(config), "authConfigured": bool(config["auth"]["url"])})
+        return jsonify({"ok": True, "config": public_config_json(), "authConfigured": bool(config["auth"]["url"])})
 
     @app.post("/__config/test-auth")
     def test_auth_config():
@@ -403,7 +409,18 @@ def create_app(config, conn, auth_service, docs_dir):
     # ---- 阶段三：SVN 提交与同步 ----
 
     def credential_of(session):
+        """提交/绑定时使用的 SVN 凭据：优先数据库中最新的（登录成功即更新），其次会话内存。"""
+        stored = auth_service.stored_credential(session.get("user"))
+        if stored is not None:
+            return stored
         return auth_service.credential_for(session["sessionId"])
+
+    def credential_invalidated(session, error):
+        """SVN 拒绝口令（401 needs_auth）时清理库里的旧密文，避免一直用旧密码重试。"""
+        if getattr(error, "status", None) != 401:
+            return
+        auth_service.forget_stored_credential(session.get("user"))
+        auth_service.forget_credential(session["sessionId"])
 
     @app.get("/__svn/info")
     def svn_info():
@@ -441,6 +458,7 @@ def create_app(config, conn, auth_service, docs_dir):
                 payload.get("path"), payload.get("message"), payload.get("expectedVersion"),
             )
         except operations.OperationError as error:
+            credential_invalidated(session, error)
             return json_error(error.status, "prepare_error", error.message, **error.extra)
         except MdSaveError as error:
             return json_error(error.status, "invalid_path", error.message)
@@ -472,6 +490,7 @@ def create_app(config, conn, auth_service, docs_dir):
                 payload.get("operationId"), session["user"]["id"], credential,
             )
         except operations.OperationError as error:
+            credential_invalidated(session, error)
             return json_error(error.status, "commit_error", error.message, **error.extra)
         return jsonify({"ok": True, "result": result})
 
