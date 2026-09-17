@@ -459,9 +459,9 @@ def run_authenticated_service(args, directory):
     except (ModuleNotFoundError, ImportError) as error:
         print("警告: 未安装认证编辑服务依赖（缺少 " + str(error.name) + "），已降级为只读预览。")
         print("  当前解释器: Python " + ".".join(str(v) for v in sys.version_info[:3]))
-        print("  离线安装（推荐）: python3 -m pip install --no-index --find-links server/wheels -r server/requirements.txt")
-        print("  联网安装: python3 -m pip install -r server/requirements.txt")
-        print("  pip 过旧时先执行: python3 -m pip install --upgrade \"pip<22\"")
+        print("  离线安装（推荐）: python3 -m pip install --user --no-index --find-links server/wheels -r server/requirements.txt")
+        print("  联网安装: python3 -m pip install --user -r server/requirements.txt")
+        print("  系统目录权限不足时加 --user；必要时用 sudo；pip 过旧先执行: python3 -m pip install --user --upgrade \"pip<22\"")
         args.preview = True
         return None
 

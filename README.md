@@ -21,6 +21,7 @@
 
 内网/无外网环境可用离线依赖包（已随仓库提供 Linux x86_64 + Python 3.6 的 wheels）：
 ```bash
+python3 -m pip install --user --no-index --find-links server/wheels -r server/requirements.txt   # 非 root 用户加 --user
 python3 -m pip install --no-index --find-links server/wheels -r server/requirements.txt
 ```
 其他平台（如 aarch64、Python 3.8+）可用 `python -m pip download -r server/requirements.txt -d server/wheels` 重新下载；`start_linux.sh` 在缺少依赖时会自动优先使用该离线包。

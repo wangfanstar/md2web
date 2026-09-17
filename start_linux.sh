@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # 启动文档站服务：
 #   - 默认认证编辑服务（Python 3.6.8+ 同一套依赖：server/requirements.txt）
-#   - 缺少依赖时优先用离线包安装（server/wheels，Linux x86_64 + cp36），失败再联网安装
+#   - 缺少依赖时自动安装：非 root 优先 --user（避免系统目录权限不足），优先离线包 server/wheels
 #   - 仍失败则降级为只读预览（无写接口）
 #   - 强制只读预览：./start_linux.sh --preview
 #   - 指定解释器：PYTHON=python3.9 ./start_linux.sh
@@ -37,21 +37,41 @@ if [ -z "$PY" ]; then
   exit 1
 fi
 
-# 认证编辑依赖：缺失时优先离线 wheels，其次联网安装
+# 认证编辑依赖：缺失时自动安装
 if ! "$PY" -c "import flask, waitress" >/dev/null 2>&1; then
-  echo "[提示] 未安装认证编辑服务依赖，尝试安装 ..."
-  installed=1
+  echo "[提示] 未安装认证编辑服务依赖，正在安装 ..."
+  # 非 root 时优先用户级安装（RHEL/CentOS 系统目录通常不可写）
+  if [ "$(id -u 2>/dev/null || echo 0)" -eq 0 ]; then
+    first_flags=""
+    second_flags="--user"
+  else
+    first_flags="--user"
+    second_flags=""
+  fi
+  installed=0
   if [ -d server/wheels ]; then
-    echo "       使用离线包: server/wheels（--no-index --find-links）"
-    "$PY" -m pip install --no-index --find-links server/wheels -r server/requirements.txt || installed=0
+    for flags in "$first_flags" "$second_flags"; do
+      # shellcheck disable=SC2086
+      if "$PY" -m pip install $flags --no-index --find-links server/wheels -r server/requirements.txt; then
+        installed=1
+        break
+      fi
+    done
   fi
   if [ "$installed" -ne 1 ]; then
-    echo "       离线包安装失败，尝试联网安装 ..."
-    "$PY" -m pip install --user -r server/requirements.txt || "$PY" -m pip install -r server/requirements.txt || true
+    for flags in "$first_flags" "$second_flags"; do
+      # shellcheck disable=SC2086
+      if "$PY" -m pip install $flags -r server/requirements.txt; then
+        installed=1
+        break
+      fi
+    done
   fi
   if ! "$PY" -c "import flask, waitress" >/dev/null 2>&1; then
     echo "[警告] 依赖仍不可用，将以只读预览模式启动（无法登录编辑）。" >&2
-    echo "        手动安装: $PY -m pip install --no-index --find-links server/wheels -r server/requirements.txt" >&2
+    echo "        若提示 Permission denied：请改用有写权限的账号，或加 --user / sudo，例如：" >&2
+    echo "          $PY -m pip install --user --no-index --find-links server/wheels -r server/requirements.txt" >&2
+    echo "        老版本 pip 先升级：$PY -m pip install --user --upgrade 'pip<22'" >&2
   fi
 fi
 
