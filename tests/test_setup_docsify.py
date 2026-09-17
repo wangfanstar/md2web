@@ -724,6 +724,44 @@ class ServeTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class LauncherScriptsTests(unittest.TestCase):
+    """启动脚本的行尾/权限约定：Linux 脚本必须 LF 且可执行，Windows 脚本保持 CRLF。"""
+
+    def test_gitattributes_declares_line_endings(self):
+        text = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+        self.assertIn("*.sh text eol=lf", text)
+        self.assertIn("*.bat text eol=crlf", text)
+
+    def test_start_linux_shebang_and_self_heal(self):
+        raw = (ROOT / "start_linux.sh").read_bytes()
+        first_line = raw.split(b"\n", 1)[0]
+        self.assertEqual(first_line.rstrip(b"\r"), b"#!/usr/bin/env sh")
+        self.assertIn(b"tr -d '\\r'", raw, "缺少 CRLF 自愈逻辑")
+        self.assertIn(b"grep -q", raw, "缺少 CRLF 检测逻辑")
+        self.assertIn(b"python3 serve.py", raw)
+
+    def test_start_linux_is_executable_in_git(self):
+        import shutil
+        import subprocess
+        if not shutil.which("git"):
+            self.skipTest("git 不可用")
+        result = subprocess.run(
+            ["git", "-C", str(ROOT), "ls-files", "-s", "start_linux.sh"],
+            capture_output=True, text=True,
+        )
+        line = (result.stdout or "").strip()
+        if not line:
+            self.skipTest("非 git 工作副本")
+        self.assertTrue(line.startswith("100755"), "start_linux.sh 需要可执行位: " + line)
+
+    def test_start_windows_is_ascii_only(self):
+        raw = (ROOT / "start_windows.bat").read_bytes()
+        try:
+            raw.decode("ascii")
+        except UnicodeDecodeError as error:
+            self.fail("start_windows.bat 必须保持纯 ASCII（cmd 用 OEM 代码页解析）: " + str(error))
+
+
 class SourceDocumentsTests(unittest.TestCase):
     """docs/md 是唯一需要人工维护的目录：防止源文档被误删或误替换。"""
 

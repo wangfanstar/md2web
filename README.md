@@ -86,6 +86,9 @@ python serve.py             # 打开 http://localhost:3000
 
 Windows 可双击 `start_windows.bat`，Linux 可执行 `sh start_linux.sh`。也可以直接双击 `docs/index.html`（file:// 模式，内容与索引内嵌）。
 
+> Linux 启动排障：若出现 `./start_linux.sh: No such file or directory`，多为从 Windows 拷贝导致的 CRLF 或缺少可执行位。
+> 修复：`git pull && sed -i "s/\r$//" start_linux.sh && chmod +x start_linux.sh`；也可 `sh start_linux.sh`（脚本会自动去 CR 后重执行）或 `python3 serve.py`。
+
 > `python serve.py` 启动时会自动关闭旧的 `serve.py` 实例，并在运行期间每 2 秒检测 `docs/md` 的新增/删除/修改，自动重建后提示刷新页面（可用 `--no-build` 关闭自动重建）；双击 `docs/index.html` 前需先手动构建一次。
 > `--index-only` 只重建搜索索引与离线数据，不重新生成侧边栏与首页；新增文件要出现在导航中需执行一次完整构建。
 
