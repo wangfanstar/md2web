@@ -97,7 +97,9 @@
       '<div class="ai-scope-head"><strong>资料范围</strong><span>勾选后 AI 只在所选范围检索</span>'
         + '<button type="button" data-settings-action="scopeAll">全选</button>'
         + '<button type="button" data-settings-action="scopeNone">全不选</button></div>',
+      '<details class="settings-details"><summary>资料范围（默认全部文档，点击展开调整）</summary>',
       '<div class="ai-scope-tree" data-personal-scope>正在加载文档索引…</div>',
+      '</details>',
       '<div class="settings-row-actions"><button type="button" data-settings-action="save-personal-ai">保存我的 AI 设置</button></div>',
       '</section>'
     ].join('');

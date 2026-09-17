@@ -314,3 +314,21 @@
   color: var(--docs-accent, #1f6feb);
   font-weight: 600;
 }
+
+/* 非当前 Tab 的区块强制隐藏（避免其它样式覆盖 hidden 属性） */
+.settings-body [data-settings-tab][hidden] {
+  display: none !important;
+}
+
+.settings-details {
+  border: 1px solid var(--docs-border, #e3e8ee);
+  border-radius: 6px;
+  margin: 6px 0 10px;
+  padding: 6px 10px;
+}
+
+.settings-details summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--docs-muted, #57606a);
+}

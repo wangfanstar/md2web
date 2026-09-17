@@ -893,7 +893,6 @@
   // ---------- 撤销 / 恢复 ----------
 
   var HISTORY_LIMIT = 200;
-  var OUTLINE_PREF = 'md2web:editor-outline';
 
   function historyReset(value) {
     state.history = [value];
@@ -1021,9 +1020,6 @@
     } else {
       closeOutline();
     }
-    try {
-      window.localStorage.setItem(OUTLINE_PREF, state.outline.hidden ? '0' : '1');
-    } catch (error) { /* 隐私模式忽略 */ }
   }
 
   function updateOutlineActive() {
@@ -1075,6 +1071,50 @@
     return null;
   }
 
+  function previewHeadingElement(heading) {
+    var preview = state.preview;
+    if (!preview || !heading) {
+      return null;
+    }
+    var wanted = String(heading.text || '').trim();
+    var nodes = preview.querySelectorAll('h1, h2, h3, h4, h5, h6');
+    var fallback = null;
+    for (var index = 0; index < nodes.length; index += 1) {
+      var node = nodes[index];
+      var text = String(node.textContent || '').trim();
+      if (text !== wanted) {
+        continue;
+      }
+      var level = Number(String(node.tagName).replace(/[^0-9]/g, '')) || 1;
+      if (level === heading.level) {
+        return node;
+      }
+      if (fallback === null) {
+        fallback = node;
+      }
+    }
+    return fallback;
+  }
+
+  function previewScrollHost() {
+    var preview = state.preview;
+    if (!preview) {
+      return null;
+    }
+    return (preview.closest && preview.closest('.md-editor-pane-preview')) || preview;
+  }
+
+  function scrollPreviewToHeading(heading) {
+    var target = previewHeadingElement(heading);
+    var host = previewScrollHost();
+    if (!host || !target) {
+      return;
+    }
+    var hostRect = host.getBoundingClientRect();
+    var targetRect = target.getBoundingClientRect();
+    host.scrollTop += targetRect.top - hostRect.top - 8;
+  }
+
   function gotoHeading(heading) {
     var textarea = state.textarea;
     if (!textarea || !heading) {
@@ -1090,9 +1130,15 @@
         state.highlight.scrollTop = top;
       }
     }
+    if (state.previewTimer) {
+      window.clearTimeout(state.previewTimer);
+      state.previewTimer = 0;
+      updatePreview();
+    }
+    scrollPreviewToHeading(heading);
     updateMetrics();
     updateOutlineActive();
-    setStatus('已跳到：' + heading.text);
+    setStatus('已跳到：' + heading.text + '（右侧预览已同步）');
   }
 
   function bindOutlineEvents() {
@@ -1837,7 +1883,8 @@
     state.preview.innerHTML = '';
     historyReset('');
     if (state.outline) {
-      state.outline.hidden = window.localStorage && window.localStorage.getItem(OUTLINE_PREF) === '0';
+      // 每次打开都默认显示目录（仅本次会话内可通过「目录」按钮临时收起）
+      state.outline.hidden = false;
       refreshOutline();
     }
     setStatus('正在读取源文档…');
