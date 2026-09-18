@@ -340,6 +340,42 @@ class AuthService:
 
     # ---- SVN 口令存储（本机密钥可逆加密，登录成功后更新，提交时复用） ----
 
+    def store_repo_credential(self, repository_id, username, password):
+        """保存某个仓库的同步凭据（加密入库）。"""
+        repository_id = str(repository_id or "").strip()
+        username = str(username or "").strip()
+        if not repository_id or not username or not password:
+            return False
+        key = self.secret_key()
+        if not key:
+            return False
+        try:
+            secret = encrypt(key, password)
+        except ValueError:
+            return False
+        with self._db_lock:
+            database.save_repo_credential(self.conn, repository_id, username, secret)
+        return True
+
+    def repo_credential(self, repository_id):
+        """读取某个仓库的同步凭据；返回 (username, password) 或 None。"""
+        repository_id = str(repository_id or "").strip()
+        if not repository_id:
+            return None
+        with self._db_lock:
+            row = database.find_repo_credential(self.conn, repository_id)
+        if row is None:
+            return None
+        try:
+            return row["username"], decrypt(self.secret_key(), row["secret"])
+        except (ValueError, TypeError):
+            return None
+
+    def repo_credential_username(self, repository_id):
+        with self._db_lock:
+            row = database.find_repo_credential(self.conn, str(repository_id or "").strip())
+        return row["username"] if row is not None else None
+
     def sync_credential(self):
         """定时同步用的只读凭据：环境变量 sync.credential_name 的 "用户名:口令"（可选）。"""
         name = str((self.config.get("sync") or {}).get("credential_name") or "").strip()
@@ -354,11 +390,23 @@ class AuthService:
         return (user.strip(), password)
 
     def sync_repositories(self, md_dir, logger=None):
-        """按各仓库频率拉取远端更新（跳过有活动草稿的文档并报告冲突）。"""
-        credential = self.sync_credential()
+        """按各仓库频率拉取远端更新（跳过有活动草稿的文档并报告冲突）。
+
+        凭据优先使用仓库自己配置的同步账号（数据库加密保存），否则回退到环境变量 sync.credential_name。
+        """
+        fallback = self.sync_credential()
         with self._db_lock:
-            return operations.sync_all(self.conn, self.svn, self.config, md_dir,
-                                       credential=credential, logger=logger)
+            return operations.sync_all(
+                self.conn, self.svn, self.config, md_dir, credential=fallback, logger=logger,
+                credential_of=lambda binding: self.repo_credential(binding.get("id")),
+            )
+
+    def backup_site_data(self, root, logger=None):
+        """把网站数据合入到配置的 SVN 库（凭据优先仓库配置，其次环境变量）。"""
+        settings = self.config.get("site_backup") or {}
+        credential = self.repo_credential("site-backup") or self.sync_credential()
+        with self._db_lock:
+            return operations.backup_site(self.conn, self.svn, self.config, root, credential)
 
     def record_document_snapshot(self, md_dir):
         """扫描 docs/md 并记录增删改（首次为基线，不产生事件）。"""

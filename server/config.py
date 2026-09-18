@@ -124,6 +124,21 @@ def load_config(path, docs_dir, allow_incomplete=False):
     database = _resolve_path(base, database_raw, "storage.database", docs_dir)
     workspaces = _resolve_path(base, workspaces_raw, "storage.workspaces", docs_dir)
 
+    site_raw = raw.get("siteBackup") or {}
+    site_interval = site_raw.get("intervalSeconds", 3600)
+    if not isinstance(site_interval, (int, float)) or site_interval < 0:
+        raise ConfigError("siteBackup.intervalSeconds 必须是不小于 0 的数值（0 表示不自动备份）")
+    site_url = str(site_raw.get("url") or "").strip()
+    if site_url:
+        site_url = _check_url(site_url, "siteBackup.url")
+    site_backup = {
+        "enabled": bool(site_raw.get("enabled", bool(site_url))),
+        "url": site_url,
+        "interval_seconds": float(site_interval),
+        "include": [str(item).strip().strip("/") for item in (site_raw.get("include") or ["docs"]) if str(item).strip()],
+        "message": str(site_raw.get("message") or "site backup").strip()[:200],
+    }
+
     sync_raw = raw.get("sync") or {}
     interval = sync_raw.get("interval_seconds", DEFAULT_SYNC_INTERVAL)
     if not isinstance(interval, (int, float)) or interval < 10:
@@ -199,6 +214,7 @@ def load_config(path, docs_dir, allow_incomplete=False):
             "credential_name": str(sync_raw.get("credential_name") or "").strip(),
         },
         "repositories": repositories,
+        "site_backup": site_backup,
         "ai": ai,
     }
 
@@ -232,6 +248,13 @@ def config_to_json(config):
             "workspaces": config["storage"].get("workspaces_raw", "../data/workspaces"),
         },
         "sync": dict(config["sync"]),
+        "siteBackup": {
+            "enabled": bool(config.get("site_backup", {}).get("enabled")),
+            "url": config.get("site_backup", {}).get("url", ""),
+            "intervalSeconds": config.get("site_backup", {}).get("interval_seconds", 3600),
+            "include": list(config.get("site_backup", {}).get("include", ["docs"])),
+            "message": config.get("site_backup", {}).get("message", "site backup"),
+        },
         "repositories": [
             {"id": repo["id"], "mount": repo["mount"], "url": repo["url"],
              "credential_group": repo["credential_group"], "group": repo.get("group") or "默认",
@@ -302,6 +325,8 @@ def default_config():
         },
         "storage": {"database": "../data/md2web.sqlite3", "workspaces": "../data/workspaces"},
         "sync": {"interval_seconds": DEFAULT_SYNC_INTERVAL, "credential_source": "", "credential_name": ""},
+        "siteBackup": {"enabled": False, "url": "", "intervalSeconds": 3600, "include": ["docs"],
+                       "message": "site backup"},
         "repositories": [],
         "ai": dict(DEFAULT_AI),
     }

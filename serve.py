@@ -278,6 +278,14 @@ def rebuild_if_needed(directory):
     return True
 
 
+def site_backup_due(last_run, interval_seconds, now=None):
+    if not interval_seconds or float(interval_seconds) <= 0:
+        return False
+    if not last_run:
+        return True
+    return (now or time.time()) - float(last_run) >= float(interval_seconds)
+
+
 def start_repo_sync(auth_service, md_dir, interval=15.0):
     """后台按各仓库配置的频率同步 SVN 库；返回停止事件。"""
     stop_event = threading.Event()
@@ -291,12 +299,25 @@ def start_repo_sync(auth_service, md_dir, interval=15.0):
             seen_errors[message] = True
         print(message)
 
+    last_backup = {"at": 0.0}
+
     def run():
         while not stop_event.is_set():
             try:
                 auth_service.sync_repositories(md_dir, logger=logger)
             except Exception as error:
                 print(f"警告: 定时同步 SVN 失败: {error}")
+            try:
+                settings = (getattr(auth_service, "config", {}) or {}).get("site_backup") or {}
+                if settings.get("enabled") and settings.get("url"):
+                    if site_backup_due(last_backup["at"], settings.get("interval_seconds")):
+                        result = auth_service.backup_site_data(ROOT)
+                        last_backup["at"] = time.time()
+                        if result.get("updated"):
+                            print("已备份网站数据到 SVN：r%s（%s）"
+                                  % (result.get("revision"), "、".join(result.get("files") or [])))
+            except Exception as error:
+                print(f"警告: 网站数据备份失败: {error}")
             stop_event.wait(interval)
 
     thread = threading.Thread(target=run, daemon=True)

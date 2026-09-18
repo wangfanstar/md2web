@@ -365,7 +365,8 @@ def _parse_iso(value):
     raise ValueError("时间格式不正确: " + value)
 
 
-def sync_all(conn, svn_client, config, md_dir, credential=None, now=None, logger=None):
+def sync_all(conn, svn_client, config, md_dir, credential=None, now=None, logger=None,
+             credential_of=None):
     """按各仓库的同步频率拉取远端更新；返回每个仓库的结果汇总。"""
     moment = now or time.time()
     results = []
@@ -375,8 +376,16 @@ def sync_all(conn, svn_client, config, md_dir, credential=None, now=None, logger
         row_dict = _row_dict(row)
         if not sync_due(row_dict, interval, moment):
             continue
+        per_repo = credential
+        if credential_of is not None:
+            try:
+                found = credential_of(binding)
+            except Exception:
+                found = None
+            if found:
+                per_repo = found
         try:
-            result = sync_binding(conn, svn_client, config, md_dir, binding, credential)
+            result = sync_binding(conn, svn_client, config, md_dir, binding, per_repo)
             result["binding"] = binding["mount"]
             results.append(result)
             if logger is not None and (result.get("updated") or result.get("conflicts")):
@@ -465,7 +474,7 @@ def list_md_folders(md_dir, repos=None):
     if not root.is_dir():
         return []
     folders = []
-    for path in sorted(root.rglob("*")):
+    for path in sorted(root.iterdir()):
         if not path.is_dir() or path.name.startswith("."):
             continue
         try:
@@ -583,6 +592,64 @@ def delete_entry(md_dir, relative, trash_root):
     trash.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(target), str(trash))
     return {"path": str(relative), "trash": str(trash)}
+
+
+def site_backup_due(last_run, interval_seconds, now=None):
+    """网站数据备份是否到期（interval 为 0 表示不自动备份）。"""
+    if not interval_seconds or float(interval_seconds) <= 0:
+        return False
+    if not last_run:
+        return True
+    return (now or time.time()) - float(last_run) >= float(interval_seconds)
+
+
+def backup_site(conn, svn_client, config, root, credential=None, message=None, now=None):
+    """把网站数据（默认 docs/）合入到配置的 SVN 库：检出工作副本 → 复制 → svn add → 提交。"""
+    settings = config.get("site_backup") or {}
+    url = str(settings.get("url") or "").strip()
+    if not url:
+        raise OperationError(400, "未配置网站数据仓库地址（siteBackup.url）")
+    username, password = credential or (None, None)
+    includes = settings.get("include") or ["docs"]
+    work_root = Path(config["storage"]["workspaces"]).parent / "site-wc"
+    work_root.mkdir(parents=True, exist_ok=True)
+    config_dir = str(work_root / "svn-config")
+    Path(config_dir).mkdir(parents=True, exist_ok=True)
+    try:
+        if not (work_root / ".svn").exists():
+            svn_client.checkout(url, work_root, depth="empty", config_dir=config_dir,
+                                username=username, password=password)
+        copied = []
+        for item in includes:
+            source = Path(root) / item
+            if not source.exists():
+                continue
+            target = work_root / item
+            if target.exists():
+                if target.is_dir():
+                    shutil.rmtree(target, ignore_errors=True)
+                else:
+                    target.unlink()
+            if source.is_dir():
+                shutil.copytree(source, target)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, target)
+            copied.append(item)
+        svn_client.add(work_root, config_dir=config_dir, username=username, password=password)
+        status = svn_client.status(work_root, config_dir=config_dir, username=username, password=password)
+        if not str(status or "").strip():
+            return {"updated": False, "revision": None, "files": copied,
+                    "message": "没有需要提交的变更"}
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        text = "%s %s" % (message or settings.get("message") or "site backup", stamp)
+        revision = svn_client.commit(work_root, text, config_dir=config_dir,
+                                     username=username, password=password)
+        return {"updated": True, "revision": revision, "files": copied}
+    except SvnError as error:
+        if error.code == "auth_failed":
+            raise OperationError(401, "网站数据仓库认证失败，请检查同步用户名与密码")
+        raise OperationError(502, "网站数据备份失败：%s" % error)
 
 
 def provision_repository(conn, svn_client, config, md_dir, binding, credential=None):

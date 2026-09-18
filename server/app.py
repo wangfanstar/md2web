@@ -384,6 +384,56 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 pass
         return jsonify({"ok": True, "result": result})
 
+    @app.post("/__admin/repo-credential")
+    def set_repo_credential():
+        """设置某个仓库（或 site-backup）的同步用户名与密码（加密入库）。"""
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        repo_id = str(payload.get("id") or "").strip()
+        username = str(payload.get("username") or "").strip()
+        password = payload.get("password") or ""
+        if not repo_id or not username or not password:
+            return json_error(400, "invalid_request", "需要 id、username 与 password")
+        if not auth_service.store_repo_credential(repo_id, username, password):
+            return json_error(500, "credential_error", "保存同步凭据失败（检查配置中的 security.secretKey）")
+        return jsonify({"ok": True, "id": repo_id, "username": username})
+
+    @app.get("/__admin/credentials")
+    def list_repo_credentials():
+        """列出已配置同步凭据的仓库与用户名（不含口令）。"""
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        rows = {}
+        for repo in config.get("repositories") or []:
+            name = auth_service.repo_credential_username(repo["id"])
+            if name:
+                rows[repo["id"]] = name
+        site_name = auth_service.repo_credential_username("site-backup")
+        if site_name:
+            rows["site-backup"] = site_name
+        return jsonify({"ok": True, "credentials": rows})
+
+    @app.post("/__admin/site-backup")
+    def admin_site_backup():
+        """立即把网站数据合入 SVN 库（管理员 + CSRF）。"""
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        try:
+            result = auth_service.backup_site_data(docs_root)
+        except operations.OperationError as error:
+            return json_error(error.status, "site_backup_error", error.message)
+        return jsonify({"ok": True, "result": result})
+
     @app.post("/__admin/group")
     def set_repo_group():
         """设置文件夹（仓库）的分组：更新配置并触发重建（管理员 + CSRF）。"""

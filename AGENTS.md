@@ -144,6 +144,9 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - `start_linux.sh` 默认**后台启动**（`nohup … >> data/serve.log 2>&1 &`，等待就绪后打印 PID/日志/停止命令），`--foreground` 前台、`--stop` 按 pidfile 停止、`--restart` 强制重启（先停本实例，再用 ss/lsof/fuser 结束占用端口的进程）、`--status` 查看状态；脚本自身的开关会先剥离，其余参数透传 `serve.py`；后台模式自动补 `--no-browser`；保持 POSIX sh、LF 与可执行位。
 - Linux 进程名：`serve.py` 启动时调用 `set_process_title()`（libc `prctl(PR_SET_NAME)`）把进程名设为 `md2web-serve`，便于 `pgrep -af md2web` / `ps -o pid,comm,args -C md2web-serve` 查找；Windows 下仅设置控制台标题（进程名仍是 python.exe），实例管理仍以 pidfile 为准。
 - 每页「返回首页」目标由 `window.$docsify.homeLink` 决定（仓库页 → `index_all.html`，合并视图 → 总览 `index.html`，构建时注入）；`index_all.html` 的左侧导航由 `workspace.js` 按当前路由过滤（只显示当前仓库条目，路由需 `decodeURIComponent`）。
+- 仓库同步凭据：`repo_credentials`（v6，按 repository_id 存密文，`site-backup` 为网站备份专用 id）；`AuthService.repo_credential` 解密，`sync_repositories` 优先用仓库凭据、其次环境变量 `sync.credential_name`；接口 `POST /__admin/repo-credential`、`GET /__admin/credentials`（均需管理员）。
+- 网站数据备份：配置 `siteBackup`（enabled/url/intervalSeconds/include/message），`operations.backup_site` 在 `data/site-wc` 检出后复制 `docs/` 并 `svn add` + `svn commit`（`svn status` 为空则跳过）；`serve.py` 同步线程按频率触发，`POST /__admin/site-backup` 可立即备份。
+- `GET /__folders` 只列 `docs/md` 的**一级**子文件夹（仓库映射以一级目录为单位）。
 - 仓库写权限：`readOnly` / `allowCommit=false` 的仓库在 `/__svn/prepare`、`/__svn/commit` 返回 403 （`repo_read_only` / `repo_commit_disabled`），编辑器也会提示只读；`PUT /__config` 与「创建并拉取」后会触发站点重建。
 - 编辑器布局：`.md-editor-body` 用 **flex**（大纲固定 210px → 源码区宽度由拖拽分栏设置 → 6px 分隔条 → 预览占剩余）；不要再改回「三列 grid」，否则新增大纲后预览会被挤到第二列并被遮挡（大纲宽度按可用区域计算拖拽百分比）。
 - 搜索结果阅读模式下：命中工具条（sticky，z-index 960）在上，操作行通过 `--reading-toolbar-h` 下移（z-index 940）两者同时可见；不要再把操作行隐藏或让两者同 top 重叠。

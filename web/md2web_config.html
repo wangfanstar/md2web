@@ -73,6 +73,23 @@
         更新频率留空使用全局默认（设置 → SVN 与仓库），填 0 表示不自动同步。</p>
     </section>
 
+    <section class="panel" data-config-main hidden>
+      <h2>网站数据备份（SVN）</h2>
+      <p class="hint">把网站数据（默认 <code>docs/</code>，含生成的页面、搜索索引与源文档）按频率定时合入到指定的 SVN 库；
+        凭据单独设置（加密保存），未设置时回退到环境变量同步凭据。</p>
+      <div class="row">
+        <label>启用<input type="checkbox" data-site-backup="enabled"></label>
+        <label>仓库地址<input type="text" data-site-backup="url" placeholder="https://svn.example.com/svn/md2web-site/trunk/"></label>
+        <label>备份频率（秒）<input type="number" min="0" step="300" data-site-backup="intervalSeconds" placeholder="3600"></label>
+        <label>提交说明前缀<input type="text" data-site-backup="message" placeholder="site backup"></label>
+      </div>
+      <div class="actions">
+        <button type="button" data-action="site-credential">设置备份凭据…</button>
+        <button type="button" data-action="site-backup-now">立即备份</button>
+        <span class="hint" data-site-credential-label></span>
+      </div>
+    </section>
+
     <section class="panel" data-config-file hidden>
       <h2>当前为离线浏览（file://）</h2>
       <p class="hint">仓库配置需要认证服务：请用 <code>python serve.py</code> 启动后访问

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .passwords import hash_password
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # 兼容目标：RHEL7 自带 SQLite 3.7.17（Python 3.6 的 sqlite3）。
 # Windows 端也必须只写这些版本能解析的对象，保证 data/ 数据库可在两个平台间直接共用。
@@ -332,6 +332,8 @@ def migrate(conn, logger=None):
                 conn.executescript(MIGRATION_V4_SQL)
             if version < 5:
                 conn.executescript(MIGRATION_V5_SQL)
+            if version < 6:
+                conn.executescript(MIGRATION_V6_SQL)
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     sanitize_schema(conn, logger)
     return SCHEMA_VERSION
@@ -392,6 +394,19 @@ CREATE INDEX IF NOT EXISTS idx_document_events_created ON document_events (creat
 """
 
 
+# v6：仓库定时同步用的凭据（按仓库 id 存密文），以及网站数据备份仓库的凭据
+MIGRATION_V6_SQL = """
+CREATE TABLE IF NOT EXISTS repo_credentials (
+    id INTEGER PRIMARY KEY,
+    repository_id TEXT NOT NULL UNIQUE,
+    username TEXT NOT NULL,
+    secret TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
+
 def save_svn_credential(conn, auth_source_id, username, secret, now=None):
     """写入/更新 SVN 口令密文（按 认证源+用户名 唯一）；返回是否新建。"""
     timestamp = now or now_iso()
@@ -412,6 +427,37 @@ def save_svn_credential(conn, auth_source_id, username, secret, now=None):
             (secret, timestamp, existing["id"]),
         )
     return False
+
+
+def save_repo_credential(conn, repository_id, username, secret, now=None):
+    """写入/更新某个仓库的同步凭据（密文）；返回是否新建。"""
+    timestamp = now or now_iso()
+    existing = conn.execute("SELECT id FROM repo_credentials WHERE repository_id = ?",
+                            (repository_id,)).fetchone()
+    with conn:
+        if existing is None:
+            conn.execute(
+                "INSERT INTO repo_credentials (repository_id, username, secret, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (repository_id, username, secret, timestamp, timestamp),
+            )
+            return True
+        conn.execute(
+            "UPDATE repo_credentials SET username = ?, secret = ?, updated_at = ? WHERE id = ?",
+            (username, secret, timestamp, existing["id"]),
+        )
+    return False
+
+
+def find_repo_credential(conn, repository_id):
+    return conn.execute("SELECT * FROM repo_credentials WHERE repository_id = ?",
+                        (repository_id,)).fetchone()
+
+
+def delete_repo_credential(conn, repository_id):
+    with conn:
+        cursor = conn.execute("DELETE FROM repo_credentials WHERE repository_id = ?", (repository_id,))
+    return cursor.rowcount > 0
 
 
 def find_svn_credential(conn, auth_source_id, username):

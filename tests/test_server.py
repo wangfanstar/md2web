@@ -203,6 +203,13 @@ if command == "diff":
             print("+" + line)
     sys.exit(0)
 
+if command == "status":
+    # 默认视为有变更（测试网站数据备份时能走到提交）；MODE=clean 时返回空
+    if MODE == "clean":
+        sys.exit(0)
+    print("M       " + str(args[-1]))
+    sys.exit(0)
+
 if command == "add":
     targets = [item for item in args[1:] if not item.startswith("-")]
     if targets:
@@ -2161,6 +2168,55 @@ class FolderOpsTests(ServerTestBase):
 
     def csrf(self):
         return self.client.get("/__auth/session").get_json()["csrfToken"]
+
+    def test_folders_endpoint_only_lists_first_level(self):
+        nested = self.docs / "md" / "硬件设计" / "接口"
+        nested.mkdir(parents=True, exist_ok=True)
+        (nested / "uart.md").write_text("# U\n", encoding="utf-8")
+        folders = {item["path"] for item in self.client.get("/__folders").get_json()["folders"]}
+        self.assertIn("md/硬件设计", folders)
+        self.assertNotIn("md/硬件设计/接口", folders, "只应列出一级子文件夹")
+
+    def test_repo_credential_roundtrip_and_usage(self):
+        headers = {"X-CSRF-Token": self.csrf()}
+        response = self.client.post("/__admin/repo-credential",
+                                    json={"id": "hardware", "username": "syncuser", "password": "syncpass"},
+                                    headers=headers)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        listed = self.client.get("/__admin/credentials").get_json()["credentials"]
+        self.assertEqual(listed.get("hardware"), "syncuser")
+        self.assertEqual(self.auth.repo_credential("hardware"), ("syncuser", "syncpass"))
+        row = self.conn.execute("SELECT * FROM repo_credentials").fetchone()
+        self.assertNotIn("syncpass", row["secret"], "库里不能是明文")
+        self.assertEqual(self.client.post("/__admin/repo-credential", json={"id": "x"},
+                                          headers=headers).status_code, 400)
+        anonymous = self.app.test_client()
+        self.assertEqual(anonymous.get("/__admin/credentials").status_code, 401)
+
+    def test_site_backup_commits_docs(self):
+        state_path = self.tmp / "site-state.json"
+        state_path.write_text(json.dumps({
+            "files": {}, "revision": 4, "log": [], "wc": {},
+            "uuid": "22222222-3333-4444-5555-666666666666"}, ensure_ascii=False), encoding="utf-8")
+        env = mock.patch.dict("os.environ", {"FAKE_SVN_STATE": str(state_path)})
+        env.start()
+        try:
+            fake = self.tmp / "fake_svn_site.py"
+            fake.write_text(FAKE_SVN, encoding="utf-8")
+            svn = server_svn.SvnClient(command=(sys.executable, str(fake)), timeout=5)
+            self.config["site_backup"] = {
+                "enabled": True, "url": "https://svn.example.invalid/svn/site/trunk/",
+                "interval_seconds": 3600, "include": ["docs"], "message": "site backup",
+            }
+            result = server_operations.backup_site(self.conn, svn, self.config, self.tmp,
+                                                   ("syncuser", "syncpass"))
+            self.assertTrue(result["updated"], result)
+            self.assertIn("docs", result["files"])
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertTrue(any(name.startswith("docs/") for name in state["files"]),
+                            list(state["files"])[:5])
+        finally:
+            env.stop()
 
     def test_folders_endpoint_lists_all_md_folders(self):
         (self.docs / "md" / "未配置目录").mkdir(parents=True, exist_ok=True)

@@ -290,6 +290,12 @@ class SvnClient:
         args += creds
         return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
 
+    def status(self, path, config_dir=None, username=None, password=None):
+        """返回 svn status 输出（用于判断是否有变更需要提交）。"""
+        creds, stdin_text = self._credential_args(username, password)
+        args = ["status", "--non-interactive", "--no-auth-cache"] + creds + [str(path)]
+        return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
+
     def add(self, path, config_dir=None, username=None, password=None):
         """把新文件加入版本控制（已纳管时报错由调用方忽略）。"""
         creds, stdin_text = self._credential_args(username, password)
