@@ -10,6 +10,7 @@
 import json
 import os
 import calendar
+from datetime import datetime
 import re
 import shutil
 import tempfile
@@ -429,6 +430,120 @@ def remote_diff(conn, svn_client, config, md_dir, binding, document_path, creden
         "publishedRevision": published,
         "path": document_path,
     }
+
+
+def _managed_path(md_dir, relative, expect_md=False):
+    """把 md/<相对路径> 解析为受管路径；越界/非法抛 OperationError。"""
+    value = str(relative or "").strip().replace("\\", "/").strip("/")
+    parts = [part for part in value.split("/") if part not in ("", ".")]
+    if not parts or parts[0] != "md":
+        raise OperationError(400, "仅支持 docs/md 下的路径")
+    if any(part == ".." or part.startswith(".") for part in parts):
+        raise OperationError(400, "路径不合法")
+    root = Path(md_dir).resolve()
+    target = (root.parent / Path(*parts)).resolve()
+    if target != root and root not in target.parents:
+        raise OperationError(400, "路径越界")
+    if expect_md and target.suffix.lower() != ".md":
+        raise OperationError(400, "文档必须是 .md 文件")
+    return target
+
+
+def _safe_name(name):
+    value = str(name or "").strip().replace("\\", "/").strip("/")
+    if not value or "/" in value or value in (".", "..") or value.startswith("."):
+        raise OperationError(400, "名称不合法")
+    for char in "\\:*?\"<>|":
+        if char in value:
+            raise OperationError(400, "名称不能包含 \\ : * ? \" < > | 等字符")
+    return value
+
+
+def folder_listing(md_dir, relative):
+    """列出某个文件夹下的文档与子文件夹（公开信息：名称/大小/修改时间）。"""
+    target = _managed_path(md_dir, relative)
+    if not target.is_dir():
+        raise OperationError(404, "文件夹不存在")
+    root = Path(md_dir).resolve()
+    documents = []
+    folders = []
+    for entry in sorted(target.iterdir(), key=lambda item: item.name):
+        if entry.name.startswith("."):
+            continue
+        if entry.is_dir():
+            folders.append({"name": entry.name,
+                            "path": "md/" + entry.resolve().relative_to(root).as_posix()})
+        elif entry.suffix.lower() == ".md":
+            stat = entry.stat()
+            documents.append({
+                "name": entry.name,
+                "path": "md/" + entry.resolve().relative_to(root).as_posix(),
+                "size": int(stat.st_size),
+                "mtime": int(stat.st_mtime),
+            })
+    return {
+        "path": "md/" + target.resolve().relative_to(root).as_posix(),
+        "name": target.name,
+        "documents": documents,
+        "folders": folders,
+        "totalBytes": sum(item["size"] for item in documents),
+    }
+
+
+def create_entry(md_dir, parent, kind, name):
+    """在指定文件夹下新建文档或子文件夹。"""
+    directory = _managed_path(md_dir, parent)
+    if not directory.is_dir():
+        raise OperationError(404, "文件夹不存在")
+    safe = _safe_name(name)
+    root = Path(md_dir).resolve()
+    if kind == "folder":
+        target = directory / safe
+        if target.exists():
+            raise OperationError(409, "同名文件夹已存在")
+        target.mkdir(parents=True)
+        return {"path": "md/" + target.resolve().relative_to(root).as_posix(), "kind": "folder"}
+    if kind != "document":
+        raise OperationError(400, "kind 只能是 document 或 folder")
+    filename = safe if safe.lower().endswith(".md") else safe + ".md"
+    target = directory / filename
+    if target.exists():
+        raise OperationError(409, "同名文档已存在")
+    target.write_text("# " + Path(filename).stem + "\n\n", encoding="utf-8")
+    return {"path": "md/" + target.resolve().relative_to(root).as_posix(), "kind": "document"}
+
+
+def rename_entry(md_dir, relative, name):
+    """重命名文档或文件夹（保持同目录）。"""
+    target = _managed_path(md_dir, relative)
+    if not target.exists():
+        raise OperationError(404, "目标不存在")
+    safe = _safe_name(name)
+    if target.is_dir():
+        new_name = safe
+    else:
+        new_name = safe if safe.lower().endswith(".md") else safe + ".md"
+    new_path = target.parent / new_name
+    if new_path.exists():
+        raise OperationError(409, "同名目标已存在")
+    target.rename(new_path)
+    return {"path": "md/" + new_path.resolve().relative_to(Path(md_dir).resolve()).as_posix(),
+            "oldPath": str(relative)}
+
+
+def delete_entry(md_dir, relative, trash_root):
+    """删除文档或文件夹：移动到 data/trash/<时间戳>/ 下（可找回）。"""
+    target = _managed_path(md_dir, relative)
+    if not target.exists():
+        raise OperationError(404, "目标不存在")
+    root = Path(md_dir).resolve()
+    if target.resolve() == root:
+        raise OperationError(400, "不能删除 docs/md 根目录")
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    trash = Path(trash_root) / stamp / target.name
+    trash.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(target), str(trash))
+    return {"path": str(relative), "trash": str(trash)}
 
 
 def provision_repository(conn, svn_client, config, md_dir, binding, credential=None):

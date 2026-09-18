@@ -2135,6 +2135,83 @@ class MultiRepoServerTests(ServerTestBase):
         self.assertIn("rebuild", self.calls)
 
 
+class FolderOpsTests(ServerTestBase):
+    """文件夹视图与右键操作：公开列表、新建/重命名/删除（移入回收站）、分组。"""
+
+    def setUp(self):
+        super().setUp()
+        self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
+        server_database.migrate(self.conn)
+        server_database.ensure_admin(self.conn)
+        self.config = server_config.load_config(self.write_config(), self.docs)
+        (self.docs / "md" / "硬件设计").mkdir(parents=True, exist_ok=True)
+        (self.docs / "md" / "硬件设计" / "时钟树设计.md").write_text("# A\n", encoding="utf-8")
+        self.svn = FakeSvn()
+        self.auth = server_auth.AuthService(self.conn, self.svn, self.config)
+        self.auth.on_startup()
+        from server.app import create_app
+        self.app = create_app(self.config, self.conn, self.auth, self.docs,
+                              on_config_changed=lambda: None)
+        self.client = self.app.test_client()
+        self.client.post("/__auth/login", json={"username": "admin", "password": "admin"})
+
+    def tearDown(self):
+        self.conn.close()
+        super().tearDown()
+
+    def csrf(self):
+        return self.client.get("/__auth/session").get_json()["csrfToken"]
+
+    def test_folder_listing_is_public(self):
+        payload = self.client.get("/__folder?path=md/硬件设计").get_json()
+        self.assertTrue(payload["ok"])
+        names = [item["name"] for item in payload["folder"]["documents"]]
+        self.assertIn("时钟树设计.md", names)
+        self.assertGreater(payload["folder"]["totalBytes"], 0)
+
+    def test_create_rename_delete_flow(self):
+        headers = {"X-CSRF-Token": self.csrf()}
+        created = self.client.post("/__md/create", json={"parent": "md/硬件设计", "kind": "document",
+                                                         "name": "新接口"}, headers=headers).get_json()
+        self.assertTrue(created["ok"], created)
+        self.assertTrue((self.docs / "md" / "硬件设计" / "新接口.md").is_file())
+        renamed = self.client.post("/__md/rename", json={"path": "md/硬件设计/新接口.md", "name": "接口说明"},
+                                   headers=headers).get_json()
+        self.assertTrue(renamed["ok"], renamed)
+        self.assertTrue((self.docs / "md" / "硬件设计" / "接口说明.md").is_file())
+        deleted = self.client.post("/__md/delete", json={"path": "md/硬件设计/接口说明.md"},
+                                   headers=headers).get_json()
+        self.assertTrue(deleted["ok"], deleted)
+        self.assertFalse((self.docs / "md" / "硬件设计" / "接口说明.md").exists())
+        self.assertTrue(Path(deleted["result"]["trash"]).is_file())
+
+    def test_create_folder_and_reject_bad_paths(self):
+        headers = {"X-CSRF-Token": self.csrf()}
+        created = self.client.post("/__md/create", json={"parent": "md/硬件设计", "kind": "folder",
+                                                         "name": "子目录"}, headers=headers).get_json()
+        self.assertTrue(created["ok"], created)
+        self.assertTrue((self.docs / "md" / "硬件设计" / "子目录").is_dir())
+        for payload in ({"parent": "md/../x", "kind": "folder", "name": "a"},
+                        {"parent": "md/硬件设计", "kind": "folder", "name": "../x"},
+                        {"parent": "README.md", "kind": "folder", "name": "a"}):
+            response = self.client.post("/__md/create", json=payload, headers=headers)
+            self.assertEqual(response.status_code, 400, payload)
+
+    def test_operations_require_login(self):
+        anonymous = self.app.test_client()
+        self.assertEqual(anonymous.post("/__md/create", json={"parent": "md", "kind": "folder",
+                                                              "name": "x"}).status_code, 401)
+        self.assertEqual(anonymous.post("/__md/delete", json={"path": "md/硬件设计/时钟树设计.md"}).status_code, 401)
+
+    def test_group_update_requires_admin(self):
+        headers = {"X-CSRF-Token": self.csrf()}
+        response = self.client.post("/__admin/group", json={"id": "hardware", "group": "新分组"},
+                                    headers=headers)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        repos = {item["id"]: item for item in server_config.config_to_json(self.config)["repositories"]}
+        self.assertEqual(repos["hardware"]["group"], "新分组")
+
+
 class PathsTests(unittest.TestCase):
     def test_blocked_paths(self):
         blocked = (".svn/entries", "md/.hidden/a.md", "data/db.sqlite3", "config/server.local.json",

@@ -402,12 +402,13 @@ body.media-viewer-open {
   flex-direction: column;
   height: 92vh;
   left: 50%;
-  max-width: 1480px;
+  max-width: 1720px;
+  width: 96vw;
   overflow: hidden;
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: min(96vw, 1480px);
+  width: min(96vw, 1720px);
 }
 
 .md-editor-head {
@@ -835,4 +836,134 @@ svg text[class*="actor"] {
   font-size: 12px;
   margin: 0;
   padding: 8px 10px;
+}
+
+/* 编辑器：表格行列选择器与文字颜色选择器 */
+.md-editor-picker {
+  background: #fff;
+  border: 1px solid var(--workspace-line);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, .18);
+  left: 12px;
+  padding: 8px;
+  position: absolute;
+  top: 84px;
+  z-index: 8;
+}
+
+.md-editor-grid-picker table {
+  border-collapse: collapse;
+}
+
+.md-editor-grid-picker td {
+  border: 1px solid #dbe3ec;
+  cursor: pointer;
+  height: 14px;
+  padding: 0;
+  width: 14px;
+}
+
+.md-editor-grid-picker td.is-on {
+  background: rgba(31, 111, 235, .35);
+  border-color: var(--docs-accent, #1f6feb);
+}
+
+.md-editor-grid-picker .md-editor-picker-hint {
+  color: var(--docs-muted, #57606a);
+  font-size: 12px;
+  margin-top: 6px;
+  text-align: center;
+}
+
+.md-editor-color-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 176px;
+}
+
+.md-editor-color-picker button {
+  border: 1px solid #dbe3ec;
+  border-radius: 5px;
+  cursor: pointer;
+  height: 20px;
+  padding: 0;
+  width: 20px;
+}
+
+.md-editor-color-picker button.is-plain {
+  font-size: 11px;
+  width: auto;
+  padding: 0 6px;
+  color: #506174;
+}
+
+/* index_all 文件夹视图：正文只显示当前文件夹信息 */
+body.folder-view-active .docs-page-toc {
+  display: none;
+}
+
+.folder-view-meta {
+  color: var(--docs-muted, #57606a);
+  font-size: 13px;
+}
+
+.folder-view-table {
+  border-collapse: collapse;
+  font-size: 13px;
+  width: 100%;
+}
+
+.folder-view-table th,
+.folder-view-table td {
+  border-bottom: 1px solid var(--docs-border, #e3e8ee);
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.folder-view-table th {
+  color: var(--docs-muted, #57606a);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.folder-view-folders {
+  margin: 6px 0 16px;
+}
+
+.folder-view-hint {
+  color: var(--docs-muted, #57606a);
+  font-size: 12.5px;
+  margin-top: 12px;
+}
+
+/* 右键菜单：新建 / 重命名 / 删除 / 分组 */
+.folder-context-menu {
+  background: #fff;
+  border: 1px solid var(--docs-border, #e3e8ee);
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, .2);
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 4px;
+  position: fixed;
+  z-index: 1200;
+}
+
+.folder-context-menu button {
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: var(--docs-text, #24292f);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.folder-context-menu button:hover {
+  background: rgba(31, 111, 235, .08);
+  color: var(--docs-accent, #1f6feb);
 }

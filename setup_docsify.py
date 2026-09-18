@@ -565,6 +565,7 @@ def generate_custom_search_assets():
         "auth.css",
         "settings.js",
         "settings.css",
+        "folder-view.js",
     ):
         shutil.copyfile(WEB_DIR / name, LIB_DIR / name)
     print("  [生成] custom-search.* / workspace.* / mermaid-init.js / media-viewer.js / packetdiag* / page-export.js / plot-playground.html / md-editor.js / math-init.js / prism-init.js / ai-*.js|css / sanitize.js / auth.* / settings.*")
@@ -955,6 +956,7 @@ def generate_index_html(title="文档中心", path=None, page_name="index.html",
     search_index_path = str(search_index)
     offline_data_path = str(offline_data)
     route_sidebar_js = "true" if route_sidebar else "false"
+    folder_view_js = "true" if route_sidebar else "false"
     home_link_js = json.dumps(home_link or "index.html", ensure_ascii=False)
     repo_list_js = json.dumps([
         {"id": item["id"], "sub": mount_subpath(item["mount"]),
@@ -997,6 +999,7 @@ def generate_index_html(title="文档中心", path=None, page_name="index.html",
       homepage: {homepage_js},
       coverpage: false,
       routeSidebar: {route_sidebar_js},
+      folderView: {folder_view_js},
       homeLink: {home_link_js},
       relativePath: {route_sidebar_js},
       repoList: {repo_list_js},
@@ -1076,6 +1079,7 @@ def generate_index_html(title="文档中心", path=None, page_name="index.html",
   <script src="lib/ai-assistant.js"></script>
   <script src="lib/auth.js"></script>
   <script src="lib/settings.js"></script>
+  <script src="lib/folder-view.js"></script>
 </body>
 </html>
 """

@@ -1411,6 +1411,148 @@
     syncAfterEdit();
   }
 
+  var TABLE_MAX = 8;
+
+  function closePickers() {
+    Array.prototype.forEach.call(state.overlay.querySelectorAll('.md-editor-picker'), function (node) {
+      node.remove();
+    });
+    state.picker = null;
+  }
+
+  function openTablePicker() {
+    closePickers();
+    var panel = state.overlay.querySelector('.md-editor-panel');
+    var picker = document.createElement('div');
+    picker.className = 'md-editor-picker md-editor-grid-picker';
+    var cells = [];
+    for (var row = 1; row <= TABLE_MAX; row += 1) {
+      var tr = '<tr>';
+      for (var column = 1; column <= TABLE_MAX; column += 1) {
+        tr += '<td data-row="' + row + '" data-column="' + column + '"></td>';
+      }
+      cells.push(tr + '</tr>');
+    }
+    picker.innerHTML = '<table><tbody>' + cells.join('') + '</tbody></table>'
+      + '<div class="md-editor-picker-hint">选择行列数（1–' + TABLE_MAX + '）</div>';
+    panel.appendChild(picker);
+    state.picker = picker;
+    picker.addEventListener('mousemove', function (event) {
+      var cell = event.target.closest ? event.target.closest('td[data-row]') : null;
+      if (!cell) {
+        return;
+      }
+      var maxRow = Number(cell.getAttribute('data-row'));
+      var maxColumn = Number(cell.getAttribute('data-column'));
+      Array.prototype.forEach.call(picker.querySelectorAll('td[data-row]'), function (node) {
+        var on = Number(node.getAttribute('data-row')) <= maxRow
+          && Number(node.getAttribute('data-column')) <= maxColumn;
+        node.classList.toggle('is-on', on);
+      });
+    });
+    picker.addEventListener('click', function (event) {
+      var cell = event.target.closest ? event.target.closest('td[data-row]') : null;
+      if (!cell) {
+        return;
+      }
+      insertTable(Number(cell.getAttribute('data-row')), Number(cell.getAttribute('data-column')));
+      closePickers();
+    });
+  }
+
+  function insertTable(rows, columns) {
+    var header = [];
+    for (var column = 1; column <= columns; column += 1) {
+      header.push('列 ' + column);
+    }
+    var lines = ['| ' + header.join(' | ') + ' |', '| ' + header.map(function () { return '---'; }).join(' | ') + ' |'];
+    for (var row = 1; row <= rows; row += 1) {
+      lines.push('| ' + header.map(function () { return '内容'; }).join(' | ') + ' |');
+    }
+    insertBlock(lines.join('\n') + '\n');
+  }
+
+  var TEXT_COLORS = [
+    { label: '红', value: '#e11d48' },
+    { label: '橙', value: '#ea580c' },
+    { label: '黄', value: '#ca8a04' },
+    { label: '绿', value: '#16a34a' },
+    { label: '蓝', value: '#2563eb' },
+    { label: '紫', value: '#7c3aed' },
+    { label: '灰', value: '#64748b' }
+  ];
+
+  function applyTextColor(color) {
+    var textarea = state.textarea;
+    var selected = textarea.value.slice(textarea.selectionStart, textarea.selectionEnd) || '彩色文本';
+    var wrapped = '<span style="color:' + color + '">' + selected + '</span>';
+    replaceRange(textarea.selectionStart, textarea.selectionEnd, wrapped,
+      textarea.selectionStart + wrapped.length, textarea.selectionStart + wrapped.length);
+    syncAfterEdit();
+    setStatus('已设置文字颜色 ' + color + '（Markdown 用 HTML span 实现，站点与预览都支持）');
+  }
+
+  function openColorPicker() {
+    closePickers();
+    var panel = state.overlay.querySelector('.md-editor-panel');
+    var picker = document.createElement('div');
+    picker.className = 'md-editor-picker md-editor-color-picker';
+    picker.innerHTML = TEXT_COLORS.map(function (item) {
+      return '<button type="button" title="' + escapeHtml(item.label + ' ' + item.value)
+        + '" style="background:' + item.value + '" data-color="' + item.value + '"></button>';
+    }).join('')
+      + '<button type="button" class="is-plain" data-color="__custom__">自定义…</button>'
+      + '<button type="button" class="is-plain" data-color="__plain__">清除颜色</button>';
+    panel.appendChild(picker);
+    state.picker = picker;
+    picker.addEventListener('click', function (event) {
+      var button = event.target.closest ? event.target.closest('[data-color]') : null;
+      if (!button) {
+        return;
+      }
+      var color = button.getAttribute('data-color');
+      closePickers();
+      if (color === '__plain__') {
+        var value = state.textarea.value.slice(state.textarea.selectionStart, state.textarea.selectionEnd);
+        var stripped = value.replace(/<\/?span[^>]*>/gi, '');
+        replaceRange(state.textarea.selectionStart, state.textarea.selectionEnd, stripped,
+          state.textarea.selectionStart, state.textarea.selectionStart + stripped.length);
+        syncAfterEdit();
+        setStatus('已清除选中文本的颜色标签');
+        return;
+      }
+      if (color === '__custom__') {
+        var custom = window.prompt('输入颜色（如 #ff6600 或 red）', '#ff6600');
+        if (!custom) {
+          return;
+        }
+        color = custom.trim();
+      }
+      applyTextColor(color);
+    });
+  }
+
+  function pickLocalImages() {
+    var input = state.overlay.querySelector('[data-editor-file-input]');
+    if (!input) {
+      input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.multiple = true;
+      input.setAttribute('data-editor-file-input', '');
+      input.style.display = 'none';
+      state.overlay.querySelector('.md-editor-panel').appendChild(input);
+    }
+    input.value = '';
+    input.onchange = function () {
+      var files = Array.prototype.slice.call(input.files || []);
+      if (files.length) {
+        handleImageFiles(files, files.length === 1 ? imageAltText(files[0]) : '');
+      }
+    };
+    input.click();
+  }
+
   function insertBlock(text, selectionStart, selectionEnd) {
     var textarea = state.textarea;
     var start = textarea.selectionStart;
@@ -1511,7 +1653,9 @@
       fence: function () { insertFence('', '代码'); },
       mermaid: function () { insertFence('mermaid', 'flowchart LR\n  A[开始] --> B[结束]'); },
       packetdiag: function () { insertFence('packetdiag', 'packetdiag {\n  colwidth = 32;\n  0-15: Field A;\n  16-31: Field B;\n}'); },
-      table: function () { insertBlock(TABLE_SKELETON); },
+      table: function () { openTablePicker(); },
+      'upload-image': function () { pickLocalImages(); },
+      color: function () { openColorPicker(); },
       hr: function () { insertBlock('---\n'); },
       save: function () { save(); },
       saveAs: function () { saveToFile(true); },
@@ -1537,7 +1681,9 @@
     { action: 'strike', label: 'S', title: '删除线（Ctrl+Shift+X）', className: 'is-strike' },
     { action: 'code', label: '<>', title: '行内代码（Ctrl+E）' },
     { action: 'link', label: '链接', title: '链接（Ctrl+K）' },
-    { action: 'image', label: '图片', title: '图片' },
+    { action: 'image', label: '图片', title: '插入图片引用' },
+    { action: 'upload-image', label: '上传图片', title: '上传本地图片（保存到文档同级 images/ 并插入引用）' },
+    { action: 'color', label: 'A 颜色', title: '设置文字颜色（Ctrl+Alt+K）' },
     { divider: true },
     { action: 'h1', label: 'H1', title: '一级标题（Ctrl+Alt+1）' },
     { action: 'h2', label: 'H2', title: '二级标题（Ctrl+Alt+2）' },
@@ -1551,7 +1697,7 @@
     { action: 'fence', label: '代码块', title: '代码块（Ctrl+Shift+C）' },
     { action: 'mermaid', label: 'Mermaid', title: 'Mermaid 图形（Ctrl+Shift+G）' },
     { action: 'packetdiag', label: 'PacketDiag', title: 'PacketDiag 报文图（Ctrl+Shift+D）' },
-    { action: 'table', label: '表格', title: '表格（Ctrl+Shift+T）' },
+    { action: 'table', label: '表格', title: '表格：选择行列数（Ctrl+Shift+T）' },
     { action: 'hr', label: '分隔线', title: '分隔线' },
     { divider: true },
     { action: 'math', label: 'Σ 行内公式', title: '行内公式 $...$（Ctrl+M）' },
@@ -1580,6 +1726,7 @@
     { key: 'g', ctrl: true, shift: true, action: 'mermaid' },
     { key: 'd', ctrl: true, shift: true, action: 'packetdiag' },
     { key: 't', ctrl: true, shift: true, action: 'table' },
+    { key: 'k', ctrl: true, alt: true, action: 'color' },
     { key: 'l', ctrl: true, shift: true, action: 'hr' },
     { key: 's', ctrl: true, action: 'save' },
     { key: 's', ctrl: true, shift: true, action: 'saveAs' },
@@ -1668,12 +1815,16 @@
     } catch (_) {
       saved = 0;
     }
-    return saved >= 22 && saved <= 78 ? saved : 50;
+    return saved >= 22 && saved <= 78 ? saved : 38;
   }
 
   function bindOverlay() {
     state.overlay.addEventListener('click', function (event) {
       var target = event.target;
+      if (state.picker && !state.picker.contains(target)
+          && !(target.closest && target.closest('[data-editor-action="table"], [data-editor-action="color"]'))) {
+        closePickers();
+      }
       var action = target.getAttribute && target.getAttribute('data-editor-action');
       if (target.hasAttribute && target.hasAttribute('data-editor-close')) {
         close();
@@ -1749,6 +1900,10 @@
       }
       if (event.key === 'Escape') {
         event.stopPropagation();
+        if (state.picker) {
+          closePickers();
+          return;
+        }
         if (state.outline && !state.outline.hidden) {
           closeOutline();
           return;
@@ -1844,6 +1999,7 @@
       '<li><code>Ctrl+Shift+G</code> Mermaid · <code>Ctrl+Shift+D</code> PacketDiag</li>',
       '<li><code>Tab</code> / <code>Shift+Tab</code> 缩进 · <code>Alt+↑/↓</code> 移动行</li>',
       '<li><code>Ctrl+S</code> 保存 · <code>Ctrl+Shift+S</code> 另存为 · <code>Esc</code> 关闭</li>',
+      '<li><code>Ctrl+Shift+T</code> 表格行列选择 · <code>Ctrl+Alt+K</code> 文字颜色 · 工具栏可上传本地图片</li>',
       '<li><code>Ctrl+Z</code> 撤销 · <code>Ctrl+Y</code>/<code>Ctrl+Shift+Z</code> 恢复 · <code>Ctrl+Shift+H</code> 大纲导航</li>',
       '<li>直接粘贴或拖入图片会自动上传到文档同级 <code>images/</code></li>',
       '</ul>',

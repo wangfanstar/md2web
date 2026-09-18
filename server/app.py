@@ -303,6 +303,119 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             "events": database.document_events(conn, 200),
         })
 
+    @app.get("/__folder")
+    def folder_info():
+        """文件夹信息（公开只读）：当前文件夹下的文档与子文件夹列表。"""
+        path = request.args.get("path") or "md"
+        try:
+            listing = operations.folder_listing(md_dir(), path)
+        except operations.OperationError as error:
+            return json_error(error.status, "folder_error", error.message)
+        return jsonify({"ok": True, "folder": listing})
+
+    @app.post("/__md/create")
+    def create_entry():
+        """新建文档或文件夹（登录用户 + CSRF）。"""
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        try:
+            result = operations.create_entry(md_dir(), payload.get("parent") or "md",
+                                             payload.get("kind") or "document", payload.get("name"))
+        except operations.OperationError as error:
+            return json_error(error.status, "create_error", error.message)
+        if on_config_changed is not None:
+            try:
+                on_config_changed()
+            except Exception:
+                pass
+        return jsonify({"ok": True, "result": result})
+
+    @app.post("/__md/rename")
+    def rename_entry():
+        """重命名文档或文件夹（登录用户 + CSRF）。"""
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        try:
+            result = operations.rename_entry(md_dir(), payload.get("path"), payload.get("name"))
+        except operations.OperationError as error:
+            return json_error(error.status, "rename_error", error.message)
+        if on_config_changed is not None:
+            try:
+                on_config_changed()
+            except Exception:
+                pass
+        return jsonify({"ok": True, "result": result})
+
+    @app.post("/__md/delete")
+    def delete_entry():
+        """删除文档或文件夹（移动到 data/trash，登录用户 + CSRF）。"""
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        try:
+            result = operations.delete_entry(md_dir(), payload.get("path"),
+                                             config["storage"]["database"].parent / "trash")
+        except operations.OperationError as error:
+            return json_error(error.status, "delete_error", error.message)
+        if on_config_changed is not None:
+            try:
+                on_config_changed()
+            except Exception:
+                pass
+        return jsonify({"ok": True, "result": result})
+
+    @app.post("/__admin/group")
+    def set_repo_group():
+        """设置文件夹（仓库）的分组：更新配置并触发重建（管理员 + CSRF）。"""
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        repo_id = str(payload.get("id") or "").strip()
+        group = str(payload.get("group") or "").strip()
+        if not repo_id:
+            return json_error(400, "invalid_request", "缺少仓库 id")
+        if not group:
+            return json_error(400, "invalid_request", "缺少分组名称")
+        data = config_to_json(config)
+        found = False
+        for repo in data.get("repositories") or []:
+            if repo.get("id") == repo_id:
+                repo["group"] = group
+                found = True
+        if not found:
+            return json_error(404, "not_found", "没有找到仓库：" + repo_id)
+        try:
+            loaded = save_config(config["path"], data, docs_root)
+        except server_config.ConfigError as error:
+            return json_error(400, "config_invalid", str(error))
+        config.clear()
+        config.update(loaded)
+        auth_service.on_config_changed()
+        if on_config_changed is not None:
+            try:
+                on_config_changed()
+            except Exception:
+                pass
+        return jsonify({"ok": True, "group": group})
+
     @app.post("/__admin/provision")
     def admin_provision():
         """创建 docs/md 下的仓库目录并从 SVN 拉取（配置页「创建并拉取」）。"""

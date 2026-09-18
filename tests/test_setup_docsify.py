@@ -967,6 +967,7 @@ class MultiRepoTests(TempDirTestCase):
         html = (self.docs / "index_all.html").read_text(encoding="utf-8")
         self.assertIn('homeLink: "index.html"', html)
         self.assertIn("routeSidebar: true", html)
+        self.assertIn("folderView: true", html)
 
 
 class PlaygroundCopyTests(unittest.TestCase):

@@ -45,13 +45,14 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `config/server.example.json` | 认证服务示例配置（可提交）；`config/server.local.json` 为真实配置，不提交（缺失时 `--config` 会自动生成默认文件） |
 | `tests/test_server.py` | 认证服务单元/HTTP 集成测试（配置、数据库、SVN 假 CLI、登录会话、静态白名单） |
 | `web/custom-search.js` / `.css` | 搜索算法与界面、结果列表、搜索/目录视图切换、正文命中高亮、右侧本文目录 |
+| `web/folder-view.js` | `index_all.html` 文件夹视图（正文只显示当前文件夹的文档/子文件夹列表，隐藏本文目录）+ 全局右键菜单：新建文档/新建文件夹/重命名/删除（移动到 `data/trash`）/设置分组；对应接口 `GET /__folder`（公开）与 `POST /__md/create|rename|delete`、`POST /__admin/group` |
 | `web/workspace.js` / `.css` | 目录树（折叠/过滤/计数/定位）、面包屑、首页卡片、复制、查看源码/编辑/下载 MD、章节序号、Mermaid 样式 |
 | `web/mermaid-init.js` | docsify 插件：把 ```mermaid 围栏渲染为图形（离线）；容器保留 `data-source`，并暴露 `window.MermaidRender.render(source)` 供放大查看/导出重渲染 |
 | `web/packetdiag.js` | PacketDiag 解析与 Canvas 绘制核心（从 `PacketDiagPic.html` 抽取，`window.PacketDiag = { parse, render, presets, defaultSource, extractSource, bitOrderFor, numberingFor }`）；支持 `bit_order`/`numbering`/`@row`/`@left`/`desctable` 等扩展语法 |
 | `web/packetdiag-init.js` | docsify 插件：把 ```packetdiag 围栏渲染为报文图（figure 保留 `data-source`），失败回退源码；暴露 `PacketDiagRerender`（按源码重绘 data URL）与 `PacketDiagEnsureRendered`（导出前修复空白画布） |
 | `web/media-viewer.js` | 图片、Mermaid 图形与 PacketDiag 图形的全屏放大查看（放大时用 `MermaidRender.render(source)` 重渲染、PacketDiag 用 `PacketDiagRerender` 重绘，避免克隆丢字/丢箭头）与下载（Mermaid 导出 SVG/PNG，PacketDiag 导出 PNG） |
 | `web/page-export.js` | 「下载本页」：把当前文档导出为自包含 HTML（样式内联、Canvas/图片转 data URL、本文目录固定左侧导航；导出前会调用 `PacketDiagEnsureRendered` 重绘空白画布） |
-| `web/md-editor.js` | 「编辑 MD / 下载 MD」（含草稿、历史、差异、提交 SVN 与 SVN 日志）：双栏编辑器（左：可拖拽分栏的 Markdown 高亮源码；右：marked + Prism + Mermaid + PacketDiag + KaTeX 实时预览）、**左侧固定大纲导航**（默认显示、不遮挡内容，点击跳转章节并让右侧预览同步滚动）、**撤销/恢复**（Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z）、**远端差异/提交后差异**（同步冲突时提示合并）、粘贴或拖入图片自动上传到文档同级 `images/`（命名 `<文档名>-<时间戳>-<序号>.<扩展名>`，并插入引用）、工具栏与快捷键、`Ctrl+S` 直连写回；`window.MdEditor = { open, download, save, close, uploadImage, undo, redo }` |
+| `web/md-editor.js` | 「编辑 MD / 下载 MD」（含草稿、历史、差异、提交 SVN 与 SVN 日志）：双栏编辑器（左：可拖拽分栏的 Markdown 高亮源码；右：marked + Prism + Mermaid + PacketDiag + KaTeX 实时预览，默认 38%/62% 偏向预览、面板最宽 1720px）、**左侧固定大纲导航**（默认显示、不遮挡内容，点击跳转章节并让右侧预览同步滚动）、**撤销/恢复**（Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z）、**上传本地图片**、**文字颜色**（Ctrl+Alt+K，HTML span）、**表格行列选择器**（Ctrl+Shift+T，1–8 行列）、**远端差异/提交后差异**（同步冲突时提示合并）、粘贴或拖入图片自动上传到文档同级 `images/`（命名 `<文档名>-<时间戳>-<序号>.<扩展名>`，并插入引用）、工具栏与快捷键、`Ctrl+S` 直连写回；`window.MdEditor = { open, download, save, close, uploadImage, undo, redo }` |
 | `web/math-init.js` | docsify 插件：`$...$` / `$$...$$` 等分隔符的 KaTeX 离线渲染；暴露 `window.MathRender.render` 供编辑器预览复用 |
 | `web/prism-init.js` | docsify 插件：`beforeEach` 阶段按围栏语言预载 Prism 组件，保证 docsify 渲染期即可高亮（docsify 内置 Prism 覆盖了 `window.Prism`，autoloader 必须在其之后加载） |
 | `web/ai-retrieval.js` | AI 助手的离线检索核心（纯函数，`window.AIRetrieval`）：分词（CJK 单字+双字）、从 `searchIndex`/Markdown 构建语料、TF-IDF 打分、摘录与上下文/消息组装；`tests/test_ai_retrieval.js` 覆盖 |
