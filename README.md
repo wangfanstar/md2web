@@ -45,25 +45,44 @@ python3 -m pip install --no-index --find-links server/wheels -r server/requireme
 
 ```
 md2web/
-├── docs/                     # 唯一目录：源文档 + 站点 + 离线依赖
-│   ├── md/                   # 源文档（唯一需要手动维护）
+├── docs/                        # 构建产物 + 站点（源文档在 docs/md）
+│   ├── md/                      # 源文档（唯一需要手动维护；构建不改动）
 │   │   ├── 使用说明/快速开始.md
-│   │   ├── 子文件夹/文档.md
-│   │   └── images/…          # 图片任意位置，相对路径引用
-│   ├── lib/                  # 离线 JS/CSS 与生成资源
-│   ├── index.html            # 站点入口（生成）
-│   ├── README.md             # 站点首页（生成）
-│   ├── _sidebar.md           # 侧边栏（生成）
-│   └── search-index.json     # 搜索索引（生成）
-├── specs/                    # 设计文档
-├── tests/                    # 离线回归测试
-├── web/                      # 自有前端源码，构建复制至 docs/lib/
-├── setup_docsify.py          # 构建入口
-├── serve.py                  # 跨平台预览
+│   │   ├── 硬件设计/时钟树设计.md
+│   │   └── <文件夹>/images/…    # 图片放在文档同级 images/，用相对路径引用
+│   ├── lib/                     # 离线 JS/CSS 与生成资源（含第三方依赖）
+│   ├── index.html               # 总览页：按分组列出各仓库入口 + 跨仓库搜索（生成）
+│   ├── index_all.html           # 全部文档合并视图（生成）
+│   ├── index_<仓库>.html         # 每个仓库一个入口页（独立侧栏/搜索索引）（生成）
+│   ├── md2web_config.html       # 仓库配置页（由 web/ 复制生成）
+│   ├── README.md                # 站点首页（生成）
+│   ├── _sidebar.md              # 全局侧边栏（生成）
+│   ├── _sidebar_<仓库>.md        # 各仓库侧边栏（生成）
+│   ├── search-index.json        # 全部仓库搜索索引（生成）
+│   └── search-index_<仓库>.json  # 各仓库搜索索引（生成）
+├── config/
+│   ├── server.example.json      # 认证服务示例配置（可提交）
+│   └── server.local.json        # 真实配置（不提交；缺失时自动生成，含仓库映射与密钥）
+├── server/                      # 认证编辑服务（Flask + Waitress + SQLite + SVN CLI，Python 3.6.8+）
+│   ├── app.py / auth.py / config.py / database.py / documents.py
+│   ├── drafts.py / operations.py / paths.py / passwords.py / secrets.py / svn.py
+│   ├── requirements.txt         # 依赖（3.6.8+ 同一套）
+│   └── wheels/                  # Linux x86_64 + cp36 离线依赖包
+├── data/                        # 运行数据：数据库、SVN 工作副本、pidfile（不提交）
+├── specs/                       # 设计与方案文档
+├── tests/                       # 离线回归测试（unittest + node --test）
+├── web/                         # 自有前端源码，构建复制至 docs/lib/
+├── setup_docsify.py             # 构建入口
+├── serve.py                     # 服务入口（默认认证编辑服务；--preview 只读预览）
 ├── start_windows.bat / start_linux.sh
-├── AGENTS.md                 # AI 助手开发指南
-└── README.md                 # 本文件
+├── AGENTS.md                    # AI 助手开发指南
+└── README.md                    # 本文件
 ```
+
+> `docs/` 下由构建生成的文件（`index*.html`、`md2web_config.html`、`README.md`、`_sidebar*.md`、
+> `search-index*.json`、`lib/` 中的生成资源）请勿手工维护；改前端请改 `web/` 后重新构建。
+> 仓库映射在 `config/server.local.json` 或网页 `md2web_config.html` 中配置，
+> 保存后服务会自动重建出各仓库入口页与总览页。
 
 ## 快速开始
 
