@@ -9,6 +9,7 @@
     overlay: null,
     stage: null,
     content: null,
+    pendingRender: null,
     svg: null,
     canvasSource: null,
     isDiagram: false,
@@ -140,26 +141,35 @@
       placeholder.style.height = state.natural.height + 'px';
       wrapper.appendChild(placeholder);
       var finish = function (fresh) {
-        var node = placeholder.querySelector('svg');
-        if (fresh && node) {
-          node.style.width = state.natural.width + 'px';
-          node.style.height = state.natural.height + 'px';
+        // 关闭或切换后，旧渲染结果不得修改当前图形的尺寸、缩放或下载目标。
+        if (state.content !== wrapper) {
           return;
         }
-        placeholder.innerHTML = '';
-        var svgClone = svg.cloneNode(true);
-        // 无法按源码重渲染时（例如外部 SVG）：把 HTML 标签的 foreignObject 转成 SVG 文本，避免丢文字
-        simplifyForeignObjects(svgClone);
-        svgClone.removeAttribute('width');
-        svgClone.removeAttribute('height');
-        svgClone.style.maxWidth = 'none';
-        svgClone.style.width = state.natural.width + 'px';
-        svgClone.style.height = state.natural.height + 'px';
-        placeholder.appendChild(svgClone);
+        var node = placeholder.querySelector('svg');
+        if (!fresh || !node) {
+          placeholder.innerHTML = '';
+          node = svg.cloneNode(true);
+          // 无法按源码重渲染时（例如外部 SVG）：保留原有回退显示。
+          simplifyForeignObjects(node);
+          placeholder.appendChild(node);
+        }
+        // 甘特图等会按渲染容器重新布局，必须以新 viewBox 为准，不能沿用正文尺寸。
+        state.natural = naturalSize(node);
+        node.removeAttribute('width');
+        node.removeAttribute('height');
+        node.style.maxWidth = 'none';
+        node.style.width = placeholder.style.width = state.natural.width + 'px';
+        node.style.height = placeholder.style.height = state.natural.height + 'px';
+        state.svg = node;
+        state.isDiagram = true;
+        state.diagramIndex = diagramIndex(source);
+        state.overlay.classList.add('is-diagram');
+        state.pendingRender = null;
+        setScale(Math.min(1, fitScale()));
       };
       state.pendingRender = renderDiagramFresh(source, placeholder).then(function (fresh) {
         finish(fresh);
-      }).catch(function () {
+      }, function () {
         finish(false);
       });
       return wrapper;
@@ -199,7 +209,8 @@
   }
 
   function setScale(next, originX, originY) {
-    var scale = clamp(next, MIN_SCALE, MAX_SCALE);
+    // 超长时序图也允许缩至整体可见；交互缩放的下限不得高于适配比例。
+    var scale = clamp(next, Math.min(MIN_SCALE, fitScale()), MAX_SCALE);
     if (originX === undefined || originY === undefined) {
       state.x = 0;
       state.y = 0;
@@ -224,6 +235,7 @@
     document.body.classList.remove('media-viewer-open');
     state.stage.innerHTML = '';
     state.content = null;
+    state.pendingRender = null;
     state.svg = null;
     state.canvasSource = null;
     state.isDiagram = false;
@@ -431,6 +443,7 @@
       bindOverlay();
     }
     state.stage.innerHTML = '';
+    state.pendingRender = null;
     state.content = buildContent(source);
     state.stage.appendChild(state.content);
     state.svg = state.content.querySelector('svg');
@@ -446,19 +459,7 @@
     state.y = 0;
     // 统一按「整体适配」打开：大于视口的图形会缩小到完整可见（不超过 100%），
     // 避免时序图/甘特图/四象限图被裁掉文字与线条；需要细看时再放大或平移。
-    state.scale = clamp(Math.min(1, fitScale()), MIN_SCALE, MAX_SCALE);
-    applyTransform();
-    if (state.pendingRender) {
-      state.pendingRender.then(function () {
-        if (state.renderedSizeChanged && state.overlay.classList.contains('is-open')) {
-          state.renderedSizeChanged = false;
-          state.scale = clamp(Math.min(1, fitScale()), MIN_SCALE, MAX_SCALE);
-          state.x = 0;
-          state.y = 0;
-          applyTransform();
-        }
-      });
-    }
+    setScale(Math.min(1, fitScale()));
     state.overlay.focus();
   }
 

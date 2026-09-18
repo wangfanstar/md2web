@@ -273,7 +273,8 @@ body.hide-heading-numbers .docs-page-toc-index {
   align-items: center;
   cursor: grab;
   display: flex;
-  inset: 0;
+  /* 给边缘和底部工具条留空间，整体适配时不能遮住图形。 */
+  inset: 16px 16px 80px;
   justify-content: center;
   overflow: hidden;
   position: absolute;
@@ -285,8 +286,14 @@ body.hide-heading-numbers .docs-page-toc-index {
 }
 
 .media-viewer-content {
+  flex: 0 0 auto;
   transform-origin: center center;
   will-change: transform;
+}
+
+.media-viewer-diagram {
+  /* Mermaid 使用浅色主题，透明 SVG 的深色文字/线条需要不透明底色。 */
+  background: var(--docs-surface, #fff);
 }
 
 .media-viewer-content img {
