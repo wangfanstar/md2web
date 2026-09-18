@@ -165,6 +165,15 @@ node --test tests/test_search.js tests/test_offline.js
 
 Python 测试全程离线（临时目录 + 伪依赖），覆盖扫描与导航、搜索索引、代码检索、首页、严格离线构建、源文件保护与预览服务。Node 仅用于开发回归测试，不是构建或浏览站点的依赖。
 
+## 第三方组件与许可
+
+本项目**基于 [docsify](https://github.com/docsifyjs/docsify) 4.13.1（MIT）构建**，并做了本地修改
+（`file://` 路由兼容补丁、主题变量适配）。站点还离线内置 Prism 1.29.0、Mermaid 11.17.2、
+marked 12.0.2、DOMPurify 3.1.6、KaTeX 0.16.11 等组件。
+
+完整的版本、许可与上游链接见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)；
+构建会把 docsify 的版权/许可横幅写入 `docs/lib/docsify.min.js`，并在 `docs/index.html` 保留注释说明。
+
 ## 常见问题
 
 - **搜索无结果或过时**：搜索索引在构建时生成，修改文档后重新运行 `python setup_docsify.py`（或 `--index-only`）

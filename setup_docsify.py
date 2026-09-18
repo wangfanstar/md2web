@@ -401,6 +401,16 @@ def patch_docsify_file_router():
         return
 
     source = docsify_path.read_text(encoding="utf-8", errors="ignore")
+    banner = (
+        "/*! docsify v4.13.1 | MIT License | https://github.com/docsifyjs/docsify\n"
+        " *  本项目基于 docsify 构建并做了本地修改（file:// 路由兼容补丁）；\n"
+        " *  第三方组件与许可见仓库根目录 THIRD-PARTY-NOTICES.md。\n"
+        " */\n"
+    )
+    if not source.startswith("/*!"):
+        docsify_path.write_text(banner + source, encoding="utf-8")
+        source = banner + source
+        print("  [修补] docsify.min.js 已写入版权/许可横幅")
     original = (
         'function N(e){var n=location.href.indexOf("#");'
         'location.replace(location.href.slice(0,0<=n?n:0)+"#"+e)}'
@@ -968,6 +978,8 @@ def generate_index_html(title="文档中心", path=None, page_name="index.html",
     allow_commit_js = "true" if allow_commit else "false"
     repo_js = json.dumps(repo or {}, ensure_ascii=False).replace("<", "\\u003c")
     html_text = f"""<!DOCTYPE html>
+<!-- 基于 docsify 4.13.1（MIT，https://github.com/docsifyjs/docsify）构建，含本地修改；
+     第三方组件与许可见 THIRD-PARTY-NOTICES.md -->
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -1222,6 +1234,8 @@ def generate_master_index_html(repos, title="文档中心", all_page="index_all.
         sections.append('<p class="empty">还没有配置仓库：请在 <a href="' + config_page + '">' + config_page
                         + '</a> 中添加 SVN 仓库与目录映射，然后重新构建或等待自动同步。</p>')
     page = f"""<!DOCTYPE html>
+<!-- 站点基于 docsify 4.13.1（MIT，https://github.com/docsifyjs/docsify）构建；
+     第三方组件与许可见 THIRD-PARTY-NOTICES.md -->
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">

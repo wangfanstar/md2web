@@ -69,6 +69,8 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `tests/test_packetdiag.js` | PacketDiag 解析回归测试（`node --test`） |
 | `specs/` | 设计与计划文档（历史归档，新增设计放这里） |
 
+- 第三方组件与许可：见 `THIRD-PARTY-NOTICES.md`（本项目基于 docsify 4.13.1 构建，构建会给 `docsify.min.js` 写版权横幅）。
+
 ## 常用命令
 
 ```bash

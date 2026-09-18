@@ -970,6 +970,28 @@ class MultiRepoTests(TempDirTestCase):
         self.assertIn("folderView: true", html)
 
 
+class ThirdPartyNoticeTests(unittest.TestCase):
+    """本项目基于 docsify 构建：需保留版权/许可声明与第三方组件清单。"""
+
+    def test_notices_file_lists_components(self):
+        notices = (ROOT / "THIRD-PARTY-NOTICES.md").read_text(encoding="utf-8")
+        for needle in ("docsify", "4.13.1", "MIT", "Prism", "Mermaid", "KaTeX", "THIRD-PARTY"):
+            self.assertIn(needle, notices, needle)
+
+    def test_docsify_banner_and_page_comment(self):
+        built = (ROOT / "docs" / "lib" / "docsify.min.js").read_text(encoding="utf-8", errors="ignore")
+        self.assertTrue(built.startswith("/*!"), "docsify.min.js 缺少版权/许可横幅")
+        self.assertIn("docsify v4.13.1", built)
+        self.assertIn("THIRD-PARTY-NOTICES.md", built)
+        page = (ROOT / "docs" / "index_all.html").read_text(encoding="utf-8")
+        self.assertIn("docsify 4.13.1", page, "页面缺少 docsify 版本声明注释")
+
+    def test_readme_mentions_docsify_based(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("docsify", readme)
+        self.assertIn("THIRD-PARTY-NOTICES.md", readme)
+
+
 class PlaygroundCopyTests(unittest.TestCase):
     """绘图在线预览：复制源码支持勾选是否带围栏（默认带）。"""
 
