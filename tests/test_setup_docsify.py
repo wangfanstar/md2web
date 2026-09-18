@@ -1007,6 +1007,23 @@ class ThirdPartyNoticeTests(unittest.TestCase):
         self.assertIn("THIRD-PARTY-NOTICES.md", readme)
 
 
+class FolderViewTests(unittest.TestCase):
+    """index_all 的文件夹视图只在文件夹路由生效；文档路由保留正文与右侧本文目录。"""
+
+    def test_folder_view_guards_document_routes(self):
+        source = (ROOT / "web" / "folder-view.js").read_text(encoding="utf-8")
+        self.assertIn("isFolderRoute", source)
+        self.assertIn("\\.md$", source, "应识别 .md 文档路由并跳过文件夹视图")
+        self.assertIn("folder-view-active", source)
+        built = (ROOT / "docs" / "lib" / "folder-view.js").read_text(encoding="utf-8")
+        self.assertIn("isFolderRoute", built, "构建产物未同步 folder-view.js")
+
+    def test_index_all_keeps_toc_container(self):
+        page = (ROOT / "docs" / "index_all.html").read_text(encoding="utf-8")
+        self.assertIn("folderView: true", page)
+        self.assertIn("customToc", page, "页面仍应启用右侧本文目录")
+
+
 class PlaygroundCopyTests(unittest.TestCase):
     """绘图在线预览：复制源码支持勾选是否带围栏（默认带）。"""
 

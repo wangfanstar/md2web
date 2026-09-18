@@ -45,7 +45,7 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `config/server.example.json` | 认证服务示例配置（可提交）；`config/server.local.json` 为真实配置，不提交（缺失时 `--config` 会自动生成默认文件） |
 | `tests/test_server.py` | 认证服务单元/HTTP 集成测试（配置、数据库、SVN 假 CLI、登录会话、静态白名单） |
 | `web/custom-search.js` / `.css` | 搜索算法与界面、结果列表、搜索/目录视图切换、正文命中高亮、右侧本文目录 |
-| `web/folder-view.js` | `index_all.html` 文件夹视图（正文只显示当前文件夹的文档/子文件夹列表，隐藏本文目录）+ 全局右键菜单：新建文档/新建文件夹/重命名/删除（移动到 `data/trash`）/设置分组；对应接口 `GET /__folder`（公开）与 `POST /__md/create|rename|delete`、`POST /__admin/group` |
+| `web/folder-view.js` | `index_all.html` 文件夹视图（正文只显示当前文件夹的文档/子文件夹列表，隐藏本文目录）+ 全局右键菜单：新建文档/新建文件夹/重命名/删除（移动到 `data/trash`）/设置分组；对应接口 `GET /__folder`（公开）与 `POST /__md/create|rename|delete`、`POST /__admin/group`；仅**文件夹路由**（以 `/` 结尾）显示文件夹视图，`.md` 文档路由保持正文与右侧本文目录（目录链接用 docsify 的 `?id=` 锚点） |
 | `web/workspace.js` / `.css` | 目录树（折叠/过滤/计数/定位）、面包屑、首页卡片、复制、查看源码/编辑/下载 MD、章节序号、Mermaid 样式 |
 | `web/mermaid-init.js` | docsify 插件：把 ```mermaid 围栏渲染为图形（离线）；容器保留 `data-source`，并暴露 `window.MermaidRender.render(source)` 供放大查看/导出重渲染 |
 | `web/packetdiag.js` | PacketDiag 解析与 Canvas 绘制核心（从 `PacketDiagPic.html` 抽取，`window.PacketDiag = { parse, render, presets, defaultSource, extractSource, bitOrderFor, numberingFor }`）；支持 `bit_order`/`numbering`/`@row`/`@left`/`desctable` 等扩展语法 |

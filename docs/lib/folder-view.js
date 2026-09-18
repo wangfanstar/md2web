@@ -96,12 +96,30 @@
     ].join('');
   }
 
+  function isFolderRoute(route) {
+    // 文档路由（以 .md 结尾或指向具体文件）保持正文与右侧本文目录；
+    // 仅“文件夹路由”（目录、以 / 结尾）才显示文件夹视图。
+    var value = String(route || '').split('?')[0];
+    if (!value) {
+      return false;
+    }
+    if (/\.md$/i.test(value)) {
+      return false;
+    }
+    return value.charAt(value.length - 1) === '/' || value.indexOf('/') === -1;
+  }
+
   function loadFolderView() {
     if (!config.folderView) {
       return;
     }
     var route = currentRoute();
     if (!route || route === 'README.md' || route === '/') {
+      document.body.classList.remove('folder-view-active');
+      return;
+    }
+    if (!isFolderRoute(route)) {
+      // 文档页：恢复正文与本文目录
       document.body.classList.remove('folder-view-active');
       return;
     }
@@ -292,5 +310,6 @@
     });
   }
   window.addEventListener('hashchange', function () { window.setTimeout(loadFolderView, 120); });
+  window.FolderView = { isFolderRoute: isFolderRoute, reload: loadFolderView };
   window.setTimeout(loadFolderView, 200);
 }());
