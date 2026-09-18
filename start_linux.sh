@@ -3,6 +3,7 @@
 #   ./start_linux.sh                 后台启动（默认），日志写入 data/serve.log
 #   ./start_linux.sh --foreground    前台运行（Ctrl+C 停止）
 #   ./start_linux.sh --stop          停止后台实例（按 pidfile）
+#   ./start_linux.sh --restart       强制重启：先停本实例，再结束占用端口的进程后重新启动
 #   ./start_linux.sh --status        查看运行状态（pid / 进程名 / 端口）
 #   ./start_linux.sh --preview       只读预览（其它参数原样透传给 serve.py）
 #   ./start_linux.sh --bind 127.0.0.1  仅本机访问（默认 0.0.0.0，局域网可访问）
@@ -22,6 +23,19 @@ if grep -q "$(printf '\r')" "$0" 2>/dev/null; then
   exec "$normalized" "$@"
 fi
 
+# 先确定解释器（端口解析/依赖安装都要用）
+PY=""
+if [ -n "$PYTHON" ]; then
+  PY="$PYTHON"
+else
+  for candidate in python3.12 python3.11 python3.10 python3.9 python3.8 python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      PY="$candidate"
+      break
+    fi
+  done
+fi
+
 # 解析脚本自身的开关（其余参数原样透传给 serve.py）
 MODE="background"
 n=$#
@@ -32,6 +46,7 @@ while [ "$i" -lt "$n" ]; do
   case "$arg" in
     --foreground|--fg) MODE="foreground" ;;
     --stop) MODE="stop" ;;
+    --restart) MODE="restart" ;;
     --status) MODE="status" ;;
     *) set -- "$@" "$arg" ;;
   esac
@@ -51,6 +66,87 @@ for arg in "$@"; do
   prev="$arg"
 done
 
+resolve_port() {
+  # 端口优先级：--port > 配置 server.port > 8882
+  port=""
+  prev=""
+  for arg in "$@"; do
+    if [ "$prev" = "--port" ]; then
+      port="$arg"
+    fi
+    case "$arg" in
+      --port=*) port="${arg#--port=}" ;;
+    esac
+    prev="$arg"
+  done
+  if [ -z "$port" ] && [ -f config/server.local.json ] && [ -n "$PY" ]; then
+    port="$("$PY" - <<'PYEOF' 2>/dev/null || true
+import json
+from pathlib import Path
+path = Path("config/server.local.json")
+if path.is_file():
+    try:
+        print(json.loads(path.read_text(encoding="utf-8")).get("server", {}).get("port", ""))
+    except Exception:
+        pass
+PYEOF
+)"
+  fi
+  [ -n "$port" ] || port=8882
+  printf '%s' "$port"
+}
+
+port_holders() {
+  port="$1"
+  pids=""
+  if command -v ss >/dev/null 2>&1; then
+    pids="$(ss -lptnH "sport = :$port" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | sort -u)"
+  fi
+  if [ -z "$pids" ] && command -v lsof >/dev/null 2>&1; then
+    pids="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | sort -u)"
+  fi
+  if [ -z "$pids" ] && command -v fuser >/dev/null 2>&1; then
+    pids="$(fuser -n tcp "$port" 2>/dev/null | tr ' ' '\n' | tr -cd '0-9\n' | sed '/^$/d' | sort -u)"
+  fi
+  printf '%s' "$pids"
+}
+
+kill_port_holder() {
+  port="$1"
+  pids="$(port_holders "$port")"
+  if [ -z "$pids" ]; then
+    return 0
+  fi
+  for pid in $pids; do
+    info="$(ps -o comm=,args= -p "$pid" 2>/dev/null | head -n 1 | cut -c1-120)"
+    echo "[提示] 端口 $port 被进程 $pid 占用：${info:-未知进程}"
+    kill "$pid" 2>/dev/null || true
+  done
+  waited=0
+  while [ "$waited" -lt 5 ]; do
+    sleep 1
+    waited=$((waited + 1))
+    remaining="$(port_holders "$port")"
+    [ -z "$remaining" ] && break
+  done
+  remaining="$(port_holders "$port")"
+  if [ -n "$remaining" ]; then
+    echo "[提示] 进程未退出，强制结束：$remaining"
+    for pid in $remaining; do
+      kill -9 "$pid" 2>/dev/null || true
+    done
+    sleep 1
+  fi
+  remaining="$(port_holders "$port")"
+  if [ -n "$remaining" ]; then
+    echo "[警告] 端口 $port 仍被占用（$remaining）：可能是其他用户的进程，请用 sudo 结束，例如：" >&2
+    echo "        sudo fuser -k $port/tcp   或   sudo kill -9 $remaining" >&2
+    return 1
+  fi
+  echo "[提示] 端口 $port 已释放。"
+  return 0
+}
+
 read_pid() {
   if [ -f "$PIDFILE" ]; then
     tr -cd '0-9' < "$PIDFILE"
@@ -62,6 +158,28 @@ is_alive() {
 }
 
 case "$MODE" in
+  restart)
+    # 先按 pidfile 停本实例（若在运行）
+    pid="$(read_pid)"
+    if [ -n "$pid" ] && is_alive "$pid"; then
+      echo "[提示] 停止旧实例（PID $pid）..."
+      kill "$pid" 2>/dev/null || true
+      waited=0
+      while is_alive "$pid" && [ "$waited" -lt 10 ]; do
+        sleep 1
+        waited=$((waited + 1))
+      done
+      if is_alive "$pid"; then
+        kill -9 "$pid" 2>/dev/null || true
+      fi
+    fi
+    rm -f "$PIDFILE"
+    # 释放端口（可能是未记录 pidfile 的旧实例）
+    target_port="$(resolve_port "$@")"
+    echo "[提示] 检查端口 $target_port 占用情况..."
+    kill_port_holder "$target_port" || true
+    MODE="background"
+    ;;
   stop)
     pid="$(read_pid)"
     if [ -z "$pid" ]; then
@@ -103,18 +221,6 @@ case "$MODE" in
     ;;
 esac
 
-# 选择一个可用的解释器（优先较新版本）
-PY=""
-if [ -n "$PYTHON" ]; then
-  PY="$PYTHON"
-else
-  for candidate in python3.12 python3.11 python3.10 python3.9 python3.8 python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-      PY="$candidate"
-      break
-    fi
-  done
-fi
 if [ -z "$PY" ]; then
   echo "未找到 python：请安装 Python 3.6.8+" >&2
   exit 1
@@ -220,4 +326,7 @@ fi
 
 echo "[错误] 服务未能在预期时间内就绪，最近日志：" >&2
 tail -n 20 "$LOG_FILE" 2>/dev/null || true
+if grep -q "已被占用" "$LOG_FILE" 2>/dev/null; then
+  echo "[提示] 端口被占用：可执行 ./start_linux.sh --restart 强制结束占用进程后重启" >&2
+fi
 exit 1

@@ -845,8 +845,10 @@ class LauncherScriptsTests(unittest.TestCase):
     def test_start_linux_supports_background_stop_status(self):
         raw = (ROOT / "start_linux.sh").read_text(encoding="utf-8")
         for needle in ("nohup", "--stop", "--status", "--foreground", "data/serve.log",
-                       "md2web-serve", "serve.pid"):
+                       "md2web-serve", "serve.pid", "--restart", "port_holders", "kill_port_holder"):
             self.assertIn(needle, raw, "start_linux.sh 缺少：" + needle)
+        # 端口占用时提示可用 --restart
+        self.assertIn("--restart 强制结束占用进程后重启", raw)
         self.assertIn("exec \"$PY\" serve.py", raw, "前台模式应保持 exec 语义")
 
     def test_launchers_default_to_lan_bind(self):

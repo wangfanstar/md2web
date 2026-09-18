@@ -113,7 +113,7 @@ python serve.py             # 打开 http://localhost:8882
 | 完整构建 | `python setup_docsify.py` |
 | 严格离线构建 | `python setup_docsify.py --offline`（缺依赖直接提示，绝不尝试下载） |
 | 自定义标题 | `python setup_docsify.py --title "我的文档"` |
-| 后台启动（Linux） | `./start_linux.sh` | 默认后台运行，日志 `data/serve.log`；`--stop` 停止、`--status` 查看状态、`--foreground` 前台运行 |
+| 后台启动（Linux） | `./start_linux.sh` | 默认后台运行，日志 `data/serve.log`；`--stop` 停止、`--restart` 强制重启（先结束占用端口的进程）、`--status` 查看状态、`--foreground` 前台运行 |
 | 仅刷新索引与离线数据 | `python setup_docsify.py --index-only` |
 | 预览 | `python serve.py`（`--port 8080`、`--bind 127.0.0.1`、`--no-browser`、`--no-build`） |
 
@@ -187,6 +187,7 @@ marked 12.0.2、DOMPurify 3.1.6、KaTeX 0.16.11 等组件。
 - **远端更新与我的草稿冲突**：自动同步不会覆盖正在编辑的文档；编辑器会提示「远端已更新，请先合并」，点「远端差异」查看远端 ↔ 本地差异，合并后保存草稿再提交（管理员也可在「设置 → 仓库映射」点「立即同步 SVN 库」）
 - **改了前端但界面没变**：构建会给 `lib/*.js|css` 加内容版本号，重新执行 `python setup_docsify.py` 后刷新即可；若仍异常请强制刷新（Ctrl+F5）或确认 `docs/index.html` 里的 `?v=` 已变化
 - **想彻底重建**：删除 `docs/` 中除 `md/` 外的生成文件后重新构建（依赖缺失时需要联网一次）
+- **启动报「端口 8882 已被占用」**：可能残留了未记录 pidfile 的旧实例；执行 `./start_linux.sh --restart` 会先停本实例、再结束占用该端口的进程后重新启动（其他用户的进程需 sudo，脚本会给出命令）
 - **Linux 上查找服务进程**：启动后进程名为 `md2web-serve`，可用 `pgrep -af md2web` 或 `ps -o pid,comm,args -C md2web-serve` 查看；停止服务用 `kill $(cat data/serve.pid)`（pidfile 记录本实例）
 - **认证服务启动报 `malformed database schema`**：本机 SQLite 版本较旧（如 RHEL7 自带 3.7.17）无法解析数据库里由新版本写入的索引；服务启动时会自动移除这类索引（原文件留 `*.repair-*.bak`），若仍不可用则把库备份为 `*.corrupt-*.bak` 后重建（本地草稿丢失、管理员密码恢复为默认 `admin/admin`）
 - **`data/` 数据库跨平台共用**：程序只写入 SQLite 3.7.17（RHEL7）能解析的对象，启动时也会清理历史遗留的不兼容索引，因此 Windows 上生成的 `data/` 可以直接拷到旧版 Linux 继续使用；反之亦然
