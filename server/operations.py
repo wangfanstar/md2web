@@ -459,6 +459,45 @@ def _safe_name(name):
     return value
 
 
+def list_md_folders(md_dir, repos=None):
+    """列出 docs/md 下所有文件夹（含文档数与已配置的仓库信息），供仓库配置页使用。"""
+    root = Path(md_dir).resolve()
+    if not root.is_dir():
+        return []
+    folders = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_dir() or path.name.startswith("."):
+            continue
+        try:
+            relative = path.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        mount = "md/" + relative
+        documents = 0
+        for child in path.iterdir():
+            if child.is_file() and child.suffix.lower() == ".md" and not child.name.startswith("."):
+                documents += 1
+        repo = None
+        for item in repos or []:
+            if item.get("mount") == mount:
+                repo = item
+                break
+        folders.append({
+            "path": mount,
+            "name": path.name,
+            "documents": documents,
+            "repo": {
+                "id": repo["id"],
+                "url": repo["url"],
+                "group": repo.get("group") or "默认",
+                "readOnly": bool(repo.get("read_only")),
+                "allowCommit": bool(repo.get("allow_commit", True)),
+                "syncIntervalSeconds": repo.get("sync_interval"),
+            } if repo else None,
+        })
+    return folders
+
+
 def folder_listing(md_dir, relative):
     """列出某个文件夹下的文档与子文件夹（公开信息：名称/大小/修改时间）。"""
     target = _managed_path(md_dir, relative)

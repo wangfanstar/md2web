@@ -849,6 +849,10 @@ class LauncherScriptsTests(unittest.TestCase):
             self.assertIn(needle, raw, "start_linux.sh 缺少：" + needle)
         # 端口占用时提示可用 --restart
         self.assertIn("--restart 强制结束占用进程后重启", raw)
+        # 容错：`-- restart` / `restart` 写法（多打空格或漏写 --）也能识别
+        self.assertIn("--restart|restart)", raw)
+        self.assertIn("--stop|stop)", raw)
+        self.assertIn("--) ;;", raw, "应忽略多余的分隔符 --")
         self.assertIn("exec \"$PY\" serve.py", raw, "前台模式应保持 exec 语义")
 
     def test_launchers_default_to_lan_bind(self):

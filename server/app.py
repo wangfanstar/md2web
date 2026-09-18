@@ -303,6 +303,12 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             "events": database.document_events(conn, 200),
         })
 
+    @app.get("/__folders")
+    def list_folders():
+        """列出 docs/md 下所有文件夹及其仓库配置（公开只读，供仓库配置页默认展示）。"""
+        folders = operations.list_md_folders(md_dir(), config.get("repositories") or [])
+        return jsonify({"ok": True, "folders": folders})
+
     @app.get("/__folder")
     def folder_info():
         """文件夹信息（公开只读）：当前文件夹下的文档与子文件夹列表。"""

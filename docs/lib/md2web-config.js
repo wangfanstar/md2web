@@ -58,15 +58,20 @@
     });
   }
 
-  function repoRow(repo) {
+  function repoRow(repo, folder) {
     var item = repo || {};
     var disabled = state.editable ? '' : ' disabled';
     var interval = item.syncIntervalSeconds === null || item.syncIntervalSeconds === undefined
       ? '' : String(item.syncIntervalSeconds);
+    var mount = (folder && folder.path) || item.mount || '';
+    var stateLabel = item.id ? '<span class="status-ok">已配置</span>' : '<span class="status-none">未配置</span>';
     return [
       '<tr data-repo-row>',
+      '<td><code>' + escapeHtml(mount) + '</code>'
+        + (folder ? '<br><span class="hint">文档 ' + folder.documents + ' 个</span>' : '')
+        + '<input type="hidden" data-repo="mount" value="' + escapeHtml(mount) + '">'
+        + '<br>' + stateLabel + '</td>',
       '<td><input type="text" data-repo="id" value="' + escapeHtml(item.id) + '" placeholder="如 hardware"' + disabled + '></td>',
-      '<td><input type="text" data-repo="mount" value="' + escapeHtml(item.mount) + '" placeholder="如 md/硬件设计"' + disabled + '></td>',
       '<td><input type="text" data-repo="url" value="' + escapeHtml(item.url) + '" placeholder="https://svn.example.com/svn/xxx/trunk/docs/"' + disabled + '></td>',
       '<td><input type="text" data-repo="group" value="' + escapeHtml(item.group || '默认') + '" placeholder="默认"' + disabled + '></td>',
       '<td><input type="number" min="0" step="30" data-repo="syncIntervalSeconds" value="' + escapeHtml(interval) + '" placeholder="默认"' + disabled + '></td>',
@@ -86,8 +91,26 @@
       return;
     }
     var repos = (state.config && state.config.repositories) || [];
-    body.innerHTML = repos.map(repoRow).join('')
-      || '<tr><td colspan="8" class="hint">还没有仓库，点「+ 添加仓库」开始配置。</td></tr>';
+    var folders = state.folders || [];
+    var used = {};
+    var rows = folders.map(function (folder) {
+      var repo = null;
+      for (var index = 0; index < repos.length; index += 1) {
+        if (repos[index].mount === folder.path) {
+          repo = repos[index];
+          used[repos[index].mount] = true;
+          break;
+        }
+      }
+      return repoRow(repo, folder);
+    });
+    repos.forEach(function (repo) {
+      if (!used[repo.mount]) {
+        rows.push(repoRow(repo, null));
+      }
+    });
+    body.innerHTML = rows.join('')
+      || '<tr><td colspan="8" class="hint">docs/md 下还没有文件夹，可先用编辑器右键新建文件夹。</td></tr>';
   }
 
   function readRepos() {
@@ -107,6 +130,18 @@
         readOnly: !!row.querySelector('[data-repo="readOnly"]').checked,
         allowCommit: !!row.querySelector('[data-repo="allowCommit"]').checked
       };
+    }).filter(function (repo) {
+      return !!(repo.id || repo.url);
+    });
+  }
+
+  function loadFolders() {
+    return api('__folders').then(function (payload) {
+      state.folders = payload.folders || [];
+      return state.folders;
+    }).catch(function () {
+      state.folders = [];
+      return state.folders;
     });
   }
 
@@ -118,19 +153,21 @@
         // 未登录：用公开配置先展示所有仓库（只读），登录后即可编辑
         state.editable = false;
         state.config = { repositories: (payload.site && payload.site.repositories) || [] };
-        renderRepos();
-        showPanels();
-        setStatus(state.config.repositories.length
-          ? '当前为只读展示：登录管理员账号后可直接修改并保存。'
-          : '还没有仓库：登录管理员账号后点「+ 添加仓库」开始配置。');
-        return state.config;
+        return loadFolders().then(function () {
+          renderRepos();
+          showPanels();
+          setStatus('当前为只读展示：登录管理员账号后可直接修改并保存。');
+          return state.config;
+        });
       }
       return api('__config').then(function (configPayload) {
         state.config = configPayload.config || {};
         state.editable = true;
-        renderRepos();
-        showPanels();
-        return state.config;
+        return loadFolders().then(function () {
+          renderRepos();
+          showPanels();
+          return state.config;
+        });
       });
     }).catch(function (error) {
       setStatus('读取配置失败：' + error.message, true);
@@ -183,6 +220,8 @@
     setStatus('正在保存配置…');
     api('__config', { method: 'PUT', body: JSON.stringify(payload) }).then(function (result) {
       state.config = result.config || state.config;
+      return loadFolders();
+    }).then(function () {
       renderRepos();
       setStatus('配置已保存，站点正在按新仓库重建（几秒后刷新总览页即可看到入口页）。');
     }).catch(function (error) {

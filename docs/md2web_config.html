@@ -30,12 +30,14 @@
     .hint { color: #6b7a89; font-size: 12px; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     .flag { align-items: center; display: inline-flex; gap: 6px; font-size: 12.5px; }
+    .status-ok { color: #047857; font-size: 11.5px; }
+    .status-none { color: #b45309; font-size: 11.5px; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>md2web 仓库配置</h1>
-    <p class="sub">配置 SVN 仓库地址、对应 <code>docs/md</code> 下的文件夹、更新频率、是否允许合入与是否只读，并按分组展示。
+    <p class="sub">默认列出 <code>docs/md</code> 下的所有文件夹：已配置仓库的显示对应 SVN 信息，未配置的留空，填写并保存即可新增；清空某行则移除该映射。配置 SVN 地址、更新频率、是否允许合入与是否只读，并按分组展示。
       保存后站点会自动重建：每个仓库生成一个入口页 <code>index_&lt;仓库名&gt;.html</code>，根目录 <code>index.html</code> 为分组总览。</p>
 
     <section class="panel" data-config-login hidden>
@@ -53,7 +55,7 @@
       <table>
         <thead>
           <tr>
-            <th>仓库 ID</th><th>md 下文件夹</th><th>SVN 地址</th><th>分组</th>
+            <th>md 下文件夹</th><th>仓库 ID</th><th>SVN 地址</th><th>分组</th>
             <th>更新频率（秒）</th><th>只读</th><th>允许合入</th><th>操作</th>
           </tr>
         </thead>
@@ -77,6 +79,6 @@
         <code>http://localhost:8882/md2web_config.html</code>。</p>
     </section>
   </div>
-  <script src="lib/md2web-config.js?v=57a8cf5122"></script>
+  <script src="lib/md2web-config.js?v=e47bdf9df0"></script>
 </body>
 </html>

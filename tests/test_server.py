@@ -2162,6 +2162,18 @@ class FolderOpsTests(ServerTestBase):
     def csrf(self):
         return self.client.get("/__auth/session").get_json()["csrfToken"]
 
+    def test_folders_endpoint_lists_all_md_folders(self):
+        (self.docs / "md" / "未配置目录").mkdir(parents=True, exist_ok=True)
+        (self.docs / "md" / "未配置目录" / "说明.md").write_text("# X\n", encoding="utf-8")
+        payload = self.client.get("/__folders").get_json()
+        self.assertTrue(payload["ok"])
+        folders = {item["path"]: item for item in payload["folders"]}
+        self.assertIn("md/硬件设计", folders)
+        self.assertIn("md/未配置目录", folders)
+        self.assertEqual(folders["md/硬件设计"]["repo"]["id"], "hardware")
+        self.assertEqual(folders["md/硬件设计"]["documents"], 1)
+        self.assertIsNone(folders["md/未配置目录"]["repo"], "未配置仓库的文件夹应留空")
+
     def test_folder_listing_is_public(self):
         payload = self.client.get("/__folder?path=md/硬件设计").get_json()
         self.assertTrue(payload["ok"])

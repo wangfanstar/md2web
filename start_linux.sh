@@ -8,6 +8,7 @@
 #   ./start_linux.sh --preview       只读预览（其它参数原样透传给 serve.py）
 #   ./start_linux.sh --bind 127.0.0.1  仅本机访问（默认 0.0.0.0，局域网可访问）
 #   PYTHON=python3.9 ./start_linux.sh  指定解释器
+#   注意：开关要连写（`--restart`）；写成 `-- restart` 也会被识别，`--` 会被忽略
 # 若从 Windows 拷贝导致 CRLF 报 “No such file or directory”：
 #   sed -i 's/\r$//' start_linux.sh && chmod +x start_linux.sh
 # 或直接运行: sh start_linux.sh   /   python3 serve.py
@@ -44,10 +45,11 @@ while [ "$i" -lt "$n" ]; do
   arg="$1"
   shift
   case "$arg" in
-    --foreground|--fg) MODE="foreground" ;;
-    --stop) MODE="stop" ;;
-    --restart) MODE="restart" ;;
-    --status) MODE="status" ;;
+    --) ;;  # 容忍 `./start_linux.sh -- restart` 这类多打了分隔符的写法
+    --foreground|--fg|foreground|fg) MODE="foreground" ;;
+    --stop|stop) MODE="stop" ;;
+    --restart|restart) MODE="restart" ;;
+    --status|status) MODE="status" ;;
     *) set -- "$@" "$arg" ;;
   esac
   i=$((i + 1))
