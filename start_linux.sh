@@ -1,14 +1,15 @@
 #!/usr/bin/env sh
-# 启动文档站服务：
-#   - 默认认证编辑服务（Python 3.6.8+ 同一套依赖：server/requirements.txt）
-#   - 缺少依赖时自动安装：非 root 优先 --user（避免系统目录权限不足），优先离线包 server/wheels
-#   - 仍失败则降级为只读预览（无写接口）
-#   - 默认监听所有网卡（局域网可访问），仅本机使用：./start_linux.sh --bind 127.0.0.1
-#   - 强制只读预览：./start_linux.sh --preview
-#   - 指定解释器：PYTHON=python3.9 ./start_linux.sh
-#   - 若从 Windows 拷贝导致 CRLF 报 “No such file or directory”：
-#       sed -i 's/\r$//' start_linux.sh && chmod +x start_linux.sh
-#     或直接运行: sh start_linux.sh   /   python3 serve.py
+# 启动 / 停止 md2web 服务（Linux）：
+#   ./start_linux.sh                 后台启动（默认），日志写入 data/serve.log
+#   ./start_linux.sh --foreground    前台运行（Ctrl+C 停止）
+#   ./start_linux.sh --stop          停止后台实例（按 pidfile）
+#   ./start_linux.sh --status        查看运行状态（pid / 进程名 / 端口）
+#   ./start_linux.sh --preview       只读预览（其它参数原样透传给 serve.py）
+#   ./start_linux.sh --bind 127.0.0.1  仅本机访问（默认 0.0.0.0，局域网可访问）
+#   PYTHON=python3.9 ./start_linux.sh  指定解释器
+# 若从 Windows 拷贝导致 CRLF 报 “No such file or directory”：
+#   sed -i 's/\r$//' start_linux.sh && chmod +x start_linux.sh
+# 或直接运行: sh start_linux.sh   /   python3 serve.py
 set -e
 cd "$(dirname "$0")"
 
@@ -20,6 +21,87 @@ if grep -q "$(printf '\r')" "$0" 2>/dev/null; then
   echo "[提示] 检测到脚本含 CRLF（可能从 Windows 拷贝），已自动转换后继续执行。" >&2
   exec "$normalized" "$@"
 fi
+
+# 解析脚本自身的开关（其余参数原样透传给 serve.py）
+MODE="background"
+n=$#
+i=0
+while [ "$i" -lt "$n" ]; do
+  arg="$1"
+  shift
+  case "$arg" in
+    --foreground|--fg) MODE="foreground" ;;
+    --stop) MODE="stop" ;;
+    --status) MODE="status" ;;
+    *) set -- "$@" "$arg" ;;
+  esac
+  i=$((i + 1))
+done
+
+# 取出 --pidfile（停止/状态用）
+PIDFILE="data/serve.pid"
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--pidfile" ]; then
+    PIDFILE="$arg"
+  fi
+  case "$arg" in
+    --pidfile=*) PIDFILE="${arg#--pidfile=}" ;;
+  esac
+  prev="$arg"
+done
+
+read_pid() {
+  if [ -f "$PIDFILE" ]; then
+    tr -cd '0-9' < "$PIDFILE"
+  fi
+}
+
+is_alive() {
+  [ -n "$1" ] && kill -0 "$1" 2>/dev/null
+}
+
+case "$MODE" in
+  stop)
+    pid="$(read_pid)"
+    if [ -z "$pid" ]; then
+      echo "[提示] 未找到 pidfile（$PIDFILE）：服务可能未在运行。"
+      exit 0
+    fi
+    if ! is_alive "$pid"; then
+      echo "[提示] 进程 $pid 已不存在，清理 pidfile。"
+      rm -f "$PIDFILE"
+      exit 0
+    fi
+    echo "[提示] 正在停止 md2web 服务（PID $pid）..."
+    kill "$pid" 2>/dev/null || true
+    waited=0
+    while is_alive "$pid" && [ "$waited" -lt 10 ]; do
+      sleep 1
+      waited=$((waited + 1))
+    done
+    if is_alive "$pid"; then
+      echo "[警告] 进程未退出，强制结束。"
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+    rm -f "$PIDFILE"
+    echo "已停止。"
+    exit 0
+    ;;
+  status)
+    pid="$(read_pid)"
+    if [ -n "$pid" ] && is_alive "$pid"; then
+      echo "运行中：PID $pid（pidfile $PIDFILE）"
+    else
+      echo "未运行（pidfile $PIDFILE${pid:+，记录的 PID $pid 已不存在}）"
+    fi
+    echo "进程列表（按名字匹配 md2web）："
+    ps -o pid,ppid,stat,etime,comm,args -C md2web-serve 2>/dev/null \
+      || ps -ef | grep '[m]d2web' \
+      || true
+    exit 0
+    ;;
+esac
 
 # 选择一个可用的解释器（优先较新版本）
 PY=""
@@ -87,4 +169,55 @@ if [ "$has_bind" -eq 0 ]; then
   set -- "$@" --bind 0.0.0.0
 fi
 
-exec "$PY" serve.py "$@"
+if [ "$MODE" = "foreground" ]; then
+  exec "$PY" serve.py "$@"
+fi
+
+# 后台启动：日志写入 data/serve.log，PID 由 serve.py 写入 pidfile
+LOG_DIR="$(dirname "$PIDFILE")"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/serve.log"
+has_no_browser=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-browser) has_no_browser=1 ;;
+  esac
+done
+if [ "$has_no_browser" -eq 0 ]; then
+  set -- "$@" --no-browser
+fi
+
+echo "[提示] 正在后台启动 md2web 服务（解释器 $PY）..."
+nohup "$PY" serve.py "$@" >>"$LOG_FILE" 2>&1 &
+launcher_pid=$!
+
+# 等待服务就绪（最多约 15 秒）
+ready=0
+waited=0
+while [ "$waited" -lt 15 ]; do
+  sleep 1
+  waited=$((waited + 1))
+  pid="$(read_pid)"
+  if [ -n "$pid" ] && is_alive "$pid"; then
+    if grep -q "认证编辑服务" "$LOG_FILE" 2>/dev/null || grep -q "预览目录" "$LOG_FILE" 2>/dev/null; then
+      ready=1
+      break
+    fi
+  fi
+  if ! is_alive "$launcher_pid"; then
+    break
+  fi
+done
+
+pid="$(read_pid)"
+if [ "$ready" -eq 1 ] && [ -n "$pid" ] && is_alive "$pid"; then
+  echo "已启动（PID $pid，进程名 md2web-serve）"
+  grep -E "认证编辑服务|预览目录|本机访问|局域网访问" "$LOG_FILE" 2>/dev/null | tail -n 4 || true
+  echo "日志：$LOG_FILE"
+  echo "停止：./start_linux.sh --stop    状态：./start_linux.sh --status"
+  exit 0
+fi
+
+echo "[错误] 服务未能在预期时间内就绪，最近日志：" >&2
+tail -n 20 "$LOG_FILE" 2>/dev/null || true
+exit 1

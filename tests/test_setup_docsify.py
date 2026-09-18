@@ -842,6 +842,13 @@ class LauncherScriptsTests(unittest.TestCase):
             self.skipTest("非 git 工作副本")
         self.assertTrue(line.startswith("100755"), "start_linux.sh 需要可执行位: " + line)
 
+    def test_start_linux_supports_background_stop_status(self):
+        raw = (ROOT / "start_linux.sh").read_text(encoding="utf-8")
+        for needle in ("nohup", "--stop", "--status", "--foreground", "data/serve.log",
+                       "md2web-serve", "serve.pid"):
+            self.assertIn(needle, raw, "start_linux.sh 缺少：" + needle)
+        self.assertIn("exec \"$PY\" serve.py", raw, "前台模式应保持 exec 语义")
+
     def test_launchers_default_to_lan_bind(self):
         linux = (ROOT / "start_linux.sh").read_text(encoding="utf-8")
         self.assertIn("--bind 0.0.0.0", linux, "start_linux.sh 默认应监听所有网卡")
