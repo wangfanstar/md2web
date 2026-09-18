@@ -828,6 +828,15 @@ class LauncherScriptsTests(unittest.TestCase):
         self.assertIn(b"grep -q", raw, "缺少 CRLF 检测逻辑")
         self.assertIn(b"python3 serve.py", raw)
 
+    def test_start_linux_has_no_cr_bytes(self):
+        raw = (ROOT / "start_linux.sh").read_bytes()
+        self.assertNotIn(b"\r", raw, "start_linux.sh 必须为 LF（CRLF 会导致 ./start_linux.sh: No such file or directory）")
+        import subprocess as subprocess_module
+        result = subprocess_module.run(["git", "-C", str(ROOT), "show", "HEAD:start_linux.sh"],
+                                       stdout=subprocess_module.PIPE, stderr=subprocess_module.PIPE)
+        if result.returncode == 0 and result.stdout:
+            self.assertNotIn(b"\r", result.stdout, "仓库中的 start_linux.sh 含 CRLF")
+
     def test_start_linux_is_executable_in_git(self):
         import shutil
         import subprocess

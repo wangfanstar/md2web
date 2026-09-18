@@ -21,6 +21,7 @@ if grep -q "$(printf '\r')" "$0" 2>/dev/null; then
   tr -d '\r' < "$0" > "$normalized"
   chmod +x "$normalized" 2>/dev/null || true
   echo "[提示] 检测到脚本含 CRLF（可能从 Windows 拷贝），已自动转换后继续执行。" >&2
+  echo "        建议同时修复工作区文件：sed -i 's/\r$//' start_linux.sh && chmod +x start_linux.sh" >&2
   exec "$normalized" "$@"
 fi
 
