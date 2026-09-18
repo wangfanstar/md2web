@@ -383,6 +383,14 @@ class ServeTests(unittest.TestCase):
         self.assertEqual(args.config.name, "server.local.json")
         self.assertTrue(serve.parse_args(["--preview"]).preview)
 
+    def test_set_process_title_is_safe(self):
+        serve = load_module("serve", "serve.py")
+        self.assertIn("md2web", serve.PROCESS_TITLE)
+        self.assertLessEqual(len(serve.PROCESS_TITLE), 15, "Linux comm 最多 15 字节")
+        # 在任意平台调用都不应抛错（Linux 下会改进程名，Windows 仅改控制台标题）
+        self.assertIsInstance(serve.set_process_title(), bool)
+        self.assertIsInstance(serve.set_process_title("md2web-test"), bool)
+
     def test_is_loopback_host(self):
         serve = load_module("serve", "serve.py")
         self.assertTrue(serve.is_loopback_host("127.0.0.1"))
@@ -933,13 +941,36 @@ class MultiRepoTests(TempDirTestCase):
                                         search_index="search-index_software.json",
                                         offline_data="lib/offline-data_software.js",
                                         read_only=repo["read_only"], allow_commit=repo["allow_commit"],
-                                        repo=repo)
+                                        repo=repo, home_link="index_all.html")
         html = (self.docs / "index_software.html").read_text(encoding="utf-8")
         self.assertIn("_sidebar_software.md", html)
         self.assertIn("search-index_software.json", html)
         self.assertIn("offline-data_software.js", html)
         self.assertIn("repoReadOnly: true", html)
         self.assertIn("repoAllowCommit: false", html)
+        self.assertIn('homeLink: "index_all.html"', html)
+
+    def test_index_all_links_home_to_overview(self):
+        lib = self.docs / "lib"
+        lib.mkdir(parents=True, exist_ok=True)
+        for name in ("custom-search.js", "workspace.js", "settings.js"):
+            (lib / name).write_text("// " + name + "\n", encoding="utf-8")
+        self.module.generate_index_html("测试站", path=self.docs / "index_all.html",
+                                        route_sidebar=True, repos=self.REPOS, home_link="index.html")
+        html = (self.docs / "index_all.html").read_text(encoding="utf-8")
+        self.assertIn('homeLink: "index.html"', html)
+        self.assertIn("routeSidebar: true", html)
+
+
+class PlaygroundCopyTests(unittest.TestCase):
+    """绘图在线预览：复制源码支持勾选是否带围栏（默认带）。"""
+
+    def test_copy_options_exist(self):
+        html = (ROOT / "web" / "plot-playground.html").read_text(encoding="utf-8")
+        for needle in ("pgPacketFence", "pgMermaidFence", "fencedSource"):
+            self.assertIn(needle, html, needle)
+        self.assertIn("带围栏", html)
+        self.assertIn("已复制（纯源码）", html)
 
 
 class AssetVersionTests(TempDirTestCase):

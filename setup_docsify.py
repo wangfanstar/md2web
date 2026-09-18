@@ -945,7 +945,7 @@ def generate_index_html(title="文档中心", path=None, page_name="index.html",
                          sidebar="_sidebar.md", search_index="search-index.json",
                          offline_data="lib/offline-data.js", homepage=None,
                          read_only=False, allow_commit=True, repo=None, repos=None,
-                         route_sidebar=False):
+                         route_sidebar=False, home_link=None):
     """生成 index.html"""
     prism_lang_map_js = json.dumps(PRISM_LANG_FALLBACK, ensure_ascii=False)
     title_html = html.escape(title)
@@ -955,6 +955,7 @@ def generate_index_html(title="文档中心", path=None, page_name="index.html",
     search_index_path = str(search_index)
     offline_data_path = str(offline_data)
     route_sidebar_js = "true" if route_sidebar else "false"
+    home_link_js = json.dumps(home_link or "index.html", ensure_ascii=False)
     repo_list_js = json.dumps([
         {"id": item["id"], "sub": mount_subpath(item["mount"]),
          "sidebar": f"_sidebar_{item['id']}.md"}
@@ -996,6 +997,7 @@ def generate_index_html(title="文档中心", path=None, page_name="index.html",
       homepage: {homepage_js},
       coverpage: false,
       routeSidebar: {route_sidebar_js},
+      homeLink: {home_link_js},
       relativePath: {route_sidebar_js},
       repoList: {repo_list_js},
       repoReadOnly: {read_only_js},
@@ -1313,7 +1315,8 @@ def main(argv=None):
         print("3. 生成多仓库页面（每仓库一个入口 + 总览 + 配置页）...")
         cleanup_repo_artifacts(repos)
         generate_index_html(args.title, path=DOCS_DIR / "index_all.html", site_name=args.title,
-                            repo={"all": True}, repos=repos, route_sidebar=True)
+                            repo={"all": True}, repos=repos, route_sidebar=True,
+                            home_link="index.html")
         for repo in repos:
             sub = mount_subpath(repo["mount"])
             repo_files = files_for_mount(md_files, repo["mount"])
@@ -1333,7 +1336,8 @@ def main(argv=None):
                                 site_name=f"{repo['id']} · {args.title}",
                                 sidebar=sidebar, search_index=search_index, offline_data=offline_data,
                                 homepage=homepage, read_only=repo.get("read_only", False),
-                                allow_commit=repo.get("allow_commit", True), repo=repo)
+                                allow_commit=repo.get("allow_commit", True), repo=repo,
+                                home_link="index_all.html")
         generate_master_index_html(repos, args.title)
         generate_config_page()
 

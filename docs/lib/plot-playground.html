@@ -97,6 +97,7 @@ svg text[class*="actor"] {
         <select id="pgPacketPreset" aria-label="示例模板"></select>
         <span class="pg-spacer"></span>
         <button type="button" id="pgPacketRender">渲染</button>
+        <label class="pg-check" title="勾选后复制 ```packetdiag 围栏，可直接粘贴到 Markdown"><input type="checkbox" id="pgPacketFence" checked> 带围栏</label>
         <button type="button" id="pgPacketCopy">复制源码</button>
         <button type="button" id="pgPacketDownload">下载 PNG</button>
       </div>
@@ -195,6 +196,7 @@ svg text[class*="actor"] {
         <select id="pgMermaidType" aria-label="图形类型"></select>
         <span class="pg-spacer"></span>
         <button type="button" id="pgMermaidRender">渲染</button>
+        <label class="pg-check" title="勾选后复制 ```mermaid 围栏，可直接粘贴到 Markdown"><input type="checkbox" id="pgMermaidFence" checked> 带围栏</label>
         <button type="button" id="pgMermaidCopy">复制源码</button>
         <button type="button" id="pgMermaidSvg">下载 SVG</button>
         <button type="button" id="pgMermaidPng">下载 PNG</button>
@@ -279,6 +281,14 @@ svg text[class*="actor"] {
   });
 
   // ---------- PacketDiag ----------
+  function fencedSource(source, language, withFence) {
+    var body = String(source || '').replace(/\s+$/, '');
+    if (!withFence) {
+      return body;
+    }
+    return '```' + language + '\n' + body + '\n```';
+  }
+
   function copyText(text, button, label) {
     var original = button ? button.textContent : '';
     function done(ok) {
@@ -301,17 +311,44 @@ svg text[class*="actor"] {
   var packetSource = document.getElementById('pgPacketSource');
   var packetCanvas = document.getElementById('pgPacketCanvas');
   var packetError = document.getElementById('pgPacketError');
+  var FENCE_STORAGE = 'md2web:playground-fence';
+  try {
+    var savedFence = window.localStorage.getItem(FENCE_STORAGE);
+    if (savedFence === '0' || savedFence === '1') {
+      ['pgPacketFence', 'pgMermaidFence'].forEach(function (id) {
+        var node = document.getElementById(id);
+        if (node) {
+          node.checked = savedFence === '1';
+        }
+      });
+    }
+  } catch (error) { /* 隐私模式忽略 */ }
+  ['pgPacketFence', 'pgMermaidFence'].forEach(function (id) {
+    var node = document.getElementById(id);
+    if (node) {
+      node.addEventListener('change', function () {
+        try {
+          window.localStorage.setItem(FENCE_STORAGE, node.checked ? '1' : '0');
+        } catch (error) { /* 隐私模式忽略 */ }
+      });
+    }
+  });
+
   var packetCopyButton = document.getElementById('pgPacketCopy');
   if (packetCopyButton) {
     packetCopyButton.addEventListener('click', function () {
-      copyText(packetSource.value, packetCopyButton);
+      var packetFence = document.getElementById('pgPacketFence');
+      copyText(fencedSource(packetSource.value, 'packetdiag', !packetFence || packetFence.checked),
+        packetCopyButton, packetFence && packetFence.checked ? '已复制（含围栏）' : '已复制（纯源码）');
     });
   }
   var mermaidCopyButton = document.getElementById('pgMermaidCopy');
   if (mermaidCopyButton) {
     mermaidCopyButton.addEventListener('click', function () {
       var source = document.getElementById('pgMermaidSource');
-      copyText(source ? source.value : '', mermaidCopyButton);
+      var mermaidFence = document.getElementById('pgMermaidFence');
+      copyText(fencedSource(source ? source.value : '', 'mermaid', !mermaidFence || mermaidFence.checked),
+        mermaidCopyButton, mermaidFence && mermaidFence.checked ? '已复制（含围栏）' : '已复制（纯源码）');
     });
   }
   var packetPreset = document.getElementById('pgPacketPreset');

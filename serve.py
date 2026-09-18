@@ -50,6 +50,42 @@ class PreviewServer(_ThreadingHTTPServer):
     allow_reuse_address = os.name != "nt"
 
 
+PROCESS_TITLE = "md2web-serve"
+
+
+def set_process_title(title=PROCESS_TITLE):
+    """把进程名（/proc/<pid>/comm）改成 md2web-*，方便 ps/pgrep 查找。
+
+    - Linux：通过 libc.prctl(PR_SET_NAME) 修改（ps -o comm / top / pgrep -x 都能看到）
+    - Windows：仅设置控制台窗口标题，进程名仍为 python.exe
+    - 其它平台：忽略
+    """
+    name = str(title or PROCESS_TITLE)[:15]
+    if sys.platform.startswith("linux"):
+        try:
+            import ctypes
+
+            for library in ("libc.so.6", "libc.so", "libc.so.7"):
+                try:
+                    libc = ctypes.CDLL(library, use_errno=True)
+                except OSError:
+                    continue
+                pr_set_name = 15
+                if libc.prctl(pr_set_name, ctypes.c_char_p(name.encode("utf-8")), 0, 0, 0) == 0:
+                    return True
+        except Exception:
+            return False
+        return False
+    if sys.platform.startswith("win"):
+        try:
+            import ctypes
+
+            ctypes.windll.kernel32.SetConsoleTitleW("md2web")
+        except Exception:
+            pass
+    return False
+
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="启动 docs/ 预览或认证编辑服务")
     parser.add_argument(
@@ -742,6 +778,8 @@ def main(argv=None):
         raise SystemExit(f"错误: {directory} 下没有 index.html，请先运行 python setup_docsify.py")
 
     print("Python: " + sys.version.split()[0] + " (" + sys.executable + ")")
+    if set_process_title():
+        print("进程名: " + PROCESS_TITLE + "（Linux 下可用 pgrep -af md2web 或 ps -ef | grep md2web 查找）")
 
     manage_instance(args.pidfile)
     write_pidfile(args.pidfile, os.getpid())
