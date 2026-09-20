@@ -574,6 +574,68 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 pass
         return jsonify({"ok": True, **result})
 
+    @app.get("/__feedback")
+    def list_feedback_endpoint():
+        """反馈列表（公开只读）：登录用户可提交，管理员可更新进度。"""
+        try:
+            limit = int(request.args.get("limit") or 200)
+        except (TypeError, ValueError):
+            limit = 200
+        limit = max(1, min(limit, 500))
+        status = str(request.args.get("status") or "").strip() or None
+        rows = database.list_feedback(conn, limit=limit, status=status)
+        return jsonify({
+            "ok": True,
+            "statuses": [{"id": key, "label": label}
+                         for key, label in database.FEEDBACK_STATUS_LABELS.items()],
+            "feedback": rows,
+        })
+
+    @app.post("/__feedback")
+    def create_feedback_endpoint():
+        """提交反馈（登录用户 + CSRF）。"""
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        title = str(payload.get("title") or "").strip()
+        body = str(payload.get("body") or "").strip()
+        page = str(payload.get("page") or "").strip()[:300]
+        if len(title) < 2 or not body:
+            return json_error(400, "invalid_request", "请填写标题（至少 2 个字）与问题描述")
+        user = session["user"]
+        feedback_id = database.create_feedback(
+            conn, user.get("id"), user.get("displayName") or user.get("username") or "读者",
+            title[:200], body[:8000], page,
+        )
+        database.audit(conn, "feedback_create", "ok", actor_id=user.get("id"), resource=str(feedback_id))
+        return jsonify({"ok": True, "id": feedback_id})
+
+    @app.post("/__admin/feedback")
+    def update_feedback_endpoint():
+        """更新反馈进度（管理员 + CSRF）：status 与 note。"""
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        try:
+            feedback_id = int(payload.get("id") or 0)
+        except (TypeError, ValueError):
+            return json_error(400, "invalid_request", "缺少有效的反馈 id")
+        updated = database.update_feedback(conn, feedback_id, status=payload.get("status"),
+                                           note=payload.get("note"))
+        if updated is None:
+            return json_error(404, "not_found", "反馈不存在")
+        database.audit(conn, "feedback_update", "ok", actor_id=session["user"].get("id"),
+                       resource=str(feedback_id))
+        return jsonify({"ok": True, "feedback": updated})
+
     @app.post("/__admin/repo-credential")
     def set_repo_credential():
         """设置某个仓库（或 site-backup）的同步用户名与密码（加密入库）。"""

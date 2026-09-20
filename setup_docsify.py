@@ -1325,6 +1325,7 @@ def generate_master_index_html(repos, title="文档中心", all_page="index_all.
       <input type="search" placeholder="搜索全部仓库的文档（回车打开第一条）" data-master-search aria-label="搜索全部仓库">
       <a href="{all_page}">全部文档（合并视图）</a>
       <a href="{config_page}">仓库配置</a>
+      <a href="md2web_feedback.html">读者反馈</a>
     </div>
     <div class="results" data-master-results></div>
     {''.join(sections)}
@@ -1339,18 +1340,29 @@ def generate_master_index_html(repos, title="文档中心", all_page="index_all.
     print(f"  [生成] index.html（总览：{len(repos)} 个仓库 / {len(groups)} 个分组）")
 
 
+def generate_standalone_page(html_name, js_name, label):
+    """把独立页面（web/<html> + web/<js>）复制到 docs/。"""
+    html_source = ROOT / "web" / html_name
+    if not html_source.is_file():
+        return False
+    LIB_DIR.mkdir(parents=True, exist_ok=True)
+    js_source = ROOT / "web" / js_name
+    if js_source.is_file():
+        (LIB_DIR / js_name).write_text(js_source.read_text(encoding="utf-8"), encoding="utf-8")
+    (DOCS_DIR / html_name).write_text(version_asset_urls(html_source.read_text(encoding="utf-8")),
+                                      encoding="utf-8")
+    print(f"  [生成] {html_name}（{label}）")
+    return True
+
+
 def generate_config_page():
     """把配置页（web/md2web_config.html + web/md2web-config.js）复制到 docs/。"""
-    html_source = ROOT / "web" / "md2web_config.html"
-    js_source = ROOT / "web" / "md2web-config.js"
-    if not html_source.is_file():
-        return
-    LIB_DIR.mkdir(parents=True, exist_ok=True)
-    if js_source.is_file():
-        (LIB_DIR / "md2web-config.js").write_text(js_source.read_text(encoding="utf-8"), encoding="utf-8")
-    html_text = html_source.read_text(encoding="utf-8")
-    (DOCS_DIR / "md2web_config.html").write_text(version_asset_urls(html_text), encoding="utf-8")
-    print("  [生成] md2web_config.html（仓库配置页）")
+    generate_standalone_page("md2web_config.html", "md2web-config.js", "仓库配置页")
+
+
+def generate_feedback_page():
+    """把读者反馈页（web/md2web_feedback.html + web/md2web-feedback.js）复制到 docs/。"""
+    generate_standalone_page("md2web_feedback.html", "md2web-feedback.js", "读者反馈")
 
 
 def main(argv=None):
@@ -1432,6 +1444,7 @@ def main(argv=None):
                                 home_link="index_all.html")
         generate_master_index_html(repos, args.title)
         generate_config_page()
+        generate_feedback_page()
 
         print("\n=== 构建完成 ===")
         print("\n启动本地预览: python serve.py")

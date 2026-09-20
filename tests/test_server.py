@@ -2580,6 +2580,80 @@ class FolderOpsTests(ServerTestBase):
         self.assertEqual(repos["hardware"]["group"], "新分组")
 
 
+class FeedbackTests(ServerTestBase):
+    """读者反馈：未登录只读、登录可提交、管理员可更新进度。"""
+
+    def setUp(self):
+        super().setUp()
+        self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
+        server_database.migrate(self.conn)
+        server_database.ensure_admin(self.conn)
+        self.config = server_config.load_config(self.write_config(), self.docs)
+        self.svn = FakeSvn()
+        self.auth = server_auth.AuthService(self.conn, self.svn, self.config)
+        self.auth.on_startup()
+        from server.app import create_app
+        self.app = create_app(self.config, self.conn, self.auth, self.docs)
+        self.client = self.app.test_client()
+
+    def tearDown(self):
+        self.conn.close()
+        super().tearDown()
+
+    def login_admin(self):
+        self.client.post("/__auth/login", json={"username": "admin", "password": "admin"})
+        return self.client.get("/__auth/session").get_json()["csrfToken"]
+
+    def test_anonymous_can_read_but_not_submit(self):
+        payload = self.client.get("/__feedback").get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["feedback"], [])
+        self.assertTrue(payload["statuses"])
+        response = self.client.post("/__feedback", json={"title": "问题", "body": "描述"})
+        self.assertEqual(response.status_code, 401)
+
+    def test_logged_in_user_submits_and_admin_updates_progress(self):
+        csrf = self.login_admin()
+        headers = {"X-CSRF-Token": csrf}
+        created = self.client.post("/__feedback", json={"title": "时序图放大丢字",
+                                                        "body": "放大后请求文字不见了",
+                                                        "page": "md/使用说明/绘图示例.md"},
+                                   headers=headers).get_json()
+        self.assertTrue(created["ok"], created)
+        items = self.client.get("/__feedback").get_json()["feedback"]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["status"], "open")
+        self.assertEqual(items[0]["title"], "时序图放大丢字")
+        self.assertIn("绘图示例", items[0]["page"])
+        # 管理员更新进度
+        updated = self.client.post("/__admin/feedback",
+                                   json={"id": created["id"], "status": "resolved",
+                                         "note": "已修复，见提交 1c9e500"},
+                                   headers=headers).get_json()
+        self.assertTrue(updated["ok"], updated)
+        self.assertEqual(updated["feedback"]["status"], "resolved")
+        items = self.client.get("/__feedback?status=resolved").get_json()["feedback"]
+        self.assertEqual(len(items), 1)
+        self.assertIn("已修复", items[0]["note"])
+        # 过滤：处理中应为空
+        self.assertEqual(self.client.get("/__feedback?status=in_progress").get_json()["feedback"], [])
+
+    def test_validation_and_admin_only(self):
+        csrf = self.login_admin()
+        headers = {"X-CSRF-Token": csrf}
+        self.assertEqual(self.client.post("/__feedback", json={"title": "x", "body": ""},
+                                          headers=headers).status_code, 400)
+        self.assertEqual(self.client.post("/__admin/feedback", json={"id": 1, "status": "resolved"},
+                                          headers=headers).status_code, 404)
+        # 普通用户不能更新进度
+        other = self.app.test_client()
+        other.post("/__auth/login", json={"username": "alice", "password": "good"})
+        other_csrf = other.get("/__auth/session").get_json()["csrfToken"]
+        response = other.post("/__admin/feedback", json={"id": 1, "status": "closed"},
+                              headers={"X-CSRF-Token": other_csrf})
+        self.assertEqual(response.status_code, 403)
+
+
 class PathsTests(unittest.TestCase):
     def test_blocked_paths(self):
         blocked = (".svn/entries", "md/.hidden/a.md", "data/db.sqlite3", "config/server.local.json",

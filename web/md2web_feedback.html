@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>md2web 读者反馈</title>
+  <style>
+    :root { color-scheme: light; }
+    body { background: #f7f9fb; color: #1f2a37; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 26px 18px 60px; }
+    .wrap { margin: 0 auto; max-width: 1080px; }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    .sub { color: #57606a; font-size: 13px; margin: 0 0 16px; }
+    .panel { background: #fff; border: 1px solid #e3e8ee; border-radius: 10px; margin-bottom: 14px; padding: 14px 16px; }
+    .panel h2 { font-size: 14px; margin: 0 0 10px; }
+    label { color: #475569; display: flex; flex-direction: column; font-size: 11.5px; gap: 4px; }
+    input, textarea { border: 1px solid #d5dee8; border-radius: 6px; font: inherit; font-size: 13px; padding: 7px 9px; }
+    textarea { min-height: 96px; resize: vertical; }
+    button { background: #fff; border: 1px solid #d5dee8; border-radius: 6px; color: #1f6feb; cursor: pointer; font: inherit; font-size: 13px; padding: 6px 12px; }
+    button:hover { border-color: #1f6feb; }
+    button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+    button:disabled { cursor: not-allowed; opacity: .55; }
+    .row { display: flex; flex-wrap: wrap; gap: 10px 12px; }
+    .row > label { flex: 1 1 220px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+    .status { border-radius: 6px; font-size: 12.5px; margin-top: 10px; padding: 8px 10px; }
+    .status.ok { background: #ecfdf5; color: #047857; }
+    .status.error { background: #fef2f2; color: #b91c1c; }
+    .hint { color: #6b7a89; font-size: 12px; }
+    .feedback-item { border: 1px solid #eef2f6; border-radius: 8px; margin-bottom: 10px; padding: 10px 12px; }
+    .feedback-head { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+    .feedback-head strong { font-size: 14px; }
+    .badge { border-radius: 999px; font-size: 11px; padding: 2px 9px; }
+    .badge.open { background: #fff7ed; color: #b45309; }
+    .badge.in_progress { background: #eef4fd; color: #1f6feb; }
+    .badge.resolved { background: #ecfdf5; color: #047857; }
+    .badge.closed { background: #f1f5f9; color: #64748b; }
+    .feedback-body { color: #334155; font-size: 13px; margin: 8px 0; white-space: pre-wrap; }
+    .feedback-meta { color: #6b7a89; font-size: 11.5px; }
+    .feedback-note { background: #f8fafc; border-left: 3px solid #1f6feb; font-size: 12.5px; margin-top: 8px; padding: 6px 10px; }
+    .admin-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .admin-tools select, .admin-tools input { font-size: 12px; padding: 4px 8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>md2web 读者反馈</h1>
+    <p class="sub">登录账号的读者可提交问题；未登录只能查看。管理员可更新处理进度与说明。</p>
+
+    <section class="panel">
+      <h2>当前状态</h2>
+      <div class="actions">
+        <span class="hint" data-user-label>正在读取登录状态…</span>
+        <button type="button" data-action="login">登录</button>
+        <button type="button" data-action="logout" hidden>退出</button>
+        <button type="button" data-action="reload">刷新列表</button>
+        <a href="index.html"><button type="button">返回总览</button></a>
+      </div>
+      <div class="status" data-status hidden></div>
+    </section>
+
+    <section class="panel" data-login-panel hidden>
+      <h2>登录</h2>
+      <div class="row">
+        <label>用户名<input type="text" data-login-username autocomplete="username" placeholder="SVN 账号或本机管理员"></label>
+        <label>密码<input type="password" data-login-password autocomplete="current-password"></label>
+      </div>
+      <div class="actions">
+        <button class="primary" type="button" data-action="do-login">登录</button>
+        <span class="hint">读者用 SVN 账号登录；管理员可用本机账号（默认 admin/admin）。</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>提交反馈</h2>
+      <p class="hint" data-submit-hint>登录后即可提交反馈。</p>
+      <div class="row">
+        <label>标题<input type="text" data-feedback-title placeholder="一句话描述问题" disabled></label>
+      </div>
+      <label>问题描述<textarea data-feedback-body placeholder="复现步骤、期望结果、实际结果…" disabled></textarea></label>
+      <label>相关页面<input type="text" data-feedback-page placeholder="如 md/硬件设计/时钟树设计.md（可自动带入）" disabled></label>
+      <div class="actions">
+        <button class="primary" type="button" data-action="submit" disabled>提交反馈</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>反馈列表与进度</h2>
+      <div class="actions">
+        <label class="hint" style="flex-direction:row;align-items:center;gap:6px">筛选
+          <select data-feedback-filter>
+            <option value="">全部</option>
+            <option value="open">待处理</option>
+            <option value="in_progress">处理中</option>
+            <option value="resolved">已解决</option>
+            <option value="closed">已关闭</option>
+          </select>
+        </label>
+      </div>
+      <div data-feedback-list><p class="hint">正在加载…</p></div>
+    </section>
+  </div>
+  <script src="lib/md2web-feedback.js"></script>
+</body>
+</html>

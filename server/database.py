@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .passwords import hash_password
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # 兼容目标：RHEL7 自带 SQLite 3.7.17（Python 3.6 的 sqlite3）。
 # Windows 端也必须只写这些版本能解析的对象，保证 data/ 数据库可在两个平台间直接共用。
@@ -336,6 +336,8 @@ def migrate(conn, logger=None):
                 conn.executescript(MIGRATION_V6_SQL)
             if version < 7:
                 conn.executescript(MIGRATION_V7_SQL)
+            if version < 8:
+                conn.executescript(MIGRATION_V8_SQL)
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     sanitize_schema(conn, logger)
     return SCHEMA_VERSION
@@ -448,6 +450,69 @@ CREATE TABLE IF NOT EXISTS source_events (
 );
 CREATE INDEX IF NOT EXISTS idx_source_events_binding ON source_events (binding_id, created_at);
 """
+
+
+# v8：读者反馈（登录用户提交，管理员更新进度）
+MIGRATION_V8_SQL = """
+CREATE TABLE IF NOT EXISTS feedback (
+    id INTEGER PRIMARY KEY,
+    author_id INTEGER REFERENCES users (id),
+    author_name TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    page TEXT,
+    status TEXT NOT NULL DEFAULT 'open',
+    note TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback (created_at);
+"""
+
+FEEDBACK_STATUSES = ("open", "in_progress", "resolved", "closed")
+FEEDBACK_STATUS_LABELS = {
+    "open": "待处理",
+    "in_progress": "处理中",
+    "resolved": "已解决",
+    "closed": "已关闭",
+}
+
+
+def create_feedback(conn, author_id, author_name, title, body, page=None, now=None):
+    timestamp = now or now_iso()
+    with conn:
+        cursor = conn.execute(
+            "INSERT INTO feedback (author_id, author_name, title, body, page, status, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, 'open', ?, ?)",
+            (author_id, author_name, title, body, page, timestamp, timestamp),
+        )
+    return cursor.lastrowid
+
+
+def list_feedback(conn, limit=200, status=None):
+    sql = ("SELECT id, author_id, author_name, title, body, page, status, note, created_at, updated_at"
+           " FROM feedback")
+    params = []
+    if status in FEEDBACK_STATUSES:
+        sql += " WHERE status = ?"
+        params.append(status)
+    sql += " ORDER BY id DESC LIMIT ?"
+    params.append(int(limit))
+    rows = conn.execute(sql, tuple(params)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def update_feedback(conn, feedback_id, status=None, note=None, now=None):
+    row = conn.execute("SELECT * FROM feedback WHERE id = ?", (feedback_id,)).fetchone()
+    if row is None:
+        return None
+    timestamp = now or now_iso()
+    new_status = status if status in FEEDBACK_STATUSES else row["status"]
+    new_note = row["note"] if note is None else str(note)
+    with conn:
+        conn.execute("UPDATE feedback SET status = ?, note = ?, updated_at = ? WHERE id = ?",
+                     (new_status, new_note, timestamp, feedback_id))
+    return dict(conn.execute("SELECT * FROM feedback WHERE id = ?", (feedback_id,)).fetchone())
 
 
 def save_svn_credential(conn, auth_source_id, username, secret, now=None):

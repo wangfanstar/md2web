@@ -1062,6 +1062,24 @@ class FolderViewTests(unittest.TestCase):
         self.assertIn("customToc", page, "页面仍应启用右侧本文目录")
 
 
+class FeedbackPageTests(unittest.TestCase):
+    """读者反馈页与每页入口链接。"""
+
+    def test_feedback_page_and_links(self):
+        page = (ROOT / "docs" / "md2web_feedback.html").read_text(encoding="utf-8")
+        self.assertIn("md2web-feedback.js", page)
+        self.assertIn("提交反馈", page)
+        script = (ROOT / "web" / "md2web-feedback.js").read_text(encoding="utf-8")
+        for needle in ("__feedback", "__admin/feedback", "登录后即可提交反馈"):
+            self.assertIn(needle, script, needle)
+        sidebar = (ROOT / "docs" / "lib" / "custom-search.js").read_text(encoding="utf-8")
+        self.assertIn("md2web_feedback.html", sidebar, "侧栏应包含反馈链接")
+        master = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("md2web_feedback.html", master)
+        config_page = (ROOT / "docs" / "md2web_config.html").read_text(encoding="utf-8")
+        self.assertIn("md2web_feedback.html", config_page)
+
+
 class PlaygroundCopyTests(unittest.TestCase):
     """绘图在线预览：复制源码支持勾选是否带围栏（默认带）。"""
 
