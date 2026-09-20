@@ -7,6 +7,8 @@
 #   端口被其它进程占用时：显示占用进程信息（PID/用户/命令），
 #   确认后强制结束；10 秒无操作自动强制结束；回答 n 取消启动
 #   ./start_linux.sh --status        查看运行状态（pid / 进程名 / 端口）
+#   ./start_linux.sh --port 8891     指定端口启动（也可直接写 ./start_linux.sh 8891）
+#                                      留空时取配置 server.port，默认 8882
 #   ./start_linux.sh --preview       只读预览（其它参数原样透传给 serve.py）
 #   ./start_linux.sh --bind 127.0.0.1  仅本机访问（默认 0.0.0.0，局域网可访问）
 #   PYTHON=python3.9 ./start_linux.sh  指定解释器
@@ -42,18 +44,35 @@ fi
 
 # 解析脚本自身的开关（其余参数原样透传给 serve.py）
 MODE="background"
+expect_value=0
 n=$#
 i=0
 while [ "$i" -lt "$n" ]; do
   arg="$1"
   shift
+  if [ "$expect_value" -eq 1 ]; then
+    # 上一个参数需要取值（--port/--bind 等），原样保留
+    set -- "$@" "$arg"
+    expect_value=0
+    i=$((i + 1))
+    continue
+  fi
   case "$arg" in
     --) ;;  # 容忍 `./start_linux.sh -- restart` 这类多打了分隔符的写法
     --foreground|--fg|foreground|fg) MODE="foreground" ;;
     --stop|stop) MODE="stop" ;;
     --restart|restart) MODE="restart" ;;
     --status|status) MODE="status" ;;
-    *) set -- "$@" "$arg" ;;
+    --port|--pidfile|--bind|--config|--title|--svn-command)
+      set -- "$@" "$arg"
+      expect_value=1
+      ;;
+    *)
+      case "$arg" in
+        ''|*[!0-9]*) set -- "$@" "$arg" ;;
+        *) set -- "$@" --port "$arg" ;;  # 纯数字参数：当作端口号（./start_linux.sh 8891）
+      esac
+      ;;
   esac
   i=$((i + 1))
 done
@@ -99,6 +118,20 @@ PYEOF
   fi
   [ -n "$port" ] || port=8882
   printf '%s' "$port"
+}
+
+validate_port() {
+  port="$1"
+  case "$port" in
+    ''|*[!0-9]*)
+      echo "[错误] 端口必须是数字：$port" >&2
+      exit 1
+      ;;
+  esac
+  if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+    echo "[错误] 端口必须在 1-65535 之间：$port" >&2
+    exit 1
+  fi
 }
 
 port_holders() {
@@ -243,7 +276,7 @@ confirm_port_conflict() {
   for pid in $foreign; do
     echo "        $(process_info "$pid")" >&2
   done
-  if [ -t 0 ]; then
+  if [ -t 0 ] || [ -r /dev/tty ]; then
     if prompt_kill_or_cancel; then
       echo "[提示] 强制结束占用进程。" >&2
     else
@@ -258,16 +291,27 @@ confirm_port_conflict() {
 }
 
 # 交互确认：y/回车/超时（10 秒）→ 返回 0（强制结束）；n → 返回 1（取消）
+# 说明：dash 等 /bin/sh 不支持 read -t，优先用 coreutils 的 timeout 读取 /dev/tty；
+#       两者都不可用时才退回 read -t（不支持时按超时处理，行为仍是自动强制结束）。
 prompt_kill_or_cancel() {
   printf '[提示] 是否强制结束以上进程以便启动？10 秒内未选择将自动强制结束 [Y/n] ' >&2
   answer=""
-  if read -t 10 answer 2>/dev/null; then
-    case "$answer" in
-      n|N|no|No|NO) return 1 ;;
-    esac
+  status=0
+  if command -v timeout >/dev/null 2>&1 && [ -r /dev/tty ]; then
+    answer="$(timeout 10 sh -c 'IFS= read -r line && printf "%s" "$line"' < /dev/tty 2>/dev/null)" || status=$?
+  elif read -t 10 answer 2>/dev/null; then
+    status=0
+  else
+    status=124
+  fi
+  if [ "$status" = "124" ]; then
+    echo "" >&2
+    echo "[提示] 10 秒无操作，自动强制结束占用进程。" >&2
     return 0
   fi
-  echo "[提示] 10 秒无操作，自动强制结束占用进程。" >&2
+  case "$answer" in
+    n|N|no|No|NO) return 1 ;;
+  esac
   return 0
 }
 
@@ -294,6 +338,7 @@ case "$MODE" in
     rm -f "$PIDFILE"
     # 释放端口（可能是未记录 pidfile 的旧实例）
     target_port="$(resolve_port "$@")"
+    validate_port "$target_port"
     echo "[提示] 检查端口 $target_port 占用情况..."
     kill_port_holder "$target_port" || true
     MODE="background"
@@ -348,6 +393,7 @@ fi
 case "$MODE" in
   background|foreground)
     target_port="$(resolve_port "$@")"
+    validate_port "$target_port"
     confirm_port_conflict "$target_port"
     ;;
 esac

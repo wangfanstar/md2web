@@ -1190,6 +1190,7 @@
       }
     });
     renderAll();
+    restoreReadingQuery();
     scheduleReadingModeBuild();
   }
 
@@ -1561,6 +1562,78 @@
     buildTimer: null,
     dismissed: null
   };
+
+  var READING_STATE_KEY = 'md2web:search-reading';
+
+  function normalizeReadingRoute(route) {
+    var value = String(route || '');
+    var anchorIndex = value.indexOf('?id=');
+    if (anchorIndex !== -1) {
+      value = value.slice(0, anchorIndex);
+    }
+    value = value.replace(/\.md$/i, '').replace(/\/+$/, '');
+    return value || '/';
+  }
+
+  function routeFromHref(href) {
+    var value = String(href || '');
+    var hashIndex = value.indexOf('#');
+    if (hashIndex === -1) {
+      return '';
+    }
+    return value.slice(hashIndex + 1);
+  }
+
+  // 搜索结果指向另一个页面（html/index_<仓库>.html#/…）时，整页导航会丢掉内存里的关键词，
+  // 导致正文命中高亮失效；这里把关键词暂存到 sessionStorage，目标页加载后恢复。
+  function rememberReadingQuery(href) {
+    if (!state.query) {
+      return;
+    }
+    var route = routeFromHref(href);
+    if (!route) {
+      return;
+    }
+    try {
+      sessionStorage.setItem(READING_STATE_KEY, JSON.stringify({
+        query: state.query,
+        route: normalizeReadingRoute(route)
+      }));
+    } catch (error) { /* 隐私模式忽略 */ }
+  }
+
+  function restoreReadingQuery() {
+    var raw = null;
+    try {
+      raw = sessionStorage.getItem(READING_STATE_KEY);
+      if (raw) {
+        sessionStorage.removeItem(READING_STATE_KEY);
+      }
+    } catch (error) {
+      return;
+    }
+    if (!raw) {
+      return;
+    }
+    var saved = null;
+    try {
+      saved = JSON.parse(raw);
+    } catch (error) {
+      saved = null;
+    }
+    if (!saved || !saved.query) {
+      return;
+    }
+    if (normalizeReadingRoute(getRouteFromHash()) !== saved.route) {
+      return;
+    }
+    [state.sidebar, state.dialog].forEach(function (view) {
+      if (view && view.input) {
+        view.input.value = saved.query;
+      }
+    });
+    setQuery(saved.query);
+  }
 
   function getRouteFromHash() {
     var hash = window.location.hash || '#/';
@@ -2390,9 +2463,23 @@
     }, 50);
   }
 
+  function handleSearchResultNavigate(event) {
+    var link = event.target && event.target.closest ? event.target.closest('.custom-search-result') : null;
+    if (!link) {
+      return;
+    }
+    var href = link.getAttribute('href') || '';
+    // 只有跨页面（含 .html）的结果才需要恢复；同页 hash 跳转关键词还在内存里
+    if (href.indexOf('.html') === -1) {
+      return;
+    }
+    rememberReadingQuery(href);
+  }
+
   function init() {
     document.addEventListener('click', handleFilePageTocClick);
     document.addEventListener('click', handleSearchResultClick);
+    document.addEventListener('click', handleSearchResultNavigate, true);
     loadHistory();
     restoreTocPreference();
     window.addEventListener('hashchange', scheduleReadingModeBuild);

@@ -879,6 +879,23 @@ class LauncherScriptsTests(unittest.TestCase):
         self.assertIn("/proc/$pid/cmdline", raw, "应用 /proc 读取命令行")
         self.assertIn("human_duration", raw, "应展示可读的运行时长")
 
+    def test_start_linux_supports_port_option(self):
+        raw = (ROOT / "start_linux.sh").read_text(encoding="utf-8")
+        # 显式 --port / --port= / 裸端口号三种写法
+        self.assertIn("--port 8891", raw, "脚本头部应说明 --port 用法")
+        self.assertIn('set -- "$@" --port "$arg"', raw, "纯数字参数应转换为 --port")
+        self.assertIn("validate_port", raw, "应校验端口范围")
+        self.assertIn("端口必须在 1-65535 之间", raw)
+        self.assertIn('--port|--pidfile|--bind|--config|--title|--svn-command)', raw,
+                      "带值参数的下一个参数不应被当作端口")
+
+    def test_start_linux_prompt_survives_dash(self):
+        """dash 的 read 不支持 -t：必须用 timeout/read -t 组合保证 10 秒超时仍然生效。"""
+        raw = (ROOT / "start_linux.sh").read_text(encoding="utf-8")
+        self.assertIn("command -v timeout", raw, "应优先用 coreutils timeout 实现超时")
+        self.assertIn("read -t 10 answer", raw, "不支持 timeout 时回退 read -t")
+        self.assertIn("[ -t 0 ] || [ -r /dev/tty ]", raw, "有终端（含 /dev/tty）时都应先询问")
+
     def test_start_linux_readiness_uses_pid_and_port(self):
         raw = (ROOT / "start_linux.sh").read_text(encoding="utf-8")
         # 就绪判断：pidfile 进程存活 + 端口监听（日志未刷新时也能判断成功）
@@ -1111,6 +1128,16 @@ class HtmlLayoutTests(unittest.TestCase):
         self.assertIn("html/README.md", payload["content"])
         self.assertIn("html/_sidebar.md", payload["content"])
         self.assertIn("md/使用说明/快速开始.md", payload["content"])
+
+    def test_search_restores_query_across_pages(self):
+        """跨页搜索结果会整页导航：关键词要暂存并在目标页恢复，否则正文命中高亮丢失。"""
+        source = (ROOT / "web" / "custom-search.js").read_text(encoding="utf-8")
+        for needle in ("READING_STATE_KEY", "rememberReadingQuery", "restoreReadingQuery",
+                       "handleSearchResultNavigate", "sessionStorage.setItem", "sessionStorage.removeItem"):
+            self.assertIn(needle, source, needle)
+        self.assertIn("restoreReadingQuery();", source, "索引就绪后应恢复关键词")
+        built = (ROOT / "docs" / "lib" / "custom-search.js").read_text(encoding="utf-8")
+        self.assertIn("restoreReadingQuery", built, "构建产物未同步 custom-search.js")
 
     def test_hash_links_stay_on_current_page(self):
         """<base> 下纯 hash 链接（侧栏/本文目录）必须在当前文档内跳转，否则会整页跳回站点根。"""

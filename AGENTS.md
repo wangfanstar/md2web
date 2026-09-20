@@ -9,6 +9,7 @@ md2web 把 `docs/md/` 下的 Markdown 构建成**完全离线可用**的 Docsify
 - 运行时：Python 3.8+（仅标准库，无需 pip/Node.js）；前端为原生 JS/CSS + Docsify 4.13.1 + Prism 1.29.0 + Mermaid 11.17.2，全部本地化
 - 支持 Windows 与 Linux；`file://` 双击与 HTTP 预览均可用
 - Python 版本：**3.6.8 及以上统一支持**（构建/只读预览仅标准库；认证编辑服务 `python3 -m pip install -r server/requirements.txt`）。新增代码必须通过 `Python36CompatibilityTests`（3.6 语法解析 + 禁用 3.7+ API 清单）。
+- **验证统一用 Python 3.6.8**：改完代码只跑 3.6.8 的解释器（本机 `C:\Users\wangf\AppData\Local\Temp\opencode\py36\python\python.exe`，目标机 `python3`）跑测试/构建，**不需要再跑 3.12**；系统默认 `python`（3.12）只用于临时脚本与调试，不作为验收依据。
 - 仓库是**公开仓库**：不要提交密钥、令牌或敏感文档；AI 助手的 API Key 只允许存在浏览器 localStorage（`window.AI_ASSISTANT_CONFIG` 也仅作可选预置，禁止把 Key 写进被提交的文件）
 
 ## 架构与数据流
@@ -99,6 +100,10 @@ node --test tests/test_ai_retrieval.js
 node --check web/custom-search.js       # 前端语法检查（workspace/mermaid-init/media-viewer/packetdiag/page-export/md-editor/math-init/prism-init/ai-assistant/ai-retrieval/auth/sanitize 同理）
 ```
 
+> 验收只跑 3.6.8：把上面的 `python` 换成 3.6.8 解释器（本机 `C:\Users\wangf\AppData\Local\Temp\opencode\py36\python\python.exe`，Linux 为 `python3`），例如
+> `& "C:\Users\wangf\AppData\Local\Temp\opencode\py36\python\python.exe" -m unittest discover -s tests`。
+> 3.12 的运行结果不作为验收依据（仅方便临时调试）。
+
 ## 不可破坏的约定
 
 1. **构建绝不修改 `docs/md/`**：不删除、不移动、不重写源文档；新增/删除文档由用户操作。编辑器的 `Ctrl+S` 是用户主动触发（经本机预览服务写回），不属于构建行为。
@@ -150,8 +155,8 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 每个一级文件夹都有入口页：`load_all_repos()` = 配置的仓库 + `auto_folder_repos()` 为**未配置仓库的文件夹**补的条目（`auto=True`，id 即文件夹名，`index_<文件夹名>.html`，总览页显示「未配置 SVN」徽标、备注「本地文件夹（不连接 SVN）」），因此配置页「仓库入口页」列对每个文件夹都有链接；`repo_page_name()` 保留中文等 CJK 字符（否则中文 id 会全部塌缩成 `index_repo.html`），前端 `entryPage()` 必须保持同一规则。删除文件夹后重建由 `cleanup_repo_artifacts()` 清理其入口页/侧栏/索引/离线数据。
 - `./start_linux.sh: No such file or directory` 多为 CRLF 或缺少可执行位：`start_linux.sh` 必须保持 LF + 100755（`.gitattributes` 已声明 `*.sh text eol=lf`，`LauncherScriptsTests` 校验无 CR 与可执行位）；排障命令 `sed -i "s/\r$//" start_linux.sh && chmod +x start_linux.sh`，或直接 `sh start_linux.sh`（脚本会去 CR 后重执行）。
 - `start_linux.sh` 的开关要**连写**（`--restart`、`--stop`）；若误写成 `-- restart`（中间多空格）或漏写 `--`（`restart`），脚本也会识别，且多余的 `--` 会被忽略（不再透传给 `serve.py`，避免 argparse 报 “unrecognized arguments”）。
-- `start_linux.sh` 默认**后台启动**（`nohup … >> data/serve.log 2>&1 &`，等待就绪后打印 PID/日志/停止命令），`--foreground` 前台、`--stop` 按 pidfile 停止、`--restart` 强制重启（先停本实例，再用 ss/lsof/fuser 结束占用端口的进程）、`--status` 查看状态；脚本自身的开关会先剥离，其余参数透传 `serve.py`；后台模式自动补 `--no-browser`；保持 POSIX sh、LF 与可执行位。
-- 启动前端口检查（`confirm_port_conflict`）：端口被**非本项目实例**占用时打印占用进程信息（`process_info`：优先读 `/proc/<pid>`，ps 字段兼容性差时不依赖它；含 PID/用户/运行时长/命令行），交互式询问是否强制结束——`y`/回车结束、`n` 取消启动、**10 秒无操作自动强制结束**，非交互（无 TTY）同样自动结束；占用者是本实例（PID 与 pidfile 一致）时跳过询问，交由 `serve.py` 按 pidfile 重启。`--restart` 仍是直接强杀不询问。
+- `start_linux.sh` 默认**后台启动**（`nohup … >> data/serve.log 2>&1 &`，等待就绪后打印 PID/日志/停止命令），`--foreground` 前台、`--stop` 按 pidfile 停止、`--restart` 强制重启（先停本实例，再用 ss/lsof/fuser 结束占用端口的进程）、`--status` 查看状态；脚本自身的开关会先剥离，其余参数透传 `serve.py`；后台模式自动补 `--no-browser`；保持 POSIX sh、LF 与可执行位。**指定端口**支持 `--port 8891`、`--port=8891` 与裸端口号 `./start_linux.sh 8891`（解析时把纯数字参数转成 `--port`，`--port/--bind/--pidfile/--config/--title/--svn-command` 的取值参数不会被误判），启动前用 `validate_port` 校验 1-65535。
+- 启动前端口检查（`confirm_port_conflict`）：端口被**非本项目实例**占用时打印占用进程信息（`process_info`：优先读 `/proc/<pid>`，ps 字段兼容性差时不依赖它；含 PID/用户/运行时长/命令行），交互式询问是否强制结束——`y`/回车结束、`n` 取消启动、**10 秒无操作自动强制结束**；`[ -t 0 ] || [ -r /dev/tty ]` 时都先询问（非交互且无 /dev/tty 才自动结束）。询问函数 `prompt_kill_or_cancel` 优先用 `timeout 10 sh -c 'read' < /dev/tty`（dash 等 /bin/sh 不支持 `read -t`，否则会**跳过等待直接强杀**），再回退 `read -t 10`。占用者是本实例（PID 与 pidfile 一致）时跳过询问，交由 `serve.py` 按 pidfile 重启。`--restart` 仍是直接强杀不询问。
 - 后台就绪判断（约 20 秒）：pidfile 进程存活 **且端口已监听**（`port_holders`）即视为就绪，日志关键字仅作无 ss/lsof/fuser 时的回退；后台启动用 `python -u`（关闭输出缓冲）保证 `data/serve.log` 即时可读（否则缓冲会让日志长时间为空、误判“未就绪”）。失败时打印 pidfile 进程状态、端口监听状态与日志尾部，日志为空时明确提示。
 - Linux 进程名：`serve.py` 启动时调用 `set_process_title()`（libc `prctl(PR_SET_NAME)`）把进程名设为 `md2web-serve`，便于 `pgrep -af md2web` / `ps -o pid,comm,args -C md2web-serve` 查找；Windows 下仅设置控制台标题（进程名仍是 python.exe），实例管理仍以 pidfile 为准。
 - 每页「返回首页」目标由 `window.$docsify.homeLink` 决定（仓库页 → `html/index_all.html`，合并视图 → 总览 `index.html`，构建时注入）；`html/index_all.html` 的左侧导航由 `workspace.js` 按当前路由过滤（只显示当前仓库条目，路由需 `decodeURIComponent`）。
@@ -183,8 +188,8 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 
 ## 完成前检查清单
 
-1. `python -m unittest discover -s tests -v` 全绿（含 `tests/test_server.py`：配置、数据库、SVN 假 CLI、登录会话、静态白名单）
+1. **用 Python 3.6.8 跑** `python -m unittest discover -s tests` 全绿（含 `tests/test_server.py`：配置、数据库、SVN 假 CLI、登录会话、静态白名单）；不再跑 3.12
 2. `node --test tests/test_search.js`、`node --test tests/test_packetdiag.js`、`node --test tests/test_ai_retrieval.js` 全绿
 3. `node --check web/custom-search.js`、`web/workspace.js`、`web/mermaid-init.js`、`web/media-viewer.js`、`web/packetdiag.js`、`web/packetdiag-init.js`、`web/page-export.js`、`web/md-editor.js`、`web/math-init.js`、`web/prism-init.js`、`web/auth.js`、`web/sanitize.js` 通过
-4. `python setup_docsify.py` 后 `git status` 无意外生成物差异（构建幂等）
+4. **用 3.6.8 跑** `python setup_docsify.py` 后 `git status` 无意外生成物差异（构建幂等）
 5. `docs/md` 内容逐字节未变
