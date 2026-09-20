@@ -1,11 +1,11 @@
 - **文档列表**
-  - **使用说明**
+  - <a class="sidebar-group-link" href="html/index_使用说明.html">**使用说明**</a>
     - [快速开始](/md/使用说明/快速开始.md)
     - [绘图示例](/md/使用说明/绘图示例.md)
-  - **硬件设计**
+  - <a class="sidebar-group-link" href="html/index_硬件设计.html">**硬件设计**</a>
     - [寄存器手册](/md/硬件设计/寄存器手册.md)
     - [时钟树设计](/md/硬件设计/时钟树设计.md)
-  - **软件工具链**
+  - <a class="sidebar-group-link" href="html/index_软件工具链.html">**软件工具链**</a>
     - [编译工具链](/md/软件工具链/编译工具链.md)
-  - **验证指南**
+  - <a class="sidebar-group-link" href="html/index_验证指南.html">**验证指南**</a>
     - [仿真环境搭建](/md/验证指南/仿真环境搭建.md)

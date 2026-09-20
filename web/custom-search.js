@@ -123,9 +123,8 @@
   }
 
   function homeLink() {
-    // 每个页面的「返回首页」目标：仓库页回 index_all.html，合并视图回总览 index.html
-    var config = window.$docsify || {};
-    return config.homeLink || 'index.html';
+    // 「返回首页」固定指向站点总览 index.html（页面带 <base>，按站点根解析）
+    return 'index.html';
   }
 
   function routeToHash(slug, site) {
@@ -2167,7 +2166,8 @@
     }
   }
 
-  var SIDEBAR_HOME_ICON = '<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2.4 7.1 8 2.4l5.6 4.7v5.6a.9.9 0 0 1-.9.9h-3.2V9.8H6.5v3.8H3.3a.9.9 0 0 1-.9-.9z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>';
+  // 「返回上一层」：指向全部文档合并视图 index_all.html
+  var SIDEBAR_BACK_ICON = '<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M8 3.1 3.6 7.5h2.5v5.4h3.8V7.5h2.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M3.6 13.6h8.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
   var SIDEBAR_AI_ICON = '<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="2.1" y="4.4" width="11.8" height="9.1" rx="2.1" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.4V2.3M5.7 8.3h.01M10.3 8.3h.01M5.9 11h4.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
 
   // 把侧栏顶部站点名替换为 HOME 图标，并在其右侧加入 AI 配置入口
@@ -2184,8 +2184,8 @@
     appName.setAttribute('data-custom-icons', '1');
     appName.innerHTML = [
       '<span class="custom-sidebar-icons">',
-      '<a class="custom-sidebar-icon" href="#/" title="' + escapeHtml(title) + '（Home）" aria-label="返回首页">',
-      SIDEBAR_HOME_ICON,
+      '<a class="custom-sidebar-icon" href="html/index_all.html" title="返回上一层：' + escapeHtml(title) + '（全部文档）" aria-label="返回上一层">',
+      SIDEBAR_BACK_ICON,
       '</a>',
       '<button type="button" class="custom-sidebar-icon" data-sidebar-ai title="设置（含 AI 配置）" aria-label="设置">',
       SIDEBAR_AI_ICON,

@@ -1129,6 +1129,21 @@ class HtmlLayoutTests(unittest.TestCase):
         self.assertIn("html/_sidebar.md", payload["content"])
         self.assertIn("md/使用说明/快速开始.md", payload["content"])
 
+    def test_sidebar_navigation_targets(self):
+        """侧栏导航：返回上一层→index_all、返回首页→index.html、一级分组名→仓库入口页。"""
+        script = (ROOT / "web" / "custom-search.js").read_text(encoding="utf-8")
+        self.assertIn('href="html/index_all.html"', script, "返回上一层应指向 index_all.html")
+        self.assertIn("返回上一层", script)
+        self.assertIn("return 'index.html';", script, "返回首页应指向总览 index.html")
+        sidebar = (ROOT / "docs" / "html" / "_sidebar.md").read_text(encoding="utf-8")
+        self.assertIn('<a class="sidebar-group-link" href="html/index_', sidebar,
+                      "全局侧栏的一级分组名应链接到仓库入口页")
+        workspace = (ROOT / "web" / "workspace.js").read_text(encoding="utf-8")
+        self.assertNotIn("filterByCurrentRepo", workspace,
+                         "index_all 合并视图不应再按仓库过滤左侧导航")
+        built = (ROOT / "docs" / "lib" / "custom-search.js").read_text(encoding="utf-8")
+        self.assertIn('href="html/index_all.html"', built, "构建产物未同步 custom-search.js")
+
     def test_search_restores_query_across_pages(self):
         """跨页搜索结果会整页导航：关键词要暂存并在目标页恢复，否则正文命中高亮丢失。"""
         source = (ROOT / "web" / "custom-search.js").read_text(encoding="utf-8")

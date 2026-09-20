@@ -946,8 +946,11 @@ def build_doc_tree(rel_paths):
     return root
 
 
-def render_doc_tree(node, route_prefix, indent, lines, link, preserve_folders=False):
-    """递归渲染；站点保留目录身份，默认保留旧调用的折叠行为。"""
+def render_doc_tree(node, route_prefix, indent, lines, link, preserve_folders=False, dir_link=None):
+    """递归渲染；站点保留目录身份，默认保留旧调用的折叠行为。
+
+    dir_link(name) 返回一级目录的链接（如仓库入口页）；返回空则不生成链接。
+    """
     for name in sorted(node["dirs"]):
         child = node["dirs"][name]
         child_files = child["files"]
@@ -958,7 +961,16 @@ def render_doc_tree(node, route_prefix, indent, lines, link, preserve_folders=Fa
                 f"({link(route_prefix + '/' + name + '/' + filename)})"
             )
             continue
-        lines.append(f"{indent}- **{html.escape(name)}**")
+        label = f"**{html.escape(name)}**"
+        target = dir_link(name) if dir_link else ""
+        if target:
+            # 原始 HTML 锚点：Markdown 链接会被 docsify 重写成 hash 路由
+            lines.append(
+                f'{indent}- <a class="sidebar-group-link" href="{html.escape(target, quote=True)}">'
+                f"{label}</a>"
+            )
+        else:
+            lines.append(f"{indent}- {label}")
         render_doc_tree(child, route_prefix + "/" + name, indent + "  ", lines, link, preserve_folders)
     for filename in sorted(node["files"]):
         lines.append(
@@ -966,11 +978,14 @@ def render_doc_tree(node, route_prefix, indent, lines, link, preserve_folders=Fa
         )
 
 
-def generate_sidebar(md_files, path=None, heading="目录"):
-    """生成 _sidebar.md 侧边栏文件"""
+def generate_sidebar(md_files, path=None, heading="目录", link_first_level=False):
+    """生成 _sidebar.md 侧边栏文件；link_first_level=True 时一级分组名链接到仓库入口页。"""
     lines = ["- **文档列表**"]
     tree = build_doc_tree(md_files)
-    render_doc_tree(tree, "/md", "  ", lines, lambda route: route, preserve_folders=True)
+    dir_link = None
+    if link_first_level:
+        dir_link = lambda name: HTML_PREFIX + repo_page_name(name)
+    render_doc_tree(tree, "/md", "  ", lines, lambda route: route, preserve_folders=True, dir_link=dir_link)
 
     sidebar_path = Path(path) if path else (HTML_DIR / "_sidebar.md")
     sidebar_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1496,7 +1511,7 @@ def main(argv=None):
         print("2. 生成导航、首页、搜索索引...")
         repos = load_all_repos()
         HTML_DIR.mkdir(parents=True, exist_ok=True)
-        generate_sidebar(md_files, path=HTML_DIR / "_sidebar.md")
+        generate_sidebar(md_files, path=HTML_DIR / "_sidebar.md", link_first_level=True)
         generate_readme(md_files, args.title, repos=repos, path=HTML_DIR / "README.md")
         generate_search_index(md_files, args.title, repos=repos, path=HTML_DIR / "search-index.json")
         generate_offline_data(md_files, sidebar=HTML_PREFIX + "_sidebar.md")
