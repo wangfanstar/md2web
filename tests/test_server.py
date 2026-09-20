@@ -2769,6 +2769,38 @@ class FeedbackTests(ServerTestBase):
         # 过滤：处理中应为空
         self.assertEqual(self.client.get("/__feedback?status=in_progress").get_json()["feedback"], [])
 
+    def test_delete_allows_author_and_admin_but_not_others(self):
+        admin_csrf = self.login_admin()
+        admin_headers = {"X-CSRF-Token": admin_csrf}
+        first = self.client.post("/__feedback", json={"title": "管理员提交", "body": "第一条"},
+                                 headers=admin_headers).get_json()
+        # 普通用户提交一条
+        alice = self.app.test_client()
+        alice.post("/__auth/login", json={"username": "alice", "password": "good"})
+        alice_csrf = alice.get("/__auth/session").get_json()["csrfToken"]
+        alice_headers = {"X-CSRF-Token": alice_csrf}
+        second = alice.post("/__feedback", json={"title": "读者提交", "body": "第二条"},
+                            headers=alice_headers).get_json()
+        # 未登录 / 缺 CSRF 均被拒绝
+        self.assertEqual(self.app.test_client().post("/__feedback/delete",
+                                                     json={"id": second["id"]}).status_code, 401)
+        self.assertEqual(alice.post("/__feedback/delete", json={"id": second["id"]}).status_code, 403)
+        # 读者不能删管理员的
+        forbidden = alice.post("/__feedback/delete", json={"id": first["id"]}, headers=alice_headers)
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(forbidden.get_json()["code"], "forbidden")
+        # 读者可删自己的
+        deleted = alice.post("/__feedback/delete", json={"id": second["id"]}, headers=alice_headers).get_json()
+        self.assertTrue(deleted["ok"], deleted)
+        ids = [item["id"] for item in self.client.get("/__feedback").get_json()["feedback"]]
+        self.assertEqual(ids, [first["id"]])
+        # 管理员可删任意一条；删除不存在的返回 404
+        self.assertTrue(self.client.post("/__feedback/delete", json={"id": first["id"]},
+                                         headers=admin_headers).get_json()["ok"])
+        self.assertEqual(self.client.get("/__feedback").get_json()["feedback"], [])
+        self.assertEqual(self.client.post("/__feedback/delete", json={"id": first["id"]},
+                                          headers=admin_headers).status_code, 404)
+
     def test_validation_and_admin_only(self):
         csrf = self.login_admin()
         headers = {"X-CSRF-Token": csrf}

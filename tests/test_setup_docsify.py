@@ -1079,6 +1079,17 @@ class FeedbackPageTests(unittest.TestCase):
         config_page = (ROOT / "docs" / "md2web_config.html").read_text(encoding="utf-8")
         self.assertIn("md2web_feedback.html", config_page)
 
+    def test_feedback_delete_and_dialog_style(self):
+        script = (ROOT / "web" / "md2web-feedback.js").read_text(encoding="utf-8")
+        for needle in ("__feedback/delete", 'data-action="delete-feedback"', "canDelete",
+                       "feedback-card", "feedback-badge", "fd-head", "fd-section", "FeedbackDialog"):
+            self.assertIn(needle, script, needle)
+        app = (ROOT / "server" / "app.py").read_text(encoding="utf-8")
+        self.assertIn('@app.post("/__feedback/delete")', app)
+        database = (ROOT / "server" / "database.py").read_text(encoding="utf-8")
+        self.assertIn("def delete_feedback", database)
+        self.assertIn("def get_feedback", database)
+
 
 class PlaygroundCopyTests(unittest.TestCase):
     """绘图在线预览：复制源码支持勾选是否带围栏（默认带）。"""

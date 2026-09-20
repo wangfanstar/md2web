@@ -26,19 +26,10 @@
     .status.ok { background: #ecfdf5; color: #047857; }
     .status.error { background: #fef2f2; color: #b91c1c; }
     .hint { color: #6b7a89; font-size: 12px; }
-    .feedback-item { border: 1px solid #eef2f6; border-radius: 8px; margin-bottom: 10px; padding: 10px 12px; }
-    .feedback-head { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
-    .feedback-head strong { font-size: 14px; }
-    .badge { border-radius: 999px; font-size: 11px; padding: 2px 9px; }
-    .badge.open { background: #fff7ed; color: #b45309; }
-    .badge.in_progress { background: #eef4fd; color: #1f6feb; }
-    .badge.resolved { background: #ecfdf5; color: #047857; }
-    .badge.closed { background: #f1f5f9; color: #64748b; }
-    .feedback-body { color: #334155; font-size: 13px; margin: 8px 0; white-space: pre-wrap; }
-    .feedback-meta { color: #6b7a89; font-size: 11.5px; }
-    .feedback-note { background: #f8fafc; border-left: 3px solid #1f6feb; font-size: 12.5px; margin-top: 8px; padding: 6px 10px; }
-    .admin-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-    .admin-tools select, .admin-tools input { font-size: 12px; padding: 4px 8px; }
+    .panel-head { align-items: baseline; display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+    .panel-head h2 { margin: 0; }
+    .count { background: #eef2f7; border-radius: 999px; color: #64748b; font-size: 11px; padding: 2px 8px; }
+    /* 反馈卡片样式由 md2web-feedback.js 注入（与弹窗共用），这里只保留页面框架 */
   </style>
 </head>
 <body>
@@ -84,7 +75,10 @@
     </section>
 
     <section class="panel">
-      <h2>反馈列表与进度</h2>
+      <div class="panel-head">
+        <h2>反馈列表与进度</h2>
+        <span class="count" data-feedback-count>0 条</span>
+      </div>
       <div class="actions">
         <label class="hint" style="flex-direction:row;align-items:center;gap:6px">筛选
           <select data-feedback-filter>

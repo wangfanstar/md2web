@@ -502,6 +502,11 @@ def list_feedback(conn, limit=200, status=None):
     return [dict(row) for row in rows]
 
 
+def get_feedback(conn, feedback_id):
+    row = conn.execute("SELECT * FROM feedback WHERE id = ?", (feedback_id,)).fetchone()
+    return dict(row) if row is not None else None
+
+
 def update_feedback(conn, feedback_id, status=None, note=None, now=None):
     row = conn.execute("SELECT * FROM feedback WHERE id = ?", (feedback_id,)).fetchone()
     if row is None:
@@ -513,6 +518,13 @@ def update_feedback(conn, feedback_id, status=None, note=None, now=None):
         conn.execute("UPDATE feedback SET status = ?, note = ?, updated_at = ? WHERE id = ?",
                      (new_status, new_note, timestamp, feedback_id))
     return dict(conn.execute("SELECT * FROM feedback WHERE id = ?", (feedback_id,)).fetchone())
+
+
+def delete_feedback(conn, feedback_id):
+    """删除一条反馈；返回是否真的删除了记录（不存在返回 False）。"""
+    with conn:
+        cursor = conn.execute("DELETE FROM feedback WHERE id = ?", (feedback_id,))
+    return cursor.rowcount > 0
 
 
 def save_svn_credential(conn, auth_source_id, username, secret, now=None):

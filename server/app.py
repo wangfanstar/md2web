@@ -614,6 +614,31 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         database.audit(conn, "feedback_create", "ok", actor_id=user.get("id"), resource=str(feedback_id))
         return jsonify({"ok": True, "id": feedback_id})
 
+    @app.post("/__feedback/delete")
+    def delete_feedback_endpoint():
+        """删除反馈：管理员可删任意一条，登录用户可删自己提交的（均需 CSRF）。"""
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        try:
+            feedback_id = int(payload.get("id") or 0)
+        except (TypeError, ValueError):
+            return json_error(400, "invalid_request", "缺少有效的反馈 id")
+        row = database.get_feedback(conn, feedback_id)
+        if row is None:
+            return json_error(404, "not_found", "反馈不存在或已被删除")
+        user = session["user"]
+        is_admin = user.get("role") == "admin"
+        if not is_admin and (row.get("author_id") is None or row["author_id"] != user.get("id")):
+            return json_error(403, "forbidden", "只能删除自己提交的反馈（管理员可删除任意一条）")
+        database.delete_feedback(conn, feedback_id)
+        database.audit(conn, "feedback_delete", "ok", actor_id=user.get("id"), resource=str(feedback_id))
+        return jsonify({"ok": True, "id": feedback_id})
+
     @app.post("/__admin/feedback")
     def update_feedback_endpoint():
         """更新反馈进度（管理员 + CSRF）：status 与 note。"""
