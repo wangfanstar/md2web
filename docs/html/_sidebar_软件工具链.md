@@ -1,3 +1,3 @@
-- **文档列表**
+- <a class="sidebar-group-link" href="html/index_all.html">**所有文档列表**</a>
   - **软件工具链**
     - [编译工具链](/md/软件工具链/编译工具链.md)

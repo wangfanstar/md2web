@@ -83,7 +83,10 @@
       if (!label || !label.querySelector(':scope > .workspace-folder-count')) {
         var count = document.createElement('span');
         count.className = 'workspace-folder-count';
-        count.textContent = String(all(':scope a[href]', li).length);
+        count.textContent = String(all(':scope > ul a[href]', li).filter(function (a) {
+          // 只统计文档链接（分组名链接指向 index_*.html，不计入文件数量）
+          return (a.getAttribute('href') || '').indexOf('.html') === -1;
+        }).length);
         var target = label || li;
         target.appendChild(count);
       }

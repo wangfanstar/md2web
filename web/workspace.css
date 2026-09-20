@@ -40,9 +40,23 @@ body { color: var(--workspace-ink); background: #f7f9fb; }
 }
 .sidebar-nav li > a:hover { background: #eef2f6; color: var(--docs-ink); }
 .sidebar-nav li > strong, .sidebar-nav li > span { color: #38495c; font-size: 12.5px; }
-/* 一级分组名（链接到仓库入口页 index_<仓库>.html） */
-.sidebar-nav li > a.sidebar-group-link { color: #38495c; font-weight: 600; }
-.sidebar-nav li > a.sidebar-group-link strong { align-items: center; display: flex; gap: 3px; font-weight: 600; }
+/* 一级分组名（链接到仓库入口页 index_<仓库>.html；箭头/名称/计数保持同一行） */
+.sidebar-nav li > a.sidebar-group-link {
+  align-items: center;
+  color: #38495c;
+  display: flex;
+  font-weight: 600;
+  gap: 3px;
+}
+.sidebar-nav li > a.sidebar-group-link strong {
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-nav li > a.sidebar-group-link .workspace-folder-toggle { flex: 0 0 auto; }
+.sidebar-nav li > a.sidebar-group-link .workspace-folder-count { flex: 0 0 auto; }
 .sidebar-nav li > a.sidebar-group-link:hover { background: #eef2f6; color: var(--docs-accent); }
 .sidebar-nav li > a.sidebar-group-link:hover strong { color: inherit; }
 .sidebar-nav .workspace-folder-toggle { color: #8a97a5; font-size: 11px; }

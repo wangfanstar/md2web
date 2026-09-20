@@ -1,4 +1,4 @@
-- **文档列表**
+- <a class="sidebar-group-link" href="html/index_all.html">**所有文档列表**</a>
   - <a class="sidebar-group-link" href="html/index_使用说明.html">**使用说明**</a>
     - [快速开始](/md/使用说明/快速开始.md)
     - [绘图示例](/md/使用说明/绘图示例.md)

@@ -980,7 +980,9 @@ def render_doc_tree(node, route_prefix, indent, lines, link, preserve_folders=Fa
 
 def generate_sidebar(md_files, path=None, heading="目录", link_first_level=False):
     """生成 _sidebar.md 侧边栏文件；link_first_level=True 时一级分组名链接到仓库入口页。"""
-    lines = ["- **文档列表**"]
+    # 侧栏第一行固定为「所有文档列表」，链接回全部文档合并视图
+    lines = ['- <a class="sidebar-group-link" href="' + HTML_PREFIX
+             + 'index_all.html">**所有文档列表**</a>']
     tree = build_doc_tree(md_files)
     dir_link = None
     if link_first_level:
