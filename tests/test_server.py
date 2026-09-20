@@ -162,6 +162,7 @@ if command == "checkout":
     state.setdefault("wc", {})[str(target)] = url
     save_state(state)
     target.mkdir(parents=True, exist_ok=True)
+    (target / ".svn").mkdir(exist_ok=True)
     if depth == "infinity":
         for relative, content in state.get("files", {}).items():
             file_path = target / relative
@@ -204,10 +205,21 @@ if command == "diff":
     sys.exit(0)
 
 if command == "status":
-    # 默认视为有变更（测试网站数据备份时能走到提交）；MODE=clean 时返回空
+    # 默认视为有变更（测试网站数据备份时能走到提交）；MODE=clean 时返回空；corrupt_wc 模拟损坏
+    if MODE == "corrupt_wc":
+        sys.stderr.write("svn: E155004: Working copy locked; run 'svn cleanup' to remove locks\n")
+        sys.exit(1)
     if MODE == "clean":
         sys.exit(0)
     print("M       " + str(args[-1]))
+    sys.exit(0)
+
+if command == "cleanup":
+    if MODE == "corrupt_wc":
+        sys.stderr.write("svn: E155004: Working copy locked\n")
+        sys.exit(1)
+    record_credential(args)
+    print("Successfully cleaned up")
     sys.exit(0)
 
 if command == "add":
@@ -2192,6 +2204,200 @@ class FolderOpsTests(ServerTestBase):
                                           headers=headers).status_code, 400)
         anonymous = self.app.test_client()
         self.assertEqual(anonymous.get("/__admin/credentials").status_code, 401)
+
+    def test_repo_health_reports_states(self):
+        state_path = self.tmp / "health-state.json"
+        state_path.write_text(json.dumps({
+            "files": {"手册.md": "# 手册\n"}, "revision": 6, "log": [], "wc": {},
+            "uuid": "33333333-4444-5555-6666-777777777777"}, ensure_ascii=False), encoding="utf-8")
+        env = mock.patch.dict("os.environ", {"FAKE_SVN_STATE": str(state_path)})
+        env.start()
+        try:
+            fake = self.tmp / "fake_svn_health.py"
+            fake.write_text(FAKE_SVN, encoding="utf-8")
+            self.auth.svn = server_svn.SvnClient(command=(sys.executable, str(fake)), timeout=5)
+            headers = {"X-CSRF-Token": self.csrf()}
+            self.assertEqual(self.client.post("/__admin/repo-credential",
+                                              json={"id": "hardware", "username": "syncuser", "password": "good"},
+                                              headers=headers).status_code, 200)
+            # 正常：远端可访问、本地目录存在
+            report = self.client.post("/__admin/repo-health", json={"id": "hardware"},
+                                      headers=headers).get_json()["reports"][0]
+            self.assertEqual(report["level"], "ok", report)
+            self.assertEqual(report["status"], "正常")
+            self.assertEqual(report["indexPage"], "index_hardware.html")
+            self.assertEqual(report["revision"], 6)
+            # 本地目录不存在（尚未拉取）
+            report = self.client.post("/__admin/repo-health", json={"id": "verification"},
+                                      headers=headers).get_json()["reports"][0]
+            self.assertEqual(report["level"], "error")
+            self.assertEqual(report["status"], "目录不存在")
+            self.assertTrue(report["hints"])
+            # 认证失败：同步凭据口令错误
+            self.assertEqual(self.client.post("/__admin/repo-credential",
+                                              json={"id": "hardware", "username": "syncuser", "password": "bad"},
+                                              headers=headers).status_code, 200)
+            report = self.client.post("/__admin/repo-health", json={"id": "hardware"},
+                                      headers=headers).get_json()["reports"][0]
+            self.assertEqual(report["level"], "error")
+            self.assertEqual(report["status"], "认证失败")
+            # 全部仓库 / 未知仓库 / 匿名
+            all_reports = self.client.post("/__admin/repo-health", json={}, headers=headers)
+            self.assertEqual(all_reports.status_code, 200)
+            self.assertEqual(len(all_reports.get_json()["reports"]), len(self.config["repositories"]))
+            self.assertEqual(self.client.post("/__admin/repo-health", json={"id": "missing"},
+                                              headers=headers).status_code, 404)
+            anonymous = self.app.test_client()
+            self.assertEqual(anonymous.post("/__admin/repo-health", json={}).status_code, 401)
+        finally:
+            env.stop()
+
+    def test_repo_health_reports_missing_svn_client(self):
+        self.auth.svn = server_svn.SvnClient(command=("md2web-missing-svn-binary",), timeout=5)
+        headers = {"X-CSRF-Token": self.csrf()}
+        report = self.client.post("/__admin/repo-health", json={"id": "hardware"},
+                                  headers=headers).get_json()["reports"][0]
+        self.assertEqual(report["status"], "SVN 客户端不可用")
+        self.assertEqual(report["level"], "error")
+        self.assertTrue(report["hints"])
+
+    def test_repo_repair_and_recreate(self):
+        state_path = self.tmp / "repair-state.json"
+        state_path.write_text(json.dumps({
+            "files": {"手册.md": "# 手册\n"}, "revision": 6, "log": [], "wc": {},
+            "uuid": "33333333-4444-5555-6666-777777777777"}, ensure_ascii=False), encoding="utf-8")
+        env = mock.patch.dict("os.environ", {"FAKE_SVN_STATE": str(state_path)})
+        env.start()
+        try:
+            fake = self.tmp / "fake_svn_repair.py"
+            fake.write_text(FAKE_SVN, encoding="utf-8")
+            self.auth.svn = server_svn.SvnClient(command=(sys.executable, str(fake)), timeout=5)
+            headers = {"X-CSRF-Token": self.csrf()}
+            # 先配置该仓库的同步凭据（修复/重建时优先使用）
+            saved = self.client.post("/__admin/repo-credential",
+                                     json={"id": "hardware", "username": "syncuser", "password": "good"},
+                                     headers=headers)
+            self.assertEqual(saved.status_code, 200, saved.get_data(as_text=True))
+            target = self.docs / "md" / "硬件设计" / "手册.md"
+            pull = self.client.post("/__admin/provision", json={"id": "hardware"}, headers=headers).get_json()
+            self.assertTrue(pull["ok"], pull)
+            self.assertTrue(target.is_file())
+            # 模拟本地内容损坏/丢失：同版本下普通同步会短路，健康检查应提示、修复应强制重拉
+            for item in (self.docs / "md" / "硬件设计").rglob("*.md"):
+                item.unlink()
+            report = self.client.post("/__admin/repo-health", json={"id": "hardware"},
+                                      headers=headers).get_json()["reports"][0]
+            self.assertEqual(report["status"], "本地内容缺失")
+            self.assertEqual(report["level"], "warn")
+            repaired = self.client.post("/__admin/repo-repair", json={"id": "hardware"},
+                                        headers=headers).get_json()
+            self.assertTrue(repaired["ok"], repaired)
+            self.assertTrue(any("重新拉取" in note for note in repaired["notes"]), repaired)
+            self.assertTrue(target.is_file(), "修复应强制重新拉取并恢复本地文件")
+            # 删除重建：本地目录移入 data/trash 后重新拉取
+            recreated = self.client.post("/__admin/repo-recreate", json={"id": "hardware"},
+                                         headers=headers).get_json()
+            self.assertTrue(recreated["ok"], recreated)
+            self.assertTrue(any("移动到" in note for note in recreated["notes"]), recreated)
+            self.assertTrue(target.is_file())
+            self.assertTrue(Path(recreated["trash"]).is_dir())
+            self.assertEqual(self.client.post("/__admin/repo-repair", json={"id": "missing"},
+                                              headers=headers).status_code, 404)
+            anonymous = self.app.test_client()
+            self.assertEqual(anonymous.post("/__admin/repo-repair", json={"id": "hardware"}).status_code, 401)
+        finally:
+            env.stop()
+
+    def test_repo_recreate_rebinds_replaced_repository(self):
+        state_path = self.tmp / "rebind-state.json"
+        state_path.write_text(json.dumps({
+            "files": {"手册.md": "# 手册\n"}, "revision": 3, "log": [], "wc": {},
+            "uuid": "aaaaaaaa-1111-2222-3333-444444444444"}, ensure_ascii=False), encoding="utf-8")
+        env = mock.patch.dict("os.environ", {"FAKE_SVN_STATE": str(state_path)})
+        env.start()
+        try:
+            fake = self.tmp / "fake_svn_rebind.py"
+            fake.write_text(FAKE_SVN, encoding="utf-8")
+            self.auth.svn = server_svn.SvnClient(command=(sys.executable, str(fake)), timeout=5)
+            headers = {"X-CSRF-Token": self.csrf()}
+            self.assertEqual(self.client.post("/__admin/repo-credential",
+                                              json={"id": "hardware", "username": "syncuser", "password": "good"},
+                                              headers=headers).status_code, 200)
+            pull = self.client.post("/__admin/provision", json={"id": "hardware"}, headers=headers).get_json()
+            self.assertTrue(pull["ok"], pull)
+            # 远端库被整体重建：UUID 变化，内容也换了
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["uuid"] = "bbbbbbbb-5555-6666-7777-888888888888"
+            state["files"] = {"新手册.md": "# 新手册\n"}
+            state["revision"] = 1
+            state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+            report = self.client.post("/__admin/repo-health", json={"id": "hardware"},
+                                      headers=headers).get_json()["reports"][0]
+            self.assertEqual(report["status"], "仓库身份变化")
+            self.assertEqual(report["level"], "error")
+            # 「修复」不重新绑定：应被拒绝并提示用「删除重建」
+            denied = self.client.post("/__admin/repo-repair", json={"id": "hardware"}, headers=headers)
+            self.assertEqual(denied.status_code, 409)
+            # 「删除重建」重新绑定并拉取新库内容
+            recreated = self.client.post("/__admin/repo-recreate", json={"id": "hardware"},
+                                         headers=headers).get_json()
+            self.assertTrue(recreated["ok"], recreated)
+            self.assertTrue(any("重新绑定" in note for note in recreated["notes"]), recreated)
+            self.assertTrue((self.docs / "md" / "硬件设计" / "新手册.md").is_file())
+            report = self.client.post("/__admin/repo-health", json={"id": "hardware"},
+                                      headers=headers).get_json()["reports"][0]
+            self.assertEqual(report["level"], "ok", report)
+        finally:
+            env.stop()
+
+    def test_site_backup_workcopy_health_repair_and_recreate(self):
+        state_path = self.tmp / "site-health-state.json"
+        state_path.write_text(json.dumps({
+            "files": {}, "revision": 4, "log": [], "wc": {},
+            "uuid": "22222222-3333-4444-5555-666666666666"}, ensure_ascii=False), encoding="utf-8")
+        env = mock.patch.dict("os.environ", {"FAKE_SVN_STATE": str(state_path)})
+        env.start()
+        try:
+            fake = self.tmp / "fake_svn_site_health.py"
+            fake.write_text(FAKE_SVN, encoding="utf-8")
+            self.auth.svn = server_svn.SvnClient(command=(sys.executable, str(fake)), timeout=5)
+            self.config["site_backup"] = {
+                "enabled": True, "url": "https://svn.example.invalid/svn/site/trunk/",
+                "interval_seconds": 3600, "include": ["docs"], "message": "site backup",
+            }
+            headers = {"X-CSRF-Token": self.csrf()}
+            work_root = Path(self.config["storage"]["workspaces"]).parent / "site-wc"
+            # 未检出：提示尚未检出
+            report = self.client.post("/__admin/repo-health", json={"id": "site-backup"},
+                                      headers=headers).get_json()["reports"][0]
+            self.assertEqual(report["status"], "尚未检出")
+            self.assertEqual(report["level"], "warn")
+            # 模拟损坏的工作副本
+            with mock.patch.dict("os.environ", {"FAKE_SVN_MODE": "corrupt_wc"}):
+                (work_root / ".svn").mkdir(parents=True, exist_ok=True)
+                report = self.client.post("/__admin/repo-health", json={"id": "site-backup"},
+                                          headers=headers).get_json()["reports"][0]
+                self.assertEqual(report["status"], "工作副本损坏")
+                self.assertEqual(report["level"], "error")
+                reports = self.client.post("/__admin/repo-health", json={},
+                                           headers=headers).get_json()["reports"]
+                self.assertIn("site-backup", [item["id"] for item in reports])
+                # 修复：cleanup 修不好 → 移入 data/trash
+                repaired = self.client.post("/__admin/repo-repair", json={"id": "site-backup"},
+                                            headers=headers).get_json()
+                self.assertTrue(repaired["ok"], repaired)
+                self.assertFalse(work_root.exists())
+                self.assertTrue(any("移动到" in note for note in repaired["notes"]), repaired)
+            # 删除重建：重新检出并立即备份
+            recreated = self.client.post("/__admin/repo-recreate", json={"id": "site-backup"},
+                                         headers=headers).get_json()
+            self.assertTrue(recreated["ok"], recreated)
+            self.assertTrue((work_root / ".svn").is_dir())
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertTrue(any(name.startswith("docs/") for name in state["files"]),
+                            list(state["files"])[:5])
+        finally:
+            env.stop()
 
     def test_site_backup_commits_docs(self):
         state_path = self.tmp / "site-state.json"

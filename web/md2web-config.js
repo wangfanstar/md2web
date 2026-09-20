@@ -53,7 +53,9 @@
     if (hint) {
       hint.hidden = state.editable;
     }
-    all('[data-action="save"], [data-action="sync"], [data-action="add-repo"]').forEach(function (button) {
+    all('[data-action="save"], [data-action="sync"], [data-action="add-repo"],'
+      + ' [data-action="health-all"], [data-action="health-site"],'
+      + ' [data-action="repair-site"], [data-action="recreate-site"]').forEach(function (button) {
       button.disabled = !state.editable;
     });
   }
@@ -70,7 +72,11 @@
       '<td><code>' + escapeHtml(mount) + '</code>'
         + (folder ? '<br><span class="hint">文档 ' + folder.documents + ' 个</span>' : '')
         + '<input type="hidden" data-repo="mount" value="' + escapeHtml(mount) + '">'
-        + '<br>' + stateLabel + '</td>',
+        + '<br>' + stateLabel
+        + (item.id ? ' <a class="entry-link" href="' + escapeHtml(entryPage(item.id)) + '" target="_blank"'
+            + ' rel="noopener" title="打开该仓库入口页">入口页</a>' : '')
+        + '<br><span class="repo-health" data-health-badge>'
+        + (item.id ? (state.editable ? '（待检查）' : '（登录管理员后自动检查）') : '（未配置）') + '</span></td>',
       '<td><input type="text" data-repo="id" value="' + escapeHtml(item.id) + '" placeholder="如 hardware"' + disabled + '></td>',
       '<td><input type="text" data-repo="url" value="' + escapeHtml(item.url) + '" placeholder="https://svn.example.com/svn/xxx/trunk/docs/"' + disabled + '></td>',
       '<td><input type="text" data-repo="group" value="' + escapeHtml(item.group || '默认') + '" placeholder="默认"' + disabled + '></td>',
@@ -79,6 +85,9 @@
       '<td><label class="flag"><input type="checkbox" data-repo="allowCommit"' + (item.allowCommit === false ? '' : ' checked') + disabled + '>允许合入</label></td>',
       '<td><div class="actions">'
         + '<button type="button" data-action="repo-credential"' + disabled + '>同步凭据…</button>'
+        + '<button type="button" data-action="health"' + disabled + '>检查</button>'
+        + '<button type="button" data-action="repair"' + disabled + '>修复</button>'
+        + '<button type="button" data-action="recreate"' + disabled + '>删除重建</button>'
         + '<button type="button" data-action="provision"' + disabled + '>创建并拉取</button>'
         + '<button type="button" class="danger" data-action="remove-repo"' + disabled + '>删除</button>'
         + '</div></td>',
@@ -133,6 +142,120 @@
       };
     }).filter(function (repo) {
       return !!(repo.id || repo.url);
+    });
+  }
+
+  function entryPage(repoId) {
+    // 与构建脚本 repo_page_name() 保持一致的命名规则
+    var safe = String(repoId || '').replace(/[^0-9A-Za-z._-]+/g, '-').replace(/^-+|-+$/g, '') || 'repo';
+    return 'index_' + safe + '.html';
+  }
+
+  function savedRepo(repoId) {
+    var repos = (state.config && state.config.repositories) || [];
+    return repos.some(function (repo) { return repo.id === repoId; });
+  }
+
+  function healthLabel(report) {
+    return report.id === 'site-backup' ? '网站备份' : report.id;
+  }
+
+  function renderHealth(report) {
+    var badge = null;
+    if (report.id === 'site-backup') {
+      badge = query('[data-site-health]');
+    } else {
+      var rows = all('[data-repo-row]');
+      for (var index = 0; index < rows.length; index += 1) {
+        var idInput = rows[index].querySelector('[data-repo="id"]');
+        if (idInput && idInput.value.trim() === report.id) {
+          badge = rows[index].querySelector('[data-health-badge]');
+          break;
+        }
+      }
+    }
+    if (!badge) {
+      return;
+    }
+    var marker = report.level === 'ok' ? '✔' : (report.level === 'warn' ? '⚠' : '✖');
+    badge.textContent = marker + ' ' + report.status + (report.detail ? '（' + report.detail + '）' : '');
+    badge.className = 'repo-health is-' + (report.level || 'ok');
+    badge.title = [report.detail].concat(report.hints || []).join('\n');
+  }
+
+  function checkHealth(repoId, quiet) {
+    if (!state.editable) {
+      if (!quiet) {
+        setStatus('请先用管理员账号登录后再检查仓库状态。', true);
+      }
+      return Promise.resolve();
+    }
+    if (repoId && repoId !== 'site-backup' && !savedRepo(repoId)) {
+      setStatus('仓库 ' + repoId + ' 还没有保存到配置：请先点「保存配置并重建站点」，再检查/修复。', true);
+      return Promise.resolve();
+    }
+    if (!quiet) {
+      setStatus('正在检查' + (repoId ? ' ' + (repoId === 'site-backup' ? '网站备份工作副本' : repoId) : '全部仓库') + ' …');
+    }
+    return api('__admin/repo-health', {
+      method: 'POST',
+      body: JSON.stringify(repoId ? { id: repoId } : {})
+    }).then(function (payload) {
+      (payload.reports || []).forEach(renderHealth);
+      if (!quiet) {
+        var reports = payload.reports || [];
+        if (!reports.length) {
+          setStatus(repoId === 'site-backup'
+            ? '网站数据备份未配置：填写仓库地址并启用后，才能检查备份状态。'
+            : '没有可检查的仓库：请先填写 SVN 地址并保存配置。', true);
+        } else {
+          var bad = reports.filter(function (item) { return item.level !== 'ok'; });
+          setStatus(bad.length
+            ? '检查完成：' + bad.length + ' 项需要注意（' + bad.map(function (item) {
+              return healthLabel(item) + '：' + item.status;
+            }).join('；') + '）'
+            : '检查完成：全部正常');
+        }
+      }
+      return payload.reports;
+    }).catch(function (error) {
+      if (!quiet) {
+        setStatus('检查失败：' + error.message, true);
+      }
+    });
+  }
+
+  function repairRepo(repoId, recreate) {
+    if (!state.editable) {
+      setStatus('请先用管理员账号登录后再修复。', true);
+      return;
+    }
+    var isSite = repoId === 'site-backup';
+    if (!isSite && !savedRepo(repoId)) {
+      setStatus('仓库 ' + repoId + ' 还没有保存到配置：请先点「保存配置并重建站点」，再检查/修复。', true);
+      return;
+    }
+    var label = recreate ? '删除重建' : '修复';
+    var message = recreate
+      ? (isSite
+        ? '将把网站备份工作副本移动到 data/trash，并立即重新检出、备份一次，确定继续？'
+        : '将把本地目录（含未提交的本地修改）移动到 data/trash，再重新从 SVN 拉取 ' + repoId + '。确定继续？')
+      : (isSite
+        ? '将对网站备份工作副本执行 svn cleanup（修不好会自动移入 data/trash），确定继续？'
+        : '将对 ' + repoId + ' 执行 svn cleanup 并强制重新拉取远端内容（覆盖同名文档），确定继续？');
+    if (!window.confirm(message)) {
+      return;
+    }
+    setStatus('正在' + label + (isSite ? '网站备份工作副本' : ' ' + repoId) + ' …');
+    api(recreate ? '__admin/repo-recreate' : '__admin/repo-repair', {
+      method: 'POST',
+      body: JSON.stringify({ id: repoId })
+    }).then(function (payload) {
+      var notes = payload.notes || [];
+      setStatus('已' + label + '：' + notes.join('；'));
+      return checkHealth(repoId, true);
+    }).catch(function (error) {
+      setStatus(label + '失败：' + error.message, true);
     });
   }
 
@@ -252,6 +375,10 @@
           renderRepos();
           renderSiteBackup();
           showPanels();
+          var siteBadge = query('[data-site-health]');
+          if (siteBadge) {
+            siteBadge.textContent = '（登录管理员后自动检查）';
+          }
           setStatus('当前为只读展示：登录管理员账号后可直接修改并保存。');
           return state.config;
         });
@@ -265,11 +392,14 @@
           renderRepos();
           renderSiteBackup();
           showPanels();
+          checkHealth(null, true);
           return state.config;
         });
       });
     }).catch(function (error) {
-      setStatus('读取配置失败：' + error.message, true);
+      setStatus(error.status === 404
+        ? '当前服务未启用配置接口（只读预览）：请用 python serve.py 启动认证服务后再打开本页。'
+        : '读取配置失败：' + error.message, true);
       showPanels();
       return null;
     });
@@ -325,6 +455,7 @@
       renderRepos();
       renderSiteBackup();
       setStatus('配置已保存，站点正在按新仓库重建（几秒后刷新总览页即可看到入口页）。');
+      checkHealth(null, true);
     }).catch(function (error) {
       setStatus('保存失败：' + error.message, true);
     });
@@ -337,11 +468,16 @@
       setStatus('请先填写仓库 ID 再点「创建并拉取」。', true);
       return;
     }
+    if (!savedRepo(repoId)) {
+      setStatus('仓库 ' + repoId + ' 还没有保存到配置：请先点「保存配置并重建站点」，再「创建并拉取」。', true);
+      return;
+    }
     setStatus('正在创建目录并从 SVN 拉取 ' + repoId + ' …');
     api('__admin/provision', { method: 'POST', body: JSON.stringify({ id: repoId }) }).then(function (payload) {
       var result = payload.result || {};
       setStatus('已拉取 ' + repoId + '：版本 r' + (result.revision || '?')
         + '，目录 ' + (result.mount || '') + '，文件 ' + ((result.files || []).length) + ' 个。');
+      return checkHealth(repoId, true);
     }).catch(function (error) {
       setStatus('拉取失败：' + error.message, true);
     });
@@ -376,6 +512,24 @@
       var row = target.closest('[data-repo-row]');
       if (row) {
         row.remove();
+      }
+    } else if (action === 'health-all') {
+      checkHealth(null, false);
+    } else if (action === 'health-site') {
+      checkHealth('site-backup', false);
+    } else if (action === 'repair-site' || action === 'recreate-site') {
+      repairRepo('site-backup', action === 'recreate-site');
+    } else if (action === 'health' || action === 'repair' || action === 'recreate') {
+      var targetRow = target.closest('[data-repo-row]');
+      var targetId = targetRow ? targetRow.querySelector('[data-repo="id"]').value.trim() : '';
+      if (!targetId) {
+        setStatus('请先填写仓库 ID。', true);
+        return;
+      }
+      if (action === 'health') {
+        checkHealth(targetId, false);
+      } else {
+        repairRepo(targetId, action === 'recreate');
       }
     } else if (action === 'repo-credential') {
       var row = target.closest('[data-repo-row]');

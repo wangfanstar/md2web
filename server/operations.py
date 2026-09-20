@@ -83,8 +83,11 @@ def _binding_row(conn, binding):
     return _row_dict(row)
 
 
-def ensure_binding(conn, binding, svn_client, config, credential=None):
-    """读取远端仓库身份并登记/核对绑定（UUID、根 URL、目标 URL）。"""
+def ensure_binding(conn, binding, svn_client, config, credential=None, rebind=False):
+    """读取远端仓库身份并登记/核对绑定（UUID、根 URL、目标 URL）。
+
+    rebind=True（仅「删除重建」）时不阻止身份变化：把绑定更新为远端实际身份并重置已发布版本。
+    """
     row = _binding_row(conn, binding)
     config_version = str(config.get("path", ""))
     username, password = credential or (None, None)
@@ -112,25 +115,28 @@ def ensure_binding(conn, binding, svn_client, config, credential=None):
         row = _row_dict(conn.execute("SELECT * FROM repo_bindings WHERE id = ?", (cursor.lastrowid,)).fetchone())
         return row
     if row["repository_uuid"] and info.get("uuid") and row["repository_uuid"] != info["uuid"]:
-        raise OperationError(
-            409,
-            "仓库身份与绑定不一致（UUID 变化），已停止操作；请管理员重新绑定",
-            expected=row["repository_uuid"], actual=info.get("uuid"),
-        )
+        if not rebind:
+            raise OperationError(
+                409,
+                "仓库身份与绑定不一致（UUID 变化），已停止操作；请用「删除重建」重新绑定并拉取",
+                expected=row["repository_uuid"], actual=info.get("uuid"),
+            )
     if row["target_url"] and info.get("url") and row["target_url"].rstrip("/") != str(info.get("url", "")).rstrip("/"):
-        raise OperationError(
-            409,
-            "目标路径与绑定不一致，已停止操作；请管理员核对映射",
-            expected=row["target_url"], actual=info.get("url"),
-        )
+        if not rebind:
+            raise OperationError(
+                409,
+                "目标路径与绑定不一致，已停止操作；请管理员核对映射",
+                expected=row["target_url"], actual=info.get("url"),
+            )
+    reset = ", published_revision = 0, sync_error = NULL" if rebind else ""
     with conn:
         conn.execute(
-            "UPDATE repo_bindings SET repository_uuid = ?, root_url = ?, target_url = ?, config_version = ?,"
-            " last_checked_at = ?, updated_at = ? WHERE id = ?",
+            "UPDATE repo_bindings SET repository_uuid = ?, root_url = ?, target_url = ?, config_version = ?"
+            + reset + ", last_checked_at = ?, updated_at = ? WHERE id = ?",
             (info.get("uuid", ""), info.get("root_url", ""), info.get("url", binding["url"]),
              config_version, database.now_iso(), database.now_iso(), row["id"]),
         )
-        row = _row_dict(conn.execute("SELECT * FROM repo_bindings WHERE id = ?", (row["id"],)).fetchone())
+    row = _row_dict(conn.execute("SELECT * FROM repo_bindings WHERE id = ?", (row["id"],)).fetchone())
     return row
 
 
@@ -652,8 +658,241 @@ def backup_site(conn, svn_client, config, root, credential=None, message=None, n
         raise OperationError(502, "网站数据备份失败：%s" % error)
 
 
-def provision_repository(conn, svn_client, config, md_dir, binding, credential=None):
-    """创建 docs/md 下的仓库目录（不存在时）并从 SVN 拉取内容，供配置页「创建并拉取」。"""
+def repo_health(conn, svn_client, config, md_dir, binding, credential=None):
+    """检查仓库健康：配置、本地目录、远端连通与认证、仓库身份（UUID）、本地内容。
+
+    返回 {status, level, detail, hints, indexPage, localPath, revision, syncError}
+    level: ok / warn / error
+    """
+    mount = binding["mount"]
+    url = str(binding.get("url") or "").strip()
+    sub = mount[3:] if mount.startswith("md/") else mount
+    local_path = Path(md_dir) / Path(*[part for part in sub.split("/") if part])
+    index_page = "index_%s.html" % _slug(binding["id"])
+    row = _binding_row(conn, binding)
+    sync_error = row["sync_error"] if row is not None else None
+    revision = int(row["published_revision"] or 0) if row is not None else 0
+    result = {
+        "id": binding["id"],
+        "mount": mount,
+        "url": url,
+        "indexPage": index_page,
+        "localPath": str(local_path),
+        "revision": revision,
+        "syncError": sync_error,
+        "status": "正常",
+        "level": "ok",
+        "detail": "",
+        "hints": [],
+    }
+    if not url:
+        result.update(status="未配置 SVN 地址", level="error",
+                      detail="该文件夹还没有填写 SVN 地址，无法同步或提交",
+                      hints=["在配置页填写 SVN 地址并保存", "保存后可点「创建并拉取」下载内容"])
+        return result
+    if not local_path.exists():
+        result.update(status="目录不存在", level="error",
+                      detail="本地目录 %s 不存在，尚未从 SVN 拉取内容" % mount,
+                      hints=["点「创建并拉取」创建目录并下载 SVN 内容"])
+        return result
+    username, password = credential or (None, None)
+    config_dir = tempfile.mkdtemp(prefix="md2web-health-")
+    try:
+        try:
+            info_fn = getattr(svn_client, "info", None)
+            if not callable(info_fn):
+                result.update(status="无法检查远端", level="warn",
+                              detail="当前 SVN 客户端不支持 info 查询",
+                              hints=["在服务器上确认 svn 命令行可用"])
+                return result
+            info = info_fn(url, config_dir, username=username, password=password)
+            result["revision"] = int(info.get("revision") or result["revision"])
+        except SvnError as error:
+            mapping = {
+                "auth_failed": ("认证失败", "SVN 账号或口令无效", ["设置该仓库的同步凭据（用户名/密码）", "确认 SVN 路径是否需要认证"]),
+                "unreachable": ("无法连接", "无法访问 SVN 服务器（网络或地址问题）", ["检查服务器地址与网络", "确认 VPN/防火墙"]),
+                "cert_error": ("证书错误", "SVN 服务器证书校验失败", ["在服务器上信任该证书或改用 https 正确证书"]),
+                "not_found_remote": ("路径不存在", "SVN 路径不存在或没有权限", ["确认仓库地址是否正确"]),
+                "not_found": ("SVN 客户端不可用", "服务器上未找到 svn 命令行（未安装或不在 PATH）",
+                              ["安装 Subversion 命令行工具", "或在启动 serve.py 时用 --svn-command 指定 svn 路径"]),
+            }
+            status, detail, hints = mapping.get(error.code, ("远端异常", str(error), ["检查 SVN 服务器状态与地址"]))
+            result.update(status=status, level="error", detail=detail, hints=hints)
+            return result
+        except Exception as error:  # 其它异常（如客户端不可用）不阻塞检查
+            result.update(status="远端异常", level="error", detail=str(error),
+                          hints=["检查 SVN 客户端与服务器状态"])
+            return result
+    finally:
+        shutil.rmtree(config_dir, ignore_errors=True)
+
+    bound_uuid = row["repository_uuid"] if row is not None else ""
+    if bound_uuid and info.get("uuid") and bound_uuid != info.get("uuid"):
+        result.update(status="仓库身份变化", level="error",
+                      detail="远端 SVN 库的 UUID 与本地绑定不一致（库被替换或重建过），已停止后续同步",
+                      hints=["确认 SVN 地址无误；如确已换库，点「删除重建」重新绑定并拉取",
+                             "如地址写错，先在配置页改正地址并保存"])
+        return result
+    if sync_error and sync_error not in ("conflicts",):
+        result.update(status="同步异常", level="warn",
+                      detail="上次同步失败：%s" % sync_error,
+                      hints=["点「修复」重试同步", "若持续失败可「删除重建」"])
+        return result
+    if sync_error == "conflicts":
+        result.update(status="存在冲突", level="warn",
+                      detail="有文档正在编辑（草稿），同步时已跳过，未覆盖本地文件",
+                      hints=["在编辑器中查看「远端差异」并合并后提交"])
+    # 本地内容丢失检查：曾同步过（published_revision > 0）但本地已无 Markdown 文件
+    if revision > 0 and not any(local_path.rglob("*.md")):
+        result.update(status="本地内容缺失", level="warn",
+                      detail="该仓库曾在 r%s 同步过内容，但本地目录现在没有任何 Markdown 文件" % revision,
+                      hints=["点「修复」重新拉取远端内容", "远端如果没有文档，可忽略此提示"])
+    if result["level"] == "ok" and not result["detail"]:
+        result["detail"] = "远端可访问，本地目录存在（r%s）" % result["revision"]
+    return result
+
+
+def site_workcopy_path(config):
+    return Path(config["storage"]["workspaces"]).parent / "site-wc"
+
+
+def site_workcopy_health(svn_client, config):
+    """检查网站数据备份的工作副本状态；未配置备份地址时返回 None。"""
+    if not (config.get("site_backup") or {}).get("url"):
+        return None
+    work_root = site_workcopy_path(config)
+    result = {
+        "id": "site-backup",
+        "mount": "site-backup",
+        "url": (config.get("site_backup") or {}).get("url", ""),
+        "indexPage": "",
+        "localPath": str(work_root),
+        "revision": 0,
+        "syncError": None,
+        "status": "正常",
+        "level": "ok",
+        "detail": "",
+        "hints": [],
+    }
+    if not (work_root / ".svn").exists():
+        result.update(status="尚未检出", level="warn",
+                      detail="网站备份工作副本还不存在，首次备份时会自动检出",
+                      hints=["点「立即备份」或等待定时备份"])
+        return result
+    status_fn = getattr(svn_client, "status", None)
+    if not callable(status_fn):
+        result.update(status="无法检查", level="warn",
+                      detail="当前 SVN 客户端不支持状态检查", hints=[])
+        return result
+    try:
+        status_fn(work_root, config_dir=None)
+    except SvnError as error:
+        if error.code == "not_found":
+            result.update(status="SVN 客户端不可用", level="error",
+                          detail="服务器上未找到 svn 命令行（未安装或不在 PATH）",
+                          hints=["安装 Subversion 命令行工具", "或在启动 serve.py 时用 --svn-command 指定 svn 路径"])
+        else:
+            result.update(status="工作副本损坏", level="error",
+                          detail="网站备份工作副本异常：%s" % error,
+                          hints=["点「修复」执行 svn cleanup（修不好会自动移入 data/trash）",
+                                 "仍失败可用「删除重建」重新检出并备份"])
+    else:
+        result["detail"] = "工作副本可用，可正常备份"
+    return result
+
+
+def _discard_site_workcopy(config, problem=None):
+    """把网站备份工作副本移入 data/trash（下次备份自动重新检出）。"""
+    work_root = site_workcopy_path(config)
+    broken = Path(config["storage"]["database"]).parent / "trash" / (
+        datetime.now().strftime("%Y%m%d-%H%M%S") + "-site-wc")
+    try:
+        broken.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(work_root), str(broken))
+    except OSError as move_error:
+        return ["移动网站备份工作副本失败：%s" % move_error]
+    note = "已把网站备份工作副本移动到 %s（下次备份自动重新检出）" % broken
+    if problem:
+        note = "svn cleanup 未能修复（%s）；%s" % (problem, note)
+    return [note]
+
+
+def repair_site_workcopy(svn_client, config):
+    """清理网站备份工作副本；清理后仍不可用则移入 data/trash。返回处理说明列表。"""
+    if not (config.get("site_backup") or {}).get("url"):
+        return ["未配置网站数据备份地址，无需修复"]
+    work_root = site_workcopy_path(config)
+    if not (work_root / ".svn").exists():
+        return ["网站备份工作副本不存在，无需修复"]
+    problem = None
+    try:
+        svn_client.cleanup(work_root)
+        status_fn = getattr(svn_client, "status", None)
+        if callable(status_fn):
+            status_fn(work_root, config_dir=None)
+    except SvnError as error:
+        if error.code == "not_found":
+            return ["未找到 svn 命令行，无法执行 cleanup；请安装 Subversion 或在启动时用 --svn-command 指定路径"]
+        problem = error
+    if problem is None:
+        return ["网站备份工作副本已执行 svn cleanup 且状态正常"]
+    return _discard_site_workcopy(config, problem)
+
+
+def recreate_site_workcopy(conn, svn_client, config, root, credential=None, message=None):
+    """删除重建网站备份工作副本：移入 data/trash 后立即重新检出并备份。"""
+    notes = []
+    if site_workcopy_path(config).exists():
+        notes += _discard_site_workcopy(config)
+    result = backup_site(conn, svn_client, config, root, credential, message=message)
+    notes.append("已重新检出并备份（r%s，%s）" % (result.get("revision"),
+                                            "、".join(result.get("files") or []) or "无变更"))
+    return {"notes": notes, "result": result}
+
+
+def repair_repo(conn, svn_client, config, md_dir, binding, credential=None):
+    """修复：网站备份工作副本 cleanup（修不好就移入回收站）+ 强制重新拉取该仓库内容。"""
+    notes = repair_site_workcopy(svn_client, config)
+    result = provision_repository(conn, svn_client, config, md_dir, binding, credential, force=True)
+    notes.append("已重新拉取 %s（r%s，覆盖 %d 个文件）" % (binding["mount"], result.get("revision"),
+                                                    len(result.get("files") or [])))
+    return {"notes": notes, "result": result}
+
+
+def recreate_repo(conn, svn_client, config, md_dir, binding, credential=None):
+    """删除重建：本地目录移入 data/trash，重新绑定仓库身份后强制重新拉取。"""
+    mount = binding["mount"]
+    sub = mount[3:] if mount.startswith("md/") else mount
+    local_path = Path(md_dir) / Path(*[part for part in sub.split("/") if part])
+    trash = Path(config["storage"]["database"]).parent / "trash" / (
+        datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + binding["id"])
+    before = _binding_row(conn, binding)
+    notes = []
+    if local_path.exists():
+        trash.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(local_path), str(trash))
+        notes.append("本地目录已移动到 %s" % trash)
+    else:
+        notes.append("本地目录不存在，直接重新拉取")
+    result = provision_repository(conn, svn_client, config, md_dir, binding, credential,
+                                  force=True, rebind=True)
+    after = _binding_row(conn, binding)
+    if (before is not None and after is not None
+            and before["repository_uuid"] != after["repository_uuid"]):
+        notes.append("仓库身份已重新绑定（UUID %s → %s）" % (before["repository_uuid"] or "无",
+                                                        after["repository_uuid"] or "无"))
+    notes.append("已重新拉取 %s（r%s，%d 个文件）" % (mount, result.get("revision"),
+                                                len(result.get("files") or [])))
+    return {"notes": notes, "result": result, "trash": str(trash)}
+
+
+def provision_repository(conn, svn_client, config, md_dir, binding, credential=None, force=False,
+                         rebind=False):
+    """创建 docs/md 下的仓库目录（不存在时）并从 SVN 拉取内容，供配置页「创建并拉取」。
+
+    force=True（修复/删除重建）时忽略「远端版本未变化就不拉取」的短路，强制重新导出；
+    rebind=True（仅删除重建）时允许仓库 UUID/地址变化并更新绑定。
+    """
     mount = binding["mount"]
     parts = mount.split("/")
     if len(parts) < 2 or parts[0] != "md":
@@ -661,8 +900,8 @@ def provision_repository(conn, svn_client, config, md_dir, binding, credential=N
     target = Path(md_dir) / Path(*parts[1:])
     created = not target.exists()
     target.mkdir(parents=True, exist_ok=True)
-    ensure_binding(conn, binding, svn_client, config, credential)
-    result = sync_binding(conn, svn_client, config, md_dir, binding, credential)
+    ensure_binding(conn, binding, svn_client, config, credential, rebind=rebind)
+    result = sync_binding(conn, svn_client, config, md_dir, binding, credential, force=force)
     return {
         "mount": mount,
         "path": str(target),
@@ -673,8 +912,11 @@ def provision_repository(conn, svn_client, config, md_dir, binding, credential=N
     }
 
 
-def sync_binding(conn, svn_client, config, md_dir, binding, credential=None):
-    """把绑定仓库的远端内容同步到 docs/md（导出快照后只覆盖受管 Markdown）。"""
+def sync_binding(conn, svn_client, config, md_dir, binding, credential=None, force=False):
+    """把绑定仓库的远端内容同步到 docs/md（导出快照后只覆盖受管 Markdown）。
+
+    force=True 时即使远端版本 ≤ 已发布版本也重新导出（修复/删除重建场景）。
+    """
     row = _binding_row(conn, binding) or ensure_binding(conn, binding, svn_client, config, credential)
     username, password = credential or (None, None)
     config_dir = tempfile.mkdtemp(prefix="md2web-svn-sync-")
@@ -683,7 +925,7 @@ def sync_binding(conn, svn_client, config, md_dir, binding, credential=None):
         info = svn_client.info(binding["url"], config_dir, username=username, password=password)
         remote_revision = int(info.get("revision") or 0)
         published = int(row["published_revision"] or 0) if row else 0
-        if remote_revision and remote_revision <= published:
+        if remote_revision and remote_revision <= published and not force:
             if row:
                 with conn:
                     conn.execute("UPDATE repo_bindings SET last_checked_at = ?, sync_error = NULL WHERE id = ?",

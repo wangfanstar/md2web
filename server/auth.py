@@ -408,6 +408,40 @@ class AuthService:
         with self._db_lock:
             return operations.backup_site(self.conn, self.svn, self.config, root, credential)
 
+    def repo_health_reports(self, md_dir, bindings, credential=None, include_site_backup=False):
+        """检查仓库健康（凭据优先仓库配置）；include_site_backup 时附带网站备份工作副本报告。"""
+        with self._db_lock:
+            reports = []
+            for binding in bindings:
+                reports.append(operations.repo_health(
+                    self.conn, self.svn, self.config, md_dir, binding,
+                    self.repo_credential(binding.get("id")) or credential))
+            if include_site_backup:
+                report = operations.site_workcopy_health(self.svn, self.config)
+                if report is not None:
+                    reports.append(report)
+            return reports
+
+    def repair_repository(self, md_dir, binding, credential=None):
+        with self._db_lock:
+            return operations.repair_repo(self.conn, self.svn, self.config, md_dir, binding,
+                                          self.repo_credential(binding.get("id")) or credential)
+
+    def recreate_repository(self, md_dir, binding, credential=None):
+        with self._db_lock:
+            return operations.recreate_repo(self.conn, self.svn, self.config, md_dir, binding,
+                                            self.repo_credential(binding.get("id")) or credential)
+
+    def repair_site_backup_workcopy(self):
+        with self._db_lock:
+            return operations.repair_site_workcopy(self.svn, self.config)
+
+    def recreate_site_backup_workcopy(self, root):
+        with self._db_lock:
+            return operations.recreate_site_workcopy(
+                self.conn, self.svn, self.config, root,
+                self.repo_credential("site-backup") or self.sync_credential())
+
     def record_document_snapshot(self, md_dir):
         """扫描 docs/md 并记录增删改（首次为基线，不产生事件）。"""
         entries = documents.scan_md_tree(md_dir)

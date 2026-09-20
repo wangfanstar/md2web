@@ -384,6 +384,93 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 pass
         return jsonify({"ok": True, "result": result})
 
+    def repo_by_id(repo_id):
+        for repo in config.get("repositories") or []:
+            if repo["id"] == repo_id:
+                return repo
+        return None
+
+    @app.post("/__admin/repo-health")
+    def repo_health_endpoint():
+        """检查一个仓库（或全部）的健康状态（管理员 + CSRF）。"""
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        repo_id = str(payload.get("id") or "").strip()
+        credential = credential_of(session) or auth_service.sync_credential()
+        if repo_id == "site-backup":
+            reports = auth_service.repo_health_reports(md_dir(), [], credential,
+                                                       include_site_backup=True)
+            return jsonify({"ok": True, "reports": reports})
+        bindings = config.get("repositories") or []
+        if repo_id:
+            binding = repo_by_id(repo_id)
+            if binding is None:
+                return json_error(404, "not_found", "没有找到仓库：" + repo_id)
+            bindings = [binding]
+        reports = auth_service.repo_health_reports(md_dir(), bindings, credential,
+                                                   include_site_backup=not repo_id)
+        return jsonify({"ok": True, "reports": reports})
+
+    @app.post("/__admin/repo-repair")
+    def repo_repair_endpoint():
+        """修复仓库（id=site-backup 时只修复网站备份工作副本，管理员 + CSRF）。"""
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        repo_id = str(payload.get("id") or "").strip()
+        if repo_id == "site-backup":
+            return jsonify({"ok": True, "notes": auth_service.repair_site_backup_workcopy()})
+        binding = repo_by_id(repo_id)
+        if binding is None:
+            return json_error(404, "not_found", "没有找到仓库")
+        credential = credential_of(session) or auth_service.sync_credential()
+        try:
+            result = auth_service.repair_repository(md_dir(), binding, credential)
+        except operations.OperationError as error:
+            return json_error(error.status, "repair_error", error.message)
+        return jsonify({"ok": True, **result})
+
+    @app.post("/__admin/repo-recreate")
+    def repo_recreate_endpoint():
+        """删除重建仓库（id=site-backup 时重建网站备份工作副本，管理员 + CSRF）。"""
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        repo_id = str(payload.get("id") or "").strip()
+        if repo_id == "site-backup":
+            try:
+                result = auth_service.recreate_site_backup_workcopy(docs_root.parent)
+            except operations.OperationError as error:
+                return json_error(error.status, "recreate_error", error.message)
+            return jsonify({"ok": True, **result})
+        binding = repo_by_id(repo_id)
+        if binding is None:
+            return json_error(404, "not_found", "没有找到仓库")
+        credential = credential_of(session) or auth_service.sync_credential()
+        try:
+            result = auth_service.recreate_repository(md_dir(), binding, credential)
+        except operations.OperationError as error:
+            return json_error(error.status, "recreate_error", error.message)
+        if on_config_changed is not None:
+            try:
+                on_config_changed()
+            except Exception:
+                pass
+        return jsonify({"ok": True, **result})
+
     @app.post("/__admin/repo-credential")
     def set_repo_credential():
         """设置某个仓库（或 site-backup）的同步用户名与密码（加密入库）。"""
@@ -429,7 +516,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         if csrf_error:
             return csrf_error
         try:
-            result = auth_service.backup_site_data(docs_root)
+            result = auth_service.backup_site_data(docs_root.parent)
         except operations.OperationError as error:
             return json_error(error.status, "site_backup_error", error.message)
         return jsonify({"ok": True, "result": result})
@@ -490,7 +577,8 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 break
         if binding is None:
             return json_error(404, "not_found", "没有找到仓库：" + repo_id)
-        credential = credential_of(session) or auth_service.sync_credential()
+        credential = (auth_service.repo_credential(binding["id"])
+                      or credential_of(session) or auth_service.sync_credential())
         try:
             result = operations.provision_repository(conn, auth_service.svn, config, md_dir(), binding,
                                                      credential)

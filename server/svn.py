@@ -290,6 +290,12 @@ class SvnClient:
         args += creds
         return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
 
+    def cleanup(self, path, config_dir=None, username=None, password=None):
+        """svn cleanup：清理工作副本锁/未完成事务（损坏修复）。"""
+        creds, stdin_text = self._credential_args(username, password)
+        args = ["cleanup", "--non-interactive", "--no-auth-cache"] + creds + [str(path)]
+        return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
+
     def status(self, path, config_dir=None, username=None, password=None):
         """返回 svn status 输出（用于判断是否有变更需要提交）。"""
         creds, stdin_text = self._credential_args(username, password)

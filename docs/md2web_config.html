@@ -31,6 +31,11 @@
     .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     .flag { align-items: center; display: inline-flex; gap: 6px; font-size: 12.5px; }
     .status-ok { color: #047857; font-size: 11.5px; }
+    .repo-health { font-size: 11.5px; }
+    .repo-health.is-ok { color: #047857; }
+    .repo-health.is-warn { color: #b45309; }
+    .repo-health.is-error { color: #b91c1c; font-weight: 600; }
+    .entry-link { font-size: 11.5px; }
     .status-none { color: #b45309; font-size: 11.5px; }
   </style>
 </head>
@@ -62,6 +67,7 @@
         <tbody data-repo-rows></tbody>
       </table>
       <div class="actions">
+        <button type="button" data-action="health-all">检查全部状态</button>
         <button type="button" data-action="add-repo">+ 添加仓库</button>
         <button class="primary" type="button" data-action="save">保存配置并重建站点</button>
         <button type="button" data-action="sync">立即同步 SVN 库</button>
@@ -69,7 +75,12 @@
       </div>
       <p class="hint" data-edit-hint hidden>当前为只读展示：登录管理员账号后即可修改并保存。</p>
       <div class="status" data-status hidden></div>
-      <p class="hint">「创建并拉取」会在目录不存在时自动创建 <code>docs/md/&lt;文件夹&gt;</code> 并从 SVN 导出内容；
+      <p class="hint">状态说明（登录管理员后自动检查，也可点「检查」/「检查全部状态」）：
+        <b>正常</b> 远端可访问且本地目录存在；
+        <b>认证失败/无法连接/路径不存在/证书错误</b> 需检查 SVN 地址或「同步凭据…」；
+        <b>同步异常/本地内容缺失/工作副本损坏</b> 点「修复」会执行 svn cleanup 并强制重新拉取远端内容（覆盖同名文档，不删除本地新增文件）；
+        <b>仓库身份变化</b>（远端库被重建，UUID 不一致）或修复仍失败时，点「删除重建」：本地目录含未提交修改会移入 <code>data/trash</code>，并重新绑定仓库身份后完整拉取。
+        「创建并拉取」会在目录不存在时自动创建 <code>docs/md/&lt;文件夹&gt;</code> 并从 SVN 导出内容；
         更新频率留空使用全局默认（设置 → SVN 与仓库），填 0 表示不自动同步。</p>
     </section>
 
@@ -86,8 +97,14 @@
       <div class="actions">
         <button type="button" data-action="site-credential">设置备份凭据…</button>
         <button type="button" data-action="site-backup-now">立即备份</button>
+        <button type="button" data-action="health-site">检查备份状态</button>
+        <button type="button" data-action="repair-site">修复工作副本</button>
+        <button type="button" data-action="recreate-site">删除重建工作副本</button>
         <span class="hint" data-site-credential-label></span>
       </div>
+      <p class="hint">备份状态：<span class="repo-health" data-site-health>（未启用或未检查）</span>
+        「修复工作副本」执行 svn cleanup，修不好会自动移入 <code>data/trash</code>；「删除重建工作副本」会移入
+        <code>data/trash</code> 后立即重新检出并备份一次。</p>
     </section>
 
     <section class="panel" data-config-file hidden>
@@ -96,6 +113,6 @@
         <code>http://localhost:8882/md2web_config.html</code>。</p>
     </section>
   </div>
-  <script src="lib/md2web-config.js?v=80b3561863"></script>
+  <script src="lib/md2web-config.js?v=acaf0b252e"></script>
 </body>
 </html>
