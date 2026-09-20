@@ -2116,8 +2116,21 @@
       '<button type="button" class="custom-sidebar-icon" data-sidebar-ai title="设置（含 AI 配置）" aria-label="设置">',
       SIDEBAR_AI_ICON,
       '</button>',
+      '<button type="button" class="custom-sidebar-icon" data-sidebar-feedback title="反馈问题（登录后可提交）" aria-label="反馈">',
+      SIDEBAR_FEEDBACK_ICON,
+      '</button>',
       '</span>'
     ].join('');
+    var feedbackButton = appName.querySelector('[data-sidebar-feedback]');
+    if (feedbackButton) {
+      feedbackButton.addEventListener('click', function () {
+        if (window.FeedbackDialog) {
+          window.FeedbackDialog.open();
+        } else {
+          window.open('md2web_feedback.html', '_blank');
+        }
+      });
+    }
     appName.querySelector('[data-sidebar-ai]').addEventListener('click', function () {
       if (window.Settings) {
         window.Settings.open('ai');
@@ -2127,6 +2140,8 @@
     });
   }
 
+  var SIDEBAR_FEEDBACK_ICON = '<svg class="custom-sidebar-svg" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2.5 3.2h11a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7.2L4 13.6v-2.4H2.5a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M5 6.4h6M5 8.4h4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+
   function createSidebarSearch(aside) {
     var wrapper = document.createElement('div');
     wrapper.className = 'docs-custom-search';
@@ -2134,7 +2149,6 @@
       '<div class="custom-search-top-row">',
       '<a class="custom-sidebar-home-link" href="' + homeLink() + '">返回首页</a>',
       '<a class="custom-sidebar-home-link custom-sidebar-tool" href="lib/plot-playground.html" target="_blank" rel="noopener" title="绘图在线预览（Mermaid / PacketDiag）"><svg class="custom-tool-icon" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2.2 13.8l3.4-.7L13.9 4.8a1.5 1.5 0 0 0 0-2.1l-.6-.6a1.5 1.5 0 0 0-2.1 0L2.9 10.4l-.7 3.4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M10.2 3.2l2.6 2.6" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>绘图预览</a>',
-      '<a class="custom-sidebar-home-link custom-sidebar-tool" href="md2web_feedback.html" target="_blank" rel="noopener" title="反馈问题（登录后可提交）">反馈</a>',
       '<button type="button" class="custom-search-kbd-hint" title="打开全局搜索">Ctrl+K</button>',
       '</div>',
       '<div class="custom-search-input-row">',

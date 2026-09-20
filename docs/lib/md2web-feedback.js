@@ -1,14 +1,15 @@
 (function () {
   'use strict';
 
-  var state = { csrf: '', user: null, isAdmin: false, statuses: {}, items: [] };
+  var state = { csrf: '', user: null, isAdmin: false, statuses: {}, items: [],
+    root: null, pageRoot: null, dialog: null };
 
   function query(selector) {
-    return document.querySelector(selector);
+    return (state.root || document).querySelector(selector);
   }
 
   function all(selector) {
-    return Array.prototype.slice.call(document.querySelectorAll(selector));
+    return Array.prototype.slice.call((state.root || document).querySelectorAll(selector));
   }
 
   function escapeHtml(value) {
@@ -89,6 +90,143 @@
     return String(value || '').replace('T', ' ').replace('Z', '').slice(0, 19);
   }
 
+  // ---------- 反馈弹窗（侧栏图标 / 固定右上角按钮共用） ----------
+
+  function dialogMarkup() {
+    return [
+      '<div class="feedback-dialog-backdrop" data-action="close-dialog"></div>',
+      '<section class="feedback-dialog-panel" role="dialog" aria-modal="true" aria-label="读者反馈">',
+      '<header class="feedback-dialog-head">',
+      '<strong>读者反馈</strong>',
+      '<span class="hint" data-user-label>正在读取登录状态…</span>',
+      '<span class="feedback-dialog-spacer"></span>',
+      '<button type="button" data-action="login">登录</button>',
+      '<button type="button" data-action="logout" hidden>退出</button>',
+      '<a href="md2web_feedback.html" target="_blank" rel="noopener"><button type="button">独立页面</button></a>',
+      '<button type="button" data-action="close-dialog">关闭</button>',
+      '</header>',
+      '<div class="status" data-status hidden></div>',
+      '<div class="feedback-dialog-body">',
+      '<div class="row" data-login-panel hidden>',
+      '<label>用户名<input type="text" data-login-username autocomplete="username" placeholder="SVN 账号或本机管理员"></label>',
+      '<label>密码<input type="password" data-login-password autocomplete="current-password"></label>',
+      '<button class="primary" type="button" data-action="do-login">登录</button>',
+      '</div>',
+      '<p class="hint" data-submit-hint>登录后即可提交反馈。</p>',
+      '<div class="row">',
+      '<label>标题<input type="text" data-feedback-title placeholder="一句话描述问题" disabled></label>',
+      '</div>',
+      '<label>问题描述<textarea data-feedback-body placeholder="复现步骤、期望结果、实际结果…" disabled></textarea></label>',
+      '<label>相关页面<input type="text" data-feedback-page placeholder="如 md/硬件设计/时钟树设计.md（自动带入）" disabled></label>',
+      '<div class="actions"><button class="primary" type="button" data-action="submit" disabled>提交反馈</button></div>',
+      '<h4 class="feedback-dialog-subtitle">反馈列表与进度</h4>',
+      '<div data-feedback-list><p class="hint">正在加载…</p></div>',
+      '</div>',
+      '</section>'
+    ].join('');
+  }
+
+  function openDialog() {
+    if (state.dialog) {
+      state.dialog.hidden = false;
+      state.root = state.dialog;
+      renderUser();
+      refreshSession().then(function () { return loadList(); });
+      return;
+    }
+    var dialog = document.createElement('div');
+    dialog.className = 'feedback-dialog';
+    dialog.innerHTML = dialogMarkup();
+    document.body.appendChild(dialog);
+    state.dialog = dialog;
+    state.root = dialog;
+    var pageInput = query('[data-feedback-page]');
+    if (pageInput) {
+      pageInput.value = pageFromQuery() || document.title || '';
+    }
+    renderUser();
+    refreshSession().then(function () { return loadList(); });
+  }
+
+  function closeDialog() {
+    if (!state.dialog) {
+      return;
+    }
+    state.dialog.hidden = true;
+    state.root = state.pageRoot;
+    renderUser();
+  }
+
+  function friendlyError(error) {
+    var status = error && error.status;
+    if (window.location.protocol === 'file:') {
+      return '离线（file://）打开不支持提交反馈，请通过服务地址访问';
+    }
+    if (status === 405 || status === 403) {
+      return '当前服务不支持提交反馈（只读预览模式），请用认证服务启动后再试';
+    }
+    if (status === 404) {
+      return '服务端未启用反馈接口，请升级到包含反馈功能的最新版本';
+    }
+    return (error && error.message) || '未知错误';
+  }
+
+  var FEEDBACK_STYLE_ID = 'feedback-dialog-style';
+  var FEEDBACK_STYLE = [
+    '.feedback-fixed-entry{background:var(--docs-accent,#1f6feb);border:0;border-radius:999px;',
+    'bottom:18px;box-shadow:0 8px 20px rgba(15,23,42,.25);color:#fff;cursor:pointer;font:inherit;',
+    'font-size:13px;padding:8px 16px;position:fixed;right:18px;z-index:1100;}',
+    '.feedback-dialog{inset:0;position:fixed;z-index:1300;}',
+    '.feedback-dialog[hidden]{display:none;}',
+    '.feedback-dialog-backdrop{background:rgba(15,23,42,.45);inset:0;position:absolute;}',
+    '.feedback-dialog-panel{background:#fff;border-radius:10px;box-shadow:0 18px 48px rgba(15,23,42,.3);',
+    'display:flex;flex-direction:column;left:50%;max-height:86vh;max-width:860px;overflow:hidden;',
+    'position:absolute;top:50%;transform:translate(-50%,-50%);width:min(94vw,860px);}',
+    '.feedback-dialog-head{align-items:center;border-bottom:1px solid var(--docs-border,#e3e8ee);display:flex;',
+    'flex-wrap:wrap;gap:8px;padding:10px 14px;}',
+    '.feedback-dialog-head strong{font-size:14px;}',
+    '.feedback-dialog-spacer{flex:1;}',
+    '.feedback-dialog-body{overflow:auto;padding:12px 14px 18px;}',
+    '.feedback-dialog-subtitle{border-top:1px dashed var(--docs-border,#e3e8ee);font-size:13px;',
+    'margin:14px 0 8px;padding-top:10px;}',
+    '.feedback-dialog .status{margin:8px 14px 0;}'
+  ].join('');
+
+  function ensureStyles() {
+    if (document.getElementById(FEEDBACK_STYLE_ID)) {
+      return;
+    }
+    var style = document.createElement('style');
+    style.id = FEEDBACK_STYLE_ID;
+    style.textContent = FEEDBACK_STYLE;
+    document.head.appendChild(style);
+  }
+
+  function ensureFixedEntry() {
+    if (document.querySelector('[data-feedback-list]') || document.querySelector('[data-sidebar-ai]')
+        || document.querySelector('.feedback-fixed-entry')) {
+      return;
+    }
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'feedback-fixed-entry';
+    button.setAttribute('data-action', 'open-dialog');
+    button.setAttribute('title', '反馈问题（登录后可提交）');
+    button.textContent = '反馈';
+    document.body.appendChild(button);
+    // docsify 侧栏（含 AI 设置图标）稍后才渲染：出现后收起右上角入口，避免重复
+    var attempts = 0;
+    var timer = setInterval(function () {
+      attempts += 1;
+      if (document.querySelector('[data-sidebar-ai]')) {
+        button.remove();
+        clearInterval(timer);
+      } else if (attempts >= 10) {
+        clearInterval(timer);
+      }
+    }, 600);
+  }
+
   function renderList() {
     var host = query('[data-feedback-list]');
     if (!host) {
@@ -136,7 +274,7 @@
       renderList();
       return state.items;
     }).catch(function (error) {
-      setStatus('加载反馈失败：' + error.message, true);
+      setStatus('加载反馈失败：' + friendlyError(error), true);
     });
   }
 
@@ -210,7 +348,7 @@
         return loadList();
       })
       .catch(function (error) {
-        setStatus('提交失败：' + error.message, true);
+        setStatus('提交失败：' + friendlyError(error), true);
       });
   }
 
@@ -246,6 +384,10 @@
       doLogin();
     } else if (action === 'logout') {
       doLogout();
+    } else if (action === 'open-dialog') {
+      openDialog();
+    } else if (action === 'close-dialog') {
+      closeDialog();
     } else if (action === 'reload') {
       loadList();
     } else if (action === 'submit') {
@@ -260,6 +402,11 @@
     filter.addEventListener('change', loadList);
   }
 
+  state.pageRoot = document.querySelector('.wrap') || document.body;
+  state.root = state.pageRoot;
+  ensureStyles();
+  ensureFixedEntry();
+  window.FeedbackDialog = { open: openDialog, close: closeDialog };
   refreshSession().then(function () {
     return loadList();
   });

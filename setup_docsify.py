@@ -1163,6 +1163,7 @@ def generate_index_html(title="文档中心", path=None, page_name="index.html",
   <script src="lib/auth.js"></script>
   <script src="lib/settings.js"></script>
   <script src="lib/folder-view.js"></script>
+  <script src="lib/md2web-feedback.js"></script>
 </body>
 </html>
 """
@@ -1332,6 +1333,7 @@ def generate_master_index_html(repos, title="文档中心", all_page="index_all.
   </div>
   <script>window.__MD2WEB_REPOS__ = {json.dumps(repos, ensure_ascii=False)};</script>
   <script>{MASTER_SCRIPT}</script>
+  <script src="lib/md2web-feedback.js"></script>
 </body>
 </html>
 """

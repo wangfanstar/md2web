@@ -284,8 +284,12 @@
       var mount = pairField(entry, 'mount') || row.getAttribute('data-mount') || '';
       var repoId = pairField(entry, 'id');
       if (!repoId && !svnEnabled && allow) {
-        // 本地模式：未填 id 时用文件夹名自动生成（与入口页命名一致）
-        repoId = slugId((row.getAttribute('data-name') || mount.replace(/^md\//, '') || 'local'));
+        // 本地模式：未填 id 时用「文件夹名」生成（每个一级文件夹唯一，避免多个 local 重复）
+        var folderName = row.getAttribute('data-name') || mount.replace(/^md\//, '');
+        repoId = folderName ? slugId(folderName) : '';
+      }
+      if (!repoId && !svnEnabled && !allow) {
+        return null;  // 未配置 SVN 且只读：不创建映射（仅保留分组）
       }
       var repo = {
         id: repoId,
@@ -303,7 +307,7 @@
       }
       return repo;
     }).filter(function (repo) {
-      return !!(repo.id || repo.url);
+      return !!repo && !!(repo.id || repo.url);
     });
   }
 
@@ -346,7 +350,8 @@
   }
 
   function slugId(value) {
-    return String(value || '').trim().replace(/[^0-9A-Za-z._-]+/g, '-').replace(/^-+|-+$/g, '') || 'local';
+    // 与 entryPage()/repo_page_name() 一致：保留中文等 CJK 字符（否则中文文件夹名会全部塌缩成 local）
+    return String(value || '').trim().replace(/[^0-9A-Za-z._㐀-䶿一-鿿-]+/g, '-').replace(/^-+|-+$/g, '') || 'local';
   }
 
   function entryPage(repoId) {
@@ -673,6 +678,21 @@
       }
       return item;
     });
+    var seenIds = {};
+    var seenMounts = {};
+    for (var index = 0; index < payload.repositories.length; index += 1) {
+      var item = payload.repositories[index];
+      if (item.id && seenIds[item.id]) {
+        setStatus('仓库 id 重复：' + item.id + '（请修改后再保存）', true);
+        return;
+      }
+      if (item.mount && seenMounts[item.mount]) {
+        setStatus('文件夹重复映射：' + item.mount + '（请修改后再保存）', true);
+        return;
+      }
+      seenIds[item.id] = true;
+      seenMounts[item.mount] = true;
+    }
     setStatus('正在保存配置…');
     api('__config', { method: 'PUT', body: JSON.stringify(payload) }).then(function (result) {
       state.config = result.config || state.config;
