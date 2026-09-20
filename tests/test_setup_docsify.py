@@ -1112,6 +1112,15 @@ class HtmlLayoutTests(unittest.TestCase):
         self.assertIn("html/_sidebar.md", payload["content"])
         self.assertIn("md/使用说明/快速开始.md", payload["content"])
 
+    def test_hash_links_stay_on_current_page(self):
+        """<base> 下纯 hash 链接（侧栏/本文目录）必须在当前文档内跳转，否则会整页跳回站点根。"""
+        source = (ROOT / "web" / "workspace.js").read_text(encoding="utf-8")
+        self.assertIn("handleHashLinkClick", source)
+        self.assertIn("a[href]", source)
+        self.assertIn("window.location.hash = href", source)
+        built = (ROOT / "docs" / "lib" / "workspace.js").read_text(encoding="utf-8")
+        self.assertIn("handleHashLinkClick", built, "构建产物未同步 workspace.js")
+
 
 class FeedbackPageTests(unittest.TestCase):
     """读者反馈页与每页入口链接。"""

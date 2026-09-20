@@ -358,8 +358,30 @@
 
   function enhance() { decorateTree(); filterByCurrentRepo(); addBreadcrumb(); addCodeButtons(); resolveRelativeImages(); }
   function schedule() { clearTimeout(state.timer); state.timer = setTimeout(enhance, 40); }
+
+  // 页面带 <base href="../"> 时，纯 hash 链接（#/md/...、#id）会被浏览器解析到站点根，
+  // 导致点击侧栏/目录时整页跳走；这里改为只改当前文档的 hash（docsify 路由仍能收到 hashchange）。
+  function handleHashLinkClick(event) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return;
+    }
+    var anchor = event.target && event.target.closest ? event.target.closest('a[href]') : null;
+    if (!anchor || anchor.target === '_blank' || anchor.hasAttribute('download')) {
+      return;
+    }
+    var href = anchor.getAttribute('href') || '';
+    if (href.charAt(0) !== '#' || href === '#') {
+      return;
+    }
+    event.preventDefault();
+    if (window.location.hash !== href) {
+      window.location.hash = href;
+    }
+  }
+
   function init() {
     try { if (localStorage.getItem(STORAGE.numbers) === '0') document.body.classList.add('hide-heading-numbers'); } catch (_) {}
+    document.addEventListener('click', handleHashLinkClick, true);
     enhance();
     state.observer = new MutationObserver(schedule);
     state.observer.observe(document.body, { childList: true, subtree: true });
