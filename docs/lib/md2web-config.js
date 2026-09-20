@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  var state = { config: null, csrf: '', authenticated: false, editable: false, busy: false };
+  var state = { config: null, csrf: '', authenticated: false, editable: false, busy: false, user: null };
 
   function query(selector, root) {
     return (root || document).querySelector(selector);
@@ -55,7 +55,9 @@
     }
     all('[data-action="save"], [data-action="sync"], [data-action="add-repo"],'
       + ' [data-action="health-all"], [data-action="health-site"],'
-      + ' [data-action="repair-site"], [data-action="recreate-site"]').forEach(function (button) {
+      + ' [data-action="repair-site"], [data-action="recreate-site"],'
+      + ' [data-action="auth-save"], [data-action="auth-test"],'
+      + ' [data-action="verify-account"], [data-action="verify-switch"]').forEach(function (button) {
       button.disabled = !state.editable;
     });
   }
@@ -528,6 +530,7 @@
 
   function loadConfig() {
     return api('__auth/session').then(function (payload) {
+      state.user = payload.user || null;
       state.authenticated = !!payload.authenticated && !!(payload.user && payload.user.role === 'admin');
       state.csrf = payload.csrfToken || '';
       if (!state.authenticated) {
@@ -537,6 +540,7 @@
         return loadFolders().then(function () {
           renderRepos();
           renderSiteBackup();
+          renderAuthPanel();
           showPanels();
           var siteBadge = query('[data-site-health]');
           if (siteBadge) {
@@ -554,6 +558,7 @@
         }).then(function () {
           renderRepos();
           renderSiteBackup();
+          renderAuthPanel();
           showPanels();
           checkHealth(null, true);
           return state.config;
@@ -660,6 +665,101 @@
     });
   }
 
+  function renderAuthPanel() {
+    var urlInput = query('[data-auth="url"]');
+    var auth = (state.config && state.config.auth) || {};
+    if (urlInput) {
+      urlInput.value = state.editable ? (auth.url || '') : '';
+      urlInput.disabled = !state.editable;
+      urlInput.placeholder = state.editable
+        ? 'https://svn.example.com/svn/accounts/auth-check/'
+        : '登录管理员后可查看/修改';
+    }
+    var current = query('[data-auth="current"]');
+    if (current) {
+      var user = state.user;
+      current.value = user
+        ? (user.username + '（' + (user.role === 'admin' ? '管理员' : 'SVN 用户') + '）')
+        : '未登录（下方可用已配置的认证路径验证账号）';
+    }
+  }
+
+  function saveAuthPath() {
+    if (!state.editable) {
+      setStatus('请先用管理员账号登录后再修改认证路径。', true);
+      return;
+    }
+    var input = query('[data-auth="url"]');
+    var url = input ? input.value.trim() : '';
+    if (!url) {
+      setStatus('请填写 SVN 认证路径（必须是强制账号密码认证的路径）。', true);
+      return;
+    }
+    var payload = JSON.parse(JSON.stringify(state.config));
+    payload.auth = Object.assign({}, payload.auth || {}, { url: url });
+    setStatus('正在保存 SVN 认证路径…');
+    api('__config', { method: 'PUT', body: JSON.stringify(payload) }).then(function (result) {
+      state.config = result.config || state.config;
+      renderAuthPanel();
+      setStatus('SVN 认证路径已保存并生效（SVN 用户会话失效，管理员会话保留）。');
+    }).catch(function (error) {
+      setStatus('保存认证路径失败：' + error.message, true);
+    });
+  }
+
+  function testAuthPath() {
+    var input = query('[data-auth="url"]');
+    var url = input ? input.value.trim() : '';
+    setStatus('正在测试认证路径…');
+    api('__config/test-auth', { method: 'POST', body: JSON.stringify({ url: url }) }).then(function (payload) {
+      var result = payload.result || {};
+      setStatus('认证路径可用：' + (result.message || '可以用于登录验证'));
+    }).catch(function (error) {
+      setStatus('认证路径不可用：' + error.message, true);
+    });
+  }
+
+  function logout() {
+    setStatus('正在退出登录…');
+    api('__auth/logout', { method: 'POST', body: JSON.stringify({}) }).then(function () {
+      window.location.reload();
+    }).catch(function () {
+      window.location.reload();
+    });
+  }
+
+  function verifyAccount(alsoLogin) {
+    var usernameNode = query('[data-auth="username"]');
+    var passwordNode = query('[data-auth="password"]');
+    var username = usernameNode ? usernameNode.value.trim() : '';
+    var password = passwordNode ? passwordNode.value : '';
+    if (!username || !password) {
+      setStatus('请填写要验证的账号与密码。', true);
+      return;
+    }
+    setStatus('正在通过 SVN 认证路径验证账号 ' + username + ' …');
+    api('__admin/verify-account', {
+      method: 'POST',
+      body: JSON.stringify({ username: username, password: password })
+    }).then(function (payload) {
+      var result = payload.result || {};
+      if (!alsoLogin) {
+        setStatus('✔ ' + (result.message || '账号验证通过'));
+        return null;
+      }
+      return api('__auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ username: username, password: password })
+      }).then(function (loginPayload) {
+        var name = (loginPayload.user && loginPayload.user.username) || username;
+        setStatus('账号验证通过，已切换为 ' + name + '；页面将刷新为只读视图。');
+        window.setTimeout(function () { window.location.reload(); }, 900);
+      });
+    }).catch(function (error) {
+      setStatus('账号验证失败：' + error.message, true);
+    });
+  }
+
   function refreshFolders() {
     setStatus('正在重新统计文件夹信息…');
     return api('__folders').then(function (payload) {
@@ -719,6 +819,16 @@
         updateSummary(entry);
         setStatus('已移除该文件夹的仓库配置（点「保存配置并重建站点」后生效）。');
       }
+    } else if (action === 'auth-save') {
+      saveAuthPath();
+    } else if (action === 'auth-test') {
+      testAuthPath();
+    } else if (action === 'logout') {
+      logout();
+    } else if (action === 'verify-account') {
+      verifyAccount(false);
+    } else if (action === 'verify-switch') {
+      verifyAccount(true);
     } else if (action === 'refresh-folders') {
       refreshFolders();
     } else if (action === 'health-all') {

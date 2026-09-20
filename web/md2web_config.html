@@ -37,6 +37,9 @@
     .repo-health.is-error { color: #b91c1c; font-weight: 600; }
     .entry-link { font-size: 11.5px; }
     .status-none { color: #b45309; font-size: 11.5px; }
+    .status-help ul { margin: 6px 0 0; padding-left: 18px; }
+    .status-help li { line-height: 1.7; margin: 3px 0; }
+    .status-help p { margin: 0; }
     tr[data-pair-detail] td { background: #f8fafc; }
     .repo-detail { display: flex; flex-wrap: wrap; gap: 10px 14px; padding: 2px 0 4px; }
     .repo-detail label { min-width: 150px; }
@@ -80,14 +83,19 @@
       </div>
       <p class="hint" data-edit-hint hidden>当前为只读展示：登录管理员账号后即可修改并保存。</p>
       <div class="status" data-status hidden></div>
-      <p class="hint">状态说明（登录管理员后自动检查，也可点「检查」/「检查全部状态」）：
-        <b>正常</b> 远端可访问且本地目录存在；
-        <b>认证失败/无法连接/路径不存在/证书错误</b> 需检查 SVN 地址或「同步凭据…」；
-        <b>同步异常/本地内容缺失/工作副本损坏</b> 点「修复」会执行 svn cleanup 并强制重新拉取远端内容（覆盖同名文档，不删除本地新增文件）；
-        <b>仓库身份变化</b>（远端库被重建，UUID 不一致）或修复仍失败时，点「删除重建」：本地目录含未提交修改会移入 <code>data/trash</code>，并重新绑定仓库身份后完整拉取。
-        「创建并拉取」会在目录不存在时自动创建 <code>docs/md/&lt;文件夹&gt;</code> 并从 SVN 导出内容；
-        更新频率留空使用全局默认（设置 → SVN 与仓库），填 0 表示不自动同步。
-        不勾选「配置 SVN」的仓库按<b>本地模式</b>（SQLite 主库）保存，不做 SVN 检查；「移除配置」会清空该文件夹的仓库 ID 与地址。</p>
+      <div class="hint status-help">
+        <p><b>状态说明</b>（登录管理员后自动检查，也可点「检查」/「检查全部状态」）：</p>
+        <ul>
+          <li><b>✔ 正常</b>：远端可访问且本地目录存在（显示当前版本 r 号）。</li>
+          <li><b>✖ 认证失败 / 无法连接 / 路径不存在 / 证书错误 / SVN 客户端不可用</b>：检查 SVN 地址，或用「同步凭据…」设置该仓库的账号密码。</li>
+          <li><b>⚠ 同步异常 / 本地内容缺失</b>：点「修复」执行 svn cleanup 并强制重新拉取远端内容（覆盖同名文档，不删除本地新增文件）。</li>
+          <li><b>✖ 仓库身份变化</b>（远端库被重建，UUID 不一致）或修复仍失败：点「删除重建」——本地目录（含未提交修改）移入 <code>data/trash</code> 后重新绑定仓库身份并完整拉取。</li>
+          <li><b>⚠ 存在冲突</b>：有文档正在编辑（草稿），同步时已跳过；在编辑器中查看「远端差异」并合并后提交。</li>
+          <li>「创建并拉取」在目录不存在时自动创建 <code>docs/md/&lt;文件夹&gt;</code> 并从 SVN 导出内容。</li>
+          <li>「更新频率（秒）」留空使用全局默认（设置 → SVN 与仓库），填 0 表示不自动同步。</li>
+          <li>不勾选「配置 SVN」的仓库按<b>本地模式</b>（SQLite 主库）保存，不做 SVN 检查；「移除配置」清空该文件夹的仓库 ID 与地址。</li>
+        </ul>
+      </div>
     </section>
 
     <section class="panel" data-config-main hidden>
@@ -111,6 +119,31 @@
       <p class="hint">备份状态：<span class="repo-health" data-site-health>（未启用或未检查）</span>
         「修复工作副本」执行 svn cleanup，修不好会自动移入 <code>data/trash</code>；「删除重建工作副本」会移入
         <code>data/trash</code> 后立即重新检出并备份一次。</p>
+    </section>
+
+    <section class="panel" data-config-main hidden>
+      <h2>账号切换与验证（SVN）</h2>
+      <p class="hint">SVN 认证路径用于<b>登录时验证账号合法性</b>：必须是强制账号密码认证的路径（允许匿名访问的会被拒绝）。
+        例如只读的 <code>https://svn.example.com/svn/accounts/auth-check/</code>。修改路径只失效 SVN 用户会话，管理员会话保留。</p>
+      <div class="row">
+        <label>SVN 认证路径<input type="text" data-auth="url" placeholder="https://svn.example.com/svn/accounts/auth-check/"></label>
+        <label>当前账号<input type="text" data-auth="current" readonly></label>
+      </div>
+      <div class="actions">
+        <button type="button" data-action="auth-save">保存认证路径</button>
+        <button type="button" data-action="auth-test">测试认证路径</button>
+        <button type="button" data-action="logout">退出登录（切换账号）</button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label>待验证账号<input type="text" data-auth="username" placeholder="SVN 用户名" autocomplete="off"></label>
+        <label>密码<input type="password" data-auth="password" autocomplete="new-password"></label>
+      </div>
+      <div class="actions">
+        <button type="button" data-action="verify-account">验证账号</button>
+        <button type="button" data-action="verify-switch">验证并切换为该账号</button>
+      </div>
+      <p class="hint">「验证账号」只调用 SVN 认证路径校验用户名与密码（不改变当前登录）；
+        「验证并切换为该账号」验证通过后用该账号重新登录本页（SVN 账号不是管理员，页面会变为只读，可再用管理员账号切回）。</p>
     </section>
 
     <section class="panel" data-config-file hidden>

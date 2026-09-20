@@ -216,6 +216,20 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 pass
         return jsonify({"ok": True, "config": public_config_json(), "authConfigured": bool(config["auth"]["url"])})
 
+    @app.post("/__admin/verify-account")
+    def verify_account_endpoint():
+        """验证某个 SVN 账号密码是否合法（管理员，不切换当前会话）。"""
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        result = auth_service.verify_account(payload.get("username"), payload.get("password"),
+                                             request.remote_addr or "")
+        return jsonify({"ok": True, "result": result})
+
     @app.post("/__config/test-auth")
     def test_auth_config():
         session, rejected = require_admin()

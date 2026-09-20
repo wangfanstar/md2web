@@ -2311,6 +2311,33 @@ class FolderOpsTests(ServerTestBase):
         finally:
             env.stop()
 
+    def test_verify_account_endpoint(self):
+        headers = {"X-CSRF-Token": self.csrf()}
+        anonymous = self.app.test_client()
+        self.assertEqual(anonymous.post("/__admin/verify-account",
+                                        json={"username": "u", "password": "p"}).status_code, 401)
+        # 本机管理员账号：提示走管理员登录，不经 SVN 校验
+        result = self.client.post("/__admin/verify-account", json={"username": "admin", "password": "x"},
+                                  headers=headers).get_json()["result"]
+        self.assertTrue(result["admin"], result)
+        # SVN 账号：认证路径校验通过
+        result = self.client.post("/__admin/verify-account",
+                                  json={"username": "zhang", "password": "pw"},
+                                  headers=headers).get_json()["result"]
+        self.assertEqual(result["username"], "zhang")
+        self.assertIn("uuid", result)
+        # 缺少参数
+        self.assertEqual(self.client.post("/__admin/verify-account", json={"username": ""},
+                                          headers=headers).status_code, 400)
+        # SVN 拒绝口令
+        self.auth.svn = FakeSvn(error=server_svn.SvnError("auth_failed", detail="bad password"))
+        denied = self.client.post("/__admin/verify-account",
+                                  json={"username": "zhang", "password": "bad"}, headers=headers)
+        self.assertEqual(denied.status_code, 401)
+        self.assertEqual(denied.get_json()["code"], "auth_failed")
+        # 验证失败不创建会话/用户
+        self.assertIsNone(server_database.find_user(self.conn, "svn", "zhang"))
+
     def test_repo_health_reports_missing_svn_client(self):
         self.auth.svn = server_svn.SvnClient(command=("md2web-missing-svn-binary",), timeout=5)
         headers = {"X-CSRF-Token": self.csrf()}

@@ -192,6 +192,36 @@ class AuthService:
             )
         return {"requiresAuth": True, "reachable": True, "message": "认证路径可用"}
 
+    def verify_account(self, username, password, client_ip=""):
+        """校验账号密码是否合法（走 SVN 认证路径），不创建会话、不切换当前登录。
+
+        返回 {username, message}；用户名/口令错误抛 AuthError，本机管理员账号返回提示。
+        """
+        username = str(username or "").strip()
+        if not username or password is None or password == "":
+            raise AuthError("invalid_request", "请填写要验证的用户名与密码")
+        with self._db_lock:
+            admin_row = database.find_user(self.conn, database.LOCAL_ADMIN_SOURCE, username)
+        if admin_row is not None:
+            return {"username": username, "admin": True,
+                    "message": "本机管理员账号不走 SVN 校验：请用「退出登录」后以管理员方式登录"}
+        if not self.configured():
+            raise AuthError("not_configured", "尚未配置 SVN 认证路径，无法验证账号")
+        key = self._rate_key(client_ip, username)
+        self._check_rate(key)
+        try:
+            info = self.svn.verify_credentials(self.config["auth"]["url"], username, password)
+        except SvnError as error:
+            self._record_attempt(key)
+            with self._db_lock, self.conn:
+                database.audit(self.conn, "account_verify", "failed:" + error.code,
+                               resource=username, client_ip=client_ip)
+            raise AuthError(error.code, str(error))
+        with self._db_lock, self.conn:
+            database.audit(self.conn, "account_verify", "ok", resource=username, client_ip=client_ip)
+        return {"username": username, "uuid": (info or {}).get("uuid", ""),
+                "message": "账号验证通过：用户名与密码正确"}
+
     def login_admin(self, username, password, client_ip, user_agent=""):
         username = str(username or "").strip()
         if not username or password is None or password == "":
