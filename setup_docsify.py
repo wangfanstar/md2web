@@ -1259,6 +1259,8 @@ MASTER_STYLE = """
   .results a:hover { border-color: #1f6feb; }
   .results small { color: #6b7a89; display: block; }
   .empty { color: #57606a; font-size: 13px; }
+  .hint { color: #57606a; font-size: 12.5px; margin: -8px 0 16px; }
+  .hint a { color: #1f6feb; }
 """
 
 MASTER_SCRIPT = """
@@ -1417,13 +1419,16 @@ def generate_master_index_html(repos, title="文档中心", all_page="index_all.
 <body>
   <div class="wrap">
     <h1>{html.escape(title)}</h1>
-    <p class="sub">按仓库分组浏览：每个仓库一个独立入口页（含独立搜索索引），下方搜索会同时检索全部仓库。</p>
+    <p class="sub">按仓库分组浏览：每个仓库一个独立入口页（含独立搜索索引）。</p>
     <div class="tools">
-      <input type="search" placeholder="搜索全部仓库的文档（回车打开第一条）" data-master-search aria-label="搜索全部仓库">
+      <input type="search" placeholder="仅按文件名/标题搜索（搜索文件内容请到全部文档）" data-master-search
+             aria-label="仅按文件名或标题搜索">
       <a href="{HTML_PREFIX}{all_page}">全部文档（合并视图）</a>
       <a href="{HTML_PREFIX}{config_page}">仓库配置</a>
       <a href="{HTML_PREFIX}md2web_feedback.html">读者反馈</a>
     </div>
+    <p class="hint">本页搜索<strong>只匹配文件名与标题</strong>；需要搜索<strong>文件内容（全文检索）</strong>请到
+      <a href="{HTML_PREFIX}{all_page}">全部文档（{all_page}）</a>。</p>
     <div class="results" data-master-results></div>
     {''.join(sections)}
   </div>

@@ -121,7 +121,7 @@ python serve.py             # 打开 http://localhost:8882
 | 完整构建 | `python setup_docsify.py` |
 | 严格离线构建 | `python setup_docsify.py --offline`（缺依赖直接提示，绝不尝试下载） |
 | 自定义标题 | `python setup_docsify.py --title "我的文档"` |
-| 后台启动（Linux） | `./start_linux.sh` | 默认后台运行，日志 `data/serve.log`；端口被其它进程占用时会显示占用进程信息并询问是否强制结束（10 秒无操作自动结束，回答 n 取消）；`--stop` 停止、`--restart` 强制重启（直接结束占用进程）、`--status` 查看状态、`--foreground` 前台运行 |
+| 后台启动（Linux） | `./start_linux.sh` | 默认后台运行，日志 `data/serve.log`；端口被其它进程占用时会显示占用进程信息并询问是否强制结束（**单键 y/n 即可、无需回车**，10 秒无操作自动结束）；`--stop` 停止、`--restart` 强制重启（直接结束占用进程）、`--status` 查看状态、`--foreground` 前台运行 |
 | 指定端口（Linux） | `./start_linux.sh --port 8891`（也可 `./start_linux.sh 8891`） | 端口留空时取配置 `server.port`，默认 8882；非数字或超出 1-65535 会直接报错 |
 | 仅刷新索引与离线数据 | `python setup_docsify.py --index-only` |
 | 预览 | `python serve.py`（`--port 8080`、`--bind 127.0.0.1`、`--no-browser`、`--no-build`） |

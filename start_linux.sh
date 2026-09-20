@@ -291,23 +291,40 @@ confirm_port_conflict() {
 }
 
 # 交互确认：y/回车/超时（10 秒）→ 返回 0（强制结束）；n → 返回 1（取消）
-# 说明：dash 等 /bin/sh 不支持 read -t，优先用 coreutils 的 timeout 读取 /dev/tty；
-#       两者都不可用时才退回 read -t（不支持时按超时处理，行为仍是自动强制结束）。
+# 优先单键确认：临时关闭终端行缓冲（stty -icanon）后读一个字符，输入 y/n 无需回车，
+#   10 秒无输入由终端驱动（min 0 time 100 = 10 秒）负责超时，避免 read -t 在 dash 下不可用；
+# 不支持 stty/dd 时退回 coreutils timeout 或 read -t（这两种需要回车确认）。
 prompt_kill_or_cancel() {
   printf '[提示] 是否强制结束以上进程以便启动？10 秒内未选择将自动强制结束 [Y/n] ' >&2
   answer=""
   status=0
-  if command -v timeout >/dev/null 2>&1 && [ -r /dev/tty ]; then
-    answer="$(timeout 10 sh -c 'IFS= read -r line && printf "%s" "$line"' < /dev/tty 2>/dev/null)" || status=$?
-  elif read -t 10 answer 2>/dev/null; then
-    status=0
-  else
-    status=124
+  single_key=0
+  saved_tty=""
+  if [ -r /dev/tty ] && command -v stty >/dev/null 2>&1 && command -v dd >/dev/null 2>&1; then
+    saved_tty="$(stty -g < /dev/tty 2>/dev/null)" || saved_tty=""
+    if [ -n "$saved_tty" ] && stty -icanon -echo min 0 time 100 < /dev/tty 2>/dev/null; then
+      answer="$(dd bs=1 count=1 2>/dev/null < /dev/tty)"
+      stty "$saved_tty" < /dev/tty 2>/dev/null || true
+      single_key=1
+      case "$answer" in
+        '') printf '\n' >&2 ;;
+        *) printf '%s\n' "$answer" >&2 ;;
+      esac
+    fi
   fi
-  if [ "$status" = "124" ]; then
-    echo "" >&2
-    echo "[提示] 10 秒无操作，自动强制结束占用进程。" >&2
-    return 0
+  if [ "$single_key" -eq 0 ]; then
+    if command -v timeout >/dev/null 2>&1 && [ -r /dev/tty ]; then
+      answer="$(timeout 10 sh -c 'IFS= read -r line && printf "%s" "$line"' < /dev/tty 2>/dev/null)" || status=$?
+    elif read -t 10 answer 2>/dev/null; then
+      status=0
+    else
+      status=124
+    fi
+    if [ "$status" = "124" ]; then
+      echo "" >&2
+      echo "[提示] 10 秒无操作，自动强制结束占用进程。" >&2
+      return 0
+    fi
   fi
   case "$answer" in
     n|N|no|No|NO) return 1 ;;

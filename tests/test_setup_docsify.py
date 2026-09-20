@@ -896,6 +896,14 @@ class LauncherScriptsTests(unittest.TestCase):
         self.assertIn("read -t 10 answer", raw, "不支持 timeout 时回退 read -t")
         self.assertIn("[ -t 0 ] || [ -r /dev/tty ]", raw, "有终端（含 /dev/tty）时都应先询问")
 
+    def test_start_linux_prompt_accepts_single_key(self):
+        """输入 y/n 不应要求回车：stty 关行缓冲 + dd 读一个字符，终端驱动负责 10 秒超时。"""
+        raw = (ROOT / "start_linux.sh").read_text(encoding="utf-8")
+        self.assertIn("stty -icanon -echo min 0 time 100", raw, "应关闭行缓冲并由终端驱动 10 秒超时")
+        self.assertIn("dd bs=1 count=1", raw, "应读取单个按键，无需回车")
+        self.assertIn('stty "$saved_tty"', raw, "读取后必须恢复终端设置")
+        self.assertIn("single_key=1", raw)
+
     def test_start_linux_readiness_uses_pid_and_port(self):
         raw = (ROOT / "start_linux.sh").read_text(encoding="utf-8")
         # 就绪判断：pidfile 进程存活 + 端口监听（日志未刷新时也能判断成功）
@@ -1117,6 +1125,10 @@ class HtmlLayoutTests(unittest.TestCase):
     def test_master_page_links_into_html_dir(self):
         master = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
         self.assertIn('href="html/index_all.html"', master)
+        # 总览页只做文件名/标题搜索，需在输入框与提示中引导到 index_all.html 做全文检索
+        self.assertIn("仅按文件名/标题搜索", master)
+        self.assertIn("只匹配文件名与标题", master)
+        self.assertIn("全文检索", master)
         self.assertIn('href="html/md2web_config.html"', master)
         self.assertIn('href="html/md2web_feedback.html"', master)
         self.assertIn("fetch('html/search-index.json')", master)
