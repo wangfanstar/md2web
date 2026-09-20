@@ -27,6 +27,17 @@ IMAGE_DIR_NAME = "images"
 IMAGE_STEM_MAX = 60
 IMAGE_UNSAFE = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
 
+ATTACHMENT_DIR_NAME = "附件"
+ATTACHMENT_MAX_BYTES = 32 * 1024 * 1024
+ATTACHMENT_NAME_MAX = 120
+ATTACHMENT_UNSAFE = re.compile(r'[\\/:*?"<>|#%\[\]{}()\x00-\x1f]+')
+# 可执行/可脚本化文件会被同源静态分发，禁止作为附件上传
+ATTACHMENT_BLOCKED_SUFFIXES = (
+    ".html", ".htm", ".xhtml", ".svg", ".js", ".mjs", ".cjs", ".css",
+    ".php", ".phtml", ".asp", ".aspx", ".jsp", ".jspx", ".cgi", ".pl", ".py",
+    ".exe", ".bat", ".cmd", ".com", ".scr", ".msi", ".vbs", ".vbe", ".ps1", ".psm1", ".jar", ".sh",
+)
+
 
 class MdSaveError(Exception):
     """源文档读写失败：status 为建议的 HTTP 状态码。"""
@@ -135,6 +146,30 @@ def referenced_images(md_dir, document_path, content):
             name = match.group(1).strip()
             if name not in names:
                 names.append(name)
+    return _existing_document_files(md_dir, document_path, names)
+
+
+def referenced_attachments(md_dir, document_path, content):
+    """解析文档中引用的 附件/ 文件，返回存在的相对文件名列表（如 ["附件/手册.pdf"]）。
+
+    支持 Markdown 链接语法与 <a href>；提交时与文档一并存档。
+    """
+    text = str(content or "")
+    names = []
+    patterns = (
+        re.compile(r"\[[^\]]*\]\(\s*<?(" + re.escape(ATTACHMENT_DIR_NAME) + r"/[^)\s>]+)>?[^)]*\)"),
+        re.compile(r"""<a[^>]+href=["'](""" + re.escape(ATTACHMENT_DIR_NAME) + r"""/[^"']+)["']""", re.I),
+    )
+    for pattern in patterns:
+        for match in pattern.finditer(text):
+            name = match.group(1).strip()
+            if name not in names:
+                names.append(name)
+    return _existing_document_files(md_dir, document_path, names)
+
+
+def _existing_document_files(md_dir, document_path, names):
+    """过滤出文档同目录下真实存在、且未越界的相对文件。"""
     doc_path = resolve_md_file(md_dir, document_path)
     doc_dir = doc_path.parent.resolve()
     found = []
@@ -205,12 +240,18 @@ def decode_image_data(data):
     return blob
 
 
-def document_image_dir(md_dir, raw):
-    """返回 (文档路径, 图片目录)：图片目录为文档同级的 images/。"""
+def document_folder(md_dir, raw):
+    """返回 (文档路径, 文档所在目录)：附件等资源与文档同级存放。"""
     path = resolve_md_file(md_dir, raw)
     if not path.is_file():
         raise MdSaveError(404, "源文件不存在：" + normalize_md_path(raw))
-    return path, path.parent / IMAGE_DIR_NAME
+    return path, path.parent
+
+
+def document_image_dir(md_dir, raw):
+    """返回 (文档路径, 图片目录)：图片目录为文档同级的 images/。"""
+    path, folder = document_folder(md_dir, raw)
+    return path, folder / IMAGE_DIR_NAME
 
 
 def next_image_sequence(directory, stem):
@@ -263,6 +304,96 @@ def save_document_image(md_dir, raw, mime_type, data, now=None):
         "path": relative,
         "name": name,
         "sequence": sequence,
+        "bytes": len(blob),
+        "document": normalize_md_path(raw),
+    }
+
+
+def attachment_filename(raw):
+    """整理附件文件名：保留原文件名（含中文），去掉路径与链接敏感字符。"""
+    value = str(raw or "").strip().replace("\\", "/")
+    value = value.rsplit("/", 1)[-1]
+    value = ATTACHMENT_UNSAFE.sub("-", value)
+    value = re.sub(r"\s+", "-", value)
+    value = re.sub(r"-{2,}", "-", value)
+    value = re.sub(r"-+\.", ".", value).strip(" .-")
+    if len(value) > ATTACHMENT_NAME_MAX:
+        stem, dot, extension = value.rpartition(".")
+        if dot and 0 < len(extension) <= 12:
+            value = stem[:ATTACHMENT_NAME_MAX - len(extension) - 1].rstrip(" .-") + "." + extension
+        else:
+            value = value[:ATTACHMENT_NAME_MAX].rstrip(" .-")
+    if not value:
+        raise MdSaveError(400, "缺少附件文件名 name")
+    if Path(value).suffix.lower() in ATTACHMENT_BLOCKED_SUFFIXES:
+        raise MdSaveError(415, "出于安全考虑，不支持上传该类型的附件（可执行/脚本/网页文件）")
+    return value
+
+
+def next_attachment_name(directory, name):
+    """同名附件自动追加 -2、-3 序号，避免覆盖已有文件。"""
+    if not (directory / name).exists():
+        return name
+    stem = Path(name).stem
+    suffix = Path(name).suffix
+    index = 2
+    while True:
+        candidate = "%s-%d%s" % (stem, index, suffix)
+        if not (directory / candidate).exists():
+            return candidate
+        index += 1
+
+
+def decode_attachment_data(data):
+    """严格解码 base64 附件数据；空内容抛 400，超限抛 413。"""
+    value = str(data or "").strip()
+    if not value:
+        raise MdSaveError(400, "缺少附件数据 data（base64）")
+    if value.startswith("data:") and "," in value:
+        value = value.split(",", 1)[1]
+    try:
+        blob = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        raise MdSaveError(400, "附件数据不是合法的 base64")
+    if not blob:
+        raise MdSaveError(400, "附件内容为空")
+    if len(blob) > ATTACHMENT_MAX_BYTES:
+        raise MdSaveError(413, "附件过大（上限 %d MB）" % (ATTACHMENT_MAX_BYTES // (1024 * 1024)))
+    return blob
+
+
+def save_document_attachment(md_dir, raw, name, data, now=None):
+    """把附件写入文档同级 附件/，返回相对路径（供 Markdown 链接引用）。
+
+    命名规则：沿用原文件名（清理链接敏感字符），同名自动追加 -2、-3 序号。
+    """
+    blob = decode_attachment_data(data)
+    filename = attachment_filename(name)
+    path, folder = document_folder(md_dir, raw)
+    directory = folder / ATTACHMENT_DIR_NAME
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise MdSaveError(400, "无法创建附件目录：%s" % error)
+    final_name = next_attachment_name(directory, filename)
+    target = directory / final_name
+    handle = tempfile.NamedTemporaryFile(
+        mode="wb", delete=False, dir=str(directory), prefix="." + final_name + ".", suffix=".tmp",
+    )
+    tmp_path = Path(handle.name)
+    try:
+        with handle:
+            handle.write(blob)
+        os.replace(tmp_path, target)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+    return {
+        "path": ATTACHMENT_DIR_NAME + "/" + final_name,
+        "name": final_name,
         "bytes": len(blob),
         "document": normalize_md_path(raw),
     }

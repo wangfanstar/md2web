@@ -691,6 +691,38 @@ class ReferencedImagesTests(ServerTestBase):
             self.md, "md/硬件设计/doc.md", "![x](images/missing.png)"), [])
 
 
+class ReferencedAttachmentsTests(ServerTestBase):
+    """文档引用的 附件/ 文件解析：用于提交时一并存档。"""
+
+    def setUp(self):
+        super().setUp()
+        self.md = self.docs / "md"
+        self.doc_dir = self.md / "硬件设计"
+        (self.doc_dir / "附件").mkdir(parents=True, exist_ok=True)
+        (self.doc_dir / "doc.md").write_text("# x\n", encoding="utf-8")
+        (self.doc_dir / "附件" / "手册.pdf").write_bytes(b"PDF-A")
+        (self.doc_dir / "附件" / "清单.xlsx").write_bytes(b"XLSX-B")
+
+    def test_parses_markdown_and_html_links(self):
+        content = "\n".join([
+            "# t",
+            "[手册](附件/手册.pdf)",
+            '<a href="附件/清单.xlsx">清单</a>',
+            "[越界](../secret.pdf)",
+            "[不存在](附件/none.pdf)",
+            "[带标题](附件/手册.pdf \"说明\")",
+            "![图片](images/a.png)",
+        ])
+        self.assertEqual(server_documents.referenced_attachments(self.md, "md/硬件设计/doc.md", content),
+                         ["附件/手册.pdf", "附件/清单.xlsx"])
+
+    def test_ignores_traversal_and_missing_files(self):
+        self.assertEqual(server_documents.referenced_attachments(
+            self.md, "md/硬件设计/doc.md", "[x](附件/../../secret.pdf)"), [])
+        self.assertEqual(server_documents.referenced_attachments(
+            self.md, "md/硬件设计/doc.md", "[x](附件/missing.pdf)"), [])
+
+
 class DocumentsTests(ServerTestBase):
     def test_save_and_read_roundtrip(self):
         md_dir = self.docs / "md"
@@ -1466,6 +1498,88 @@ class ImageUploadTests(ServerTestBase):
         self.assertEqual(response.data, base64.b64decode(self.PNG))
 
 
+class AttachmentUploadTests(ServerTestBase):
+    """附件上传：写入文档同级 附件/，沿用原文件名（重名加序号）。"""
+
+    PDF = base64.b64encode(b"PDF-DATA").decode("ascii")
+
+    def setUp(self):
+        super().setUp()
+        self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
+        server_database.migrate(self.conn)
+        server_database.ensure_admin(self.conn)
+        self.config = server_config.load_config(self.write_config(), self.docs)
+        self.svn = FakeSvn()
+        self.auth = server_auth.AuthService(self.conn, self.svn, self.config)
+        self.auth.on_startup()
+        from server.app import create_app
+        self.app = create_app(self.config, self.conn, self.auth, self.docs)
+        self.client = self.app.test_client()
+        target = self.docs / "md" / "硬件设计"
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "时钟树设计.md").write_text("# 时钟树\n", encoding="utf-8")
+        self.path = "md/硬件设计/时钟树设计.md"
+        self.client.post("/__auth/login", json={"username": "alice", "password": "good"})
+        self.csrf = self.client.get("/__auth/session").get_json()["csrfToken"]
+
+    def tearDown(self):
+        self.conn.close()
+        super().tearDown()
+
+    def upload(self, name="数据手册.pdf", data=None, path=None, csrf=True):
+        headers = {"X-CSRF-Token": self.csrf} if csrf else {}
+        return self.client.post("/__md/attachment", headers=headers, json={
+            "path": path if path is not None else self.path,
+            "name": name,
+            "data": self.PDF if data is None else data,
+        })
+
+    def test_upload_writes_attachment_folder_with_original_name(self):
+        response = self.upload()
+        self.assertEqual(response.status_code, 200, response.get_json())
+        payload = response.get_json()
+        self.assertEqual(payload["path"], "附件/数据手册.pdf")
+        self.assertEqual(payload["name"], "数据手册.pdf")
+        self.assertEqual(payload["document"], self.path)
+        target = self.docs / "md" / "硬件设计" / "附件" / "数据手册.pdf"
+        self.assertTrue(target.is_file())
+        self.assertEqual(target.read_bytes(), base64.b64decode(self.PDF))
+
+    def test_upload_sanitizes_name_and_avoids_collision(self):
+        first = self.upload(name=" 设计 说明 (v2).pdf ").get_json()
+        self.assertEqual(first["name"], "设计-说明-v2.pdf")
+        second = self.upload(name="设计 说明 (v2).pdf").get_json()
+        self.assertEqual(second["name"], "设计-说明-v2-2.pdf")
+        third = self.upload(name="设计 说明 (v2).pdf").get_json()
+        self.assertEqual(third["name"], "设计-说明-v2-3.pdf")
+
+    def test_upload_rejects_unsafe_and_invalid_payloads(self):
+        self.assertEqual(self.upload(name="evil.html").status_code, 415)
+        self.assertEqual(self.upload(name="run.js").status_code, 415)
+        self.assertEqual(self.upload(name="").status_code, 400)
+        self.assertEqual(self.upload(data="not-base64!!").status_code, 400)
+        self.assertEqual(self.upload(data="").status_code, 400)
+        self.assertEqual(self.upload(path="md/../escape.md").status_code, 400)
+        self.assertEqual(self.upload(path="md/硬件设计/不存在.md").status_code, 404)
+        with mock.patch.object(server_documents, "ATTACHMENT_MAX_BYTES", 5):
+            self.assertEqual(self.upload().status_code, 413)
+
+    def test_upload_requires_login_and_csrf(self):
+        anonymous = self.app.test_client()
+        response = anonymous.post("/__md/attachment",
+                                  json={"path": self.path, "name": "a.pdf", "data": self.PDF})
+        self.assertEqual(response.status_code, 401)
+        response = self.upload(csrf=False)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["code"], "csrf_failed")
+
+    def test_uploaded_attachment_is_served_statically(self):
+        payload = self.upload().get_json()
+        response = self.client.get("/md/硬件设计/" + payload["path"])
+        self.assertEqual(response.status_code, 200, payload["path"])
+        self.assertEqual(response.data, base64.b64decode(self.PDF))
+
+
 class SvnOperationTests(ServerTestBase):
     def setUp(self):
         super().setUp()
@@ -1568,6 +1682,23 @@ class SvnOperationTests(ServerTestBase):
         self.assertIn("images/shot.png", state["files"])
         self.assertEqual(state["files"]["images/shot.png"], "PNG-CONTENT")
         self.assertIn("时钟树设计.md", state["files"])
+
+    def test_commit_includes_referenced_attachments(self):
+        attachments = self.mount_dir / "附件"
+        attachments.mkdir(parents=True, exist_ok=True)
+        (attachments / "手册.pdf").write_text("PDF-CONTENT", encoding="utf-8")
+        content = "# 时钟树设计\n\n远端基线\n\n[手册](附件/手册.pdf)\n"
+        server_drafts.save_draft(self.conn, self.alice, self.md_dir, self.document_path, content, expected_version=0)
+        prepared = server_operations.prepare_commit(self.conn, self.alice, self.config, self.md_dir,
+                                                    self.document_path, "docs: 带附件", expected_version=1)
+        self.assertEqual(prepared["manifest"]["attachments"], ["附件/手册.pdf"])
+        result = server_operations.run_commit(self.conn, self.svn, self.config, self.md_dir, self.workspaces,
+                                              prepared["operationId"], self.alice, ("alice", "good"))
+        self.assertEqual(result["state"], "published")
+        self.assertEqual(result["attachments"], ["附件/手册.pdf"])
+        state = self.repo_state()
+        self.assertIn("附件/手册.pdf", state["files"])
+        self.assertEqual(state["files"]["附件/手册.pdf"], "PDF-CONTENT")
 
     def test_commit_is_idempotent(self):
         self.make_draft()

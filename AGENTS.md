@@ -34,14 +34,14 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `server/svn.py` | 唯一的 svn 子进程入口：优先 `--password-from-stdin`，旧版客户端（RHEL7 1.7/1.8）自动回退 `--password`（`password_transport()` 可查询）；匿名可读检测、错误分类、info/log XML 解析、检出/稀疏更新/差异/提交/导出，超时与脱敏 |
 | `server/auth.py` | SVN 登录、本地管理员登录/改密、会话（token 只存摘要、闲置/绝对过期）、CSRF、限速、审计；SVN 口令登录成功后以本机密钥加密存入 `svn_credentials`（换密码重新登录会更新），提交时优先取库内最新口令；重启与认证源变更使 SVN 旧会话失效（保留管理员会话）；`verify_account` 只校验账号密码（含限速与审计 `account_verify`），不建会话/不建用户；数据库访问串行化 |
 | `server/passwords.py` | 管理员口令哈希（PBKDF2-HMAC-SHA256）与校验 |
-| `server/operations.py` | 提交任务与仓库同步：审阅清单冻结、私有工作副本（稀疏检出）、UUID/URL 绑定核对、幂等 operation、状态机（prepared/running/svn_committed/published/failed/uncertain/needs_auth）、发布到 docs/md 与 published_revision、远端同步导出；提交时把文档引用的 `images/` 图片一并 `svn add`/提交（`documents.referenced_images`）；定时同步（`sync_due`/`sync_all`）跳过有活动草稿的文档并报告冲突，`remote_diff`/`remote_revision` 提供远端对比 |
+| `server/operations.py` | 提交任务与仓库同步：审阅清单冻结、私有工作副本（稀疏检出）、UUID/URL 绑定核对、幂等 operation、状态机（prepared/running/svn_committed/published/failed/uncertain/needs_auth）、发布到 docs/md 与 published_revision、远端同步导出；提交时把文档引用的 `images/` 图片与 `附件/` 文件一并 `svn add`/提交（`documents.referenced_images` / `referenced_attachments`）；定时同步（`sync_due`/`sync_all`）跳过有活动草稿的文档并报告冲突，`remote_diff`/`remote_revision` 提供远端对比 |
 | `server/drafts.py` | 个人草稿与版本历史：乐观并发（expected_version → 409）、不可变 revision 全文快照、统一差异（published/draft/版本号）、放弃草稿 |
-| `server/documents.py` | 受管 Markdown 读写底层：路径校验、EOL 保持、唯一临时文件 + 原子替换、必填 `base_hash` 冲突检测 |
-| `server/app.py` | Flask 应用：`/__auth/session|login|logout`（含 `mode:admin`）、`GET/PUT /__config`、`POST /__config/test-auth`、`POST /__admin/verify-account`（验证 SVN 账号密码是否合法，不切换会话）、`POST /__admin/password`、`POST /__admin/sync`（立即同步仓库）、`GET /__admin/usage`（登录 IP/账号活动/用户数/审计）、`GET /__admin/documents`（文档更新时间与次数/文件夹大小/增删记录）（均要求管理员 + CSRF）、草稿接口（`/__md/document|draft|image|history|diff|revision|discard`）、SVN 接口（`/__svn/info|log|prepare|commit|refresh|status|remote-diff`、`/__operations/<id>`）、写接口守卫（匿名 401、旧 `/__md/save` 410）、静态分发白名单与安全响应头 |
+| `server/documents.py` | 受管 Markdown 读写底层：路径校验、EOL 保持、唯一临时文件 + 原子替换、必填 `base_hash` 冲突检测；图片写入文档同级 `images/`（`save_document_image`），附件写入文档同级 `附件/`（`save_document_attachment`，沿用原文件名、重名加序号、禁止 html/js/svg 等可脚本化后缀）；`referenced_images` / `referenced_attachments` 解析提交需随带的资源 |
+| `server/app.py` | Flask 应用：`/__auth/session|login|logout`（含 `mode:admin`）、`GET/PUT /__config`、`POST /__config/test-auth`、`POST /__admin/verify-account`（验证 SVN 账号密码是否合法，不切换会话）、`POST /__admin/password`、`POST /__admin/sync`（立即同步仓库）、`GET /__admin/usage`（登录 IP/账号活动/用户数/审计）、`GET /__admin/documents`（文档更新时间与次数/文件夹大小/增删记录）（均要求管理员 + CSRF）、草稿接口（`/__md/document|draft|image|attachment|history|diff|revision|discard`）、SVN 接口（`/__svn/info|log|prepare|commit|refresh|status|remote-diff`、`/__operations/<id>`）、写接口守卫（匿名 401、旧 `/__md/save` 410）、静态分发白名单与安全响应头 |
 | `server/paths.py` | 静态分发禁止清单（点目录、`.svn`、`data/`、`config/`、临时/数据库/源码文件），预览与认证服务共用 |
 | `web/auth.js` / `.css` | 登录状态与弹窗（`window.SiteAuth`）：会话刷新、登录/退出、侧栏指示器、只读模式提示、管理员角色与 AI 默认值下发 |
 | `web/settings.js` / `.css` | 统一设置弹窗（`window.Settings`，侧栏单一入口，**分为 AI 助手 / SVN 与仓库 / 账号 / 信息查询 四个 Tab**）：本机 AI 设置、管理员登录、SVN 认证路径与测试、仓库映射增删（含凭据分组与「更新频率」）、全站 AI 默认值、管理员改密，、「立即同步 SVN 库」，以及**管理员使用情况**（登录 IP/账号活动/用户数/审计）与**文档统计**（文档更新时间与次数、文件夹大小、增删记录，表头可排序） |
-| `web/sanitize.js` | 前端净化入口（`window.Sanitize`，基于离线 DOMPurify）：阅读/预览/AI 回答统一净化 |
+| `web/sanitize.js` | 前端净化入口（`window.Sanitize`，基于离线 DOMPurify）：阅读/预览/AI 回答统一净化；`style` 只放行 `color:` 单属性（编辑器文字颜色用 `<span style="color:…">`，其余样式一律移除） |
 | `config/server.example.json` | 认证服务示例配置（可提交）；`config/server.local.json` 为真实配置，不提交（缺失时 `--config` 会自动生成默认文件） |
 | `tests/test_server.py` | 认证服务单元/HTTP 集成测试（配置、数据库、SVN 假 CLI、登录会话、静态白名单） |
 | `web/custom-search.js` / `.css` | 搜索算法与界面、结果列表、搜索/目录视图切换、正文命中高亮、右侧本文目录 |
@@ -52,7 +52,7 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `web/packetdiag-init.js` | docsify 插件：把 ```packetdiag 围栏渲染为报文图（figure 保留 `data-source`），失败回退源码；暴露 `PacketDiagRerender`（按源码重绘 data URL）与 `PacketDiagEnsureRendered`（导出前修复空白画布） |
 | `web/media-viewer.js` | 图片、Mermaid 图形与 PacketDiag 图形的全屏放大查看（放大时用 `MermaidRender.render(source)` 重渲染、PacketDiag 用 `PacketDiagRerender` 重绘，避免克隆丢字/丢箭头）与下载（Mermaid 导出 SVG/PNG，PacketDiag 导出 PNG） |
 | `web/page-export.js` | 「下载本页」：把当前文档导出为自包含 HTML（样式内联、Canvas/图片转 data URL、本文目录固定左侧导航；导出前会调用 `PacketDiagEnsureRendered` 重绘空白画布） |
-| `web/md-editor.js` | 「编辑 MD / 下载 MD」（含草稿、历史、差异、提交 SVN 与 SVN 日志）：双栏编辑器（左：可拖拽分栏的 Markdown 高亮源码；右：marked + Prism + Mermaid + PacketDiag + KaTeX 实时预览，默认 38%/62% 偏向预览、面板最宽 1720px）、**左侧固定大纲导航**（默认显示、不遮挡内容，点击跳转章节并让右侧预览同步滚动）、**撤销/恢复**（Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z）、**上传本地图片**、**文字颜色**（Ctrl+Alt+K，HTML span）、**表格行列选择器**（Ctrl+Shift+T，1–8 行列）、**远端差异/提交后差异**（同步冲突时提示合并）、粘贴或拖入图片自动上传到文档同级 `images/`（命名 `<文档名>-<时间戳>-<序号>.<扩展名>`，并插入引用）、工具栏与快捷键、`Ctrl+S` 直连写回；`window.MdEditor = { open, download, save, close, uploadImage, undo, redo }` |
+| `web/md-editor.js` | 「编辑 MD / 下载 MD」（含草稿、历史、差异、提交 SVN 与 SVN 日志）：双栏编辑器（左：可拖拽分栏的 Markdown 高亮源码；右：marked + Prism + Mermaid + PacketDiag + KaTeX 实时预览，默认 38%/62% 偏向预览、面板最宽 1720px）、**左侧固定大纲导航**（默认显示、不遮挡内容，点击跳转章节并让右侧预览同步滚动）、**撤销/恢复**（Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z）、**上传本地图片**、**上传附件**（写入文档同级 `附件/`，沿用原文件名、重名加序号，插入 `[文件名](附件/…)` 链接）、**文字颜色**（Ctrl+Alt+K，HTML span）、**表格行列选择器**（Ctrl+Shift+T，1–8 行列）、**远端差异/提交后差异**（同步冲突时提示合并）、粘贴或拖入图片自动上传到文档同级 `images/`（命名 `<文档名>-<时间戳>-<序号>.<扩展名>`，并插入引用）、拖入其他文件上传到 `附件/`、工具栏与快捷键、`Ctrl+S` 直连写回；`window.MdEditor = { open, download, save, close, uploadImage, uploadAttachment, undo, redo }` |
 | `web/math-init.js` | docsify 插件：`$...$` / `$$...$$` 等分隔符的 KaTeX 离线渲染；暴露 `window.MathRender.render` 供编辑器预览复用 |
 | `web/prism-init.js` | docsify 插件：`beforeEach` 阶段按围栏语言预载 Prism 组件，保证 docsify 渲染期即可高亮（docsify 内置 Prism 覆盖了 `window.Prism`，autoloader 必须在其之后加载） |
 | `web/ai-retrieval.js` | AI 助手的离线检索核心（纯函数，`window.AIRetrieval`）：分词（CJK 单字+双字）、从 `searchIndex`/Markdown 构建语料、TF-IDF 打分、摘录与上下文/消息组装；`tests/test_ai_retrieval.js` 覆盖 |
@@ -67,7 +67,7 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `tests/test_setup_docsify.py` | Python 回归测试（unittest，全程离线） |
 | `tests/test_search.js` | 搜索算法测试（`node --test`） |
 | `tests/test_packetdiag.js` | PacketDiag 解析回归测试（`node --test`） |
-| `specs/` | 设计与计划文档（历史归档，新增设计放这里） |
+| `specs/` | 设计与计划文档（历史归档，新增设计放这里）；`specs/2026-09-20-content-asset-storage-design.md` 为文本/资产 SQLite 双库存储方案（结论：文件仍为唯一事实源，`content.sqlite3` 存文本元数据、`assets.sqlite3` 存资产登记与可选二进制备份） |
 
 - 第三方组件与许可：见 `THIRD-PARTY-NOTICES.md`（本项目基于 docsify 4.13.1 构建，构建会给 `docsify.min.js` 写版权横幅）。
 
@@ -166,6 +166,9 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 提交状态机与幂等：同一 `operationId` 重复提交直接返回已有结果；不确定（超时/断网）标记 `uncertain` 且绝不自动重试；发布写 docs/md 前核对 hash，站点重建由 watcher 完成。
 - 服务默认按认证模式启动（`--preview` 才是只读预览）；缺少 Flask/Waitress 时给出安装提示，不静默回退匿名写。
 - 搜索的排除词语法为 `-词`，短语为 `"词 组"`；改动 `parseQuery` 时注意与 UI 提示保持一致。
+- 编辑器文字颜色用 `<span style="color:…">`；`web/sanitize.js` 已改为**只放行 `color` 单属性**（DOMPurify `afterSanitizeAttributes` 钩子 + 正则白名单），不要再把 `style` 加回 `FORBID_ATTR`，否则预览里颜色会消失（站点渲染不经过 `Sanitize`，只有编辑器预览/AI 回答经过）。
+- 附件目录名固定为 `附件/`（`documents.ATTACHMENT_DIR_NAME`），与 `images/` 同级；上传沿用原文件名（清理链接敏感字符、重名加 `-2/-3`），并禁止 `.html/.js/.svg` 等可脚本化后缀（同源静态分发有 XSS 风险）。提交随带依赖 `documents.referenced_attachments` 解析 `[名称](附件/…)` 与 `<a href="附件/…">`，改动目录名或链接写法要同步更新解析与测试。
+- 配置页 SVN 明细行（`.repo-detail`）是 12 栅格：仓库 ID/更新频率各 3 列、SVN 地址 6 列、权限与操作按钮整行；标签在上输入框在下，窄屏（≤980px/≤620px）逐级降为 6/12 列。改布局时保持 `.repo-field-*` 类名与 `md2web-config.js` 中 `repoRow` 的 class 对应。
 
 ## 完成前检查清单
 

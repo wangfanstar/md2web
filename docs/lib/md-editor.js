@@ -484,10 +484,12 @@
     }).then(function (payload) {
       state.prepareOperation = payload;
       var images = payload.manifest.images || [];
+      var attachments = payload.manifest.attachments || [];
       showDiffPanel(
         '目标库：' + payload.manifest.repositoryId + '（' + payload.manifest.mount + '）\n'
         + '提交说明：' + payload.manifest.message + '\n'
-        + '随文档存档的图片：' + (images.length ? images.join('、') : '（无）') + '\n\n'
+        + '随文档存档的图片：' + (images.length ? images.join('、') : '（无）') + '\n'
+        + '随文档存档的附件：' + (attachments.length ? attachments.join('、') : '（无）') + '\n\n'
         + (payload.diff || '（无差异）')
         + '\n\n点击下方「确认提交」写入 SVN；点「关闭」可稍后再提交。',
         '审阅提交（确认后写入 SVN）'
@@ -566,7 +568,8 @@
   function afterCommit(result) {
     var head = '提交成功：r' + result.svnRevision + '\n' + (result.message || '')
       + '\n' + result.path + '\n'
-      + ((result.images || []).length ? '已一并存档图片：' + result.images.join('、') + '\n' : '');
+      + ((result.images || []).length ? '已一并存档图片：' + result.images.join('、') + '\n' : '')
+      + ((result.attachments || []).length ? '已一并存档附件：' + result.attachments.join('、') + '\n' : '');
     if (result.diff) {
       showDiffPanel(head + '\n本次提交差异：\n' + result.diff, '本次提交差异（已写入 SVN）');
     } else {
@@ -842,6 +845,19 @@
     return files;
   }
 
+  function clipboardOtherFiles(dataTransfer) {
+    var files = [];
+    if (!dataTransfer || !dataTransfer.files) {
+      return files;
+    }
+    Array.prototype.forEach.call(dataTransfer.files, function (file) {
+      if (!/^image\//i.test(file.type || '')) {
+        files.push(file);
+      }
+    });
+    return files;
+  }
+
   function imageAltText(file) {
     var name = String((file && file.name) || '').replace(/\.[^.]+$/, '');
     return name || '图片';
@@ -849,6 +865,15 @@
 
   function insertImageMarkdown(relativePath, altText) {
     insertBlock('![' + (altText || '图片') + '](' + relativePath + ')\n');
+  }
+
+  function attachmentLinkTarget(relativePath) {
+    return String(relativePath || '').replace(/ /g, '%20');
+  }
+
+  function insertAttachmentMarkdown(relativePath, label) {
+    var name = String(label || relativePath || '附件');
+    insertBlock('[' + name + '](' + attachmentLinkTarget(relativePath) + ')\n');
   }
 
   function insertEmbeddedImage(dataUrl, altText, note) {
@@ -906,9 +931,69 @@
     return chain.catch(function () { /* 失败信息已在状态栏提示 */ });
   }
 
+  function uploadAttachment(file) {
+    var name = (file && file.name) || '附件';
+    if (!file) {
+      return Promise.reject(new Error('没有选择附件'));
+    }
+    if (file.size > ATTACHMENT_MAX_BYTES) {
+      setStatus('附件过大（上限 ' + (ATTACHMENT_MAX_BYTES / (1024 * 1024)) + ' MB）：' + name);
+      return Promise.reject(new Error('附件过大'));
+    }
+    if (state.localMode || !authAvailable()) {
+      setStatus('上传附件需要登录认证服务：附件会保存到文档同级 附件/ 目录并插入链接');
+      return Promise.reject(new Error('需要登录后才能上传附件'));
+    }
+    setStatus('正在上传附件 ' + name + ' …');
+    return readFileAsDataUrl(file).then(function (dataUrl) {
+      return authApi('__md/attachment', {
+        method: 'POST',
+        body: JSON.stringify({ path: state.resource, name: name, data: dataUrl })
+      });
+    }).then(function (payload) {
+      insertAttachmentMarkdown(payload.path, payload.name || name);
+      setStatus('已插入附件 ' + payload.path);
+      return payload;
+    }).catch(function (error) {
+      setStatus('附件上传失败：' + message(error));
+      throw error;
+    });
+  }
+
+  function handleAttachmentFiles(files) {
+    var chain = Promise.resolve();
+    Array.prototype.forEach.call(files || [], function (file) {
+      chain = chain.then(function () {
+        return uploadAttachment(file);
+      });
+    });
+    return chain.catch(function () { /* 失败信息已在状态栏提示 */ });
+  }
+
+  function pickLocalAttachments() {
+    var input = state.overlay.querySelector('[data-editor-attachment-input]');
+    if (!input) {
+      input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.setAttribute('data-editor-attachment-input', '');
+      input.style.display = 'none';
+      state.overlay.querySelector('.md-editor-panel').appendChild(input);
+    }
+    input.value = '';
+    input.onchange = function () {
+      var files = Array.prototype.slice.call(input.files || []);
+      if (files.length) {
+        handleAttachmentFiles(files);
+      }
+    };
+    input.click();
+  }
+
   // ---------- 撤销 / 恢复 ----------
 
   var HISTORY_LIMIT = 200;
+  var ATTACHMENT_MAX_BYTES = 32 * 1024 * 1024;
 
   function historyReset(value) {
     state.history = [value];
@@ -1655,6 +1740,7 @@
       packetdiag: function () { insertFence('packetdiag', 'packetdiag {\n  colwidth = 32;\n  0-15: Field A;\n  16-31: Field B;\n}'); },
       table: function () { openTablePicker(); },
       'upload-image': function () { pickLocalImages(); },
+      'upload-attachment': function () { pickLocalAttachments(); },
       color: function () { openColorPicker(); },
       hr: function () { insertBlock('---\n'); },
       save: function () { save(); },
@@ -1683,6 +1769,7 @@
     { action: 'link', label: '链接', title: '链接（Ctrl+K）' },
     { action: 'image', label: '图片', title: '插入图片引用' },
     { action: 'upload-image', label: '上传图片', title: '上传本地图片（保存到文档同级 images/ 并插入引用）' },
+    { action: 'upload-attachment', label: '上传附件', title: '上传附件（保存到文档同级 附件/ 并插入链接）' },
     { action: 'color', label: 'A 颜色', title: '设置文字颜色（Ctrl+Alt+K）' },
     { divider: true },
     { action: 'h1', label: 'H1', title: '一级标题（Ctrl+Alt+1）' },
@@ -1850,17 +1937,23 @@
       handleImageFiles(files, files.length === 1 ? imageAltText(files[0]) : '');
     });
     state.textarea.addEventListener('dragover', function (event) {
-      if (clipboardImageFiles(event.dataTransfer).length) {
+      if (clipboardImageFiles(event.dataTransfer).length || clipboardOtherFiles(event.dataTransfer).length) {
         event.preventDefault();
       }
     });
     state.textarea.addEventListener('drop', function (event) {
-      var files = clipboardImageFiles(event.dataTransfer);
-      if (!files.length) {
+      var images = clipboardImageFiles(event.dataTransfer);
+      var others = clipboardOtherFiles(event.dataTransfer);
+      if (!images.length && !others.length) {
         return;
       }
       event.preventDefault();
-      handleImageFiles(files, files.length === 1 ? imageAltText(files[0]) : '');
+      if (images.length) {
+        handleImageFiles(images, images.length === 1 ? imageAltText(images[0]) : '');
+      }
+      if (others.length) {
+        handleAttachmentFiles(others);
+      }
     });
     state.textarea.addEventListener('scroll', function () {
       if (state.highlight) {
@@ -1999,9 +2092,9 @@
       '<li><code>Ctrl+Shift+G</code> Mermaid · <code>Ctrl+Shift+D</code> PacketDiag</li>',
       '<li><code>Tab</code> / <code>Shift+Tab</code> 缩进 · <code>Alt+↑/↓</code> 移动行</li>',
       '<li><code>Ctrl+S</code> 保存 · <code>Ctrl+Shift+S</code> 另存为 · <code>Esc</code> 关闭</li>',
-      '<li><code>Ctrl+Shift+T</code> 表格行列选择 · <code>Ctrl+Alt+K</code> 文字颜色 · 工具栏可上传本地图片</li>',
+      '<li><code>Ctrl+Shift+T</code> 表格行列选择 · <code>Ctrl+Alt+K</code> 文字颜色 · 工具栏可上传本地图片与附件</li>',
       '<li><code>Ctrl+Z</code> 撤销 · <code>Ctrl+Y</code>/<code>Ctrl+Shift+Z</code> 恢复 · <code>Ctrl+Shift+H</code> 大纲导航</li>',
-      '<li>直接粘贴或拖入图片会自动上传到文档同级 <code>images/</code></li>',
+      '<li>直接粘贴或拖入图片会自动上传到文档同级 <code>images/</code>，拖入其他文件会上传到 <code>附件/</code> 并插入链接</li>',
       '</ul>',
       '</div>',
       '<footer class="md-editor-foot">',
@@ -2156,6 +2249,7 @@
     save: save,
     close: close,
     uploadImage: uploadImage,
+    uploadAttachment: uploadAttachment,
     undo: undo,
     redo: redo,
     headings: collectHeadings,

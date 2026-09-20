@@ -389,6 +389,7 @@ def prepare_commit(conn, user_id, config, md_dir, document_path, message, expect
         "basePublishedHash": documents.text_hash(published) if published is not None else None,
         "message": str(message).strip()[:500],
         "images": documents.referenced_images(md_dir, rel, head["content"]),
+        "attachments": documents.referenced_attachments(md_dir, rel, head["content"]),
     }
     operation_id = create_operation(conn, user_id, None, "svn_commit", manifest)
     diff = documents_diff(published or "", head["content"], rel)
@@ -460,8 +461,9 @@ def run_commit(conn, svn_client, config, md_dir, workspace_root, operation_id, u
         diff = svn_client.diff(target_file, config_dir=config_dir, username=username, password=password)
         if not str(diff or "").strip():
             raise OperationError(409, "远端内容与草稿一致，无需提交")
-        # 文档引用的 images 图片一并存档：复制到工作副本、必要时 svn add，再与文档一起提交
+        # 文档引用的 images 图片与 附件/ 文件一并存档：复制到工作副本、必要时 svn add，再与文档一起提交
         image_paths = []
+        attachment_paths = []
         for name in manifest.get("images") or []:
             source = documents.resolve_md_file(md_dir, rel).parent / name
             target = target_file.parent / name
@@ -474,7 +476,20 @@ def run_commit(conn, svn_client, config, md_dir, workspace_root, operation_id, u
                 except SvnError as error:
                     if error.code not in ("conflict", "failed", "parse_error"):
                         raise
-        revision = svn_client.commit([target_file] + image_paths, manifest["message"], config_dir=config_dir,
+        for name in manifest.get("attachments") or []:
+            source = documents.resolve_md_file(md_dir, rel).parent / name
+            target = target_file.parent / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if source.is_file():
+                shutil.copyfile(str(source), str(target))
+                attachment_paths.append(target)
+                try:
+                    svn_client.add(target, config_dir=config_dir, username=username, password=password)
+                except SvnError as error:
+                    if error.code not in ("conflict", "failed", "parse_error"):
+                        raise
+        revision = svn_client.commit([target_file] + image_paths + attachment_paths, manifest["message"],
+                                     config_dir=config_dir,
                                      username=username, password=password)
         if revision is None:
             raise OperationError(502, "提交未返回 revision，结果需人工核对")
@@ -485,7 +500,9 @@ def run_commit(conn, svn_client, config, md_dir, workspace_root, operation_id, u
         shutil.rmtree(work_dir, ignore_errors=True)
         return {"operationId": operation_id, "state": "published", "svnRevision": revision,
                 "path": rel, "message": manifest["message"],
-                "images": [Path(str(item)).name for item in image_paths]}
+                "images": [Path(str(item)).name for item in image_paths],
+                "attachments": [Path(str(item)).relative_to(target_file.parent).as_posix()
+                                for item in attachment_paths]}
     except OperationError:
         raise
     except SvnError as error:

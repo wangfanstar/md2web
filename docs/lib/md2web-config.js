@@ -166,11 +166,11 @@
       '</tr>',
       '<tr data-pair-detail="' + pair + '"' + (svnEnabled ? '' : ' hidden') + '>',
       '<td colspan="7"><div class="repo-detail">',
-      '<label>仓库 ID<input type="text" data-repo="id" value="' + escapeHtml(item.id)
+      '<label class="repo-field repo-field-id"><span>仓库 ID</span><input type="text" data-repo="id" value="' + escapeHtml(item.id)
         + '" placeholder="如 hardware"' + disabled + '></label>',
-      '<label>SVN 地址<input type="text" data-repo="url" value="' + escapeHtml(item.url)
+      '<label class="repo-field repo-field-url"><span>SVN 地址</span><input type="text" data-repo="url" value="' + escapeHtml(item.url)
         + '" placeholder="https://svn.example.com/svn/xxx/trunk/docs/"' + disabled + '></label>',
-      '<label>更新频率（秒）<input type="number" min="0" step="30" data-repo="syncIntervalSeconds" value="'
+      '<label class="repo-field repo-field-interval"><span>更新频率（秒）</span><input type="number" min="0" step="30" data-repo="syncIntervalSeconds" value="'
         + escapeHtml(interval) + '" placeholder="默认"' + disabled + '></label>',
       '<div class="repo-flags">',
       '<label class="flag" title="' + (svnEnabled

@@ -859,6 +859,24 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             return json_error(error.status, "image_error", error.message)
         return jsonify({"ok": True, **result})
 
+    @app.post("/__md/attachment")
+    def upload_attachment():
+        """上传附件：写入文档同级 附件/，沿用原文件名（同名自动加序号）。"""
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        try:
+            result = server_documents.save_document_attachment(
+                md_dir(), payload.get("path"), payload.get("name"), payload.get("data"),
+            )
+        except MdSaveError as error:
+            return json_error(error.status, "attachment_error", error.message)
+        return jsonify({"ok": True, **result})
+
     @app.get("/__md/revision")
     def read_revision():
         session, rejected = require_session()
