@@ -1138,11 +1138,11 @@ class HtmlLayoutTests(unittest.TestCase):
         sidebar = (ROOT / "docs" / "html" / "_sidebar.md").read_text(encoding="utf-8")
         self.assertIn('<a class="sidebar-group-link" href="html/index_', sidebar,
                       "全局侧栏的一级分组名应链接到仓库入口页")
-        self.assertIn('href="html/index_all.html">**所有文档列表**</a>', sidebar,
-                      "侧栏标题应为「所有文档列表」并链接到合并视图")
+        self.assertIn('href="html/index_all.html">**所有文档**</a>', sidebar,
+                      "侧栏标题应为「所有文档」并链接到合并视图")
         repo_sidebar = next((ROOT / "docs" / "html").glob("_sidebar_*.md"))
-        self.assertIn("所有文档列表", repo_sidebar.read_text(encoding="utf-8"),
-                      "各仓库侧栏标题同样应为「所有文档列表」")
+        self.assertIn("所有文档", repo_sidebar.read_text(encoding="utf-8"),
+                      "各仓库侧栏标题同样应为「所有文档」")
         workspace = (ROOT / "web" / "workspace.js").read_text(encoding="utf-8")
         self.assertNotIn("filterByCurrentRepo", workspace,
                          "index_all 合并视图不应再按仓库过滤左侧导航")
