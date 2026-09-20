@@ -28,11 +28,13 @@
     /* 主表格列宽：状态与「启用 SVN」列不挤压 */
     [data-repo-rows] > tr > td:nth-child(1) { min-width: 190px; }
     [data-repo-rows] > tr > td:nth-child(2) { min-width: 150px; }
-    [data-repo-rows] > tr > td:nth-child(3),
-    [data-repo-rows] > tr > td:nth-child(4) { min-width: 110px; }
-    [data-repo-rows] > tr > td:nth-child(5) { min-width: 170px; }
-    [data-repo-rows] > tr > td:nth-child(6) { text-align: center; white-space: nowrap; width: 1%; }
-    [data-repo-rows] > tr > td:nth-child(6) .flag { justify-content: center; margin: 0; }
+    [data-repo-rows] > tr > td:nth-child(3) { min-width: 110px; }
+    [data-repo-rows] > tr > td:nth-child(4),
+    [data-repo-rows] > tr > td:nth-child(5) { min-width: 110px; }
+    [data-repo-rows] > tr > td:nth-child(6) { min-width: 170px; }
+    [data-repo-rows] > tr > td:nth-child(7) { text-align: center; white-space: nowrap; width: 1%; }
+    [data-repo-rows] > tr > td:nth-child(7) .flag { justify-content: center; margin: 0; }
+    .folder-group-input { min-width: 90px; }
     .status { border-radius: 6px; font-size: 12.5px; margin-top: 10px; padding: 8px 10px; }
     .status.ok { background: #ecfdf5; color: #047857; }
     .status.error { background: #fef2f2; color: #b91c1c; }
@@ -74,9 +76,12 @@
       align-items: center;
       display: flex;
       flex-wrap: wrap;
-      gap: 14px;
+      gap: 10px 14px;
       min-height: 36px;
     }
+    .repo-detail .repo-flags .flag { font-weight: 600; }
+    .repo-detail .repo-flags .perm-hint { color: #b45309; font-size: 11.5px; }
+    .repo-detail .repo-flags .perm-hint:empty { display: none; }
     .repo-detail .actions { grid-column: 1 / -1; margin-top: 2px; }
     .repo-detail .actions button { padding: 5px 10px; white-space: nowrap; }
   </style>
@@ -103,7 +108,7 @@
       <table>
         <thead>
           <tr>
-            <th>md 下文件夹</th><th>仓库入口页</th><th>最新更新</th><th>仓库大小</th><th>状态</th><th>SVN 配置</th>
+            <th>md 下文件夹</th><th>仓库入口页</th><th>分组</th><th>最新更新</th><th>仓库大小</th><th>状态</th><th>启用 SVN</th>
           </tr>
         </thead>
         <tbody data-repo-rows></tbody>

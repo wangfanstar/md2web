@@ -619,6 +619,11 @@ def load_repositories():
                 "allow_commit": bool(item.get("allowCommit", True)),
                 "sync_interval": item.get("syncIntervalSeconds"),
             })
+        folder_groups = raw.get("folderGroups") if isinstance(raw.get("folderGroups"), dict) else {}
+        for repo in repos:
+            override = folder_groups.get(repo["mount"])
+            if override and str(override).strip():
+                repo["group"] = str(override).strip()
         if repos or items == []:
             return repos
     return []
@@ -677,11 +682,29 @@ def first_level_folders():
                   if path.is_dir() and not path.name.startswith("."))
 
 
+def load_folder_groups():
+    """读取 folderGroups（md/<文件夹> → 分组），供未配置 SVN 的文件夹也参与分组。"""
+    candidates = [ROOT / "config" / "server.local.json", ROOT / "config" / "server.example.json"]
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            continue
+        groups = raw.get("folderGroups")
+        if isinstance(groups, dict):
+            return {str(key): str(value) for key, value in groups.items() if str(value).strip()}
+        return {}
+    return {}
+
+
 def auto_folder_repos(repos):
     """未配置仓库的一级文件夹：自动生成入口页（本地模式默认页）。
 
     返回的条目与 load_repositories() 结构一致，额外带 auto=True。
     """
+    groups = load_folder_groups()
     configured = set()
     for repo in repos:
         sub = mount_subpath(repo["mount"])
@@ -698,7 +721,7 @@ def auto_folder_repos(repos):
             "id": name,
             "mount": "md/" + name,
             "url": "",
-            "group": "默认",
+            "group": groups.get("md/" + name, "默认"),
             "read_only": False,
             "allow_commit": True,
             "sync_interval": None,

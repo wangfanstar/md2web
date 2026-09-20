@@ -138,8 +138,9 @@
     var mount = (folder && folder.path) || item.mount || '';
     var manual = !folder;
     var svnEnabled = item.sourceMode ? item.sourceMode === 'svn' : !!item.id;
-    // 入口页：已配置仓库用仓库 ID；未配置的文件夹用文件夹名（构建会生成同名入口页）
+    // 入口页命名：已配置仓库用仓库 ID；未配置文件夹用文件夹名（与构建生成规则一致）
     var linkKey = item.id || (folder && folder.name) || '';
+    var allow = !(item.allowCommit === false || item.readOnly);
     return [
       '<tr data-repo-row data-pair="' + pair + '" data-mount="' + escapeHtml(mount) + '"'
         + ' data-name="' + escapeHtml((folder && folder.name) || '') + '">',
@@ -152,29 +153,34 @@
         ? '<a class="entry-link" href="' + escapeHtml(entryPage(linkKey)) + '" target="_blank"'
           + ' rel="noopener" title="打开该文件夹的入口页">' + escapeHtml(entryPage(linkKey)) + '</a>'
         : '<span class="hint">—</span>') + '</td>',
+      '<td><input type="text" class="folder-group-input" data-folder-group="' + escapeHtml(mount)
+        + '" value="' + escapeHtml(folderGroup(mount)) + '" placeholder="默认"' + disabled + '></td>',
       '<td>' + latestUpdateCell(folder) + '</td>',
       '<td>' + sizeCell(folder) + '</td>',
       '<td><span class="repo-health" data-health-badge>' + initialBadge(item, svnEnabled) + '</span>'
         + '<br><span class="hint" data-mode-cell>'
-        + (item.id && !svnEnabled ? '本地模式：' + escapeHtml(item.id) : '') + '</span></td>',
+        + (item.id && !svnEnabled ? '本地模式：' + escapeHtml(item.id) : '') + '</span>'
+        + (allow ? '' : '<br><span class="repo-readonly">只读：由服务器自动更新</span>') + '</td>',
       '<td><label class="flag"><input type="checkbox" data-repo="svnEnabled"'
-        + (svnEnabled ? ' checked' : '') + '>配置 SVN</label></td>',
+        + (svnEnabled ? ' checked' : '') + '>启用 SVN</label></td>',
       '</tr>',
       '<tr data-pair-detail="' + pair + '"' + (svnEnabled ? '' : ' hidden') + '>',
-      '<td colspan="6"><div class="repo-detail">',
+      '<td colspan="7"><div class="repo-detail">',
       '<label>仓库 ID<input type="text" data-repo="id" value="' + escapeHtml(item.id)
         + '" placeholder="如 hardware"' + disabled + '></label>',
       '<label>SVN 地址<input type="text" data-repo="url" value="' + escapeHtml(item.url)
         + '" placeholder="https://svn.example.com/svn/xxx/trunk/docs/"' + disabled + '></label>',
-      '<label>分组<input type="text" data-repo="group" value="' + escapeHtml(item.group || '默认')
-        + '" placeholder="默认"' + disabled + '></label>',
       '<label>更新频率（秒）<input type="number" min="0" step="30" data-repo="syncIntervalSeconds" value="'
         + escapeHtml(interval) + '" placeholder="默认"' + disabled + '></label>',
       '<div class="repo-flags">',
-      '<label class="flag"><input type="checkbox" data-repo="readOnly"'
-        + (item.readOnly ? ' checked' : '') + disabled + '>只读</label>',
-      '<label class="flag"><input type="checkbox" data-repo="allowCommit"'
-        + (item.allowCommit === false ? '' : ' checked') + disabled + '>允许合入</label>',
+      '<label class="flag" title="' + (svnEnabled
+        ? '勾选后允许登录用户把草稿合入 SVN 库；取消勾选则网页只读，内容由服务器定时同步更新'
+        : '勾选后允许登录用户在线编辑并发布到本地库；取消勾选则网页只读，内容由服务器自动更新') + '">'
+        + '<input type="checkbox" data-repo="allowCommit"'
+        + (allow ? ' checked' : '') + disabled + '>'
+        + (svnEnabled ? '允许合入 SVN 库' : '允许在线修改') + '</label>',
+      '<span class="hint perm-hint" data-perm-hint>'
+        + (allow ? '' : '未勾选：网页为只读，内容由服务器自动更新') + '</span>',
       '</div>',
       '</div>',
       '<div class="actions">'
@@ -183,7 +189,7 @@
         + '<button type="button" data-action="repair"' + disabled + '>修复</button>'
         + '<button type="button" data-action="recreate"' + disabled + '>删除重建</button>'
         + '<button type="button" data-action="provision"' + disabled + '>创建并拉取</button>'
-        + '<button type="button" class="danger" data-action="remove-repo"' + disabled + '>移除配置</button>'
+        + '<button type="button" class="danger" data-action="remove-repo"' + disabled + '>移除映射</button>'
         + '</div></td></tr>'
     ].join('');
   }
@@ -274,14 +280,22 @@
       var toggle = row.querySelector('[data-repo="svnEnabled"]');
       var svnEnabled = !!(toggle && toggle.checked);
       var interval = pairField(entry, 'syncIntervalSeconds');
+      var allow = !!(entry && entry.detail.querySelector('[data-repo="allowCommit"]').checked);
+      var mount = pairField(entry, 'mount') || row.getAttribute('data-mount') || '';
+      var repoId = pairField(entry, 'id');
+      if (!repoId && !svnEnabled && allow) {
+        // 本地模式：未填 id 时用文件夹名自动生成（与入口页命名一致）
+        repoId = slugId((row.getAttribute('data-name') || mount.replace(/^md\//, '') || 'local'));
+      }
       var repo = {
-        id: pairField(entry, 'id'),
-        mount: pairField(entry, 'mount') || row.getAttribute('data-mount') || '',
-        group: pairField(entry, 'group') || '默认',
+        id: repoId,
+        mount: mount,
+        group: folderGroup(mount) || '默认',
         sourceMode: svnEnabled ? 'svn' : 'local',
         url: svnEnabled ? pairField(entry, 'url') : '',
-        readOnly: !!(entry && entry.detail.querySelector('[data-repo="readOnly"]').checked),
-        allowCommit: !!(entry && entry.detail.querySelector('[data-repo="allowCommit"]').checked)
+        // 单一权限开关：勾选=允许（合入 SVN / 在线修改），未勾选=只读（服务器自动更新）
+        readOnly: !allow,
+        allowCommit: allow
       };
       repo.credential_group = repo.group;
       if (svnEnabled && interval !== '') {
@@ -315,6 +329,24 @@
       var old = previous[repo.id];
       return old && old.sourceMode !== 'local' && repo.sourceMode === 'local';
     });
+  }
+
+  function folderGroup(mount) {
+    var groups = (state.config && state.config.folderGroups) || {};
+    if (groups[mount]) {
+      return groups[mount];
+    }
+    var repos = (state.config && state.config.repositories) || [];
+    for (var index = 0; index < repos.length; index += 1) {
+      if (repos[index].mount === mount) {
+        return repos[index].group || '默认';
+      }
+    }
+    return '默认';
+  }
+
+  function slugId(value) {
+    return String(value || '').trim().replace(/[^0-9A-Za-z._-]+/g, '-').replace(/^-+|-+$/g, '') || 'local';
   }
 
   function entryPage(repoId) {
@@ -615,6 +647,15 @@
     }
     var payload = JSON.parse(JSON.stringify(state.config));
     payload.siteBackup = readSiteBackup();
+    var folderGroups = {};
+    all('[data-folder-group]').forEach(function (input) {
+      var mount = input.getAttribute('data-folder-group');
+      var value = input.value.trim();
+      if (mount) {
+        folderGroups[mount] = value || '默认';
+      }
+    });
+    payload.folderGroups = folderGroups;
     payload.repositories = repos.map(function (repo) {
       var item = {
         id: repo.id, mount: repo.mount, group: repo.group,
@@ -789,6 +830,41 @@
       setStatus('同步失败：' + error.message, true);
     });
   }
+
+  function syncPermLabel(detail, svnEnabled) {
+    if (!detail) {
+      return;
+    }
+    var label = detail.querySelector('.repo-flags .flag');
+    var text = svnEnabled ? '允许合入 SVN 库' : '允许在线修改';
+    if (label && label.lastChild && label.lastChild.nodeType === 3) {
+      label.lastChild.nodeValue = text;
+    }
+    if (label) {
+      label.setAttribute('title', svnEnabled
+        ? '勾选后允许登录用户把草稿合入 SVN 库；取消勾选则网页只读，内容由服务器定时同步更新'
+        : '勾选后允许登录用户在线编辑并发布到本地库；取消勾选则网页只读，内容由服务器自动更新');
+    }
+  }
+
+  document.addEventListener('change', function (event) {
+    var target = event.target;
+    var allow = target.closest ? target.closest('[data-repo="allowCommit"]') : null;
+    if (allow) {
+      var host = allow.closest('.repo-flags');
+      var hint = host ? host.querySelector('[data-perm-hint]') : null;
+      if (hint) {
+        hint.textContent = allow.checked ? '' : '未勾选：网页为只读，内容由服务器自动更新';
+      }
+      return;
+    }
+    var svnToggle = target.closest ? target.closest('[data-repo="svnEnabled"]') : null;
+    if (svnToggle) {
+      var pair = svnToggle.closest('[data-repo-row]');
+      var detail = document.querySelector('[data-pair-detail="' + (pair ? pair.getAttribute('data-pair') : '') + '"]');
+      syncPermLabel(detail, !!svnToggle.checked);
+    }
+  });
 
   document.addEventListener('click', function (event) {
     var target = event.target.closest ? event.target.closest('[data-action]') : null;

@@ -124,6 +124,19 @@ def load_config(path, docs_dir, allow_incomplete=False):
     database = _resolve_path(base, database_raw, "storage.database", docs_dir)
     workspaces = _resolve_path(base, workspaces_raw, "storage.workspaces", docs_dir)
 
+    folder_groups_raw = raw.get("folderGroups") or {}
+    if not isinstance(folder_groups_raw, dict):
+        raise ConfigError("folderGroups 必须是对象（md/<文件夹> → 分组名）")
+    folder_groups = {}
+    for key, value in folder_groups_raw.items():
+        mount = str(key or "").strip().strip("/")
+        group = str(value or "").strip()
+        if not mount or not group:
+            continue
+        if not mount.startswith("md/"):
+            raise ConfigError("folderGroups 的键必须是 md/ 下的文件夹：" + mount)
+        folder_groups[mount] = group[:60]
+
     site_raw = raw.get("siteBackup") or {}
     site_interval = site_raw.get("intervalSeconds", 3600)
     if not isinstance(site_interval, (int, float)) or site_interval < 0:
@@ -225,6 +238,7 @@ def load_config(path, docs_dir, allow_incomplete=False):
             "credential_name": str(sync_raw.get("credential_name") or "").strip(),
         },
         "repositories": repositories,
+        "folder_groups": folder_groups,
         "site_backup": site_backup,
         "ai": ai,
     }
@@ -259,6 +273,7 @@ def config_to_json(config):
             "workspaces": config["storage"].get("workspaces_raw", "../data/workspaces"),
         },
         "sync": dict(config["sync"]),
+        "folderGroups": dict(config.get("folder_groups") or {}),
         "siteBackup": {
             "enabled": bool(config.get("site_backup", {}).get("enabled")),
             "url": config.get("site_backup", {}).get("url", ""),
@@ -337,6 +352,7 @@ def default_config():
         },
         "storage": {"database": "../data/md2web.sqlite3", "workspaces": "../data/workspaces"},
         "sync": {"interval_seconds": DEFAULT_SYNC_INTERVAL, "credential_source": "", "credential_name": ""},
+        "folderGroups": {},
         "siteBackup": {"enabled": False, "url": "", "intervalSeconds": 3600, "include": ["docs"],
                        "message": "site backup"},
         "repositories": [],

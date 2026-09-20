@@ -2259,6 +2259,19 @@ class FolderOpsTests(ServerTestBase):
         anonymous = self.app.test_client()
         self.assertEqual(anonymous.get("/__admin/credentials").status_code, 401)
 
+    def test_folder_groups_roundtrip(self):
+        payload = server_config.config_to_json(self.config)
+        payload["folderGroups"] = {"md/未配置目录": "自定义组"}
+        headers = {"X-CSRF-Token": self.csrf()}
+        response = self.client.put("/__config", json=payload, headers=headers)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(self.config["folder_groups"], {"md/未配置目录": "自定义组"})
+        self.assertEqual(server_config.config_to_json(self.config)["folderGroups"],
+                         {"md/未配置目录": "自定义组"})
+        bad = server_config.config_to_json(self.config)
+        bad["folderGroups"] = {"硬件设计": "x"}
+        self.assertEqual(self.client.put("/__config", json=bad, headers=headers).status_code, 400)
+
     def test_repo_health_reports_states(self):
         state_path = self.tmp / "health-state.json"
         state_path.write_text(json.dumps({

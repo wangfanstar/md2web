@@ -1073,6 +1073,31 @@ class PlaygroundCopyTests(unittest.TestCase):
         self.assertIn("已复制（纯源码）", html)
 
 
+class FolderGroupTests(TempDirTestCase):
+    """未配置 SVN 的文件夹也能分组（folderGroups）。"""
+
+    def test_auto_folder_repos_use_configured_groups(self):
+        for name in ("硬件设计", "未配置目录"):
+            (self.md / name).mkdir(parents=True, exist_ok=True)
+            (self.md / name / "a.md").write_text("# A\n", encoding="utf-8")
+        (self.tmp / "config").mkdir(parents=True, exist_ok=True)
+        config_path = self.tmp / "config" / "server.local.json"
+        config_path.write_text(json.dumps({
+            "folderGroups": {"md/未配置目录": "自定义组"},
+            "repositories": [{"id": "hardware", "mount": "md/硬件设计",
+                              "url": "https://svn.example.invalid/hw/"}],
+        }, ensure_ascii=False), encoding="utf-8")
+        original = self.module.ROOT
+        self.module.ROOT = self.tmp
+        try:
+            repos = self.module.auto_folder_repos([{"id": "hardware", "mount": "md/硬件设计",
+                                                    "group": "默认"}])
+        finally:
+            self.module.ROOT = original
+        groups = {repo["id"]: repo["group"] for repo in repos}
+        self.assertEqual(groups.get("未配置目录"), "自定义组")
+
+
 class AssetVersionTests(TempDirTestCase):
     """index.html 里的本地 lib 资源要带内容版本号，避免浏览器缓存旧脚本（修复放大丢字等问题）。"""
 
