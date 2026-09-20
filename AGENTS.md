@@ -14,14 +14,22 @@ md2web 把 `docs/md/` 下的 Markdown 构建成**完全离线可用**的 Docsify
 ## 架构与数据流
 
 ```text
-docs/md/**/*.md ──scan──> setup_docsify.py ──生成──> docs/_sidebar.md
-                                          ├─ docs/README.md         (首页索引)
-                                          ├─ docs/search-index.json (搜索索引)
-                                          ├─ docs/lib/offline-data.js (file:// 内嵌快照)
-                                          └─ docs/index.html        (站点入口)
+docs/md/**/*.md ──scan──> setup_docsify.py ──生成──> docs/html/_sidebar.md
+                                          ├─ docs/html/README.md         (首页索引)
+                                          ├─ docs/html/search-index.json (搜索索引)
+                                          ├─ docs/html/index_<仓库>.html  (各仓库入口页)
+                                          ├─ docs/html/index_all.html     (合并视图)
+                                          ├─ docs/lib/offline-data*.js    (file:// 内嵌快照)
+                                          └─ docs/index.html              (总览入口，docs 根目录只留它)
 web/*.{js,css}  ──copy──> docs/lib/*      (前端源码在 web/，产物在 docs/lib/)
 docs/lib/<第三方依赖>                       (离线依赖，缺失时才联网补齐)
+docs/html/images|uploads                  (反馈截图/附件，运行时写入)
 ```
+
+> 站点页面都在 `docs/html/` 下，页面 head 带 `<base href="../">`，因此 `lib/`、`md/`、
+> `search-index.json`、API（`__auth/...`）等相对路径一律按**站点根**解析；
+> 页面之间的链接统一写成站点根相对路径（`html/index_all.html`、`index.html`）。
+> docsify 侧用 `basePath: "../"` 与 `alias: 'html/_sidebar.md'` 取 `docs/md` 与侧栏文件。
 
 ## 文件职责
 
@@ -30,14 +38,14 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `setup_docsify.py` | 构建：扫描、编码校验、依赖复用/下载、Prism 组件、生成导航/首页/索引/离线数据/入口 |
 | `serve.py` | 跨平台入口：默认**只读预览**（静态站点 + 自动重建 + 本机 AI 代理，写接口一律 403）；`--config config/server.local.json` 启动认证编辑服务（Flask + Waitress）；按 pidfile 只管理本项目自身实例；认证模式后台线程：每 15 秒检查仓库同步到期（`start_repo_sync`）与每 10 秒记录文档增删（`start_document_recorder`） |
 | `server/config.py` | 配置加载/校验：存储路径不得在 `docs/` 内、mount 唯一且禁止越界、URL 仅 http/https、仓库存目录段最长前缀匹配；仓库映射支持每库 `syncIntervalSeconds`（0 = 不自动同步） |
-| `server/database.py` | SQLite 访问层：迁移 v5（users 含 role/password_hash，首次启动创建 admin/admin；svn_credentials 存加密口令；document_snapshots/document_events 记录文档快照与增删；audit_events 含 client_ip）、外键与 busy_timeout、`backup_to`、SQLite 3.7.17 兼容检查与清理 |
+| `server/database.py` | SQLite 访问层：迁移 v9（users 含 role/password_hash，首次启动创建 admin/admin；svn_credentials 存加密口令；document_snapshots/document_events 记录文档快照与增删；audit_events 含 client_ip；feedback 含 images/attachments JSON）、外键与 busy_timeout、`backup_to`、SQLite 3.7.17 兼容检查与清理 |
 | `server/svn.py` | 唯一的 svn 子进程入口：优先 `--password-from-stdin`，旧版客户端（RHEL7 1.7/1.8）自动回退 `--password`（`password_transport()` 可查询）；匿名可读检测、错误分类、info/log XML 解析、检出/稀疏更新/差异/提交/导出，超时与脱敏 |
 | `server/auth.py` | SVN 登录、本地管理员登录/改密、会话（token 只存摘要、闲置/绝对过期）、CSRF、限速、审计；SVN 口令登录成功后以本机密钥加密存入 `svn_credentials`（换密码重新登录会更新），提交时优先取库内最新口令；重启与认证源变更使 SVN 旧会话失效（保留管理员会话）；`verify_account` 只校验账号密码（含限速与审计 `account_verify`），不建会话/不建用户；数据库访问串行化 |
 | `server/passwords.py` | 管理员口令哈希（PBKDF2-HMAC-SHA256）与校验 |
 | `server/operations.py` | 提交任务与仓库同步：审阅清单冻结、私有工作副本（稀疏检出）、UUID/URL 绑定核对、幂等 operation、状态机（prepared/running/svn_committed/published/failed/uncertain/needs_auth）、发布到 docs/md 与 published_revision、远端同步导出；提交时把文档引用的 `images/` 图片与 `附件/` 文件一并 `svn add`/提交（`documents.referenced_images` / `referenced_attachments`）；定时同步（`sync_due`/`sync_all`）跳过有活动草稿的文档并报告冲突，`remote_diff`/`remote_revision` 提供远端对比 |
 | `server/drafts.py` | 个人草稿与版本历史：乐观并发（expected_version → 409）、不可变 revision 全文快照、统一差异（published/draft/版本号）、放弃草稿 |
-| `server/documents.py` | 受管 Markdown 读写底层：路径校验、EOL 保持、唯一临时文件 + 原子替换、必填 `base_hash` 冲突检测；图片写入文档同级 `images/`（`save_document_image`），附件写入文档同级 `附件/`（`save_document_attachment`，沿用原文件名、重名加序号、禁止 html/js/svg 等可脚本化后缀）；`referenced_images` / `referenced_attachments` 解析提交需随带的资源 |
-| `server/app.py` | Flask 应用：`/__auth/session|login|logout`（含 `mode:admin`）、`GET/PUT /__config`、`POST /__config/test-auth`、`POST /__admin/verify-account`（验证 SVN 账号密码是否合法，不切换会话）、`POST /__admin/password`、`POST /__admin/sync`（立即同步仓库）、`GET /__admin/usage`（登录 IP/账号活动/用户数/审计）、`GET /__admin/documents`（文档更新时间与次数/文件夹大小/增删记录）（均要求管理员 + CSRF）、草稿接口（`/__md/document|draft|image|attachment|history|diff|revision|discard`）、SVN 接口（`/__svn/info|log|prepare|commit|refresh|status|remote-diff`、`/__operations/<id>`）、写接口守卫（匿名 401、旧 `/__md/save` 410）、静态分发白名单与安全响应头 |
+| `server/documents.py` | 受管 Markdown 读写底层：路径校验、EOL 保持、唯一临时文件 + 原子替换、必填 `base_hash` 冲突检测；图片写入文档同级 `images/`（`save_document_image`），附件写入文档同级 `附件/`（`save_document_attachment`，沿用原文件名、重名加序号、禁止 html/js/svg 等可脚本化后缀）；反馈截图/附件写入 `docs/html/images|uploads`（`save_feedback_image` / `save_feedback_attachment`）；`referenced_images` / `referenced_attachments` 解析提交需随带的资源 |
+| `server/app.py` | Flask 应用：`/__auth/session|login|logout`（含 `mode:admin`）、`GET/PUT /__config`、`POST /__config/test-auth`、`POST /__admin/verify-account`（验证 SVN 账号密码是否合法，不切换会话）、`POST /__admin/password`、`POST /__admin/sync`（立即同步仓库）、`GET /__admin/usage`（登录 IP/账号活动/用户数/审计）、`GET /__admin/documents`（文档更新时间与次数/文件夹大小/增删记录）（均要求管理员 + CSRF）、草稿接口（`/__md/document|draft|image|attachment|history|diff|revision|discard`）、反馈接口（`/__feedback`、`/__feedback/image|attachment|delete`、`/__admin/feedback`）、SVN 接口（`/__svn/info|log|prepare|commit|refresh|status|remote-diff`、`/__operations/<id>`）、写接口守卫（匿名 401、旧 `/__md/save` 410）、静态分发白名单与安全响应头 |
 | `server/paths.py` | 静态分发禁止清单（点目录、`.svn`、`data/`、`config/`、临时/数据库/源码文件），预览与认证服务共用 |
 | `web/auth.js` / `.css` | 登录状态与弹窗（`window.SiteAuth`）：会话刷新、登录/退出、侧栏指示器、只读模式提示、管理员角色与 AI 默认值下发 |
 | `web/settings.js` / `.css` | 统一设置弹窗（`window.Settings`，侧栏单一入口，**分为 AI 助手 / SVN 与仓库 / 账号 / 信息查询 四个 Tab**）：本机 AI 设置、管理员登录、SVN 认证路径与测试、仓库映射增删（含凭据分组与「更新频率」）、全站 AI 默认值、管理员改密，、「立即同步 SVN 库」，以及**管理员使用情况**（登录 IP/账号活动/用户数/审计）与**文档统计**（文档更新时间与次数、文件夹大小、增删记录，表头可排序） |
@@ -59,8 +67,8 @@ docs/lib/<第三方依赖>                       (离线依赖，缺失时才联
 | `web/ai-assistant.js` / `.css` | AI 助手聊天面板与独立配置弹窗（`window.AIAssistant`）：设置面板（服务商预设、接口地址、模型、Key、代理策略，Key 仅存 localStorage）、**资料范围勾选**（按文件夹/文档过滤检索）、**上传文档**（.md/.txt，仅本机 localStorage，≤512 KB）、本地检索 + 引用来源、OpenAI/Anthropic 风格流式 SSE 解析、直连失败自动走 `/__ai/chat` 代理；侧栏「AI 配置」图标与对话面板 ⚙ 均可打开配置 |
 | `tests/test_ai_retrieval.js` | AI 检索算法测试（`node --test`） |
 | `web/plot-playground.html` | 独立绘图在线预览页（Mermaid 全部类型模板 + PacketDiag 增强控件与完整语法说明、一键复制源码、下载），构建复制到 `docs/lib/`；`docs/md/使用说明/绘图示例.md` 与之保持全部样例同步（`tests/test_setup_docsify.py::DrawingExamplesTests` 校验） |
-| `web/md2web_config.html` / `web/md2web-config.js` | 仓库配置页（构建复制到 `docs/md2web_config.html`）：默认只列 `docs/md` 一级文件夹（显示文件夹名、不带 `md/` 前缀）+ 入口页链接（已配置仓库用仓库 ID，未配置用文件夹名，均有对应 `index_*.html`）+ 最新更新（作者/时间）+ 仓库大小（合计/文档/附件/子文件夹分类）+ 状态，并有「刷新文件夹信息」按钮；勾选「配置 SVN」才展开 SVN 地址/分组/更新频率/只读/允许合入与操作按钮（不勾选按 `sourceMode=local` 保存并清空地址，切换时需确认）。另有「账号切换与验证（SVN）」面板：查看当前账号、保存/测试 SVN 认证路径（`PUT /__config` + `POST /__config/test-auth`）、退出登录切换账号、验证（可选直接切换）SVN 账号；管理员登录后保存配置、设置同步凭据，支持「创建并拉取」（`POST /__admin/provision`：目录不存在时创建并从 SVN 导出） |
-| `docs/index.html` / `index_<仓库>.html` / `index_all.html` | 构建生成：总览页（按分组列出各仓库入口 + 跨仓库搜索）、每仓库入口页（独立侧栏/搜索索引/离线快照，带只读与允许合入标记）、全部文档合并视图 |
+| `web/md2web_config.html` / `web/md2web-config.js` | 仓库配置页（构建复制到 `docs/html/md2web_config.html`）：默认只列 `docs/md` 一级文件夹（显示文件夹名、不带 `md/` 前缀）+ 入口页链接（已配置仓库用仓库 ID，未配置用文件夹名，均有对应 `index_*.html`）+ 最新更新（作者/时间）+ 仓库大小（合计/文档/附件/子文件夹分类）+ 状态，并有「刷新文件夹信息」按钮；勾选「配置 SVN」才展开 SVN 地址/分组/更新频率/只读/允许合入与操作按钮（不勾选按 `sourceMode=local` 保存并清空地址，切换时需确认）。另有「账号切换与验证（SVN）」面板：查看当前账号、保存/测试 SVN 认证路径（`PUT /__config` + `POST /__config/test-auth`）、退出登录切换账号、验证（可选直接切换）SVN 账号；管理员登录后保存配置、设置同步凭据，支持「创建并拉取」（`POST /__admin/provision`：目录不存在时创建并从 SVN 导出） |
+| `docs/index.html` / `docs/html/index_<仓库>.html` / `docs/html/index_all.html` | 构建生成：docs 根目录只留总览页 `index.html`（按分组列出各仓库入口 + 跨仓库搜索）；`docs/html/` 下是每仓库入口页（独立侧栏/搜索索引/离线快照，带只读与允许合入标记）、合并视图、配置页与反馈页、`README.md`/`_sidebar*.md`/`search-index*.json` |
 | `docs/md/` | 唯一需要人工维护的源文档目录 |
 | `docs/lib/` | 离线依赖 + 生成资源，不要手工修改 |
 | `docs/` 其余文件 | `index.html`、`README.md`、`_sidebar.md`、`search-index.json`、`offline-data.js` 等，均由构建生成 |
@@ -94,7 +102,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 ## 不可破坏的约定
 
 1. **构建绝不修改 `docs/md/`**：不删除、不移动、不重写源文档；新增/删除文档由用户操作。编辑器的 `Ctrl+S` 是用户主动触发（经本机预览服务写回），不属于构建行为。
-2. **生成物不手工维护**：`docs/index.html`、`docs/README.md`、`docs/_sidebar.md`、`docs/search-index.json`、`docs/lib/` 下生成资源都会被构建覆盖。
+2. **生成物不手工维护**：`docs/index.html`、`docs/html/` 下的页面与索引（`README.md`、`_sidebar*.md`、`search-index*.json`、`index*.html`、`md2web_*.html`）、`docs/lib/` 下生成资源都会被构建覆盖；`docs/html/images|uploads` 是反馈运行数据（构建不动）。
 3. **前端源码在 `web/`**：改搜索/工作台/样式要改 `web/`，再运行构建同步到 `docs/lib/`；不要直接改 `docs/lib/`。
 4. **完全离线**：运行时不得请求 CDN；新增第三方库必须保存到 `docs/lib/` 并登记到 `setup_docsify.py` 的 `ASSETS`（含固定版本 URL）。KaTeX 含 `katex/fonts/*.woff2` 共 20 个字体文件，`ensure_assets` 会自动创建嵌套目录。
 5. **失败要早、要清楚**：`docs/md` 缺失/为空、非 UTF-8 文档等应在写任何文件前抛 `BuildError`，错误信息带路径。
@@ -138,7 +146,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 生成的 `index.html` 会给自有资源加内容版本号（`version_asset_urls` → `lib/x.js?v=<sha1>`），改 `web/` 后必须重建才会更新版本号；排查「改了没生效/放大丢字」先确认浏览器拿到的是新脚本。
 - SVN 定时同步：`serve.py` 每 15 秒按各仓库 `syncIntervalSeconds`（留空用 `sync.interval_seconds`，0 关闭）判断到期，`svn info` 比对远端版本后导出更新 `docs/md`；**有活动草稿的文档不覆盖**，记入 `conflicts` 并把仓库 `sync_error` 标记为 `conflicts`，编辑器据此提示「远端已更新，请先合并」并提供「远端差异」；同步凭据来自环境变量 `sync.credential_name`（`用户名:口令`），未配置时按匿名读取。
 - SVN 提交会把文档引用的 `images/` 图片一起存档：`prepare_commit` 的清单含 `images` 列表（由 `documents.referenced_images` 解析 Markdown/HTML 图片引用），`run_commit` 复制到工作副本、必要时 `svn add`，并与文档同一次 `svn commit` 提交；图片不参与文本差异比对（冲突风险由用户确认）。
-- 多仓库站点：`setup_docsify.load_repositories()` 读 `config/server.local.json` 的 repositories（id/mount/url/group/readOnly/allowCommit/syncIntervalSeconds）；每个仓库生成 `index_<仓库>.html` + `_sidebar_<仓库>.md` + `search-index_<仓库>.json` + `lib/offline-data_<仓库>.js`，根 `index.html` 是分组总览，`index_all.html` 是合并视图。仓库页的 docsify `alias` 必须同时映射 `/_sidebar.md` 与 `/.*/_sidebar.md`（否则首页路由会加载全局侧栏，把其它仓库的文档列出来）；搜索索引每条记录带 `site`，跨仓库结果会先跳到对应入口页。
+- 多仓库站点：`setup_docsify.load_repositories()` 读 `config/server.local.json` 的 repositories（id/mount/url/group/readOnly/allowCommit/syncIntervalSeconds）；每个仓库在 `docs/html/` 生成 `index_<仓库>.html` + `_sidebar_<仓库>.md` + `search-index_<仓库>.json` + `lib/offline-data_<仓库>.js`，根 `index.html` 是分组总览，`html/index_all.html` 是合并视图。仓库页的 docsify `alias` 必须同时映射 `/_sidebar.md` 与 `/.*/_sidebar.md`（否则首页路由会加载全局侧栏，把其它仓库的文档列出来）；搜索索引每条记录带 `site`，跨仓库结果会先跳到对应入口页。
 - 每个一级文件夹都有入口页：`load_all_repos()` = 配置的仓库 + `auto_folder_repos()` 为**未配置仓库的文件夹**补的条目（`auto=True`，id 即文件夹名，`index_<文件夹名>.html`，总览页显示「未配置 SVN」徽标、备注「本地文件夹（不连接 SVN）」），因此配置页「仓库入口页」列对每个文件夹都有链接；`repo_page_name()` 保留中文等 CJK 字符（否则中文 id 会全部塌缩成 `index_repo.html`），前端 `entryPage()` 必须保持同一规则。删除文件夹后重建由 `cleanup_repo_artifacts()` 清理其入口页/侧栏/索引/离线数据。
 - `./start_linux.sh: No such file or directory` 多为 CRLF 或缺少可执行位：`start_linux.sh` 必须保持 LF + 100755（`.gitattributes` 已声明 `*.sh text eol=lf`，`LauncherScriptsTests` 校验无 CR 与可执行位）；排障命令 `sed -i "s/\r$//" start_linux.sh && chmod +x start_linux.sh`，或直接 `sh start_linux.sh`（脚本会去 CR 后重执行）。
 - `start_linux.sh` 的开关要**连写**（`--restart`、`--stop`）；若误写成 `-- restart`（中间多空格）或漏写 `--`（`restart`），脚本也会识别，且多余的 `--` 会被忽略（不再透传给 `serve.py`，避免 argparse 报 “unrecognized arguments”）。
@@ -146,10 +154,10 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 启动前端口检查（`confirm_port_conflict`）：端口被**非本项目实例**占用时打印占用进程信息（`process_info`：优先读 `/proc/<pid>`，ps 字段兼容性差时不依赖它；含 PID/用户/运行时长/命令行），交互式询问是否强制结束——`y`/回车结束、`n` 取消启动、**10 秒无操作自动强制结束**，非交互（无 TTY）同样自动结束；占用者是本实例（PID 与 pidfile 一致）时跳过询问，交由 `serve.py` 按 pidfile 重启。`--restart` 仍是直接强杀不询问。
 - 后台就绪判断（约 20 秒）：pidfile 进程存活 **且端口已监听**（`port_holders`）即视为就绪，日志关键字仅作无 ss/lsof/fuser 时的回退；后台启动用 `python -u`（关闭输出缓冲）保证 `data/serve.log` 即时可读（否则缓冲会让日志长时间为空、误判“未就绪”）。失败时打印 pidfile 进程状态、端口监听状态与日志尾部，日志为空时明确提示。
 - Linux 进程名：`serve.py` 启动时调用 `set_process_title()`（libc `prctl(PR_SET_NAME)`）把进程名设为 `md2web-serve`，便于 `pgrep -af md2web` / `ps -o pid,comm,args -C md2web-serve` 查找；Windows 下仅设置控制台标题（进程名仍是 python.exe），实例管理仍以 pidfile 为准。
-- 每页「返回首页」目标由 `window.$docsify.homeLink` 决定（仓库页 → `index_all.html`，合并视图 → 总览 `index.html`，构建时注入）；`index_all.html` 的左侧导航由 `workspace.js` 按当前路由过滤（只显示当前仓库条目，路由需 `decodeURIComponent`）。
+- 每页「返回首页」目标由 `window.$docsify.homeLink` 决定（仓库页 → `html/index_all.html`，合并视图 → 总览 `index.html`，构建时注入）；`html/index_all.html` 的左侧导航由 `workspace.js` 按当前路由过滤（只显示当前仓库条目，路由需 `decodeURIComponent`）。
 - 仓库同步凭据：`repo_credentials`（v6，按 repository_id 存密文，`site-backup` 为网站备份专用 id）；`AuthService.repo_credential` 解密，`sync_repositories` 优先用仓库凭据、其次环境变量 `sync.credential_name`；接口 `POST /__admin/repo-credential`、`GET /__admin/credentials`（均需管理员）。
 - 网站数据备份：配置 `siteBackup`（enabled/url/intervalSeconds/include/message），`operations.backup_site` 在 `data/site-wc` 检出后复制 `docs/` 并 `svn add` + `svn commit`（`svn status` 为空则跳过）；`serve.py` 同步线程按频率触发，`POST /__admin/site-backup` 可立即备份。
-- 读者反馈：`web/md2web_feedback.html` + `web/md2web-feedback.js`（构建复制到 `docs/` 与 `docs/lib/`）：`GET /__feedback`（公开只读，含状态字典）、`POST /__feedback`（登录 + CSRF，标题≥2 字 + 描述）、`POST /__feedback/delete`（登录 + CSRF，作者本人或管理员）、`POST /__admin/feedback`（管理员 + CSRF，更新 status/note）；数据库 v8 `feedback` 表。入口：docsify 页面在侧栏 AI 设置图标旁（`[data-sidebar-feedback]`，点击打开 `window.FeedbackDialog` 弹窗），无 AI 图标的独立页（配置页/总览页）显示右上角固定入口（`.feedback-fixed-entry`，侧栏渲染后自动收起）；反馈卡片与弹窗样式由 `md2web-feedback.js` 注入（`FEEDBACK_STYLE`），独立页只保留页面框架样式。
+- 读者反馈：`web/md2web_feedback.html` + `web/md2web-feedback.js`（构建复制到 `docs/html/` 与 `docs/lib/`）：`GET /__feedback`（公开只读，含状态字典）、`POST /__feedback`（登录 + CSRF，标题≥2 字 + 描述，可带 `images`/`attachments`）、`POST /__feedback/image|attachment`（登录 + CSRF，截图写 `docs/html/images/`、附件写 `docs/html/uploads/`）、`POST /__feedback/delete`（登录 + CSRF，作者本人或管理员）、`POST /__admin/feedback`（管理员 + CSRF，更新 status/note）；数据库 v9 `feedback` 表（含 images/attachments JSON，服务端只接受真实存在的 `html/images|uploads` 文件路径）。入口：docsify 页面在侧栏 AI 设置图标旁（`[data-sidebar-feedback]`，点击打开 `window.FeedbackDialog` 弹窗），无 AI 图标的独立页（配置页/总览页）显示右上角固定入口（`.feedback-fixed-entry`，侧栏渲染后自动收起）；反馈卡片与弹窗样式由 `md2web-feedback.js` 注入（`FEEDBACK_STYLE`），独立页只保留页面框架样式。
 - 分组与权限：配置页「分组」在**公共行**（每个一级文件夹都有），保存到配置 `folderGroups`（`md/<文件夹>` → 分组名）；构建侧 `load_folder_groups()` 覆盖已配置仓库的 group，并给 `auto_folder_repos` 的未配置文件夹带上分组。权限为单一开关：勾选 → `readOnly=false, allowCommit=true`（SVN 模式文案「允许合入 SVN 库」，本地模式「允许在线修改」）；未勾选 → 只读，内容由服务器同步更新。
 - 仓库健康与修复：`operations.repo_health` 检查配置/目录/远端连通与认证/同步错误/仓库身份（UUID 与绑定比对）/本地内容缺失（返回 status+level+hints+indexPage）；`site_workcopy_health` 单独检查网站备份工作副本（`data/site-wc`，报告 id 为 `site-backup`，仅在「检查全部」时附带）。`repair_repo` 执行网站备份 `svn cleanup`（修不好自动移入 `data/trash`）+ **强制重新拉取**（`force=True` 绕过「远端版本未变化不拉取」短路，恢复本地被删/损坏的文件）；`recreate_repo` 先移目录到 `data/trash`，再 `rebind=True` 允许远端 UUID/地址变化并重置 published_revision 后强制拉取（远端库被重建时用）。接口 `POST /__admin/repo-health|repo-repair|repo-recreate`（管理员 + CSRF，`id` 可为 `site-backup`：只处理网站备份工作副本，重建会重新检出并立即备份）。「创建并拉取」/`repo-repair|recreate` 优先使用仓库凭据。
 - `GET /__folders` 只列 `docs/md` 的**一级**子文件夹（仓库映射以一级目录为单位），并附带 `sizeBytes`/`files`（递归含附件）、分类统计 `mdFiles`/`mdBytes`（Markdown）、`otherFiles`/`otherBytes`（附件等）、`subfolders`/`nestedFiles`/`nestedBytes`（子文件夹及其内文件，已计入前两类）与 `latestUpdate`（`source=publish` 时来自 `operations` 最近发布记录的作者/时间，否则回退最新文件修改时间，`database.folder_latest_updates` 提供聚合查询）。配置页「刷新文件夹信息」按钮即重新拉取该接口并重绘。`POST /__admin/repo-health` 对 `sourceMode=local` 的仓库返回 `本地模式`（level ok），不做 SVN 检查。
@@ -166,6 +174,9 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 提交状态机与幂等：同一 `operationId` 重复提交直接返回已有结果；不确定（超时/断网）标记 `uncertain` 且绝不自动重试；发布写 docs/md 前核对 hash，站点重建由 watcher 完成。
 - 服务默认按认证模式启动（`--preview` 才是只读预览）；缺少 Flask/Waitress 时给出安装提示，不静默回退匿名写。
 - 搜索的排除词语法为 `-词`，短语为 `"词 组"`；改动 `parseQuery` 时注意与 UI 提示保持一致。
+- **站点页面在 `docs/html/`**：页面 head 必须保留 `<base href="../">`（相对路径含 API 都按站点根解析），docsify 用 `basePath: "../"`、`alias` 值 `html/_sidebar.md`、`homepage: html/README.md`、`customSearch.indexPath: html/search-index.json`；页面间链接与 `web/*.js` 里的入口链接一律写 `html/index_*.html`（`entryPage()`/`folder-view.js`/`md2web-feedback.js` 已统一）。`docsify.min.js` 的 hash 规范化补丁必须用 `slice(0,0<=n?n:location.href.length)`（`<base>` 下相对 `#/` 会被解析到站点根，导致跳错页）。
+- 反馈截图/附件目录固定为 `docs/html/images`（`documents.FEEDBACK_IMAGE_REL`，命名 `fb-<时间戳>-<序号>.<扩展名>`）与 `docs/html/uploads`（`FEEDBACK_UPLOAD_REL`，沿用原文件名、重名加序号、禁止可脚本化后缀）；提交反馈时服务端只保留 `html/images|uploads/` 下真实存在的文件路径，卡片按 `html/images/...` 相对路径展示（页面带 `<base>` 时正好解析到站点根）。
+- 离线快照（`docs/lib/offline-data*.js`）的键以**站点根**为基准：md 用 `md/...`，侧栏/首页用 `html/_sidebar*.md`、`html/README.md`；`offline-file.js` 的 `SITE_BASE` 取 `lib/` 的上一级（`document.currentScript`），不要改回按页面目录计算。
 - 编辑器文字颜色用 `<span style="color:…">`；`web/sanitize.js` 已改为**只放行 `color` 单属性**（DOMPurify `afterSanitizeAttributes` 钩子 + 正则白名单），不要再把 `style` 加回 `FORBID_ATTR`，否则预览里颜色会消失（站点渲染不经过 `Sanitize`，只有编辑器预览/AI 回答经过）。
 - 附件目录名固定为 `附件/`（`documents.ATTACHMENT_DIR_NAME`），与 `images/` 同级；上传沿用原文件名（清理链接敏感字符、重名加 `-2/-3`），并禁止 `.html/.js/.svg` 等可脚本化后缀（同源静态分发有 XSS 风险）。提交随带依赖 `documents.referenced_attachments` 解析 `[名称](附件/…)` 与 `<a href="附件/…">`，改动目录名或链接写法要同步更新解析与测试。
 - 配置页 SVN 明细行（`.repo-detail`）是 12 栅格：仓库 ID/更新频率各 3 列、SVN 地址 6 列、权限与操作按钮整行；标签在上输入框在下，窄屏（≤980px/≤620px）逐级降为 6/12 列。改布局时保持 `.repo-field-*` 类名与 `md2web-config.js` 中 `repoRow` 的 class 对应。

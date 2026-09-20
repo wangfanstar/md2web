@@ -29,7 +29,7 @@ class WorkspaceTests(TempDirTestCase):
         paths = ['硬件/接口/README.md', '软件/接口/README.md']
         with redirect_stdout(io.StringIO()):
             self.module.generate_sidebar(paths)
-        text = (self.docs / '_sidebar.md').read_text(encoding='utf-8')
+        text = (self.module.HTML_DIR / '_sidebar.md').read_text(encoding='utf-8')
         self.assertIn('**硬件**', text)
         self.assertIn('**软件**', text)
         self.assertEqual(text.count('**接口**'), 2)
@@ -40,7 +40,7 @@ class WorkspaceTests(TempDirTestCase):
         paths = ['硬件/接口/a.md', '硬件/b.md', '软件/c.md', 'root.md']
         with redirect_stdout(io.StringIO()):
             self.module.generate_readme(paths, '工程文档')
-        text = (self.docs / 'README.md').read_text(encoding='utf-8')
+        text = (self.module.HTML_DIR / 'README.md').read_text(encoding='utf-8')
         self.assertIn('workspace-folder-grid', text)
         self.assertEqual(text.count('class="workspace-folder-card"'), 3)
         self.assertIn('4 篇文档', text)
@@ -52,7 +52,7 @@ class WorkspaceTests(TempDirTestCase):
     def test_home_escapes_folder_and_title_html(self):
         with redirect_stdout(io.StringIO()):
             self.module.generate_readme(['A&B/<b>.md'], '<img src=x>')
-        text = (self.docs / 'README.md').read_text(encoding='utf-8')
+        text = (self.module.HTML_DIR / 'README.md').read_text(encoding='utf-8')
         self.assertNotIn('<img src=x>', text)
         self.assertIn('A&amp;B', text)
 

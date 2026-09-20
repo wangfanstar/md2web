@@ -2731,6 +2731,9 @@ class FeedbackTests(ServerTestBase):
         self.conn.close()
         super().tearDown()
 
+    PNG = base64.b64encode(b"PNG-DATA").decode("ascii")
+    PDF = base64.b64encode(b"PDF-DATA").decode("ascii")
+
     def login_admin(self):
         self.client.post("/__auth/login", json={"username": "admin", "password": "admin"})
         return self.client.get("/__auth/session").get_json()["csrfToken"]
@@ -2800,6 +2803,45 @@ class FeedbackTests(ServerTestBase):
         self.assertEqual(self.client.get("/__feedback").get_json()["feedback"], [])
         self.assertEqual(self.client.post("/__feedback/delete", json={"id": first["id"]},
                                           headers=admin_headers).status_code, 404)
+
+    def test_feedback_image_and_attachment_upload(self):
+        csrf = self.login_admin()
+        headers = {"X-CSRF-Token": csrf}
+        # 匿名 / 缺 CSRF 拒绝
+        self.assertEqual(self.app.test_client().post("/__feedback/image",
+                                                     json={"type": "image/png", "data": self.PNG}).status_code, 401)
+        self.assertEqual(self.client.post("/__feedback/image",
+                                          json={"type": "image/png", "data": self.PNG}).status_code, 403)
+        # 图片写入 docs/html/images/
+        image = self.client.post("/__feedback/image",
+                                 json={"type": "image/png", "data": self.PNG},
+                                 headers=headers).get_json()
+        self.assertTrue(image["ok"], image)
+        self.assertRegex(image["path"], r"^html/images/fb-\d{8}-\d{6}-\d+\.png$")
+        self.assertTrue((self.docs / image["path"]).is_file())
+        # 附件写入 docs/html/uploads/，沿用原文件名
+        attachment = self.client.post("/__feedback/attachment",
+                                      json={"name": "截图说明.pdf", "data": self.PDF},
+                                      headers=headers).get_json()
+        self.assertEqual(attachment["path"], "html/uploads/截图说明.pdf")
+        self.assertTrue((self.docs / attachment["path"]).is_file())
+        # 可脚本化后缀被拒绝
+        self.assertEqual(self.client.post("/__feedback/attachment",
+                                          json={"name": "evil.html", "data": self.PDF},
+                                          headers=headers).status_code, 415)
+        # 提交反馈时带上截图与附件
+        created = self.client.post("/__feedback",
+                                   json={"title": "带截图的问题", "body": "见图",
+                                         "images": [image["path"], "html/images/missing.png", "../etc/passwd"],
+                                         "attachments": [attachment["path"]]},
+                                   headers=headers).get_json()
+        self.assertTrue(created["ok"], created)
+        items = self.client.get("/__feedback").get_json()["feedback"]
+        self.assertEqual(items[0]["images"], [image["path"]], "只保留真实存在的图片")
+        self.assertEqual(items[0]["attachments"], [attachment["path"]])
+        # 截图可静态访问
+        served = self.client.get("/" + image["path"])
+        self.assertEqual(served.status_code, 200)
 
     def test_validation_and_admin_only(self):
         csrf = self.login_admin()

@@ -166,7 +166,7 @@
       state.corpusPromise = Promise.resolve(state.corpusBase);
       return state.corpusPromise;
     }
-    state.corpusPromise = fetch('search-index.json', { cache: 'no-cache' }).then(function (response) {
+    state.corpusPromise = fetch('html/search-index.json', { cache: 'no-cache' }).then(function (response) {
       if (!response.ok) {
         throw new Error('HTTP ' + response.status);
       }

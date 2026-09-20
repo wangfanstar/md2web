@@ -58,7 +58,7 @@
 
   function siteForPath(path) {
     var repo = repoForRoute(path);
-    return repo ? 'index_' + repo.id + '.html' : 'index_all.html';
+    return repo ? 'html/index_' + repo.id + '.html' : 'html/index_all.html';
   }
 
   function renderFolderView(folder) {

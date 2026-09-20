@@ -38,6 +38,7 @@ class TempDirTestCase(unittest.TestCase):
         self.module.DOCS_DIR = self.docs
         self.module.LIB_DIR = self.docs / "lib"
         self.module.MD_DIR = self.md
+        self.module.HTML_DIR = self.docs / "html"
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -589,7 +590,8 @@ class ServeTests(unittest.TestCase):
             docs = tmp / "docs"
             (docs / "md").mkdir(parents=True)
             (tmp / "setup_docsify.py").write_text("", encoding="utf-8")
-            index_path = docs / "search-index.json"
+            (docs / "html").mkdir(parents=True, exist_ok=True)
+            index_path = docs / "html" / "search-index.json"
             index_path.write_text('{"/": {}, "/md/a.md": {}}', encoding="utf-8")
             doc_path = docs / "md" / "a.md"
             doc_path.write_text("# A", encoding="utf-8")
@@ -611,7 +613,8 @@ class ServeTests(unittest.TestCase):
             (tmp / "setup_docsify.py").write_text("", encoding="utf-8")
             doc_path = docs / "md" / "a.md"
             doc_path.write_text("# A", encoding="utf-8")
-            (docs / "search-index.json").write_text(
+            (docs / "html").mkdir(parents=True, exist_ok=True)
+            (docs / "html" / "search-index.json").write_text(
                 '{"/": {}, "/md/a.md": {}}', encoding="utf-8"
             )
             with mock.patch.object(serve, "ROOT", tmp):
@@ -1036,7 +1039,7 @@ class ThirdPartyNoticeTests(unittest.TestCase):
         self.assertTrue(built.startswith("/*!"), "docsify.min.js 缺少版权/许可横幅")
         self.assertIn("docsify v4.13.1", built)
         self.assertIn("THIRD-PARTY-NOTICES.md", built)
-        page = (ROOT / "docs" / "index_all.html").read_text(encoding="utf-8")
+        page = (ROOT / "docs" / "html" / "index_all.html").read_text(encoding="utf-8")
         self.assertIn("docsify 4.13.1", page, "页面缺少 docsify 版本声明注释")
 
     def test_readme_mentions_docsify_based(self):
@@ -1057,16 +1060,64 @@ class FolderViewTests(unittest.TestCase):
         self.assertIn("isFolderRoute", built, "构建产物未同步 folder-view.js")
 
     def test_index_all_keeps_toc_container(self):
-        page = (ROOT / "docs" / "index_all.html").read_text(encoding="utf-8")
+        page = (ROOT / "docs" / "html" / "index_all.html").read_text(encoding="utf-8")
         self.assertIn("folderView: true", page)
         self.assertIn("customToc", page, "页面仍应启用右侧本文目录")
+
+
+class HtmlLayoutTests(unittest.TestCase):
+    """docs 根目录只保留 index.html，其余页面与数据都在 docs/html/ 下。"""
+
+    def test_docs_root_keeps_only_index_html(self):
+        docs = ROOT / "docs"
+        files = sorted(path.name for path in docs.iterdir() if path.is_file())
+        self.assertEqual(files, ["index.html"], "docs 根目录只应有 index.html")
+        for name in ("html", "lib", "md"):
+            self.assertTrue((docs / name).is_dir(), name)
+
+    def test_html_dir_contains_pages_and_data(self):
+        html_dir = ROOT / "docs" / "html"
+        for name in ("index_all.html", "md2web_config.html", "md2web_feedback.html",
+                     "README.md", "_sidebar.md", "search-index.json"):
+            self.assertTrue((html_dir / name).is_file(), name)
+        self.assertTrue(list(html_dir.glob("index_*.html")), "每个文件夹都应有入口页")
+        self.assertTrue(list(html_dir.glob("search-index_*.json")))
+        self.assertTrue(list(html_dir.glob("_sidebar_*.md")))
+
+    def test_html_pages_use_base_and_prefixed_paths(self):
+        page = (ROOT / "docs" / "html" / "index_all.html").read_text(encoding="utf-8")
+        self.assertIn('<base href="../">', page)
+        self.assertIn('basePath: "../"', page)
+        self.assertIn("'/_sidebar.md': 'html/_sidebar.md'", page)
+        self.assertIn("indexPath: 'html/search-index.json'", page)
+        self.assertIn('homeLink: "index.html"', page)
+        repo_page = next(path for path in (ROOT / "docs" / "html").glob("index_*.html")
+                         if path.name != "index_all.html")
+        repo_html = repo_page.read_text(encoding="utf-8")
+        self.assertIn('<base href="../">', repo_html)
+        self.assertIn('homeLink: "html/index_all.html"', repo_html)
+
+    def test_master_page_links_into_html_dir(self):
+        master = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('href="html/index_all.html"', master)
+        self.assertIn('href="html/md2web_config.html"', master)
+        self.assertIn('href="html/md2web_feedback.html"', master)
+        self.assertIn("fetch('html/search-index.json')", master)
+        self.assertRegex(master, r'href="html/index_[^"]+\.html"')
+
+    def test_merged_offline_data_uses_html_keys(self):
+        text = (ROOT / "docs" / "lib" / "offline-data.js").read_text(encoding="utf-8")
+        payload = json.loads(text.split("=", 1)[1].rstrip().rstrip(";"))
+        self.assertIn("html/README.md", payload["content"])
+        self.assertIn("html/_sidebar.md", payload["content"])
+        self.assertIn("md/使用说明/快速开始.md", payload["content"])
 
 
 class FeedbackPageTests(unittest.TestCase):
     """读者反馈页与每页入口链接。"""
 
     def test_feedback_page_and_links(self):
-        page = (ROOT / "docs" / "md2web_feedback.html").read_text(encoding="utf-8")
+        page = (ROOT / "docs" / "html" / "md2web_feedback.html").read_text(encoding="utf-8")
         self.assertIn("md2web-feedback.js", page)
         self.assertIn("提交反馈", page)
         script = (ROOT / "web" / "md2web-feedback.js").read_text(encoding="utf-8")
@@ -1076,7 +1127,7 @@ class FeedbackPageTests(unittest.TestCase):
         self.assertIn("md2web_feedback.html", sidebar, "侧栏应包含反馈链接")
         master = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
         self.assertIn("md2web_feedback.html", master)
-        config_page = (ROOT / "docs" / "md2web_config.html").read_text(encoding="utf-8")
+        config_page = (ROOT / "docs" / "html" / "md2web_config.html").read_text(encoding="utf-8")
         self.assertIn("md2web_feedback.html", config_page)
 
     def test_feedback_delete_and_dialog_style(self):
@@ -1246,30 +1297,31 @@ class GenerationTests(TempDirTestCase):
         self.write_doc("指南/进阶.md", "# 进阶")
         self.write_doc("常见问题.md", "# FAQ")
         md_files = self.scan()
+        html = self.module.HTML_DIR
         with redirect_stdout(io.StringIO()):
-            self.module.generate_sidebar(md_files)
-            self.module.generate_readme(md_files, "测试站点")
-            self.module.generate_search_index(md_files, "测试站点")
-            self.module.generate_offline_data(md_files)
+            self.module.generate_sidebar(md_files, path=html / "_sidebar.md")
+            self.module.generate_readme(md_files, "测试站点", path=html / "README.md")
+            self.module.generate_search_index(md_files, "测试站点", path=html / "search-index.json")
+            self.module.generate_offline_data(md_files, sidebar="html/_sidebar.md")
         return md_files
 
     def test_sidebar_tree(self):
         self.build_site()
-        sidebar = (self.docs / "_sidebar.md").read_text(encoding="utf-8")
+        sidebar = (self.module.HTML_DIR / "_sidebar.md").read_text(encoding="utf-8")
         self.assertIn("- **指南**", sidebar)
         self.assertIn("[入门](/md/指南/入门.md)", sidebar)
         self.assertIn("[常见问题](/md/常见问题.md)", sidebar)
 
     def test_readme_index(self):
         self.build_site()
-        readme = (self.docs / "README.md").read_text(encoding="utf-8")
+        readme = (self.module.HTML_DIR / "README.md").read_text(encoding="utf-8")
         self.assertIn("# 测试站点", readme)
         self.assertIn("[入门](md/指南/入门.md)", readme)
 
     def test_search_index_routes(self):
         self.build_site()
         index = json.loads(
-            (self.docs / "search-index.json").read_text(encoding="utf-8")
+            (self.module.HTML_DIR / "search-index.json").read_text(encoding="utf-8")
         )
         self.assertIn("/", index)
         self.assertIn("/md/指南/入门.md", index)
@@ -1279,7 +1331,7 @@ class GenerationTests(TempDirTestCase):
     def test_search_index_has_no_empty_shell_entry(self):
         self.build_site()
         index = json.loads(
-            (self.docs / "search-index.json").read_text(encoding="utf-8")
+            (self.module.HTML_DIR / "search-index.json").read_text(encoding="utf-8")
         )
         page = index["/md/指南/入门.md"]
         self.assertNotIn("/md/指南/入门.md", page)
@@ -1290,7 +1342,7 @@ class GenerationTests(TempDirTestCase):
         text = (self.docs / "lib" / "offline-data.js").read_text(encoding="utf-8")
         payload = json.loads(text.split("=", 1)[1].rstrip().rstrip(";"))
         self.assertIn("md/指南/入门.md", payload["content"])
-        self.assertIn("_sidebar.md", payload["content"])
+        self.assertIn("html/_sidebar.md", payload["content"])
         self.assertIn("searchIndex", payload)
 
     def test_index_html_title_and_escaping(self):
@@ -1451,16 +1503,16 @@ class EndToEndTests(TempDirTestCase):
                 self.module.main([])
         download.assert_not_called()
         self.assertTrue((self.docs / "index.html").exists())
-        self.assertTrue((self.docs / "_sidebar.md").exists())
-        self.assertTrue((self.docs / "README.md").exists())
-        self.assertTrue((self.docs / "search-index.json").exists())
+        self.assertTrue((self.docs / "html" / "_sidebar.md").exists())
+        self.assertTrue((self.docs / "html" / "README.md").exists())
+        self.assertTrue((self.docs / "html" / "search-index.json").exists())
         self.assertTrue((self.md / "a.md").exists())
         self.assertIn(
             "<title>文档中心</title>",
             (self.docs / "index.html").read_text(encoding="utf-8"),
         )
         index = json.loads(
-            (self.docs / "search-index.json").read_text(encoding="utf-8")
+            (self.docs / "html" / "search-index.json").read_text(encoding="utf-8")
         )
         self.assertTrue(
             any(entry["pageTitle"] == "文档中心" for entry in index["/"].values())
@@ -1475,9 +1527,9 @@ class EndToEndTests(TempDirTestCase):
             "<title>E2E</title>",
             (self.docs / "index.html").read_text(encoding="utf-8"),
         )
-        self.assertIn("# E2E", (self.docs / "README.md").read_text(encoding="utf-8"))
+        self.assertIn("# E2E", (self.docs / "html" / "README.md").read_text(encoding="utf-8"))
         index = json.loads(
-            (self.docs / "search-index.json").read_text(encoding="utf-8")
+            (self.docs / "html" / "search-index.json").read_text(encoding="utf-8")
         )
         self.assertTrue(
             any(entry["pageTitle"] == "E2E" for entry in index["/"].values())
@@ -1490,10 +1542,10 @@ class EndToEndTests(TempDirTestCase):
         with mock.patch.object(self.module, "load_repositories", lambda: []):
             with redirect_stdout(io.StringIO()):
                 self.module.main([])
-        self.assertTrue((self.docs / "index_使用说明.html").is_file())
-        self.assertTrue((self.docs / "index_硬件设计.html").is_file())
-        self.assertTrue((self.docs / "_sidebar_硬件设计.md").is_file())
-        self.assertTrue((self.docs / "search-index_硬件设计.json").is_file())
+        self.assertTrue((self.docs / "html" / "index_使用说明.html").is_file())
+        self.assertTrue((self.docs / "html" / "index_硬件设计.html").is_file())
+        self.assertTrue((self.docs / "html" / "_sidebar_硬件设计.md").is_file())
+        self.assertTrue((self.docs / "html" / "search-index_硬件设计.json").is_file())
         overview = (self.docs / "index.html").read_text(encoding="utf-8")
         self.assertIn("index_使用说明.html", overview)
         self.assertIn("未配置 SVN", overview)
@@ -1502,19 +1554,20 @@ class EndToEndTests(TempDirTestCase):
         with mock.patch.object(self.module, "load_repositories", lambda: []):
             with redirect_stdout(io.StringIO()):
                 self.module.main([])
-        self.assertFalse((self.docs / "index_硬件设计.html").exists())
-        self.assertFalse((self.docs / "_sidebar_硬件设计.md").exists())
+        self.assertFalse((self.docs / "html" / "index_硬件设计.html").exists())
+        self.assertFalse((self.docs / "html" / "_sidebar_硬件设计.md").exists())
 
     def test_index_only_skips_site_files(self):
         self.write_doc("a.md", "# A")
-        (self.docs / "_sidebar.md").write_text("SENTINEL", encoding="utf-8")
+        (self.docs / "html").mkdir(parents=True, exist_ok=True)
+        (self.docs / "html" / "_sidebar.md").write_text("SENTINEL", encoding="utf-8")
         with redirect_stdout(io.StringIO()):
             self.module.main(["--index-only"])
         self.assertEqual(
-            (self.docs / "_sidebar.md").read_text(encoding="utf-8"), "SENTINEL"
+            (self.docs / "html" / "_sidebar.md").read_text(encoding="utf-8"), "SENTINEL"
         )
         index = json.loads(
-            (self.docs / "search-index.json").read_text(encoding="utf-8")
+            (self.docs / "html" / "search-index.json").read_text(encoding="utf-8")
         )
         self.assertIn("/md/a.md", index)
         self.assertFalse((self.docs / "index.html").exists())
@@ -1548,9 +1601,9 @@ class EndToEndTests(TempDirTestCase):
             with self.assertRaises(SystemExit) as ctx:
                 self.module.main([])
         self.assertEqual(ctx.exception.code, 1)
-        self.assertFalse((self.docs / "_sidebar.md").exists())
-        self.assertFalse((self.docs / "README.md").exists())
-        self.assertFalse((self.docs / "search-index.json").exists())
+        self.assertFalse((self.docs / "html" / "_sidebar.md").exists())
+        self.assertFalse((self.docs / "html" / "README.md").exists())
+        self.assertFalse((self.docs / "html" / "search-index.json").exists())
 
     def test_build_does_not_touch_user_files(self):
         self.write_doc("a.md", "# A")

@@ -28,6 +28,9 @@ IMAGE_STEM_MAX = 60
 IMAGE_UNSAFE = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
 
 ATTACHMENT_DIR_NAME = "附件"
+# 反馈截图与附件：站点页面在 docs/html/ 下，资产集中存放
+FEEDBACK_IMAGE_REL = "html/images"
+FEEDBACK_UPLOAD_REL = "html/uploads"
 ATTACHMENT_MAX_BYTES = 32 * 1024 * 1024
 ATTACHMENT_NAME_MAX = 120
 ATTACHMENT_UNSAFE = re.compile(r'[\\/:*?"<>|#%\[\]{}()\x00-\x1f]+')
@@ -266,6 +269,49 @@ def next_image_sequence(directory, stem):
             if match:
                 highest = max(highest, int(match.group(1)))
     return highest + 1
+
+
+def _write_blob(directory, name, blob):
+    """把二进制内容原子写入目录（唯一临时文件 + 替换），返回目标路径。"""
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / name
+    handle = tempfile.NamedTemporaryFile(
+        mode="wb", delete=False, dir=str(directory), prefix="." + name + ".", suffix=".tmp",
+    )
+    tmp_path = Path(handle.name)
+    try:
+        with handle:
+            handle.write(blob)
+        os.replace(tmp_path, target)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+    return target
+
+
+def save_feedback_image(docs_dir, mime_type, data, now=None):
+    """反馈截图/图片：写入 docs/html/images/，命名 fb-<时间戳>-<序号>.<扩展名>。"""
+    extension = image_extension(mime_type)
+    blob = decode_image_data(data)
+    directory = Path(docs_dir) / FEEDBACK_IMAGE_REL
+    stamp = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
+    sequence = next_image_sequence(directory, "fb")
+    name = "fb-%s-%d%s" % (stamp, sequence, extension)
+    _write_blob(directory, name, blob)
+    return {"path": FEEDBACK_IMAGE_REL + "/" + name, "name": name, "bytes": len(blob)}
+
+
+def save_feedback_attachment(docs_dir, name, data):
+    """反馈附件：写入 docs/html/uploads/，沿用原文件名（重名自动加序号）。"""
+    blob = decode_attachment_data(data)
+    filename = attachment_filename(name)
+    directory = Path(docs_dir) / FEEDBACK_UPLOAD_REL
+    final_name = next_attachment_name(directory, filename)
+    _write_blob(directory, final_name, blob)
+    return {"path": FEEDBACK_UPLOAD_REL + "/" + final_name, "name": final_name, "bytes": len(blob)}
 
 
 def save_document_image(md_dir, raw, mime_type, data, now=None):

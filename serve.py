@@ -233,7 +233,7 @@ def needs_rebuild(directory):
     md_dir = docs_dir / "md"
     if not md_dir.is_dir():
         return False
-    index_path = docs_dir / "search-index.json"
+    index_path = docs_dir / "html" / "search-index.json"
     if not index_path.exists():
         return True
 

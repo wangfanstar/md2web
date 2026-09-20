@@ -358,7 +358,8 @@
     // 与构建脚本 repo_page_name() 保持一致的命名规则（保留中文等 CJK 字符）
     var safe = String(repoId || '').replace(/[^0-9A-Za-z._㐀-䶿一-鿿-]+/g, '-')
       .replace(/^-+|-+$/g, '') || 'repo';
-    return 'index_' + safe + '.html';
+    // 站点页面在 docs/html/ 下，用站点根相对路径（页面带 <base href="../">）
+    return 'html/index_' + safe + '.html';
   }
 
   function savedRepo(repoId) {

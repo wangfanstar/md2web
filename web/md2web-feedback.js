@@ -2,7 +2,8 @@
   'use strict';
 
   var state = { csrf: '', user: null, isAdmin: false, statuses: {}, items: [],
-    root: null, pageRoot: null, dialog: null };
+    root: null, pageRoot: null, dialog: null,
+    pendingImages: [], pendingAttachments: [], uploading: 0 };
 
   function query(selector) {
     return (state.root || document).querySelector(selector);
@@ -65,14 +66,18 @@
         label.classList.toggle('is-user', !!state.user);
       }
     }
-    query('[data-action="login"]').hidden = !!state.user;
-    query('[data-action="logout"]').hidden = !state.user;
-    query('[data-login-panel]').hidden = !!state.user;
+    var loginButton = query('[data-action="login"]');
+    var logoutButton = query('[data-action="logout"]');
+    var loginPanel = query('[data-login-panel]');
+    if (loginButton) { loginButton.hidden = !!state.user; }
+    if (logoutButton) { logoutButton.hidden = !state.user; }
+    if (loginPanel) { loginPanel.hidden = !!state.user; }
     var hint = query('[data-submit-hint]');
     if (hint) {
       hint.textContent = state.user ? '提交后管理员会更新处理进度。' : '登录后即可提交反馈。';
     }
-    ['[data-feedback-title]', '[data-feedback-body]', '[data-feedback-page]', '[data-action="submit"]'].forEach(function (selector) {
+    ['[data-feedback-title]', '[data-feedback-body]', '[data-feedback-page]', '[data-action="submit"]',
+      '[data-action="pick-image"]', '[data-action="pick-attachment"]'].forEach(function (selector) {
       var node = query(selector);
       if (node) {
         node.disabled = !state.user;
@@ -90,6 +95,199 @@
 
   function formatTime(value) {
     return String(value || '').replace('T', ' ').replace('Z', '').slice(0, 19);
+  }
+
+  // ---------- 截图 / 附件上传 ----------
+
+  var FEEDBACK_IMAGE_MAX = 8 * 1024 * 1024;
+  var FEEDBACK_FILE_MAX = 32 * 1024 * 1024;
+
+  function uploaderMarkup() {
+    return [
+      '<div class="fd-uploader" data-feedback-uploader>',
+      '<div class="fd-uploader-actions">',
+      '<button type="button" class="fd-btn" data-action="pick-image" disabled>选择图片</button>',
+      '<button type="button" class="fd-btn" data-action="pick-attachment" disabled>上传附件</button>',
+      '<span class="fd-hint">可直接粘贴截图（Ctrl+V）或把文件拖到这里</span>',
+      '</div>',
+      '<input type="file" accept="image/*" multiple hidden data-feedback-image-input>',
+      '<input type="file" multiple hidden data-feedback-attachment-input>',
+      '<div class="fd-pending" data-feedback-pending></div>',
+      '</div>'
+    ].join('');
+  }
+
+  function isImageFile(file) {
+    return /^image\//i.test((file && file.type) || '');
+  }
+
+  function clipboardImageFiles(dataTransfer) {
+    var files = [];
+    if (!dataTransfer) {
+      return files;
+    }
+    if (dataTransfer.items && dataTransfer.items.length) {
+      Array.prototype.forEach.call(dataTransfer.items, function (item) {
+        if (item.kind === 'file' && /^image\//i.test(item.type || '')) {
+          var file = item.getAsFile();
+          if (file) { files.push(file); }
+        }
+      });
+    }
+    if (!files.length && dataTransfer.files) {
+      Array.prototype.forEach.call(dataTransfer.files, function (file) {
+        if (isImageFile(file)) { files.push(file); }
+      });
+    }
+    return files;
+  }
+
+  function clipboardOtherFiles(dataTransfer) {
+    var files = [];
+    if (!dataTransfer || !dataTransfer.files) {
+      return files;
+    }
+    Array.prototype.forEach.call(dataTransfer.files, function (file) {
+      if (!isImageFile(file)) { files.push(file); }
+    });
+    return files;
+  }
+
+  function readFileAsDataUrl(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(reader.result); };
+      reader.onerror = function () { reject(reader.error || new Error('读取文件失败')); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function pendingChip(kind, item, index) {
+    var preview = kind === 'image'
+      ? '<img src="' + escapeHtml(item.path) + '" alt="截图预览">'
+      : '<span class="fd-file">' + escapeHtml(item.name) + '</span>';
+    return '<span class="fd-chip-item">' + preview
+      + '<button type="button" data-action="remove-pending" data-kind="' + kind
+      + '" data-index="' + index + '" title="移除">×</button></span>';
+  }
+
+  function renderPending() {
+    var host = query('[data-feedback-pending]');
+    if (!host) {
+      return;
+    }
+    var html = '';
+    state.pendingImages.forEach(function (item, index) { html += pendingChip('image', item, index); });
+    state.pendingAttachments.forEach(function (item, index) { html += pendingChip('attachment', item, index); });
+    if (state.uploading) {
+      html += '<span class="fd-hint">正在上传…</span>';
+    }
+    host.innerHTML = html || '<span class="fd-hint">还没有截图或附件。</span>';
+  }
+
+  function uploadFeedbackImage(file) {
+    if (!state.user) {
+      setStatus('登录后才能上传截图', true);
+      return Promise.reject(new Error('需要登录'));
+    }
+    if (file.size > FEEDBACK_IMAGE_MAX) {
+      setStatus('图片过大（上限 8 MB）', true);
+      return Promise.reject(new Error('图片过大'));
+    }
+    state.uploading += 1;
+    renderPending();
+    return readFileAsDataUrl(file).then(function (dataUrl) {
+      return api('__feedback/image', {
+        method: 'POST',
+        body: JSON.stringify({ type: file.type || 'image/png', data: dataUrl })
+      });
+    }).then(function (payload) {
+      state.pendingImages.push({ path: payload.path, name: payload.name });
+      setStatus('已添加截图 ' + payload.name);
+      return payload;
+    }).catch(function (error) {
+      setStatus('截图上传失败：' + friendlyError(error), true);
+      throw error;
+    }).then(function (payload) {
+      state.uploading -= 1;
+      renderPending();
+      return payload;
+    }, function (error) {
+      state.uploading -= 1;
+      renderPending();
+      throw error;
+    });
+  }
+
+  function uploadFeedbackAttachment(file) {
+    if (!state.user) {
+      setStatus('登录后才能上传附件', true);
+      return Promise.reject(new Error('需要登录'));
+    }
+    if (file.size > FEEDBACK_FILE_MAX) {
+      setStatus('附件过大（上限 32 MB）', true);
+      return Promise.reject(new Error('附件过大'));
+    }
+    state.uploading += 1;
+    renderPending();
+    return readFileAsDataUrl(file).then(function (dataUrl) {
+      return api('__feedback/attachment', {
+        method: 'POST',
+        body: JSON.stringify({ name: file.name || '附件', data: dataUrl })
+      });
+    }).then(function (payload) {
+      state.pendingAttachments.push({ path: payload.path, name: payload.name });
+      setStatus('已添加附件 ' + payload.name);
+      return payload;
+    }).catch(function (error) {
+      setStatus('附件上传失败：' + friendlyError(error), true);
+      throw error;
+    }).then(function (payload) {
+      state.uploading -= 1;
+      renderPending();
+      return payload;
+    }, function (error) {
+      state.uploading -= 1;
+      renderPending();
+      throw error;
+    });
+  }
+
+  function handleFeedbackFiles(files) {
+    var chain = Promise.resolve();
+    Array.prototype.forEach.call(files || [], function (file) {
+      chain = chain.then(function () {
+        return isImageFile(file) ? uploadFeedbackImage(file) : uploadFeedbackAttachment(file);
+      });
+    });
+    return chain.catch(function () { /* 状态栏已提示 */ });
+  }
+
+  function pickFeedbackFile(selector) {
+    var input = query(selector);
+    if (!input) {
+      return;
+    }
+    input.value = '';
+    input.onchange = function () {
+      handleFeedbackFiles(Array.prototype.slice.call(input.files || []));
+    };
+    input.click();
+  }
+
+  function removePending(button) {
+    var kind = button.getAttribute('data-kind');
+    var index = Number(button.getAttribute('data-index'));
+    if (kind === 'image') {
+      state.pendingImages.splice(index, 1);
+    } else {
+      state.pendingAttachments.splice(index, 1);
+    }
+    renderPending();
+  }
+
+  function feedbackUploaderOf(target) {
+    return target && target.closest ? target.closest('[data-feedback-uploader], [data-feedback-body]') : null;
   }
 
   // ---------- 反馈弹窗（侧栏图标 / 固定右上角按钮共用） ----------
@@ -111,7 +309,7 @@
       '<div class="fd-actions">',
       '<button type="button" class="fd-btn" data-action="login">登录</button>',
       '<button type="button" class="fd-btn" data-action="logout" hidden>退出</button>',
-      '<a class="fd-btn" href="md2web_feedback.html" target="_blank" rel="noopener">独立页面</a>',
+      '<a class="fd-btn" href="html/md2web_feedback.html" target="_blank" rel="noopener">独立页面</a>',
       '<button type="button" class="fd-btn" data-action="close-dialog" title="关闭（Esc）">关闭</button>',
       '</div>',
       '</header>',
@@ -131,6 +329,7 @@
       '<div class="fd-field"><span>相关页面</span><input type="text" data-feedback-page placeholder="md/…（自动带入）" disabled></div>',
       '<div class="fd-field fd-field-wide"><span>问题描述</span>'
       + '<textarea data-feedback-body placeholder="复现步骤、期望结果、实际结果…" disabled></textarea></div>',
+      '<div class="fd-field fd-field-wide"><span>截图 / 附件</span>' + uploaderMarkup() + '</div>',
       '</div>',
       '<div class="fd-actions fd-actions-right">',
       '<button class="fd-btn primary" type="button" data-action="submit" disabled>提交反馈</button>',
@@ -285,7 +484,26 @@
     '.feedback-admin{align-items:center;background:#f8fafc;border:1px dashed #dbe4ee;border-radius:8px;display:flex;',
     'flex:1 1 auto;flex-wrap:wrap;gap:6px;padding:6px 8px;}',
     '.feedback-admin select,.feedback-admin input{border:1px solid #d5dee8;border-radius:6px;font:inherit;font-size:12px;',
-    'padding:5px 8px;}'
+    'padding:5px 8px;}',
+    /* 截图 / 附件上传 */
+    '.fd-uploader{background:#fbfdff;border:1px dashed #cbd8e6;border-radius:10px;padding:10px 12px;}',
+    '.fd-uploader-actions{align-items:center;display:flex;flex-wrap:wrap;gap:8px;}',
+    '.fd-pending{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}',
+    '.fd-chip-item{align-items:center;background:#fff;border:1px solid #dbe4ee;border-radius:8px;display:inline-flex;',
+    'gap:6px;max-width:220px;padding:4px 6px;}',
+    '.fd-chip-item img{border-radius:6px;height:34px;object-fit:cover;width:48px;}',
+    '.fd-chip-item .fd-file{color:#334155;font-size:12px;max-width:150px;overflow:hidden;text-overflow:ellipsis;',
+    'white-space:nowrap;}',
+    '.fd-chip-item button{background:transparent;border:0;color:#94a3b8;cursor:pointer;font-size:14px;line-height:1;',
+    'padding:2px 4px;}',
+    '.fd-chip-item button:hover{color:#b91c1c;}',
+    '.feedback-shots{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}',
+    '.feedback-shot{border:1px solid #e6ecf3;border-radius:8px;display:block;line-height:0;overflow:hidden;}',
+    '.feedback-shot img{display:block;height:84px;object-fit:cover;width:120px;}',
+    '.feedback-files{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}',
+    '.feedback-file{background:#f1f5f9;border:1px solid #e2e8f0;border-radius:999px;color:#334155;font-size:12px;',
+    'padding:3px 10px;text-decoration:none;}',
+    '.feedback-file:hover{border-color:#1f6feb;color:#1f6feb;}'
   ].join('');
 
   function ensureStyles() {
@@ -325,7 +543,7 @@
 
   function pageHref(page) {
     var value = String(page || '').trim().replace(/^#\/?/, '').replace(/\.md$/i, '');
-    return value ? 'index_all.html#/' + encodeURI(value) : '';
+    return value ? 'html/index_all.html#/' + encodeURI(value) : '';
   }
 
   function canDelete(item) {
@@ -374,6 +592,18 @@
       '<span class="feedback-badge ' + escapeHtml(status) + '">' + escapeHtml(statusLabel(item.status)) + '</span>',
       '</div>',
       '<p class="feedback-body-text">' + escapeHtml(item.body) + '</p>',
+      (item.images && item.images.length)
+        ? '<div class="feedback-shots">' + item.images.map(function (path) {
+          return '<a class="feedback-shot" href="' + escapeHtml(path) + '" target="_blank" rel="noopener">'
+            + '<img src="' + escapeHtml(path) + '" alt="反馈截图" loading="lazy"></a>';
+        }).join('') + '</div>'
+        : '',
+      (item.attachments && item.attachments.length)
+        ? '<div class="feedback-files">' + item.attachments.map(function (path) {
+          return '<a class="feedback-file" href="' + escapeHtml(path) + '" target="_blank" rel="noopener">'
+            + escapeHtml(String(path).split('/').pop()) + '</a>';
+        }).join('') + '</div>'
+        : '',
       item.note
         ? '<div class="feedback-note-box"><b>处理说明：</b>' + escapeHtml(item.note)
           + '<br><span class="feedback-meta">更新于 ' + escapeHtml(formatTime(item.updated_at)) + '</span></div>'
@@ -427,8 +657,13 @@
   }
 
   function doLogin() {
-    var username = query('[data-login-username]').value.trim();
-    var password = query('[data-login-password]').value;
+    var usernameInput = query('[data-login-username]');
+    var passwordInput = query('[data-login-password]');
+    if (!usernameInput || !passwordInput) {
+      return;
+    }
+    var username = usernameInput.value.trim();
+    var password = passwordInput.value;
     if (!username || !password) {
       setStatus('请输入用户名与密码', true);
       return;
@@ -467,19 +702,32 @@
   }
 
   function submit() {
-    var title = query('[data-feedback-title]').value.trim();
-    var body = query('[data-feedback-body]').value.trim();
-    var page = query('[data-feedback-page]').value.trim();
+    var titleInput = query('[data-feedback-title]');
+    var bodyInput = query('[data-feedback-body]');
+    var pageInput = query('[data-feedback-page]');
+    if (!titleInput || !bodyInput) {
+      return;
+    }
+    var title = titleInput.value.trim();
+    var body = bodyInput.value.trim();
+    var page = pageInput ? pageInput.value.trim() : '';
     if (title.length < 2 || !body) {
       setStatus('请填写标题（至少 2 个字）与问题描述', true);
       return;
     }
     setStatus('正在提交…');
-    api('__feedback', { method: 'POST', body: JSON.stringify({ title: title, body: body, page: page }) })
+    api('__feedback', { method: 'POST', body: JSON.stringify({
+      title: title, body: body, page: page,
+      images: state.pendingImages.map(function (item) { return item.path; }),
+      attachments: state.pendingAttachments.map(function (item) { return item.path; })
+    }) })
       .then(function (payload) {
         setStatus('已提交反馈 #' + payload.id + '，管理员会更新处理进度');
-        query('[data-feedback-title]').value = '';
-        query('[data-feedback-body]').value = '';
+        titleInput.value = '';
+        bodyInput.value = '';
+        state.pendingImages = [];
+        state.pendingAttachments = [];
+        renderPending();
         return loadList();
       })
       .catch(function (error) {
@@ -522,6 +770,34 @@
       });
   }
 
+  document.addEventListener('paste', function (event) {
+    if (!feedbackUploaderOf(event.target)) {
+      return;
+    }
+    var files = clipboardImageFiles(event.clipboardData);
+    if (!files.length) {
+      return;
+    }
+    event.preventDefault();
+    handleFeedbackFiles(files);
+  });
+  document.addEventListener('dragover', function (event) {
+    if (feedbackUploaderOf(event.target)) {
+      event.preventDefault();
+    }
+  });
+  document.addEventListener('drop', function (event) {
+    if (!feedbackUploaderOf(event.target)) {
+      return;
+    }
+    var files = clipboardImageFiles(event.dataTransfer).concat(clipboardOtherFiles(event.dataTransfer));
+    if (!files.length) {
+      return;
+    }
+    event.preventDefault();
+    handleFeedbackFiles(files);
+  });
+
   document.addEventListener('click', function (event) {
     var target = event.target.closest ? event.target.closest('[data-action]') : null;
     if (!target) {
@@ -529,8 +805,10 @@
     }
     var action = target.getAttribute('data-action');
     if (action === 'login') {
-      query('[data-login-panel]').hidden = false;
-      query('[data-login-username]').focus();
+      var panel = query('[data-login-panel]');
+      var username = query('[data-login-username]');
+      if (panel) { panel.hidden = false; }
+      if (username) { username.focus(); }
     } else if (action === 'do-login') {
       doLogin();
     } else if (action === 'logout') {
@@ -547,6 +825,12 @@
       saveProgress(target);
     } else if (action === 'delete-feedback') {
       deleteFeedback(target);
+    } else if (action === 'pick-image') {
+      pickFeedbackFile('[data-feedback-image-input]');
+    } else if (action === 'pick-attachment') {
+      pickFeedbackFile('[data-feedback-attachment-input]');
+    } else if (action === 'remove-pending') {
+      removePending(target);
     }
   });
 

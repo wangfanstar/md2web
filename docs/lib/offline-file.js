@@ -9,24 +9,45 @@
   var content = data.content || {};
   var NativeXHR = window.XMLHttpRequest;
 
+  // 站点根目录（lib/ 的上一级）：页面可能在 html/ 子目录，内嵌数据的键统一以站点根为基准
+  function siteBase() {
+    var script = document.currentScript;
+    var tags;
+    var index;
+    if (script && script.src) {
+      try {
+        return decodeURIComponent(new URL('../', script.src).pathname);
+      } catch (error) { /* 回退到扫描 script 标签 */ }
+    }
+    tags = document.getElementsByTagName('script');
+    for (index = tags.length - 1; index >= 0; index -= 1) {
+      if (/offline-file\.js/.test(tags[index].src || '')) {
+        try {
+          return decodeURIComponent(new URL('../', tags[index].src).pathname);
+        } catch (error) { /* 继续 */ }
+      }
+    }
+    return decodeURIComponent(new URL('.', window.location.href).pathname);
+  }
+
+  var SITE_BASE = siteBase();
+
   function localKey(url) {
     var parsed;
-    var base;
     var path;
     try {
       parsed = new URL(String(url), window.location.href);
       if (parsed.origin !== new URL(window.location.href).origin) {
         return null;
       }
-      base = decodeURIComponent(new URL('.', window.location.href).pathname);
       path = decodeURIComponent(parsed.pathname);
     } catch (error) {
       return null;
     }
-    if (path.indexOf(base) !== 0) {
+    if (path.indexOf(SITE_BASE) !== 0) {
       return null;
     }
-    return path.slice(base.length).replace(/^\/+/, '');
+    return path.slice(SITE_BASE.length).replace(/^\/+/, '');
   }
 
   function OfflineXHR() {

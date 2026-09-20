@@ -37,12 +37,12 @@
     <p class="sub">按仓库分组浏览：每个仓库一个独立入口页（含独立搜索索引），下方搜索会同时检索全部仓库。</p>
     <div class="tools">
       <input type="search" placeholder="搜索全部仓库的文档（回车打开第一条）" data-master-search aria-label="搜索全部仓库">
-      <a href="index_all.html">全部文档（合并视图）</a>
-      <a href="md2web_config.html">仓库配置</a>
-      <a href="md2web_feedback.html">读者反馈</a>
+      <a href="html/index_all.html">全部文档（合并视图）</a>
+      <a href="html/md2web_config.html">仓库配置</a>
+      <a href="html/md2web_feedback.html">读者反馈</a>
     </div>
     <div class="results" data-master-results></div>
-    <h2>默认</h2><div class="cards"><a class="card" href="index_使用说明.html"><strong>使用说明<span class="badge readonly">未配置 SVN</span></strong><span>目录：md/使用说明</span><span>本地文件夹（不连接 SVN）</span></a><a class="card" href="index_硬件设计.html"><strong>硬件设计<span class="badge readonly">未配置 SVN</span></strong><span>目录：md/硬件设计</span><span>本地文件夹（不连接 SVN）</span></a><a class="card" href="index_软件工具链.html"><strong>软件工具链<span class="badge readonly">未配置 SVN</span></strong><span>目录：md/软件工具链</span><span>本地文件夹（不连接 SVN）</span></a><a class="card" href="index_验证指南.html"><strong>验证指南<span class="badge readonly">未配置 SVN</span></strong><span>目录：md/验证指南</span><span>本地文件夹（不连接 SVN）</span></a></div>
+    <h2>默认</h2><div class="cards"><a class="card" href="html/index_使用说明.html"><strong>使用说明<span class="badge readonly">未配置 SVN</span></strong><span>目录：md/使用说明</span><span>本地文件夹（不连接 SVN）</span></a><a class="card" href="html/index_硬件设计.html"><strong>硬件设计<span class="badge readonly">未配置 SVN</span></strong><span>目录：md/硬件设计</span><span>本地文件夹（不连接 SVN）</span></a><a class="card" href="html/index_软件工具链.html"><strong>软件工具链<span class="badge readonly">未配置 SVN</span></strong><span>目录：md/软件工具链</span><span>本地文件夹（不连接 SVN）</span></a><a class="card" href="html/index_验证指南.html"><strong>验证指南<span class="badge readonly">未配置 SVN</span></strong><span>目录：md/验证指南</span><span>本地文件夹（不连接 SVN）</span></a></div>
   </div>
   <script>window.__MD2WEB_REPOS__ = [{"id": "使用说明", "mount": "md/使用说明", "url": "", "group": "默认", "read_only": false, "allow_commit": true, "sync_interval": null, "auto": true}, {"id": "硬件设计", "mount": "md/硬件设计", "url": "", "group": "默认", "read_only": false, "allow_commit": true, "sync_interval": null, "auto": true}, {"id": "软件工具链", "mount": "md/软件工具链", "url": "", "group": "默认", "read_only": false, "allow_commit": true, "sync_interval": null, "auto": true}, {"id": "验证指南", "mount": "md/验证指南", "url": "", "group": "默认", "read_only": false, "allow_commit": true, "sync_interval": null, "auto": true}];</script>
   <script>
@@ -52,7 +52,7 @@
   var results = document.querySelector('[data-master-results]');
   function load() {
     if (index) { return Promise.resolve(index); }
-    return fetch('search-index.json').then(function (r) { return r.json(); }).then(function (data) {
+    return fetch('html/search-index.json').then(function (r) { return r.json(); }).then(function (data) {
       index = data; return data;
     }).catch(function () { index = {}; return index; });
   }

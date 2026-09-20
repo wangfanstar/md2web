@@ -53,16 +53,20 @@ md2web/
 │   │   ├── 硬件设计/时钟树设计.md
 │   │   ├── <文件夹>/images/…    # 图片放在文档同级 images/，用相对路径引用
 │   │   └── <文件夹>/附件/…      # 附件放在文档同级 附件/（编辑器上传时自动插入链接）
+│   ├── html/                    # 站点页面与数据（docs 根目录只保留 index.html）
+│   │   ├── index_all.html       # 全部文档合并视图（生成）
+│   │   ├── index_<仓库>.html     # 每个仓库一个入口页（独立侧栏/搜索索引）（生成）
+│   │   ├── md2web_config.html   # 仓库配置页（由 web/ 复制生成）
+│   │   ├── md2web_feedback.html # 读者反馈页（由 web/ 复制生成）
+│   │   ├── README.md            # 站点首页（生成）
+│   │   ├── _sidebar.md          # 全局侧边栏（生成）
+│   │   ├── _sidebar_<仓库>.md    # 各仓库侧边栏（生成）
+│   │   ├── search-index.json    # 全部仓库搜索索引（生成）
+│   │   ├── search-index_<仓库>.json # 各仓库搜索索引（生成）
+│   │   ├── images/              # 反馈截图（粘贴/上传，运行时创建）
+│   │   └── uploads/             # 反馈附件（运行时创建）
 │   ├── lib/                     # 离线 JS/CSS 与生成资源（含第三方依赖）
-│   ├── index.html               # 总览页：按分组列出各仓库入口 + 跨仓库搜索（生成）
-│   ├── index_all.html           # 全部文档合并视图（生成）
-│   ├── index_<仓库>.html         # 每个仓库一个入口页（独立侧栏/搜索索引）（生成）
-│   ├── md2web_config.html       # 仓库配置页（由 web/ 复制生成）
-│   ├── README.md                # 站点首页（生成）
-│   ├── _sidebar.md              # 全局侧边栏（生成）
-│   ├── _sidebar_<仓库>.md        # 各仓库侧边栏（生成）
-│   ├── search-index.json        # 全部仓库搜索索引（生成）
-│   └── search-index_<仓库>.json  # 各仓库搜索索引（生成）
+│   └── index.html               # 总览页：按分组列出各仓库入口 + 跨仓库搜索（生成）
 ├── config/
 │   ├── server.example.json      # 认证服务示例配置（可提交）
 │   └── server.local.json        # 真实配置（不提交；缺失时自动生成，含仓库映射与密钥）
@@ -82,9 +86,10 @@ md2web/
 └── README.md                    # 本文件
 ```
 
-> `docs/` 下由构建生成的文件（`index*.html`、`md2web_config.html`、`README.md`、`_sidebar*.md`、
-> `search-index*.json`、`lib/` 中的生成资源）请勿手工维护；改前端请改 `web/` 后重新构建。
-> 仓库映射在 `config/server.local.json` 或网页 `md2web_config.html` 中配置，
+> `docs/` 下由构建生成的文件（`index.html`、`html/` 中的页面与索引、`lib/` 中的生成资源）
+> 请勿手工维护；改前端请改 `web/` 后重新构建。
+> 站点页面在 `docs/html/`，页面通过 `<base href="../">` 让 `lib/`、`md/` 与 API 路径都相对站点根解析；
+> 仓库映射在 `config/server.local.json` 或网页 `html/md2web_config.html` 中配置，
 > 保存后服务会自动重建出各仓库入口页与总览页。
 
 ## 快速开始
@@ -167,7 +172,7 @@ node --test tests/test_search.js tests/test_offline.js
 
 Python 测试全程离线（临时目录 + 伪依赖），覆盖扫描与导航、搜索索引、代码检索、首页、严格离线构建、源文件保护与预览服务。Node 仅用于开发回归测试，不是构建或浏览站点的依赖。
 
-- 读者反馈：`md2web_feedback.html` 与页面内反馈弹窗（侧栏 AI 设置图标旁的反馈图标；没有该图标的页面显示右上角固定入口）——登录账号的读者可提交问题并删除自己提交的反馈，未登录只能查看；管理员可更新处理进度（待处理/处理中/已解决/已关闭）、填写处理说明并删除任意反馈，列表按状态着色、带作者与相关页面跳转
+- 读者反馈：`html/md2web_feedback.html` 与页面内反馈弹窗（侧栏 AI 设置图标旁的反馈图标；没有该图标的页面显示右上角固定入口）——登录账号的读者可提交问题并删除自己提交的反馈，未登录只能查看；**支持粘贴截图与上传附件**（截图保存到 `docs/html/images/`、附件保存到 `docs/html/uploads/`，卡片内直接预览与下载）；管理员可更新处理进度（待处理/处理中/已解决/已关闭）、填写处理说明并删除任意反馈，列表按状态着色、带作者与相关页面跳转
 - 分组与权限（仓库配置页）：每个一级文件夹都有「分组」输入（公共设置，不依赖是否配置 SVN，保存到 `folderGroups`，未配置 SVN 的文件夹同样参与分组）；权限是单一开关——有 SVN 时显示「允许合入 SVN 库」，本地模式显示「允许在线修改」，未勾选即网页只读、内容由服务器自动更新。
 
 ## 第三方组件与许可

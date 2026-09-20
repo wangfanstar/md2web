@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .passwords import hash_password
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # 兼容目标：RHEL7 自带 SQLite 3.7.17（Python 3.6 的 sqlite3）。
 # Windows 端也必须只写这些版本能解析的对象，保证 data/ 数据库可在两个平台间直接共用。
@@ -338,6 +338,8 @@ def migrate(conn, logger=None):
                 conn.executescript(MIGRATION_V7_SQL)
             if version < 8:
                 conn.executescript(MIGRATION_V8_SQL)
+            if version < 9:
+                conn.executescript(MIGRATION_V9_SQL)
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     sanitize_schema(conn, logger)
     return SCHEMA_VERSION
@@ -469,6 +471,12 @@ CREATE TABLE IF NOT EXISTS feedback (
 CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback (created_at);
 """
 
+# v9：反馈附带截图与附件（JSON 数组，存 docs/html/images、docs/html/uploads 相对路径）
+MIGRATION_V9_SQL = """
+ALTER TABLE feedback ADD COLUMN images TEXT;
+ALTER TABLE feedback ADD COLUMN attachments TEXT;
+"""
+
 FEEDBACK_STATUSES = ("open", "in_progress", "resolved", "closed")
 FEEDBACK_STATUS_LABELS = {
     "open": "待处理",
@@ -478,20 +486,39 @@ FEEDBACK_STATUS_LABELS = {
 }
 
 
-def create_feedback(conn, author_id, author_name, title, body, page=None, now=None):
+def _feedback_payload(row):
+    """把 feedback 行转换为字典：images/attachments 解析为列表。"""
+    item = dict(row)
+    for key in ("images", "attachments"):
+        try:
+            value = json.loads(item.get(key) or "[]")
+        except (TypeError, ValueError):
+            value = []
+        item[key] = value if isinstance(value, list) else []
+    return item
+
+
+def _feedback_json(values):
+    return json.dumps(list(values or []), ensure_ascii=False)
+
+
+def create_feedback(conn, author_id, author_name, title, body, page=None,
+                    images=None, attachments=None, now=None):
     timestamp = now or now_iso()
     with conn:
         cursor = conn.execute(
-            "INSERT INTO feedback (author_id, author_name, title, body, page, status, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, 'open', ?, ?)",
-            (author_id, author_name, title, body, page, timestamp, timestamp),
+            "INSERT INTO feedback (author_id, author_name, title, body, page, status,"
+            " images, attachments, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)",
+            (author_id, author_name, title, body, page, _feedback_json(images),
+             _feedback_json(attachments), timestamp, timestamp),
         )
     return cursor.lastrowid
 
 
 def list_feedback(conn, limit=200, status=None):
-    sql = ("SELECT id, author_id, author_name, title, body, page, status, note, created_at, updated_at"
-           " FROM feedback")
+    sql = ("SELECT id, author_id, author_name, title, body, page, status, note,"
+           " images, attachments, created_at, updated_at FROM feedback")
     params = []
     if status in FEEDBACK_STATUSES:
         sql += " WHERE status = ?"
@@ -499,12 +526,12 @@ def list_feedback(conn, limit=200, status=None):
     sql += " ORDER BY id DESC LIMIT ?"
     params.append(int(limit))
     rows = conn.execute(sql, tuple(params)).fetchall()
-    return [dict(row) for row in rows]
+    return [_feedback_payload(row) for row in rows]
 
 
 def get_feedback(conn, feedback_id):
     row = conn.execute("SELECT * FROM feedback WHERE id = ?", (feedback_id,)).fetchone()
-    return dict(row) if row is not None else None
+    return _feedback_payload(row) if row is not None else None
 
 
 def update_feedback(conn, feedback_id, status=None, note=None, now=None):
@@ -517,7 +544,7 @@ def update_feedback(conn, feedback_id, status=None, note=None, now=None):
     with conn:
         conn.execute("UPDATE feedback SET status = ?, note = ?, updated_at = ? WHERE id = ?",
                      (new_status, new_note, timestamp, feedback_id))
-    return dict(conn.execute("SELECT * FROM feedback WHERE id = ?", (feedback_id,)).fetchone())
+    return _feedback_payload(conn.execute("SELECT * FROM feedback WHERE id = ?", (feedback_id,)).fetchone())
 
 
 def delete_feedback(conn, feedback_id):

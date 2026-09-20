@@ -591,6 +591,61 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             "feedback": rows,
         })
 
+    def feedback_assets(payload, key, prefix, limit=12):
+        """校验反馈附带的资产路径：必须是 prefix/ 下的已存在文件（防止任意路径入库）。"""
+        values = payload.get(key) or []
+        if not isinstance(values, list):
+            return []
+        result = []
+        for raw in values[:limit]:
+            value = str(raw or "").strip().replace("\\", "/")
+            if not value.startswith(prefix + "/"):
+                continue
+            name = value[len(prefix) + 1:]
+            if not name or "/" in name or ".." in name or name.startswith("."):
+                continue
+            if not (docs_root / prefix / name).is_file():
+                continue
+            if value not in result:
+                result.append(value)
+        return result
+
+    @app.post("/__feedback/image")
+    def upload_feedback_image():
+        """反馈截图：写入 docs/html/images/，命名 fb-<时间戳>-<序号>.<扩展名>。"""
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        try:
+            result = server_documents.save_feedback_image(
+                docs_root, payload.get("type"), payload.get("data"),
+            )
+        except MdSaveError as error:
+            return json_error(error.status, "image_error", error.message)
+        return jsonify({"ok": True, **result})
+
+    @app.post("/__feedback/attachment")
+    def upload_feedback_attachment():
+        """反馈附件：写入 docs/html/uploads/，沿用原文件名（重名自动加序号）。"""
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        try:
+            result = server_documents.save_feedback_attachment(
+                docs_root, payload.get("name"), payload.get("data"),
+            )
+        except MdSaveError as error:
+            return json_error(error.status, "attachment_error", error.message)
+        return jsonify({"ok": True, **result})
+
     @app.post("/__feedback")
     def create_feedback_endpoint():
         """提交反馈（登录用户 + CSRF）。"""
@@ -607,9 +662,11 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         if len(title) < 2 or not body:
             return json_error(400, "invalid_request", "请填写标题（至少 2 个字）与问题描述")
         user = session["user"]
+        images = feedback_assets(payload, "images", "html/images")
+        attachments = feedback_assets(payload, "attachments", "html/uploads")
         feedback_id = database.create_feedback(
             conn, user.get("id"), user.get("displayName") or user.get("username") or "读者",
-            title[:200], body[:8000], page,
+            title[:200], body[:8000], page, images=images, attachments=attachments,
         )
         database.audit(conn, "feedback_create", "ok", actor_id=user.get("id"), resource=str(feedback_id))
         return jsonify({"ok": True, "id": feedback_id})

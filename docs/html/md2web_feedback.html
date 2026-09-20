@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <base href="../">
   <title>md2web 读者反馈</title>
   <style>
     :root { color-scheme: light; }
@@ -69,6 +70,18 @@
       </div>
       <label>问题描述<textarea data-feedback-body placeholder="复现步骤、期望结果、实际结果…" disabled></textarea></label>
       <label>相关页面<input type="text" data-feedback-page placeholder="如 md/硬件设计/时钟树设计.md（可自动带入）" disabled></label>
+      <div class="fd-field fd-field-wide"><span>截图 / 附件</span>
+        <div class="fd-uploader" data-feedback-uploader>
+          <div class="fd-uploader-actions">
+            <button type="button" class="fd-btn" data-action="pick-image" disabled>选择图片</button>
+            <button type="button" class="fd-btn" data-action="pick-attachment" disabled>上传附件</button>
+            <span class="fd-hint">可直接粘贴截图（Ctrl+V）或把文件拖到这里</span>
+          </div>
+          <input type="file" accept="image/*" multiple hidden data-feedback-image-input>
+          <input type="file" multiple hidden data-feedback-attachment-input>
+          <div class="fd-pending" data-feedback-pending></div>
+        </div>
+      </div>
       <div class="actions">
         <button class="primary" type="button" data-action="submit" disabled>提交反馈</button>
       </div>
@@ -93,6 +106,6 @@
       <div data-feedback-list><p class="hint">正在加载…</p></div>
     </section>
   </div>
-  <script src="lib/md2web-feedback.js?v=1aede1f02a"></script>
+  <script src="lib/md2web-feedback.js?v=a8de97626a"></script>
 </body>
 </html>

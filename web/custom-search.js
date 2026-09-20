@@ -1,6 +1,6 @@
 (function () {
   var defaults = {
-    indexPath: 'search-index.json',
+    indexPath: 'html/search-index.json',
     maxSidebarResults: 8,
     maxDialogResults: 50,
     minQueryLength: 2,
@@ -129,15 +129,16 @@
   }
 
   function routeToHash(slug, site) {
-    // 多仓库站点：结果条目带 site（index_<仓库>.html），跨仓库时先切到对应入口页
+    // 多仓库站点：结果条目带 site（html/index_<仓库>.html），跨仓库时先切到对应入口页
     var hash = '#/';
     if (slug && slug !== '/') {
       hash = slug.charAt(0) === '#' ? slug : '#' + slug;
     }
     var page = String(site || '').trim();
-    if (page && page !== 'index_all.html') {
+    var pageName = page.split('/').pop();
+    if (pageName && pageName !== 'index_all.html') {
       var current = String(window.location.pathname || '').split('/').pop() || 'index.html';
-      if (page !== current) {
+      if (pageName !== current) {
         return page + hash;
       }
     }
@@ -2127,7 +2128,7 @@
         if (window.FeedbackDialog) {
           window.FeedbackDialog.open();
         } else {
-          window.open('md2web_feedback.html', '_blank');
+          window.open('html/md2web_feedback.html', '_blank');
         }
       });
     }

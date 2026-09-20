@@ -5,6 +5,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <base href="../">
   <title>文档中心</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f6feb'/%3E%3Cpath d='M9 8.5h14v2.6H9zm0 6h14v2.6H9zm0 6h9v2.6H9z' fill='%23fff'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="lib/prism.min.css?v=aa405e2bcb">
@@ -17,28 +18,29 @@
   <link rel="stylesheet" href="lib/settings.css?v=a86612d83f">
 </head>
 <body>
-  <script src="lib/offline-data.js?v=aa436d976e"></script>
-  <script src="lib/offline-file.js?v=9e57b7a7e9"></script>
+  <script src="lib/offline-data_验证指南.js?v=a5a7c9b67b"></script>
+  <script src="lib/offline-file.js?v=515b2b9fa4"></script>
   <div id="app">加载中...</div>
   <script>
     window.$docsify = {
-      name: "文档中心",
+      name: "验证指南 · 文档中心",
       repo: '',
       loadSidebar: true,
       alias: {
-        '/_sidebar.md': '/_sidebar.md',
-        '/.*/_sidebar.md': '/_sidebar.md',
+        '/_sidebar.md': 'html/_sidebar_验证指南.md',
+        '/.*/_sidebar.md': 'html/_sidebar_验证指南.md',
       },
-      homepage: false,
+      homepage: "md/验证指南/仿真环境搭建.md",
       coverpage: false,
-      routeSidebar: true,
-      folderView: true,
-      homeLink: "index.html",
-      relativePath: true,
-      repoList: [{"id": "使用说明", "sub": "使用说明", "sidebar": "_sidebar_使用说明.md"}, {"id": "硬件设计", "sub": "硬件设计", "sidebar": "_sidebar_硬件设计.md"}, {"id": "软件工具链", "sub": "软件工具链", "sidebar": "_sidebar_软件工具链.md"}, {"id": "验证指南", "sub": "验证指南", "sidebar": "_sidebar_验证指南.md"}],
+      routeSidebar: false,
+      folderView: false,
+      homeLink: "html/index_all.html",
+      basePath: "../",
+      relativePath: false,
+      repoList: [],
       repoReadOnly: false,
       repoAllowCommit: true,
-      repoInfo: {"all": true},
+      repoInfo: {"id": "验证指南", "mount": "md/验证指南", "url": "", "group": "默认", "read_only": false, "allow_commit": true, "sync_interval": null, "auto": true},
       subMaxLevel: 0,
       auto2top: true,
       noEmoji: true,
@@ -69,7 +71,7 @@
         });
       }],
       customSearch: {
-        indexPath: 'search-index.json',
+        indexPath: 'html/search-index_验证指南.json',
         maxSidebarResults: 8,
         maxDialogResults: 50,
         minQueryLength: 2,
@@ -99,7 +101,7 @@
   <script src="lib/katex/katex.min.js?v=4881bfc93a"></script>
   <script src="lib/katex/auto-render.min.js?v=61e52860f7"></script>
   <script src="lib/math-init.js?v=c70b13c7e4"></script>
-  <script src="lib/custom-search.js?v=d91ac72ed4"></script>
+  <script src="lib/custom-search.js?v=b74edbd6be"></script>
   <script src="lib/workspace.js?v=68db9f1a2c"></script>
   <script src="lib/mermaid.min.js?v=4e251a46db"></script>
   <script src="lib/mermaid-init.js?v=046bf9cfc2"></script>
@@ -109,10 +111,10 @@
   <script src="lib/page-export.js?v=bacd3511e2"></script>
   <script src="lib/md-editor.js?v=be2a0eefa0"></script>
   <script src="lib/ai-retrieval.js?v=33c00133c7"></script>
-  <script src="lib/ai-assistant.js?v=921db2acf5"></script>
+  <script src="lib/ai-assistant.js?v=ce1bbdc574"></script>
   <script src="lib/auth.js?v=4bc844eb51"></script>
   <script src="lib/settings.js?v=b90393e0bf"></script>
-  <script src="lib/folder-view.js?v=10f2653c54"></script>
-  <script src="lib/md2web-feedback.js?v=1aede1f02a"></script>
+  <script src="lib/folder-view.js?v=64353819dd"></script>
+  <script src="lib/md2web-feedback.js?v=a8de97626a"></script>
 </body>
 </html>
