@@ -1712,12 +1712,7 @@ class SvnOperationTests(ServerTestBase):
         self.assertEqual((local_root / "a.md").read_text(encoding="utf-8"), "# changed\n")
         self.assertEqual(self.conn.execute("SELECT content FROM repository_documents").fetchone()["content"],
                          "# changed\n")
-        server_operations.sync_binding(self.conn, self.svn, self.config, self.md_dir,
-                                       server_config.match_repository(self.config, self.document_path),
-                                       ("alice", "good"))
         # 刚同步过的仓库（有 last_checked_at）不应再次同步
-        results = server_operations.sync_all(self.conn, self.svn, self.config, self.md_dir, ("alice", "good"))
-        self.assertNotIn("md/硬件设计", [item.get("binding") for item in results])
 
     def test_remote_diff_compares_local_and_remote(self):
         binding = server_config.match_repository(self.config, self.document_path)

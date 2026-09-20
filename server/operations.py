@@ -83,14 +83,15 @@ def _repository_root(md_dir, mount):
     return Path(md_dir).joinpath(*parts[1:])
 
 
-def _repository_files(root):
+def _repository_files(root, mount="md"):
+    """扫描本地仓库目录：键统一为 md/<相对路径>（与草稿、发布查找保持一致）。"""
     files = {}
     if not root.is_dir():
         return files
     for path in sorted(root.rglob("*.md")):
         if not path.is_file() or ".svn" in path.parts:
             continue
-        rel = path.as_posix()
+        rel = str(mount).rstrip("/") + "/" + path.relative_to(root).as_posix()
         try:
             text = documents.read_md_text(path)
         except (OSError, UnicodeError) as error:
@@ -118,7 +119,7 @@ def local_import_repository(conn, config, md_dir, binding, actor_id=None, force=
     if binding.get("source_mode", "svn") != "local":
         raise OperationError(400, "只有本地模式仓库才能导入 SQLite")
     binding_row = _ensure_local_binding(conn, binding, config)
-    files = _repository_files(_repository_root(md_dir, binding["mount"]))
+    files = _repository_files(_repository_root(md_dir, binding["mount"]), binding["mount"])
     existing = {
         row["path"]: dict(row)
         for row in conn.execute("SELECT * FROM repository_documents WHERE binding_id = ?", (binding_row["id"],))
@@ -137,6 +138,9 @@ def local_import_repository(conn, config, md_dir, binding, actor_id=None, force=
     now = database.now_iso()
     manifest_hash = _manifest_hash(files)
     with conn:
+        # 清理历史遗留的绝对路径行（旧版本写入的）
+        conn.execute("DELETE FROM repository_documents WHERE binding_id = ? AND path NOT LIKE 'md/%'",
+                     (binding_row["id"],))
         for path, item in files.items():
             conn.execute(
                 "INSERT OR REPLACE INTO repository_documents"

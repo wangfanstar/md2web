@@ -170,10 +170,12 @@
         + '" placeholder="默认"' + disabled + '></label>',
       '<label>更新频率（秒）<input type="number" min="0" step="30" data-repo="syncIntervalSeconds" value="'
         + escapeHtml(interval) + '" placeholder="默认"' + disabled + '></label>',
+      '<div class="repo-flags">',
       '<label class="flag"><input type="checkbox" data-repo="readOnly"'
         + (item.readOnly ? ' checked' : '') + disabled + '>只读</label>',
       '<label class="flag"><input type="checkbox" data-repo="allowCommit"'
         + (item.allowCommit === false ? '' : ' checked') + disabled + '>允许合入</label>',
+      '</div>',
       '</div>',
       '<div class="actions">'
         + '<button type="button" data-action="repo-credential"' + disabled + '>同步凭据…</button>'

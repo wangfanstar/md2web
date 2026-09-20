@@ -21,9 +21,18 @@
     button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
     button.danger { color: #b91c1c; }
     table { border-collapse: collapse; font-size: 12.5px; width: 100%; }
-    th, td { border-bottom: 1px solid #eef2f6; padding: 6px 8px; text-align: left; vertical-align: top; }
+    th, td { border-bottom: 1px solid #eef2f6; padding: 8px 10px; text-align: left; vertical-align: middle; }
     th { color: #57606a; font-weight: 600; white-space: nowrap; }
     td input[type="text"], td input[type="number"] { width: 100%; min-width: 90px; }
+
+    /* 主表格列宽：状态与「启用 SVN」列不挤压 */
+    [data-repo-rows] > tr > td:nth-child(1) { min-width: 190px; }
+    [data-repo-rows] > tr > td:nth-child(2) { min-width: 150px; }
+    [data-repo-rows] > tr > td:nth-child(3),
+    [data-repo-rows] > tr > td:nth-child(4) { min-width: 110px; }
+    [data-repo-rows] > tr > td:nth-child(5) { min-width: 170px; }
+    [data-repo-rows] > tr > td:nth-child(6) { text-align: center; white-space: nowrap; width: 1%; }
+    [data-repo-rows] > tr > td:nth-child(6) .flag { justify-content: center; margin: 0; }
     .status { border-radius: 6px; font-size: 12.5px; margin-top: 10px; padding: 8px 10px; }
     .status.ok { background: #ecfdf5; color: #047857; }
     .status.error { background: #fef2f2; color: #b91c1c; }
@@ -41,9 +50,35 @@
     .status-help li { line-height: 1.7; margin: 3px 0; }
     .status-help p { margin: 0; }
     tr[data-pair-detail] td { background: #f8fafc; }
-    .repo-detail { display: flex; flex-wrap: wrap; gap: 10px 14px; padding: 2px 0 4px; }
-    .repo-detail label { min-width: 150px; }
-    .repo-detail input[type="text"] { min-width: 230px; }
+    /* SVN 配置明细：网格对齐（输入框与「只读 / 允许合入」勾选行底部对齐） */
+    .repo-detail {
+      align-items: end;
+      display: grid;
+      gap: 10px 14px;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      padding: 6px 0 6px;
+    }
+    .repo-detail label { min-width: 0; }
+    .repo-detail input[type="text"],
+    .repo-detail input[type="number"] { min-width: 0; width: 100%; }
+    .repo-detail .flag {
+      align-items: center;
+      display: inline-flex;
+      gap: 6px;
+      margin: 0;
+      min-height: 32px;
+      padding-bottom: 6px;
+    }
+    .repo-detail .flag input[type="checkbox"] { height: 16px; margin: 0; width: 16px; }
+    .repo-detail .repo-flags {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      min-height: 36px;
+    }
+    .repo-detail .actions { grid-column: 1 / -1; margin-top: 2px; }
+    .repo-detail .actions button { padding: 5px 10px; white-space: nowrap; }
   </style>
 </head>
 <body>
