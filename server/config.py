@@ -160,6 +160,16 @@ def load_config(path, docs_dir, allow_incomplete=False):
         if mount in seen_mounts:
             raise ConfigError(f"repository.mount 重复: {mount}")
         seen_mounts.add(mount)
+        source_mode = str(item.get("sourceMode", item.get("source_mode", "svn")) or "svn").strip().lower()
+        if source_mode not in ("local", "svn"):
+            raise ConfigError(f"repositories[{index}].sourceMode 必须是 local 或 svn")
+        raw_url = str(item.get("url") or "").strip()
+        if source_mode == "svn":
+            repo_url = _check_url(raw_url, f"repositories[{index}].url")
+        else:
+            if raw_url:
+                raise ConfigError(f"repositories[{index}] 本地模式不能配置 SVN URL，请清空 url")
+            repo_url = ""
         sync_interval = item.get("syncIntervalSeconds", None)
         if sync_interval is not None:
             try:
@@ -171,7 +181,8 @@ def load_config(path, docs_dir, allow_incomplete=False):
         repositories.append({
             "id": repo_id,
             "mount": mount,
-            "url": _check_url(item.get("url"), f"repositories[{index}].url"),
+            "source_mode": source_mode,
+            "url": repo_url,
             "credential_group": str(item.get("credential_group") or credential_group).strip() or credential_group,
             "group": str(item.get("group") or "").strip() or str(item.get("credential_group") or credential_group).strip() or "默认",
             "read_only": bool(item.get("readOnly", False)),
@@ -256,7 +267,8 @@ def config_to_json(config):
             "message": config.get("site_backup", {}).get("message", "site backup"),
         },
         "repositories": [
-            {"id": repo["id"], "mount": repo["mount"], "url": repo["url"],
+            {"id": repo["id"], "mount": repo["mount"], "sourceMode": repo.get("source_mode", "svn"),
+             "url": repo["url"],
              "credential_group": repo["credential_group"], "group": repo.get("group") or "默认",
              "readOnly": bool(repo.get("read_only")), "allowCommit": bool(repo.get("allow_commit", True)),
              "syncIntervalSeconds": repo.get("sync_interval")}
@@ -351,7 +363,8 @@ def public_config(config):
     ai = config.get("ai") or {}
     return {
         "repositories": [
-            {"id": repo["id"], "mount": repo["mount"], "url": repo["url"],
+            {"id": repo["id"], "mount": repo["mount"], "sourceMode": repo.get("source_mode", "svn"),
+             "url": repo["url"],
              "group": repo.get("group") or "默认", "readOnly": bool(repo.get("read_only")),
              "allowCommit": bool(repo.get("allow_commit", True)),
              "syncIntervalSeconds": repo.get("sync_interval")}

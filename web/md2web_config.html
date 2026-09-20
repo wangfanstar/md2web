@@ -37,12 +37,17 @@
     .repo-health.is-error { color: #b91c1c; font-weight: 600; }
     .entry-link { font-size: 11.5px; }
     .status-none { color: #b45309; font-size: 11.5px; }
+    tr[data-pair-detail] td { background: #f8fafc; }
+    .repo-detail { display: flex; flex-wrap: wrap; gap: 10px 14px; padding: 2px 0 4px; }
+    .repo-detail label { min-width: 150px; }
+    .repo-detail input[type="text"] { min-width: 230px; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>md2web 仓库配置</h1>
-    <p class="sub">默认列出 <code>docs/md</code> 下的所有文件夹：已配置仓库的显示对应 SVN 信息，未配置的留空，填写并保存即可新增；清空某行则移除该映射。配置 SVN 地址、更新频率、是否允许合入与是否只读，并按分组展示。
+    <p class="sub">默认列出 <code>docs/md</code> 下的所有文件夹、入口页链接、最新更新（作者/时间）与仓库大小；
+      勾选「配置 SVN」才会展开 SVN 地址、更新频率、只读/允许合入等设置（不勾选表示本地模式，不连接 SVN）。
       保存后站点会自动重建：每个仓库生成一个入口页 <code>index_&lt;仓库名&gt;.html</code>，根目录 <code>index.html</code> 为分组总览。</p>
 
     <section class="panel" data-config-login hidden>
@@ -60,13 +65,13 @@
       <table>
         <thead>
           <tr>
-            <th>md 下文件夹</th><th>仓库 ID</th><th>SVN 地址</th><th>分组</th>
-            <th>更新频率（秒）</th><th>只读</th><th>允许合入</th><th>操作</th>
+            <th>md 下文件夹</th><th>仓库入口页</th><th>最新更新</th><th>仓库大小</th><th>状态</th><th>SVN 配置</th>
           </tr>
         </thead>
         <tbody data-repo-rows></tbody>
       </table>
       <div class="actions">
+        <button type="button" data-action="refresh-folders">刷新文件夹信息</button>
         <button type="button" data-action="health-all">检查全部状态</button>
         <button type="button" data-action="add-repo">+ 添加仓库</button>
         <button class="primary" type="button" data-action="save">保存配置并重建站点</button>
@@ -81,7 +86,8 @@
         <b>同步异常/本地内容缺失/工作副本损坏</b> 点「修复」会执行 svn cleanup 并强制重新拉取远端内容（覆盖同名文档，不删除本地新增文件）；
         <b>仓库身份变化</b>（远端库被重建，UUID 不一致）或修复仍失败时，点「删除重建」：本地目录含未提交修改会移入 <code>data/trash</code>，并重新绑定仓库身份后完整拉取。
         「创建并拉取」会在目录不存在时自动创建 <code>docs/md/&lt;文件夹&gt;</code> 并从 SVN 导出内容；
-        更新频率留空使用全局默认（设置 → SVN 与仓库），填 0 表示不自动同步。</p>
+        更新频率留空使用全局默认（设置 → SVN 与仓库），填 0 表示不自动同步。
+        不勾选「配置 SVN」的仓库按<b>本地模式</b>（SQLite 主库）保存，不做 SVN 检查；「移除配置」会清空该文件夹的仓库 ID 与地址。</p>
     </section>
 
     <section class="panel" data-config-main hidden>

@@ -405,6 +405,27 @@ class ConfigTests(ServerTestBase):
             with self.assertRaises(server_config.ConfigError, msg=url):
                 server_config.load_config(path, self.docs)
 
+    def test_local_repository_allows_empty_url_and_defaults_sync_off(self):
+        path = self.write_config({"repositories": [{
+            "id": "notes", "mount": "md/notes", "sourceMode": "local",
+            "url": "", "syncIntervalSeconds": 0,
+        }]})
+        config = server_config.load_config(path, self.docs)
+        repo = config["repositories"][0]
+        self.assertEqual(repo["source_mode"], "local")
+        self.assertEqual(repo["url"], "")
+        self.assertEqual(repo["sync_interval"], 0.0)
+
+    def test_local_repository_rejects_svn_url_and_unknown_mode(self):
+        for item in (
+            {"id": "x", "mount": "md/x", "sourceMode": "local",
+             "url": "https://svn.example.invalid/svn/x/"},
+            {"id": "x", "mount": "md/x", "sourceMode": "mirror", "url": ""},
+        ):
+            path = self.write_config({"repositories": [item]})
+            with self.assertRaises(server_config.ConfigError):
+                server_config.load_config(path, self.docs)
+
     def test_match_repository_uses_longest_segment_prefix(self):
         path = self.write_config({"repositories": [
             {"id": "root", "mount": "md/A", "url": "https://svn.example.invalid/svn/a/"},
@@ -430,8 +451,11 @@ class DatabaseTests(ServerTestBase):
             self.assertEqual(server_database.migrate(conn), server_database.SCHEMA_VERSION)
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             for name in ("users", "sessions", "repo_bindings", "drafts", "revisions", "operations",
-                         "audit_events", "svn_credentials", "document_snapshots", "document_events"):
+                         "audit_events", "svn_credentials", "document_snapshots", "document_events",
+                         "repository_documents", "source_events"):
                 self.assertIn(name, tables)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(repo_bindings)")}
+            self.assertIn("source_mode", columns)
             self.assertEqual(conn.execute("PRAGMA foreign_keys").fetchone()[0], 1)
             self.assertEqual(server_database.migrate(conn), server_database.SCHEMA_VERSION)
         finally:
@@ -1653,6 +1677,41 @@ class SvnOperationTests(ServerTestBase):
                                                     ("alice", "good")), [])
         for repo in self.config["repositories"]:
             repo["sync_interval"] = 3600
+
+    def test_sync_all_skips_local_source_without_calling_svn(self):
+        local_root = self.md_dir / "本地"
+        local_root.mkdir(parents=True, exist_ok=True)
+        (local_root / "a.md").write_text("# local\n", encoding="utf-8")
+        local = {"id": "local", "mount": "md/本地", "source_mode": "local", "url": "",
+                 "credential_group": "default", "sync_interval": 1}
+        self.config["repositories"] = [local]
+        class NeverSvn:
+            def info(self, *args, **kwargs):
+                raise AssertionError("local source must not call svn")
+        result = server_operations.sync_all(self.conn, NeverSvn(), self.config, self.md_dir,
+                                            now=time.time() + 1000)
+        self.assertEqual(result, [])
+
+    def test_local_import_and_publish_keep_content_in_sqlite(self):
+        local_root = self.md_dir / "本地"
+        local_root.mkdir(parents=True, exist_ok=True)
+        (local_root / "a.md").write_text("# local\n", encoding="utf-8")
+        binding = {"id": "local", "mount": "md/本地", "source_mode": "local", "url": "",
+                   "credential_group": "default", "read_only": False, "allow_commit": True}
+        self.config["repositories"] = [binding]
+        imported = server_operations.local_import_repository(self.conn, self.config, self.md_dir, binding)
+        self.assertEqual(imported["files"], 1)
+        row = self.conn.execute("SELECT content FROM repository_documents").fetchone()
+        self.assertEqual(row["content"], "# local\n")
+        draft = server_drafts.save_draft(self.conn, self.alice, self.md_dir, "md/本地/a.md",
+                                         "# changed\n", expected_version=0, binding_id=1)
+        published = server_operations.local_publish_draft(self.conn, self.config, self.md_dir,
+                                                          self.alice, "md/本地/a.md",
+                                                          expected_version=draft["version"])
+        self.assertEqual(published["state"], "published")
+        self.assertEqual((local_root / "a.md").read_text(encoding="utf-8"), "# changed\n")
+        self.assertEqual(self.conn.execute("SELECT content FROM repository_documents").fetchone()["content"],
+                         "# changed\n")
         server_operations.sync_binding(self.conn, self.svn, self.config, self.md_dir,
                                        server_config.match_repository(self.config, self.document_path),
                                        ("alice", "good"))
@@ -2494,6 +2553,88 @@ class PathsTests(unittest.TestCase):
             self.assertTrue(server_paths.is_blocked_static_path(value), value)
         for value in ("md/a.md", "lib/ai-assistant.js", "md/硬件设计/时钟树设计.md"):
             self.assertFalse(server_paths.is_blocked_static_path(value), value)
+
+
+class FolderMetadataTests(ServerTestBase):
+    """/__folders 附带仓库大小/文件数与最新更新；local 模式仓库不做 SVN 检查。"""
+
+    def setUp(self):
+        super().setUp()
+        self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
+        server_database.migrate(self.conn)
+        server_database.ensure_admin(self.conn)
+        self.config = server_config.load_config(self.write_config({"repositories": [
+            {"id": "hardware", "mount": "md/硬件设计",
+             "url": "https://svn.example.invalid/svn/hardware/trunk/docs/"},
+            {"id": "notes", "mount": "md/本地笔记", "sourceMode": "local"},
+        ]}), self.docs)
+        (self.docs / "md" / "硬件设计" / "images").mkdir(parents=True)
+        (self.docs / "md" / "硬件设计" / "doc.md").write_text("# 文档\n", encoding="utf-8")
+        (self.docs / "md" / "硬件设计" / "images" / "a.png").write_bytes(b"PNG-DATA")
+        (self.docs / "md" / "硬件设计" / "接口").mkdir(parents=True)
+        (self.docs / "md" / "硬件设计" / "接口" / "uart.md").write_text("# UART\n", encoding="utf-8")
+        (self.docs / "md" / "硬件设计" / "接口" / "datasheet.pdf").write_bytes(b"PDF")
+        (self.docs / "md" / "本地笔记").mkdir(parents=True)
+        (self.docs / "md" / "本地笔记" / "note.md").write_text("# 笔记\n", encoding="utf-8")
+        from server.app import create_app
+        self.auth = server_auth.AuthService(self.conn, FakeSvn(), self.config)
+        self.app = create_app(self.config, self.conn, self.auth, self.docs)
+        self.client = self.app.test_client()
+        self.client.post("/__auth/login", json={"username": "admin", "password": "admin"})
+
+    def tearDown(self):
+        self.conn.close()
+        super().tearDown()
+
+    def csrf(self):
+        return self.client.get("/__auth/session").get_json()["csrfToken"]
+
+    def test_folders_include_size_files_and_latest_update(self):
+        folders = {item["path"]: item for item in self.client.get("/__folders").get_json()["folders"]}
+        hardware = folders["md/硬件设计"]
+        self.assertEqual(hardware["files"], 4, "应统计子目录与附件")
+        sizes = {name: (self.docs / "md" / "硬件设计" / name).stat().st_size
+                 for name in ("doc.md", "images/a.png", "接口/uart.md", "接口/datasheet.pdf")}
+        expected_size = sum(sizes.values())
+        self.assertEqual(hardware["sizeBytes"], expected_size)
+        # 分类统计：文档（md）/附件（其他文件）/子文件夹
+        self.assertEqual(hardware["mdFiles"], 2)
+        self.assertEqual(hardware["mdBytes"], sizes["doc.md"] + sizes["接口/uart.md"])
+        self.assertEqual(hardware["otherFiles"], 2)
+        self.assertEqual(hardware["otherBytes"], sizes["images/a.png"] + sizes["接口/datasheet.pdf"])
+        self.assertEqual(hardware["subfolders"], 2, "images 与 接口 都是一级子文件夹")
+        self.assertEqual(hardware["nestedFiles"], 3, "子文件夹内的文件（含 images/a.png）")
+        self.assertEqual(hardware["nestedBytes"],
+                         sizes["images/a.png"] + sizes["接口/uart.md"] + sizes["接口/datasheet.pdf"])
+        self.assertEqual(hardware["latestUpdate"]["source"], "filesystem",
+                         "没有发布记录时应回退到最新文件时间")
+        self.assertTrue(hardware["latestUpdate"]["at"].endswith("Z"))
+        self.assertEqual(hardware["documents"], 1, "documents 仍只统计一级 md 文件")
+        # 有发布记录时展示作者与发布时间
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO operations (id, actor_id, binding_id, kind, state, reviewed_manifest,"
+                " message, created_at, finished_at) VALUES ('op-1', 1, NULL, 'svn_commit', 'published',"
+                " ?, 'm', '2026-09-20T01:00:00Z', '2026-09-20T01:00:05Z')",
+                (json.dumps({"path": "md/硬件设计/doc.md"}),))
+        folders = {item["path"]: item for item in self.client.get("/__folders").get_json()["folders"]}
+        latest = folders["md/硬件设计"]["latestUpdate"]
+        self.assertEqual(latest["source"], "publish")
+        self.assertEqual(latest["author"], "管理员")
+        self.assertEqual(latest["at"], "2026-09-20T01:00:05Z")
+        self.assertEqual(folders["md/本地笔记"]["latestUpdate"]["source"], "filesystem")
+
+    def test_health_reports_local_mode_without_svn_check(self):
+        headers = {"X-CSRF-Token": self.csrf()}
+        payload = self.client.post("/__admin/repo-health", json={}, headers=headers).get_json()
+        reports = {item["id"]: item for item in payload["reports"]}
+        self.assertEqual(reports["notes"]["status"], "本地模式")
+        self.assertEqual(reports["notes"]["level"], "ok")
+        self.assertNotEqual(reports["hardware"]["status"], "本地模式")
+        single = self.client.post("/__admin/repo-health", json={"id": "notes"},
+                                  headers=headers).get_json()["reports"]
+        self.assertEqual(len(single), 1)
+        self.assertEqual(single[0]["status"], "本地模式")
 
 
 if __name__ == "__main__":

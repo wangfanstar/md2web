@@ -864,6 +864,27 @@ class LauncherScriptsTests(unittest.TestCase):
         self.assertIn("--) ;;", raw, "应忽略多余的分隔符 --")
         self.assertIn("exec \"$PY\" serve.py", raw, "前台模式应保持 exec 语义")
 
+    def test_start_linux_prompts_before_killing_port_holder(self):
+        raw = (ROOT / "start_linux.sh").read_text(encoding="utf-8")
+        self.assertIn("confirm_port_conflict", raw, "启动前应先检查端口占用")
+        self.assertIn("read -t 10", raw, "端口占用询问应支持 10 秒超时")
+        self.assertIn("10 秒无操作，自动强制结束占用进程", raw, "超时应自动强制结束占用进程")
+        self.assertIn("已取消启动", raw, "回答 n 应取消启动")
+        self.assertIn("非交互式启动：自动强制结束占用进程", raw, "非交互启动应自动结束占用进程")
+        # 进程信息优先 /proc（ps -o 字段在不同发行版上有兼容问题）
+        self.assertIn("process_info", raw, "应打印占用进程的详细信息")
+        self.assertIn("/proc/$pid/cmdline", raw, "应用 /proc 读取命令行")
+        self.assertIn("human_duration", raw, "应展示可读的运行时长")
+
+    def test_start_linux_readiness_uses_pid_and_port(self):
+        raw = (ROOT / "start_linux.sh").read_text(encoding="utf-8")
+        # 就绪判断：pidfile 进程存活 + 端口监听（日志未刷新时也能判断成功）
+        self.assertIn('port_holders "$target_port"', raw, "就绪判断应检查端口监听")
+        self.assertIn('nohup "$PY" -u serve.py', raw, "后台启动应关闭 Python 输出缓冲，日志即时可用")
+        # 失败时给出诊断（进程/端口/日志）
+        self.assertIn("日志为空：$LOG_FILE", raw, "日志为空时应明确提示")
+        self.assertIn("端口 $target_port 尚未监听", raw, "应区分“进程在但端口未监听”")
+
     def test_launchers_default_to_lan_bind(self):
         linux = (ROOT / "start_linux.sh").read_text(encoding="utf-8")
         self.assertIn("--bind 0.0.0.0", linux, "start_linux.sh 默认应监听所有网卡")
@@ -923,6 +944,23 @@ class MultiRepoTests(TempDirTestCase):
         self.assertEqual(self.module.repo_page_name("hardware"), "index_hardware.html")
         self.assertEqual(self.module.repo_page_name("a/b c"), "index_a-b-c.html")
         self.assertEqual(self.module.mount_subpath("md/硬件设计"), "硬件设计")
+
+    def test_auto_folder_repos_cover_unconfigured_folders(self):
+        self.write_doc("硬件设计/时钟树设计.md", "# A")
+        self.write_doc("验证指南/仿真环境搭建.md", "# B")
+        auto = self.module.auto_folder_repos(self.REPOS)
+        ids = {item["id"] for item in auto}
+        self.assertEqual(ids, {"验证指南"}, "只应为未配置仓库的文件夹生成入口页")
+        item = auto[0]
+        self.assertTrue(item["auto"])
+        self.assertEqual(item["mount"], "md/验证指南")
+        self.assertEqual(item["url"], "")
+        self.assertEqual(self.module.repo_page_name(item["id"]), "index_验证指南.html",
+                         "中文文件夹名应保留在入口页文件名中")
+        with mock.patch.object(self.module, "load_repositories", lambda: list(self.REPOS)):
+            with redirect_stdout(io.StringIO()):
+                repos = self.module.load_all_repos()
+        self.assertEqual([item["id"] for item in repos], ["hardware", "software", "验证指南"])
 
     def test_repo_for_route_uses_longest_prefix(self):
         repos = self.REPOS + [{"id": "deep", "mount": "md/硬件设计/接口", "group": "硬件",
@@ -1390,6 +1428,28 @@ class EndToEndTests(TempDirTestCase):
         self.assertTrue(
             any(entry["pageTitle"] == "E2E" for entry in index["/"].values())
         )
+
+    def test_full_build_creates_entry_page_per_folder(self):
+        self.write_doc("使用说明/a.md", "# A")
+        self.write_doc("硬件设计/b.md", "# B")
+        self.seed_assets()
+        with mock.patch.object(self.module, "load_repositories", lambda: []):
+            with redirect_stdout(io.StringIO()):
+                self.module.main([])
+        self.assertTrue((self.docs / "index_使用说明.html").is_file())
+        self.assertTrue((self.docs / "index_硬件设计.html").is_file())
+        self.assertTrue((self.docs / "_sidebar_硬件设计.md").is_file())
+        self.assertTrue((self.docs / "search-index_硬件设计.json").is_file())
+        overview = (self.docs / "index.html").read_text(encoding="utf-8")
+        self.assertIn("index_使用说明.html", overview)
+        self.assertIn("未配置 SVN", overview)
+        # 文件夹被删除后重建：入口页等产物应被清理
+        shutil.rmtree(self.md / "硬件设计")
+        with mock.patch.object(self.module, "load_repositories", lambda: []):
+            with redirect_stdout(io.StringIO()):
+                self.module.main([])
+        self.assertFalse((self.docs / "index_硬件设计.html").exists())
+        self.assertFalse((self.docs / "_sidebar_硬件设计.md").exists())
 
     def test_index_only_skips_site_files(self):
         self.write_doc("a.md", "# A")

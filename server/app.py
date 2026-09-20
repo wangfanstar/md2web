@@ -303,10 +303,81 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             "events": database.document_events(conn, 200),
         })
 
+    def folder_metrics():
+        """每个一级文件夹的大小/文件数与最新文件时间。
+
+        分类统计：mdFiles/mdBytes（Markdown 文档）、otherFiles/otherBytes（附件等其它文件）、
+        subfolders（一级子文件夹数）、nestedFiles/nestedBytes（子文件夹内的文件，已计入前两类）。
+        """
+        metrics = {}
+        root = md_dir()
+        if not root.is_dir():
+            return metrics
+        for child in sorted(root.iterdir()):
+            if not child.is_dir() or child.name.startswith("."):
+                continue
+            size = files = newest = 0
+            md_files = md_bytes = other_files = other_bytes = 0
+            nested_files = nested_bytes = 0
+            subfolders = 0
+            for item in child.rglob("*"):
+                if not item.is_file() or ".svn" in item.parts:
+                    continue
+                try:
+                    stat = item.stat()
+                except OSError:
+                    continue
+                file_size = int(stat.st_size)
+                files += 1
+                size += file_size
+                newest = max(newest, int(stat.st_mtime))
+                if len(item.relative_to(child).parts) > 1:
+                    nested_files += 1
+                    nested_bytes += file_size
+                if item.suffix.lower() == ".md":
+                    md_files += 1
+                    md_bytes += file_size
+                else:
+                    other_files += 1
+                    other_bytes += file_size
+            for entry in child.iterdir():
+                if entry.is_dir() and not entry.name.startswith(".") and entry.name != ".svn":
+                    subfolders += 1
+            metrics["md/" + child.name] = {
+                "sizeBytes": size,
+                "files": files,
+                "mdFiles": md_files,
+                "mdBytes": md_bytes,
+                "otherFiles": other_files,
+                "otherBytes": other_bytes,
+                "subfolders": subfolders,
+                "nestedFiles": nested_files,
+                "nestedBytes": nested_bytes,
+                "mtime": (datetime.fromtimestamp(newest, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                          if newest else None),
+            }
+        return metrics
+
     @app.get("/__folders")
     def list_folders():
         """列出 docs/md 下所有文件夹及其仓库配置（公开只读，供仓库配置页默认展示）。"""
         folders = operations.list_md_folders(md_dir(), config.get("repositories") or [])
+        metrics = folder_metrics()
+        latest = database.folder_latest_updates(conn)
+        for folder in folders:
+            item = metrics.get(folder["path"]) or {}
+            for name in ("sizeBytes", "files", "mdFiles", "mdBytes", "otherFiles", "otherBytes",
+                         "subfolders", "nestedFiles", "nestedBytes"):
+                folder[name] = int(item.get(name) or 0)
+            # 最新更新：优先发布记录（作者+时间），没有记录时回退最新文件时间
+            record = latest.get(folder["path"])
+            if record:
+                folder["latestUpdate"] = dict(record, source="publish")
+            elif item.get("mtime"):
+                folder["latestUpdate"] = {"author": "", "at": item["mtime"], "path": "",
+                                          "source": "filesystem"}
+            else:
+                folder["latestUpdate"] = None
         return jsonify({"ok": True, "folders": folders})
 
     @app.get("/__folder")
@@ -412,8 +483,26 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             if binding is None:
                 return json_error(404, "not_found", "没有找到仓库：" + repo_id)
             bindings = [binding]
-        reports = auth_service.repo_health_reports(md_dir(), bindings, credential,
-                                                   include_site_backup=not repo_id)
+        # 本地模式仓库不做 SVN 检查：直接返回本地来源状态
+        local = [item for item in bindings if item.get("source_mode") == "local"]
+        svn = [item for item in bindings if item.get("source_mode") != "local"]
+        reports = []
+        if svn or not repo_id:
+            reports = auth_service.repo_health_reports(md_dir(), svn, credential,
+                                                       include_site_backup=not repo_id)
+        reports.extend({
+            "id": item["id"],
+            "mount": item["mount"],
+            "url": "",
+            "indexPage": "",
+            "localPath": "",
+            "revision": 0,
+            "syncError": None,
+            "status": "本地模式",
+            "level": "ok",
+            "detail": "使用本地 SQLite 作为权威来源，不做 SVN 检查",
+            "hints": [],
+        } for item in local)
         return jsonify({"ok": True, "reports": reports})
 
     @app.post("/__admin/repo-repair")

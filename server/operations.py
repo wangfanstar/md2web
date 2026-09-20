@@ -16,6 +16,7 @@ import shutil
 import tempfile
 import time
 import uuid
+import hashlib
 from pathlib import Path
 
 from . import database, documents
@@ -40,6 +41,215 @@ def _slug(value):
 
 def _row_dict(row):
     return dict(row) if row is not None else None
+
+
+def binding_for_path(config, document_path):
+    """按目录段最长前缀返回仓库配置。"""
+    rel = documents.normalize_md_path(document_path)
+    found = None
+    for binding in config.get("repositories") or []:
+        mount = binding["mount"]
+        if rel == mount or rel.startswith(mount + "/"):
+            if found is None or len(mount) > len(found["mount"]):
+                found = binding
+    return found
+
+
+def _ensure_local_binding(conn, binding, config):
+    """登记本地模式绑定；不调用 SVN。"""
+    row = _binding_row(conn, binding)
+    now = database.now_iso()
+    if row is None:
+        with conn:
+            cursor = conn.execute(
+                "INSERT INTO repo_bindings (repository_id, mount_path, credential_group, config_version,"
+                " source_mode, sync_state, created_at, updated_at) VALUES (?, ?, ?, ?, 'local', 'idle', ?, ?)",
+                (binding["id"], binding["mount"], binding["credential_group"],
+                 str(config.get("path", "")), now, now),
+            )
+        row = conn.execute("SELECT * FROM repo_bindings WHERE id = ?", (cursor.lastrowid,)).fetchone()
+    elif row["source_mode"] != "local":
+        with conn:
+            conn.execute("UPDATE repo_bindings SET source_mode = 'local', sync_state = 'idle', updated_at = ? WHERE id = ?",
+                         (now, row["id"]))
+        row = conn.execute("SELECT * FROM repo_bindings WHERE id = ?", (row["id"],)).fetchone()
+    return _row_dict(row)
+
+
+def _repository_root(md_dir, mount):
+    parts = mount.split("/")
+    if not parts or parts[0] != "md" or len(parts) == 1:
+        raise OperationError(400, "仓库目录必须是 md 下的子目录：" + mount)
+    return Path(md_dir).joinpath(*parts[1:])
+
+
+def _repository_files(root):
+    files = {}
+    if not root.is_dir():
+        return files
+    for path in sorted(root.rglob("*.md")):
+        if not path.is_file() or ".svn" in path.parts:
+            continue
+        rel = path.as_posix()
+        try:
+            text = documents.read_md_text(path)
+        except (OSError, UnicodeError) as error:
+            raise OperationError(400, "无法读取 Markdown：%s（%s）" % (path, error))
+        files[rel] = {
+            "content": documents.normalize_eol(text),
+            "hash": documents.text_hash(text),
+            "eol": documents.detect_eol(text),
+        }
+    return files
+
+
+def _manifest_hash(files):
+    digest = hashlib.sha256()
+    for path in sorted(files):
+        digest.update(path.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(files[path]["hash"].encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def local_import_repository(conn, config, md_dir, binding, actor_id=None, force=False):
+    """把本地仓库目录导入 SQLite，供首次初始化或管理员显式导入使用。"""
+    if binding.get("source_mode", "svn") != "local":
+        raise OperationError(400, "只有本地模式仓库才能导入 SQLite")
+    binding_row = _ensure_local_binding(conn, binding, config)
+    files = _repository_files(_repository_root(md_dir, binding["mount"]))
+    existing = {
+        row["path"]: dict(row)
+        for row in conn.execute("SELECT * FROM repository_documents WHERE binding_id = ?", (binding_row["id"],))
+    }
+    changed = []
+    for path, item in files.items():
+        old = existing.get(path)
+        if old is None or old["content_hash"] != item["hash"] or old["state"] != "published":
+            changed.append(path)
+    deleted = sorted(set(existing) - set(files))
+    if (changed or deleted) and existing and not force:
+        # 外部修改必须由管理员显式确认，不能被定时任务静默吸收。
+        raise OperationError(409, "本地目录与 SQLite 快照不一致，请选择导入或恢复",
+                             code="local_external_change", changed=changed, deleted=deleted)
+    revision = int(binding_row.get("source_revision") or 0) + 1
+    now = database.now_iso()
+    manifest_hash = _manifest_hash(files)
+    with conn:
+        for path, item in files.items():
+            conn.execute(
+                "INSERT OR REPLACE INTO repository_documents"
+                " (id, binding_id, path, content, content_hash, eol, source_revision, state, updated_at)"
+                " VALUES ((SELECT id FROM repository_documents WHERE binding_id = ? AND path = ?), ?, ?, ?, ?, ?, ?, 'published', ?)",
+                (binding_row["id"], path, binding_row["id"], path, item["content"], item["hash"],
+                 item["eol"], revision, now),
+            )
+        for path in deleted:
+            conn.execute("UPDATE repository_documents SET state = 'deleted', source_revision = ?, updated_at = ?"
+                         " WHERE binding_id = ? AND path = ?", (revision, now, binding_row["id"], path))
+        conn.execute(
+            "UPDATE repo_bindings SET source_mode = 'local', source_revision = ?, source_hash = ?,"
+            " sync_state = 'idle', last_success_at = ?, last_error_code = NULL, updated_at = ? WHERE id = ?",
+            (revision, manifest_hash, now, now, binding_row["id"]),
+        )
+        database.audit(conn, "local_import", "ok", actor_id=actor_id, resource=binding["mount"])
+        conn.execute(
+            "INSERT INTO source_events (binding_id, mode, event_type, target_revision, actor_id, detail, created_at)"
+            " VALUES (?, 'local', 'local_import', ?, ?, ?, ?)",
+            (binding_row["id"], revision, actor_id, json.dumps({"changed": changed, "deleted": deleted}, ensure_ascii=False), now),
+        )
+    return {"mode": "local", "revision": revision, "files": len(files), "changed": changed, "deleted": deleted,
+            "hash": manifest_hash}
+
+
+def local_publish_draft(conn, config, md_dir, user_id, document_path, expected_version=None):
+    """把当前用户草稿发布到本地 SQLite 主库，再物化 docs/md。"""
+    from . import drafts as drafts_module
+
+    rel = documents.normalize_md_path(document_path)
+    binding = binding_for_path(config, rel)
+    if binding is None or binding.get("source_mode", "svn") != "local":
+        raise OperationError(400, "该文档未关联本地 SQLite 仓库")
+    if binding.get("read_only") or binding.get("allow_commit", True) is False:
+        raise OperationError(403, "该仓库已设置为只读或关闭本地发布")
+    draft = drafts_module.get_draft_row(conn, user_id, rel)
+    if draft is None or draft["state"] != "active" or not draft["head_revision_id"]:
+        raise OperationError(409, "没有可发布的个人草稿")
+    if expected_version is not None and int(expected_version) != int(draft["version"]):
+        raise OperationError(409, "草稿版本已变化，请重新发布", currentVersion=draft["version"])
+    revision_row = conn.execute("SELECT * FROM revisions WHERE id = ?", (draft["head_revision_id"],)).fetchone()
+    if revision_row is None:
+        raise OperationError(409, "草稿版本不存在，请重新保存")
+    binding_row = _ensure_local_binding(conn, binding, config)
+    old = conn.execute("SELECT * FROM repository_documents WHERE binding_id = ? AND path = ?",
+                       (binding_row["id"], rel)).fetchone()
+    old_hash = old["content_hash"] if old is not None and old["state"] != "deleted" else None
+    if revision_row["before_hash"] != old_hash:
+        raise OperationError(409, "本地源已变化，请先重新加载并合并", code="local_external_change")
+    content = documents.normalize_eol(revision_row["content"])
+    revision = int(binding_row.get("source_revision") or 0) + 1
+    now = database.now_iso()
+    operation_id = create_operation(conn, user_id, binding_row["id"], "local_publish", {
+        "path": rel, "repositoryId": binding["id"], "contentHash": documents.text_hash(content),
+        "baseHash": old_hash, "message": "local publish",
+    })
+    try:
+        with conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO repository_documents"
+                " (id, binding_id, path, content, content_hash, eol, source_revision, state, updated_at)"
+                " VALUES ((SELECT id FROM repository_documents WHERE binding_id = ? AND path = ?), ?, ?, ?, ?, ?, ?, 'published', ?)",
+                (binding_row["id"], rel, binding_row["id"], rel, content, documents.text_hash(content),
+                 documents.detect_eol(content), revision, now),
+            )
+            rows = conn.execute("SELECT path, content_hash, state FROM repository_documents WHERE binding_id = ?",
+                                (binding_row["id"],)).fetchall()
+            manifest_hash = _manifest_hash({row["path"]: {"hash": row["content_hash"]}
+                                             for row in rows if row["state"] != "deleted"})
+            conn.execute("UPDATE repo_bindings SET source_revision = ?, source_hash = ?, last_success_at = ?,"
+                         " sync_state = 'idle', last_error_code = NULL, updated_at = ? WHERE id = ?",
+                         (revision, manifest_hash, now, now, binding_row["id"]))
+            conn.execute("INSERT INTO source_events (binding_id, operation_id, mode, event_type, path,"
+                         " before_hash, after_hash, base_revision, target_revision, actor_id, created_at)"
+                         " VALUES (?, ?, 'local', 'local_publish', ?, ?, ?, ?, ?, ?, ?)",
+                         (binding_row["id"], operation_id, rel, old_hash, documents.text_hash(content),
+                          binding_row.get("source_revision"), revision, user_id, now))
+        _materialize_repository(conn, md_dir, binding_row["id"], binding["mount"])
+        _set_state(conn, operation_id, "published", finished_at=database.now_iso())
+    except Exception as error:
+        _set_state(conn, operation_id, "failed", error_code="local_publish_failed", finished_at=database.now_iso())
+        raise OperationError(500, "本地发布失败：%s" % error)
+    return {"operationId": operation_id, "state": "published", "revision": revision, "path": rel}
+
+
+def _materialize_repository(conn, md_dir, binding_id, mount):
+    """将 SQLite 主库物化为 docs/md；只删除此前已受管且标为 deleted 的文件。"""
+    root = _repository_root(md_dir, mount)
+    rows = conn.execute("SELECT * FROM repository_documents WHERE binding_id = ?", (binding_id,)).fetchall()
+    root.mkdir(parents=True, exist_ok=True)
+    for row in rows:
+        target = Path(md_dir) / Path(*row["path"].split("/", 1)[1:])
+        if row["state"] == "deleted":
+            if target.is_file():
+                target.unlink()
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="", delete=False,
+                                                 dir=str(target.parent), prefix="." + target.name + ".", suffix=".tmp")
+        tmp_path = Path(temporary.name)
+        try:
+            with temporary:
+                text = row["content"]
+                if row["eol"] == "\r\n":
+                    text = text.replace("\n", "\r\n")
+                elif row["eol"] == "\r":
+                    text = text.replace("\n", "\r")
+                temporary.write(text)
+            os.replace(tmp_path, target)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
 
 
 def create_operation(conn, actor_id, binding_id, kind, manifest):
@@ -377,6 +587,8 @@ def sync_all(conn, svn_client, config, md_dir, credential=None, now=None, logger
     moment = now or time.time()
     results = []
     for binding in config.get("repositories") or []:
+        if binding.get("source_mode", "svn") == "local":
+            continue
         interval = sync_interval_of(binding, config)
         row = _binding_row(conn, binding)
         row_dict = _row_dict(row)

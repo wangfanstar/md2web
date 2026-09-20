@@ -4,6 +4,8 @@
 #   ./start_linux.sh --foreground    前台运行（Ctrl+C 停止）
 #   ./start_linux.sh --stop          停止后台实例（按 pidfile）
 #   ./start_linux.sh --restart       强制重启：先停本实例，再结束占用端口的进程后重新启动
+#   端口被其它进程占用时：显示占用进程信息（PID/用户/命令），
+#   确认后强制结束；10 秒无操作自动强制结束；回答 n 取消启动
 #   ./start_linux.sh --status        查看运行状态（pid / 进程名 / 端口）
 #   ./start_linux.sh --preview       只读预览（其它参数原样透传给 serve.py）
 #   ./start_linux.sh --bind 127.0.0.1  仅本机访问（默认 0.0.0.0，局域网可访问）
@@ -114,15 +116,78 @@ port_holders() {
   printf '%s' "$pids"
 }
 
+human_duration() {
+  # 秒 → 可读时长（1天2小时 / 3小时5分 / 12分30秒 / 45秒）
+  seconds="$1"
+  case "$seconds" in
+    ''|*[!0-9]*) printf '%s' "?" ; return ;;
+  esac
+  days=$((seconds / 86400)); rest=$((seconds % 86400))
+  hours=$((rest / 3600)); rest=$((rest % 3600))
+  mins=$((rest / 60)); secs=$((rest % 60))
+  if [ "$days" -gt 0 ]; then
+    printf '%s' "${days}天${hours}小时"
+  elif [ "$hours" -gt 0 ]; then
+    printf '%s' "${hours}小时${mins}分"
+  elif [ "$mins" -gt 0 ]; then
+    printf '%s' "${mins}分${secs}秒"
+  else
+    printf '%s' "${secs}秒"
+  fi
+}
+
+process_info() {
+  # 打印进程信息：PID | 用户 | 运行时长 | 命令行（优先 /proc，回退 ps）
+  pid="$1"
+  user=""
+  cmd=""
+  etime=""
+  if [ -r "/proc/$pid/status" ]; then
+    uid="$(sed -n 's/^Uid:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "/proc/$pid/status" 2>/dev/null | head -n 1)"
+    if [ -n "$uid" ]; then
+      user="$(id -nu "$uid" 2>/dev/null || printf '%s' "$uid")"
+    fi
+    start_ticks="$(sed 's/^[0-9]* (.*) //' "/proc/$pid/stat" 2>/dev/null | awk '{print $20}')"
+    uptime_s="$(cut -d. -f1 /proc/uptime 2>/dev/null)"
+    clk="$(getconf CLK_TCK 2>/dev/null)"
+    [ -n "$clk" ] || clk=100
+    case "$start_ticks" in
+      ''|*[!0-9]*) ;;
+      *)
+        case "$uptime_s" in
+          ''|*[!0-9]*) ;;
+          *) etime="$(human_duration "$((uptime_s - start_ticks / clk))")" ;;
+        esac
+        ;;
+    esac
+  fi
+  if [ -r "/proc/$pid/cmdline" ]; then
+    cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c1-140)"
+    case "$cmd" in *[!\ ]*) ;; *) cmd="" ;; esac
+  fi
+  if [ -z "$cmd" ]; then
+    cmd="$(ps -o args= -p "$pid" 2>/dev/null | head -n 1 | cut -c1-140)"
+  fi
+  if [ -z "$user" ]; then
+    user="$(ps -o user= -p "$pid" 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+  fi
+  [ -n "$user" ] || user="?"
+  [ -n "$etime" ] || etime="?"
+  [ -n "$cmd" ] || cmd="未知命令（可能需要 sudo 查看）"
+  printf 'PID %s | 用户 %s | 已运行 %s | %s' "$pid" "$user" "$etime" "$cmd"
+}
+
 kill_port_holder() {
   port="$1"
+  announce="${2:-1}"  # 0 = 调用方已打印过占用进程信息
   pids="$(port_holders "$port")"
   if [ -z "$pids" ]; then
     return 0
   fi
   for pid in $pids; do
-    info="$(ps -o comm=,args= -p "$pid" 2>/dev/null | head -n 1 | cut -c1-120)"
-    echo "[提示] 端口 $port 被进程 $pid 占用：${info:-未知进程}"
+    if [ "$announce" = "1" ]; then
+      echo "[提示] 端口 $port 被占用：$(process_info "$pid")"
+    fi
     kill "$pid" 2>/dev/null || true
   done
   waited=0
@@ -154,6 +219,56 @@ read_pid() {
   if [ -f "$PIDFILE" ]; then
     tr -cd '0-9' < "$PIDFILE"
   fi
+}
+
+# 启动前检查端口占用：打印占用进程信息并询问是否强制结束；
+# 10 秒无操作（或非交互式启动）自动强制结束；按 n 取消启动。
+confirm_port_conflict() {
+  port="$1"
+  pids="$(port_holders "$port")"
+  [ -n "$pids" ] || return 0
+  own_pid="$(read_pid)"
+  foreign=""
+  for pid in $pids; do
+    if [ -n "$own_pid" ] && [ "$pid" = "$own_pid" ]; then
+      continue
+    fi
+    foreign="$foreign $pid"
+  done
+  if [ -z "$foreign" ]; then
+    echo "[提示] 端口 $port 由本项目实例（PID $own_pid）占用：serve.py 会按 pidfile 重启该实例。"
+    return 0
+  fi
+  echo "[提示] 端口 $port 已被下列进程占用：" >&2
+  for pid in $foreign; do
+    echo "        $(process_info "$pid")" >&2
+  done
+  if [ -t 0 ]; then
+    if prompt_kill_or_cancel; then
+      echo "[提示] 强制结束占用进程。" >&2
+    else
+      echo "" >&2
+      echo "[提示] 已取消启动：请先手动结束占用进程，或用 ./start_linux.sh --restart 强制重启。" >&2
+      exit 1
+    fi
+  else
+    echo "[提示] 非交互式启动：自动强制结束占用进程。" >&2
+  fi
+  kill_port_holder "$port" 0 || true
+}
+
+# 交互确认：y/回车/超时（10 秒）→ 返回 0（强制结束）；n → 返回 1（取消）
+prompt_kill_or_cancel() {
+  printf '[提示] 是否强制结束以上进程以便启动？10 秒内未选择将自动强制结束 [Y/n] ' >&2
+  answer=""
+  if read -t 10 answer 2>/dev/null; then
+    case "$answer" in
+      n|N|no|No|NO) return 1 ;;
+    esac
+    return 0
+  fi
+  echo "[提示] 10 秒无操作，自动强制结束占用进程。" >&2
+  return 0
 }
 
 is_alive() {
@@ -229,6 +344,14 @@ if [ -z "$PY" ]; then
   exit 1
 fi
 
+# 端口已被占用（非本项目实例）时：显示进程信息并确认，10 秒无操作自动强制结束
+case "$MODE" in
+  background|foreground)
+    target_port="$(resolve_port "$@")"
+    confirm_port_conflict "$target_port"
+    ;;
+esac
+
 # 认证编辑依赖：缺失时自动安装
 if ! "$PY" -c "import flask, waitress" >/dev/null 2>&1; then
   echo "[提示] 未安装认证编辑服务依赖，正在安装 ..."
@@ -296,18 +419,28 @@ if [ "$has_no_browser" -eq 0 ]; then
   set -- "$@" --no-browser
 fi
 
+if [ -z "$target_port" ]; then
+  target_port="$(resolve_port "$@")"
+fi
+
 echo "[提示] 正在后台启动 md2web 服务（解释器 $PY）..."
-nohup "$PY" serve.py "$@" >>"$LOG_FILE" 2>&1 &
+# -u：日志不缓冲，启动横幅立即写入，便于判断就绪与排障
+nohup "$PY" -u serve.py "$@" >>"$LOG_FILE" 2>&1 &
 launcher_pid=$!
 
-# 等待服务就绪（最多约 15 秒）
+# 等待服务就绪（最多约 20 秒）：pidfile 进程存活且端口已监听；
+# 没有 ss/lsof/fuser 时回退到日志关键字
 ready=0
 waited=0
-while [ "$waited" -lt 15 ]; do
+while [ "$waited" -lt 20 ]; do
   sleep 1
   waited=$((waited + 1))
   pid="$(read_pid)"
   if [ -n "$pid" ] && is_alive "$pid"; then
+    if [ -n "$(port_holders "$target_port")" ]; then
+      ready=1
+      break
+    fi
     if grep -q "认证编辑服务" "$LOG_FILE" 2>/dev/null || grep -q "预览目录" "$LOG_FILE" 2>/dev/null; then
       ready=1
       break
@@ -327,8 +460,23 @@ if [ "$ready" -eq 1 ] && [ -n "$pid" ] && is_alive "$pid"; then
   exit 0
 fi
 
-echo "[错误] 服务未能在预期时间内就绪，最近日志：" >&2
-tail -n 20 "$LOG_FILE" 2>/dev/null || true
+echo "[错误] 服务未能在预期时间内就绪。" >&2
+if [ -n "$pid" ] && is_alive "$pid"; then
+  if [ -n "$(port_holders "$target_port")" ]; then
+    echo "[提示] 进程 $pid 仍在运行且端口 $target_port 已监听：服务可能已启动，请刷新浏览器确认。" >&2
+  else
+    echo "[提示] 进程 $pid 仍在运行，但端口 $target_port 尚未监听：仍在初始化或绑定失败。" >&2
+    echo "       $(process_info "$pid")" >&2
+  fi
+else
+  echo "[提示] pidfile 进程未在运行（pidfile $PIDFILE${pid:+，记录的 PID $pid}）。" >&2
+fi
+if [ -s "$LOG_FILE" ]; then
+  echo "最近日志（$LOG_FILE）：" >&2
+  tail -n 20 "$LOG_FILE" >&2
+else
+  echo "日志为空：$LOG_FILE（进程可能未启动或尚未输出）" >&2
+fi
 if grep -q "已被占用" "$LOG_FILE" 2>/dev/null; then
   echo "[提示] 端口被占用：可执行 ./start_linux.sh --restart 强制结束占用进程后重启" >&2
 fi

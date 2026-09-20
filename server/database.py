@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .passwords import hash_password
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # 兼容目标：RHEL7 自带 SQLite 3.7.17（Python 3.6 的 sqlite3）。
 # Windows 端也必须只写这些版本能解析的对象，保证 data/ 数据库可在两个平台间直接共用。
@@ -334,6 +334,8 @@ def migrate(conn, logger=None):
                 conn.executescript(MIGRATION_V5_SQL)
             if version < 6:
                 conn.executescript(MIGRATION_V6_SQL)
+            if version < 7:
+                conn.executescript(MIGRATION_V7_SQL)
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     sanitize_schema(conn, logger)
     return SCHEMA_VERSION
@@ -404,6 +406,47 @@ CREATE TABLE IF NOT EXISTS repo_credentials (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+"""
+
+
+# v7：仓库来源模式、本地 SQLite 正文快照和来源变更事件
+MIGRATION_V7_SQL = """
+ALTER TABLE repo_bindings ADD COLUMN source_mode TEXT NOT NULL DEFAULT 'svn';
+ALTER TABLE repo_bindings ADD COLUMN source_revision INTEGER;
+ALTER TABLE repo_bindings ADD COLUMN source_hash TEXT;
+ALTER TABLE repo_bindings ADD COLUMN pending_mode TEXT;
+ALTER TABLE repo_bindings ADD COLUMN sync_state TEXT NOT NULL DEFAULT 'idle';
+ALTER TABLE repo_bindings ADD COLUMN last_success_at TEXT;
+ALTER TABLE repo_bindings ADD COLUMN last_error_code TEXT;
+CREATE TABLE IF NOT EXISTS repository_documents (
+    id INTEGER PRIMARY KEY,
+    binding_id INTEGER NOT NULL REFERENCES repo_bindings (id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    content TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    eol TEXT NOT NULL DEFAULT '\\n',
+    source_revision INTEGER,
+    state TEXT NOT NULL DEFAULT 'published',
+    updated_at TEXT NOT NULL,
+    UNIQUE (binding_id, path)
+);
+CREATE INDEX IF NOT EXISTS idx_repository_documents_binding ON repository_documents (binding_id, path);
+CREATE TABLE IF NOT EXISTS source_events (
+    id INTEGER PRIMARY KEY,
+    binding_id INTEGER REFERENCES repo_bindings (id) ON DELETE SET NULL,
+    operation_id TEXT,
+    mode TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    path TEXT,
+    before_hash TEXT,
+    after_hash TEXT,
+    base_revision INTEGER,
+    target_revision INTEGER,
+    actor_id INTEGER REFERENCES users (id),
+    detail TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_source_events_binding ON source_events (binding_id, created_at);
 """
 
 
@@ -713,3 +756,34 @@ def audit(conn, action, result, actor_id=None, resource=None, operation_id=None,
         " VALUES (?, ?, ?, ?, ?, ?, ?)",
         (actor_id, action, resource, operation_id, result, now_iso(), client_ip),
     )
+
+
+def folder_latest_updates(conn, limit=1000):
+    """每个一级文件夹最近一次发布记录：{“md/<文件夹>”: {author, at, path}}。
+
+    数据来自已发布的操作（SVN 提交与本地发布），供仓库配置页展示“最新更新作者/时间”。
+    """
+    rows = conn.execute(
+        "SELECT o.reviewed_manifest, o.finished_at, o.created_at,"
+        " COALESCE(NULLIF(TRIM(u.display_name), ''), u.svn_username, '') AS author"
+        " FROM operations o LEFT JOIN users u ON u.id = o.actor_id"
+        " WHERE o.state = 'published' AND o.reviewed_manifest IS NOT NULL"
+        " ORDER BY o.created_at DESC, o.rowid DESC LIMIT ?",
+        (int(limit),),
+    ).fetchall()
+    latest = {}
+    for row in rows:
+        try:
+            manifest = json.loads(row["reviewed_manifest"] or "{}")
+        except ValueError:
+            continue
+        path = str(manifest.get("path") or "")
+        parts = path.split("/")
+        if len(parts) < 2 or parts[0] != "md":
+            continue
+        key = "md/" + parts[1]
+        if key in latest:
+            continue
+        latest[key] = {"author": row["author"] or "", "at": row["finished_at"] or row["created_at"],
+                       "path": path}
+    return latest

@@ -654,9 +654,57 @@ def repo_for_route(route, repos):
 
 
 def repo_page_name(repo_id):
-    """每个仓库一个入口页：index_<仓库名>.html。"""
-    safe = re.sub(r"[^0-9A-Za-z._-]+", "-", str(repo_id or "")).strip("-") or "repo"
+    """每个仓库一个入口页：index_<仓库名>.html（保留中文等 CJK 字符，其余换成 -）。"""
+    safe = re.sub("[^0-9A-Za-z._\\-㐀-䶿一-鿿]+", "-",
+                  str(repo_id or "")).strip("-") or "repo"
     return "index_" + safe + ".html"
+
+
+def load_all_repos():
+    """仓库列表 = 配置的仓库 + 未配置文件夹的自动入口页（本地模式默认页）。"""
+    repos = load_repositories()
+    auto = auto_folder_repos(repos)
+    if auto:
+        print("  [提示] 未配置仓库的文件夹将生成入口页：%s" % "、".join(item["id"] for item in auto))
+    return repos + auto
+
+
+def first_level_folders():
+    """docs/md 下的一级文件夹名（不含隐藏目录）。"""
+    if not MD_DIR.is_dir():
+        return []
+    return sorted(path.name for path in MD_DIR.iterdir()
+                  if path.is_dir() and not path.name.startswith("."))
+
+
+def auto_folder_repos(repos):
+    """未配置仓库的一级文件夹：自动生成入口页（本地模式默认页）。
+
+    返回的条目与 load_repositories() 结构一致，额外带 auto=True。
+    """
+    configured = set()
+    for repo in repos:
+        sub = mount_subpath(repo["mount"])
+        if sub:
+            configured.add(sub.split("/")[0])
+    reserved = {"index.html", "index_all.html", "md2web_config.html"}
+    auto = []
+    for name in first_level_folders():
+        if name in configured:
+            continue
+        if repo_page_name(name) in reserved:
+            continue
+        auto.append({
+            "id": name,
+            "mount": "md/" + name,
+            "url": "",
+            "group": "默认",
+            "read_only": False,
+            "allow_commit": True,
+            "sync_interval": None,
+            "auto": True,
+        })
+    return auto
 
 
 def files_for_mount(md_files, mount):
@@ -911,7 +959,7 @@ def generate_readme(md_files, title="文档中心", path=None, repos=None):
     lines.extend(['', '</details>', ''])
 
     if repos:
-        lines = [f"# {title}", "", "按分组浏览各仓库文档（点击进入对应仓库入口页）：", ""]
+        lines = [f"# {title}", "", "按分组浏览各文档文件夹（每个文件夹一个入口页）：", ""]
         groups = {}
         for repo in repos:
             groups.setdefault(repo["group"], []).append(repo)
@@ -1218,15 +1266,18 @@ def generate_master_index_html(repos, title="文档中心", all_page="index_all.
         cards = []
         for repo in groups[group]:
             badges = ''
+            if repo.get("auto"):
+                badges += '<span class="badge readonly">未配置 SVN</span>'
             if repo.get("read_only"):
                 badges += '<span class="badge readonly">只读</span>'
             if not repo.get("allow_commit", True):
                 badges += '<span class="badge readonly">禁止合入</span>'
+            note = repo.get("url") or ("本地文件夹（不连接 SVN）" if repo.get("auto") else "（未填写 SVN 地址）")
             cards.append(
                 '<a class="card" href="' + repo_page_name(repo["id"]) + '">'
                 + '<strong>' + html.escape(str(repo["id"])) + badges + '</strong>'
                 + '<span>目录：' + html.escape(str(repo["mount"])) + '</span>'
-                + '<span>' + html.escape(str(repo.get("url") or "（未填写 SVN 地址）")) + '</span>'
+                + '<span>' + html.escape(str(note)) + '</span>'
                 + '</a>'
             )
         sections.append('<h2>' + html.escape(str(group)) + '</h2><div class="cards">' + ''.join(cards) + '</div>')
@@ -1300,7 +1351,7 @@ def main(argv=None):
     try:
         if args.index_only:
             print("=== 只刷新搜索索引与离线数据（不重新生成站点文件） ===\n")
-            repos = load_repositories()
+            repos = load_all_repos()
             generate_search_index(md_files, args.title, repos=repos)
             generate_offline_data(md_files)
             for repo in repos:
@@ -1324,7 +1375,7 @@ def main(argv=None):
         generate_custom_search_assets()
 
         print("2. 生成导航、首页、搜索索引...")
-        repos = load_repositories()
+        repos = load_all_repos()
         generate_sidebar(md_files)
         generate_readme(md_files, args.title, repos=repos)
         generate_search_index(md_files, args.title, repos=repos)
