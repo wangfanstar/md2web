@@ -1189,6 +1189,12 @@ class HtmlLayoutTests(unittest.TestCase):
             self.assertIn(needle, source, needle)
         self.assertIn("state.repoFilter.indexOf(routeRepoName(item.route))", source,
                       "过滤应作用于搜索范围判定")
+        # 索引加载前绑定菜单时用的是页面内嵌快照（仓库页只有当前仓库），索引就绪后必须刷新
+        self.assertIn("syncRepoFilterUI();", source)
+        index_apply = source.index("function applySearchIndex")
+        index_end = source.index("function refreshSearchIndex", index_apply)
+        self.assertIn("syncRepoFilterUI()", source[index_apply:index_end],
+                      "索引就绪后应刷新仓库过滤菜单，否则仓库页只能看到当前仓库")
         css = (ROOT / "web" / "custom-search.css").read_text(encoding="utf-8")
         self.assertIn(".custom-search-repo-menu", css, "仓库过滤菜单需要样式")
         built = (ROOT / "docs" / "lib" / "custom-search.js").read_text(encoding="utf-8")

@@ -1189,6 +1189,8 @@
     renderAll();
     restoreReadingQuery();
     scheduleReadingModeBuild();
+    // 索引就绪后刷新仓库过滤菜单：绑定发生在索引加载前，此时用的是页面内嵌快照（仓库页只有当前仓库）
+    syncRepoFilterUI();
   }
 
   function refreshSearchIndex(sourceView) {
