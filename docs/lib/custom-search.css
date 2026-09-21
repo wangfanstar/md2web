@@ -1085,3 +1085,88 @@ body.toc-resizing {
 .custom-search-filters[hidden] {
   display: none !important;
 }
+
+/* 仓库多选过滤（范围/模式之后） */
+.custom-search-repo { position: relative; }
+
+.custom-search-repo-toggle {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #dbe2ea;
+  border-radius: 5px;
+  color: var(--docs-muted, #6b7a8d);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 11px;
+  gap: 4px;
+  max-width: 180px;
+  padding: 3px 6px;
+}
+
+.custom-search-repo-toggle:hover { border-color: var(--docs-accent, #1f6feb); color: var(--docs-accent, #1f6feb); }
+
+.custom-search-repo-toggle.is-active {
+  background: #eef4fd;
+  border-color: #bfdbfe;
+  color: var(--docs-accent, #1f6feb);
+}
+
+.custom-search-repo-toggle [data-role="repo-label"] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.custom-search-repo-caret { flex: 0 0 auto; font-size: 10px; }
+
+.custom-search-repo-menu {
+  background: #fff;
+  border: 1px solid #d5dee8;
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .16);
+  left: 0;
+  margin-top: 4px;
+  max-height: 260px;
+  min-width: 190px;
+  overflow: auto;
+  padding: 6px;
+  position: absolute;
+  top: 100%;
+  z-index: 1200;
+}
+
+.custom-search-repo-menu[hidden] { display: none !important; }
+
+.custom-search-repo-actions {
+  border-bottom: 1px dashed #e6ebf1;
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+  padding: 2px 4px 6px;
+}
+
+.custom-search-repo-actions button {
+  background: #f6f9fc;
+  border: 1px solid #dbe2ea;
+  border-radius: 5px;
+  color: #506174;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+.custom-search-repo-actions button:hover { border-color: var(--docs-accent, #1f6feb); color: var(--docs-accent, #1f6feb); }
+
+.custom-search-repo-item {
+  align-items: center;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
+.custom-search-repo-item:hover { background: #f2f6fb; }
+
+.custom-search-repo-item input { flex: 0 0 auto; margin: 0; }
+
+.custom-search-repo-empty { color: #94a3b8; display: block; font-size: 12px; padding: 4px 6px; }

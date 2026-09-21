@@ -1181,6 +1181,19 @@ class HtmlLayoutTests(unittest.TestCase):
         self.assertNotIn("kind === 'open'", source, "旧的 open 分支已无调用方，应删除")
         self.assertIn("view.input.focus()", source, "回填后应聚焦输入框")
 
+    def test_search_repo_filter_multi_select(self):
+        """搜索支持按仓库多选过滤：范围/模式之外提供仓库勾选菜单，并持久化选择。"""
+        source = (ROOT / "web" / "custom-search.js").read_text(encoding="utf-8")
+        for needle in ("repoFilter", "SEARCH_REPOS_KEY", "routeRepoName", "searchRepoOptions",
+                       "renderRepoMenu", "syncRepoFilterUI", 'data-role="repo-all"', 'data-role="repo-none"'):
+            self.assertIn(needle, source, needle)
+        self.assertIn("state.repoFilter.indexOf(routeRepoName(item.route))", source,
+                      "过滤应作用于搜索范围判定")
+        css = (ROOT / "web" / "custom-search.css").read_text(encoding="utf-8")
+        self.assertIn(".custom-search-repo-menu", css, "仓库过滤菜单需要样式")
+        built = (ROOT / "docs" / "lib" / "custom-search.js").read_text(encoding="utf-8")
+        self.assertIn("repoFilter", built, "构建产物未同步 custom-search.js")
+
     def test_search_reading_highlight_robustness(self):
         """正文命中高亮：标题文字在 a.anchor 内不能被排除；DOM 重渲染后失效的 Range 要重新采集。"""
         source = (ROOT / "web" / "custom-search.js").read_text(encoding="utf-8")

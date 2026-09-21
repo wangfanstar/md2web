@@ -28,6 +28,7 @@
     index: {},
     results: [],
     query: '',
+    repoFilter: [],
     searchMode: 'full',
     searchScope: 'all',
     composing: false,
@@ -1344,8 +1345,63 @@
       .replace(/\/$/, '') || '/';
   }
 
+  var SEARCH_REPOS_KEY = 'md2web:search-repos';
+
+  // 路由所属仓库 = md/ 下的一级文件夹名（与入口页/仓库映射一致）
+  function routeRepoName(route) {
+    var path = routeWithoutAnchor(route).replace(/^\/+/, '');
+    var parts = path.split('/');
+    if (parts[0] !== 'md' || parts.length < 2) {
+      return '';
+    }
+    return parts[1];
+  }
+
+  function searchRepoOptions() {
+    var names = {};
+    getSearchRoutes().forEach(function (route) {
+      var name = routeRepoName(route);
+      if (name) {
+        names[name] = true;
+      }
+    });
+    return Object.keys(names).sort();
+  }
+
+  function loadRepoFilter() {
+    var raw = null;
+    try {
+      raw = localStorage.getItem(SEARCH_REPOS_KEY);
+    } catch (error) {
+      raw = null;
+    }
+    var values = [];
+    if (raw) {
+      try {
+        values = JSON.parse(raw) || [];
+      } catch (error) {
+        values = [];
+      }
+    }
+    state.repoFilter = Array.isArray(values) ? values.filter(function (item) {
+      return typeof item === 'string' && item;
+    }) : [];
+  }
+
+  function persistRepoFilter() {
+    try {
+      localStorage.setItem(SEARCH_REPOS_KEY, JSON.stringify(state.repoFilter || []));
+    } catch (error) { /* 隐私模式忽略 */ }
+  }
+
   function itemInScope(item) {
     var scope = String(state.searchScope || 'all');
+    // 仓库多选过滤：与范围、模式叠加生效
+    if (state.repoFilter && state.repoFilter.length) {
+      if (state.repoFilter.indexOf(routeRepoName(item.route)) === -1) {
+        return false;
+      }
+    }
     if (scope === 'all') {
       return true;
     }
@@ -2171,7 +2227,50 @@
     return '<div class="custom-search-filters" data-role="search-filters" hidden>' +
       '<label>范围 <select data-role="search-scope" aria-label="搜索范围">' + searchScopeOptions() + '</select></label>' +
       '<label>模式 <select data-role="search-mode" aria-label="搜索模式"><option value="full">全文</option><option value="file">文件名/路径</option></select></label>' +
+      '<div class="custom-search-repo" data-role="repo-filter">' +
+      '<button type="button" class="custom-search-repo-toggle" data-role="repo-toggle" aria-expanded="false">' +
+      '<span data-role="repo-label">仓库：全部</span><span class="custom-search-repo-caret">▾</span></button>' +
+      '<div class="custom-search-repo-menu" data-role="repo-menu" hidden>' +
+      '<div class="custom-search-repo-actions">' +
+      '<button type="button" data-role="repo-all">全选</button>' +
+      '<button type="button" data-role="repo-none">清空</button>' +
+      '</div>' +
+      '<div class="custom-search-repo-list" data-role="repo-list"></div>' +
+      '</div>' +
+      '</div>' +
       '</div>';
+  }
+
+  function renderRepoMenu(host) {
+    var list = host.querySelector('[data-role="repo-list"]');
+    var label = host.querySelector('[data-role="repo-label"]');
+    var toggle = host.querySelector('[data-role="repo-toggle"]');
+    if (!list || !label || !toggle) {
+      return;
+    }
+    var options = searchRepoOptions();
+    list.innerHTML = options.length
+      ? options.map(function (name) {
+        var checked = (state.repoFilter || []).indexOf(name) !== -1;
+        return '<label class="custom-search-repo-item"><input type="checkbox" data-repo-name="'
+          + escapeHtml(name) + '"' + (checked ? ' checked' : '') + '><span>' + escapeHtml(name) + '</span></label>';
+      }).join('')
+      : '<span class="custom-search-repo-empty">没有可过滤的仓库</span>';
+    var count = (state.repoFilter || []).length;
+    label.textContent = '仓库：' + (count === 0 ? '全部' : (count === 1 ? state.repoFilter[0] : count + ' 个'));
+    toggle.classList.toggle('is-active', count > 0);
+  }
+
+  function syncRepoFilterUI() {
+    [state.sidebar, state.dialog].forEach(function (view) {
+      if (!view || !view.root) {
+        return;
+      }
+      var host = view.root.querySelector('[data-role="repo-filter"]');
+      if (host) {
+        renderRepoMenu(host);
+      }
+    });
   }
 
   function bindSearchFilters(view, root) {
@@ -2196,7 +2295,8 @@
       if (!toggle) {
         return;
       }
-      var active = state.searchScope !== 'all' || state.searchMode !== 'full';
+      var active = state.searchScope !== 'all' || state.searchMode !== 'full'
+        || (state.repoFilter && state.repoFilter.length > 0);
       toggle.classList.toggle('is-active', active);
       toggle.title = active ? '搜索范围/模式已筛选（点击展开）' : '搜索范围与模式';
     }
@@ -2211,6 +2311,56 @@
         refreshToggleState();
         renderAll();
       });
+    }
+    var repoHost = root.querySelector('[data-role="repo-filter"]');
+    if (repoHost) {
+      var repoToggle = repoHost.querySelector('[data-role="repo-toggle"]');
+      var repoMenu = repoHost.querySelector('[data-role="repo-menu"]');
+      var applyRepoFilter = function () {
+        persistRepoFilter();
+        syncRepoFilterUI();
+        state.results = search(state.query);
+        refreshToggleState();
+        renderAll();
+      };
+      renderRepoMenu(repoHost);
+      if (repoToggle && repoMenu) {
+        repoToggle.addEventListener('click', function (event) {
+          event.stopPropagation();
+          repoMenu.hidden = !repoMenu.hidden;
+          repoToggle.setAttribute('aria-expanded', repoMenu.hidden ? 'false' : 'true');
+        });
+      }
+      var repoList = repoHost.querySelector('[data-role="repo-list"]');
+      if (repoList) {
+        repoList.addEventListener('change', function (event) {
+          var name = event.target && event.target.getAttribute ? event.target.getAttribute('data-repo-name') : '';
+          if (!name) {
+            return;
+          }
+          var index = state.repoFilter.indexOf(name);
+          if (event.target.checked && index === -1) {
+            state.repoFilter.push(name);
+          } else if (!event.target.checked && index !== -1) {
+            state.repoFilter.splice(index, 1);
+          }
+          applyRepoFilter();
+        });
+      }
+      var repoAll = repoHost.querySelector('[data-role="repo-all"]');
+      if (repoAll) {
+        repoAll.addEventListener('click', function () {
+          state.repoFilter = searchRepoOptions();
+          applyRepoFilter();
+        });
+      }
+      var repoNone = repoHost.querySelector('[data-role="repo-none"]');
+      if (repoNone) {
+        repoNone.addEventListener('click', function () {
+          state.repoFilter = [];
+          applyRepoFilter();
+        });
+      }
     }
     if (mode) {
       mode.value = state.searchMode;
@@ -2534,6 +2684,21 @@
   }
 
   function init() {
+    loadRepoFilter();
+    document.addEventListener('click', function (event) {
+      // 点击仓库过滤菜单外部时收起
+      [state.sidebar, state.dialog].forEach(function (view) {
+        if (!view || !view.root) { return; }
+        var host = view.root.querySelector('[data-role="repo-filter"]');
+        if (!host || host.contains(event.target)) { return; }
+        var menu = host.querySelector('[data-role="repo-menu"]');
+        var toggle = host.querySelector('[data-role="repo-toggle"]');
+        if (menu && !menu.hidden) {
+          menu.hidden = true;
+          if (toggle) { toggle.setAttribute('aria-expanded', 'false'); }
+        }
+      });
+    });
     document.addEventListener('click', handleFilePageTocClick);
     document.addEventListener('click', handleSearchResultClick);
     document.addEventListener('click', handleSearchResultNavigate, true);
