@@ -1376,7 +1376,14 @@ def cleanup_repo_artifacts(repos):
         ("_sidebar_*.md", lambda name: name[len("_sidebar_"):-len(".md")]),
         ("search-index_*.json", lambda name: name[len("search-index_"):-len(".json")]),
     ]
-    for pattern, extract in patterns:
+    # search-index_<仓库>.json 是历史产物（现统一用全站 search-index.json），全部清理
+    for path in sorted(HTML_DIR.glob("search-index_*.json")):
+        try:
+            path.unlink()
+            removed.append(path.name)
+        except OSError:
+            pass
+    for pattern, extract in patterns[:2]:
         for path in sorted(HTML_DIR.glob(pattern)):
             if path.name in ("index_all.html",):
                 continue
@@ -1517,13 +1524,9 @@ def main(argv=None):
             generate_offline_data(md_files, sidebar=HTML_PREFIX + "_sidebar.md")
             for repo in repos:
                 repo_files = files_for_mount(md_files, repo["mount"])
-                search_index = f"search-index_{repo['id']}.json"
                 sidebar = f"_sidebar_{repo['id']}.md"
-                generate_search_index(repo_files, args.title, path=HTML_DIR / search_index,
-                                      repos=repos, include_readme=False,
-                                      site=HTML_PREFIX + repo_page_name(repo["id"]))
                 generate_offline_data(repo_files, path=LIB_DIR / f"offline-data_{repo['id']}.js",
-                                      search_index_path=HTML_DIR / search_index,
+                                      search_index_path=HTML_DIR / "search-index.json",
                                       sidebar=HTML_PREFIX + sidebar,
                                       include_readme=False)
             print("\n=== 索引刷新完成 ===")
@@ -1554,14 +1557,12 @@ def main(argv=None):
             repo_files = files_for_mount(md_files, repo["mount"])
             page = repo_page_name(repo["id"])
             sidebar = f"_sidebar_{repo['id']}.md"
-            search_index = f"search-index_{repo['id']}.json"
+            # 统一使用全站索引：仓库入口页的「全部文档」范围也能搜到其他仓库的内容
+            search_index = "search-index.json"
             offline_data = f"lib/offline-data_{repo['id']}.js"
             generate_sidebar(repo_files, path=HTML_DIR / sidebar, heading=repo["id"])
-            generate_search_index(repo_files, args.title, path=HTML_DIR / search_index,
-                                  repos=repos, include_readme=False,
-                                  site=HTML_PREFIX + page)
             generate_offline_data(repo_files, path=LIB_DIR / f"offline-data_{repo['id']}.js",
-                                  search_index_path=HTML_DIR / search_index,
+                                  search_index_path=HTML_DIR / "search-index.json",
                                   sidebar=HTML_PREFIX + sidebar,
                                   include_readme=False)
             homepage = f"md/{sub}/README.md" if (MD_DIR / sub / "README.md").is_file() else (

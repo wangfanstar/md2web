@@ -1106,8 +1106,12 @@ class HtmlLayoutTests(unittest.TestCase):
                      "README.md", "_sidebar.md", "search-index.json"):
             self.assertTrue((html_dir / name).is_file(), name)
         self.assertTrue(list(html_dir.glob("index_*.html")), "每个文件夹都应有入口页")
-        self.assertTrue(list(html_dir.glob("search-index_*.json")))
         self.assertTrue(list(html_dir.glob("_sidebar_*.md")))
+        # 索引统一为全站 search-index.json：仓库入口页的「全部文档」范围也能搜到其他仓库
+        self.assertFalse(list(html_dir.glob("search-index_*.json")), "不应再生成每仓库搜索索引")
+        for page in html_dir.glob("index_*.html"):
+            self.assertIn("indexPath: 'html/search-index.json'",
+                          page.read_text(encoding="utf-8"), page.name)
 
     def test_html_pages_use_base_and_prefixed_paths(self):
         page = (ROOT / "docs" / "html" / "index_all.html").read_text(encoding="utf-8")
@@ -1667,7 +1671,7 @@ class EndToEndTests(TempDirTestCase):
         self.assertTrue((self.docs / "html" / "index_使用说明.html").is_file())
         self.assertTrue((self.docs / "html" / "index_硬件设计.html").is_file())
         self.assertTrue((self.docs / "html" / "_sidebar_硬件设计.md").is_file())
-        self.assertTrue((self.docs / "html" / "search-index_硬件设计.json").is_file())
+        self.assertTrue((self.docs / "html" / "search-index.json").is_file())
         overview = (self.docs / "index.html").read_text(encoding="utf-8")
         self.assertIn("index_使用说明.html", overview)
         self.assertIn("未配置 SVN", overview)

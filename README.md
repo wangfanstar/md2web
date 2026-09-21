@@ -56,14 +56,13 @@ md2web/
 │   │   └── <文件夹>/附件/…      # 附件放在文档同级 附件/（编辑器上传时自动插入链接）
 │   ├── html/                    # 站点页面与数据（docs 根目录只保留 index.html）
 │   │   ├── index_all.html       # 全部文档合并视图（生成）
-│   │   ├── index_<仓库>.html     # 每个仓库一个入口页（独立侧栏/搜索索引）（生成）
+│   │   ├── index_<仓库>.html     # 每个仓库一个入口页（独立侧栏/离线快照）（生成）
 │   │   ├── md2web_config.html   # 仓库配置页（由 web/ 复制生成）
 │   │   ├── md2web_feedback.html # 读者反馈页（由 web/ 复制生成）
 │   │   ├── README.md            # 站点首页（生成）
 │   │   ├── _sidebar.md          # 全局侧边栏（生成）
 │   │   ├── _sidebar_<仓库>.md    # 各仓库侧边栏（生成）
-│   │   ├── search-index.json    # 全部仓库搜索索引（生成）
-│   │   ├── search-index_<仓库>.json # 各仓库搜索索引（生成）
+│   │   ├── search-index.json    # 全站搜索索引（所有页面共用）（生成）
 │   │   ├── images/              # 反馈截图（粘贴/上传，运行时创建）
 │   │   └── uploads/             # 反馈附件（运行时创建）
 │   ├── lib/                     # 离线 JS/CSS 与生成资源（含第三方依赖）
