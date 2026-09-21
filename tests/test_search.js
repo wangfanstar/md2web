@@ -60,3 +60,11 @@ test('full mode uses AND and excludes matching documents', () => {
   });
   assert.deepEqual(Array.from(api.search('DMA ready -debug'), (item) => item.path), ['a.md']);
 });
+
+test('reading route matching ignores the optional markdown extension', () => {
+  const api = loadSearch();
+  assert.equal(
+    api.routeWithoutAnchor('/md/guide/a.md'),
+    api.routeWithoutAnchor('/md/guide/a')
+  );
+});

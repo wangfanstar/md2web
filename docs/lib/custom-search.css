@@ -849,12 +849,13 @@ body.search-reading .workspace-page-actions {
   vertical-align: middle;
 }
 
+/* 注意：::highlight() 只支持 background-color 等少数属性，写 background 简写会被浏览器忽略（高亮不可见） */
 ::highlight(docsify-search-hl) {
-  background: rgba(255, 214, 10, .55);
+  background-color: rgba(255, 214, 10, .55);
 }
 
 ::highlight(docsify-search-current) {
-  background: #ffb84d;
+  background-color: #ffb84d;
 }
 
 @media (max-width: 768px) {

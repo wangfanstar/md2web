@@ -1166,6 +1166,21 @@ class HtmlLayoutTests(unittest.TestCase):
         built = (ROOT / "docs" / "lib" / "custom-search.js").read_text(encoding="utf-8")
         self.assertIn('href="html/index_all.html"', built, "构建产物未同步 custom-search.js")
 
+    def test_search_reading_highlight_robustness(self):
+        """正文命中高亮：标题文字在 a.anchor 内不能被排除；DOM 重渲染后失效的 Range 要重新采集。"""
+        source = (ROOT / "web" / "custom-search.js").read_text(encoding="utf-8")
+        self.assertNotIn(".anchor, .search-reading-toolbar", source,
+                         "docsify 标题文字包在 a.anchor 中，排除 .anchor 会导致标题命中不高亮")
+        self.assertIn("readingRangesValid", source, "应用高亮前应校验 Range 是否失效")
+        self.assertIn("refreshReadingMatches", source, "Range 失效后应按当前 DOM 重新采集")
+        self.assertIn("ensureReadingMatches", source)
+        css = (ROOT / "web" / "custom-search.css").read_text(encoding="utf-8")
+        self.assertIn("::highlight(docsify-search-hl)", css)
+        self.assertIn("background-color", css.split("::highlight(docsify-search-hl)")[1][:120],
+                      "::highlight() 应使用 background-color")
+        built = (ROOT / "docs" / "lib" / "custom-search.js").read_text(encoding="utf-8")
+        self.assertIn("readingRangesValid", built, "构建产物未同步 custom-search.js")
+
     def test_search_restores_query_across_pages(self):
         """跨页搜索结果会整页导航：关键词要暂存并在目标页恢复，否则正文命中高亮丢失。"""
         source = (ROOT / "web" / "custom-search.js").read_text(encoding="utf-8")

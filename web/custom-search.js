@@ -1342,7 +1342,9 @@
   }
 
   function routeWithoutAnchor(route) {
-    return String(route || '').split('?')[0].replace(/\/$/, '') || '/';
+    return String(route || '').split('?')[0]
+      .replace(/\.md$/i, '')
+      .replace(/\/$/, '') || '/';
   }
 
   function itemInScope(item) {
@@ -1707,7 +1709,8 @@
     var walker = document.createTreeWalker(section, NodeFilter.SHOW_TEXT, {
       acceptNode: function (node) {
         var parent = node.parentElement;
-        if (!parent || parent.closest('pre, code, .anchor, .search-reading-toolbar')) {
+        // 注意：docsify 的标题文字包在 a.anchor 里，不能排除 .anchor，否则标题命中不会高亮
+        if (!parent || parent.closest('pre, code, .search-reading-toolbar')) {
           return NodeFilter.FILTER_REJECT;
         }
         return NodeFilter.FILTER_ACCEPT;
@@ -1788,10 +1791,47 @@
     }
   }
 
+  function readingRangesValid() {
+    return (reading.matches || []).every(function (range) {
+      if (range.collapsed) {
+        return false;
+      }
+      var start = range.startContainer;
+      var end = range.endContainer;
+      return !!(start && start.isConnected && end && end.isConnected);
+    });
+  }
+
+  // docsify 重新渲染会替换正文节点，已采集的 Range 会塌缩/失效：按当前 DOM 重新采集
+  function refreshReadingMatches() {
+    var section = document.querySelector('.markdown-section');
+    if (!section || !reading.query) {
+      return false;
+    }
+    reading.matches = collectReadingRanges(section, reading.query, queryTerms(reading.query));
+    if (reading.current >= reading.matches.length) {
+      reading.current = reading.matches.length - 1;
+    }
+    return true;
+  }
+
+  function ensureReadingMatches() {
+    if (readingRangesValid()) {
+      return;
+    }
+    if (refreshReadingMatches()) {
+      reading.marks = [];
+      applyReadingHighlight();
+    }
+  }
+
   function applyReadingHighlight() {
     if (!supportsHighlightApi()) {
       updateCurrentMark();
       return;
+    }
+    if (!readingRangesValid()) {
+      refreshReadingMatches();
     }
     CSS.highlights.delete('docsify-search-hl');
     CSS.highlights.delete('docsify-search-current');
@@ -2053,6 +2093,7 @@
         return entry.heading.isConnected && entry.wrapper.isConnected;
       });
       if (domIntact) {
+        ensureReadingMatches();
         updateReadingCurrentForAnchor();
         return;
       }
@@ -2083,6 +2124,13 @@
       reading.current = 0;
       applyReadingHighlight();
     }
+    [400, 1200, 2600].forEach(function (delay) {
+      window.setTimeout(function () {
+        if (reading.active) {
+          ensureReadingMatches();
+        }
+      }, delay);
+    });
   }
 
   // ---------- 界面构建 ----------
@@ -2516,7 +2564,8 @@
       flattenIndex: flattenIndex,
       search: search,
       state: state,
-      normalizeText: normalizeText
+      normalizeText: normalizeText,
+      routeWithoutAnchor: routeWithoutAnchor
     };
   }
 
