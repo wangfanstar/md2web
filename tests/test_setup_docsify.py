@@ -1166,6 +1166,17 @@ class HtmlLayoutTests(unittest.TestCase):
         built = (ROOT / "docs" / "lib" / "custom-search.js").read_text(encoding="utf-8")
         self.assertIn('href="html/index_all.html"', built, "构建产物未同步 custom-search.js")
 
+    def test_search_history_click_reruns_query(self):
+        """点击历史搜索词应重新执行搜索（回填输入框并展示结果），而不是跳转到上次地址。"""
+        source = (ROOT / "web" / "custom-search.js").read_text(encoding="utf-8")
+        start = source.index("function historyPanelHtml")
+        end = source.index("function groupsHtml", start)
+        panel = source[start:end]
+        self.assertIn("kind: 'fill'", panel, "历史词点击应复用 fill 分支（回填 + 重新搜索）")
+        self.assertNotIn("kind: 'open'", panel)
+        self.assertNotIn("kind === 'open'", source, "旧的 open 分支已无调用方，应删除")
+        self.assertIn("view.input.focus()", source, "回填后应聚焦输入框")
+
     def test_search_reading_highlight_robustness(self):
         """正文命中高亮：标题文字在 a.anchor 内不能被排除；DOM 重渲染后失效的 Range 要重新采集。"""
         source = (ROOT / "web" / "custom-search.js").read_text(encoding="utf-8")

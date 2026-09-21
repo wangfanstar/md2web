@@ -314,7 +314,8 @@
   function historyPanelHtml(view) {
     var items = state.history.map(function (entry) {
       var index = view.flat.length;
-      view.flat.push({ kind: 'open', item: entry });
+      // 点击历史词应重新执行搜索（填入输入框并展示结果），而不是跳转到上次记录的地址
+      view.flat.push({ kind: 'fill', item: entry });
       return [
         '<div class="custom-search-history-item" data-flat-index="' + index + '">',
         '<span class="custom-search-history-icon">🕘</span>',
@@ -473,13 +474,9 @@
       setQuery(query);
       view.autocompleteHidden = true;
       renderView(view);
-    } else if (entry.kind === 'open') {
-      if (view === state.dialog) {
-        closeDialog();
+      if (view.input && view.input.focus) {
+        view.input.focus();
       }
-      reading.dismissed = null;
-      navigateToUrl(entry.item.url);
-      scheduleReadingModeBuild();
     } else if (entry.kind === 'result') {
       recordHistory(state.query, entry.item.url);
       if (view === state.dialog) {
