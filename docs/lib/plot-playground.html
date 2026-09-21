@@ -207,7 +207,7 @@ svg text[class*="actor"] {
       <details class="pg-help">
         <summary>语法说明</summary>
         <div class="pg-help-body">
-          <p>在文档中把围栏语言写为 <code>mermaid</code> 即可渲染；本页选择类型会自动载入对应模板。</p>
+          <p>在文档中把围栏语言写为 <code>mermaid</code> 即可渲染；本页选择类型会自动载入对应模板。直接把带 <code>```mermaid</code> 围栏的源码粘贴到下方文本框也可以，会自动去掉围栏。</p>
           <table>
             <tr><th>类型</th><th>用途</th><th>关键语法</th></tr>
             <tr><td>flowchart</td><td>流程图</td><td><code>A[文本] --&gt; B{判断}</code>、<code>subgraph</code></td></tr>
@@ -280,9 +280,16 @@ svg text[class*="actor"] {
     });
   });
 
+  // 源码里可能已经带了 ``` 围栏（从文档复制/粘贴回来）：先剥掉，避免预览报错或复制出嵌套围栏
+  function stripFence(source) {
+    var text = String(source || '').trim();
+    var match = text.match(/^(?:```|~~~)[^\n]*\n([\s\S]*?)\n?(?:```|~~~)\s*$/);
+    return match ? match[1].trim() : text;
+  }
+
   // ---------- PacketDiag ----------
   function fencedSource(source, language, withFence) {
-    var body = String(source || '').replace(/\s+$/, '');
+    var body = stripFence(source).replace(/\s+$/, '');
     if (!withFence) {
       return body;
     }
@@ -483,7 +490,7 @@ svg text[class*="actor"] {
       return;
     }
     try {
-      var raw = window.PacketDiag.extractSource(packetSource.value);
+      var raw = window.PacketDiag.extractSource(stripFence(packetSource.value));
       var firstPass = window.PacketDiag.parse(raw);
       var bitOrder = window.PacketDiag.bitOrderFor(firstPass, packetBitOrder.value);
       var numbering = window.PacketDiag.numberingFor(firstPass, packetNumbering.value);
@@ -632,7 +639,7 @@ svg text[class*="actor"] {
     }
     mermaidCounter += 1;
     mermaidError.textContent = '';
-    window.mermaid.render('pg-mermaid-' + mermaidCounter, mermaidSource.value).then(function (result) {
+    window.mermaid.render('pg-mermaid-' + mermaidCounter, stripFence(mermaidSource.value)).then(function (result) {
       mermaidPreview.innerHTML = result.svg;
     }).catch(function (error) {
       mermaidError.textContent = error && error.message ? error.message : String(error);
