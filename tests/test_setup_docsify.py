@@ -1174,6 +1174,7 @@ class HtmlLayoutTests(unittest.TestCase):
         self.assertIn("readingRangesValid", source, "应用高亮前应校验 Range 是否失效")
         self.assertIn("refreshReadingMatches", source, "Range 失效后应按当前 DOM 重新采集")
         self.assertIn("ensureReadingMatches", source)
+        self.assertIn("wrapReadingMatches();", source, "无 Highlight API 的浏览器刷新后应重新包裹 <mark>")
         css = (ROOT / "web" / "custom-search.css").read_text(encoding="utf-8")
         self.assertIn("::highlight(docsify-search-hl)", css)
         self.assertIn("background-color", css.split("::highlight(docsify-search-hl)")[1][:120],
@@ -1181,11 +1182,23 @@ class HtmlLayoutTests(unittest.TestCase):
         built = (ROOT / "docs" / "lib" / "custom-search.js").read_text(encoding="utf-8")
         self.assertIn("readingRangesValid", built, "构建产物未同步 custom-search.js")
 
+    def test_search_query_handoff_across_pages_and_tabs(self):
+        """关键词交接用 localStorage（跨标签页有效）并带有效期；总览页搜索点击结果也交接。"""
+        source = (ROOT / "web" / "custom-search.js").read_text(encoding="utf-8")
+        self.assertIn("READING_STATE_TTL", source)
+        self.assertIn("localStorage.setItem(READING_STATE_KEY", source)
+        self.assertIn("localStorage.getItem(READING_STATE_KEY", source)
+        self.assertNotIn("sessionStorage.setItem(READING_STATE_KEY", source,
+                         "sessionStorage 不跨标签页，应改用 localStorage")
+        master = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("md2web:search-reading", master, "总览页搜索结果应把关键词交接给目标文档页")
+        self.assertIn("rememberReadingQuery", master)
+
     def test_search_restores_query_across_pages(self):
         """跨页搜索结果会整页导航：关键词要暂存并在目标页恢复，否则正文命中高亮丢失。"""
         source = (ROOT / "web" / "custom-search.js").read_text(encoding="utf-8")
         for needle in ("READING_STATE_KEY", "rememberReadingQuery", "restoreReadingQuery",
-                       "handleSearchResultNavigate", "sessionStorage.setItem", "sessionStorage.removeItem"):
+                       "handleSearchResultNavigate", "localStorage.setItem", "localStorage.removeItem"):
             self.assertIn(needle, source, needle)
         self.assertIn("restoreReadingQuery();", source, "索引就绪后应恢复关键词")
         built = (ROOT / "docs" / "lib" / "custom-search.js").read_text(encoding="utf-8")

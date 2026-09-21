@@ -1565,6 +1565,7 @@
   };
 
   var READING_STATE_KEY = 'md2web:search-reading';
+  var READING_STATE_TTL = 120000;  // 关键词交接有效期（毫秒）
 
   function normalizeReadingRoute(route) {
     var value = String(route || '');
@@ -1596,9 +1597,10 @@
       return;
     }
     try {
-      sessionStorage.setItem(READING_STATE_KEY, JSON.stringify({
+      localStorage.setItem(READING_STATE_KEY, JSON.stringify({
         query: state.query,
-        route: normalizeReadingRoute(route)
+        route: normalizeReadingRoute(route),
+        at: Date.now()
       }));
     } catch (error) { /* 隐私模式忽略 */ }
   }
@@ -1606,9 +1608,9 @@
   function restoreReadingQuery() {
     var raw = null;
     try {
-      raw = sessionStorage.getItem(READING_STATE_KEY);
+      raw = localStorage.getItem(READING_STATE_KEY);
       if (raw) {
-        sessionStorage.removeItem(READING_STATE_KEY);
+        localStorage.removeItem(READING_STATE_KEY);
       }
     } catch (error) {
       return;
@@ -1623,6 +1625,9 @@
       saved = null;
     }
     if (!saved || !saved.query) {
+      return;
+    }
+    if (saved.at && Date.now() - saved.at > READING_STATE_TTL) {
       return;
     }
     if (normalizeReadingRoute(getRouteFromHash()) !== saved.route) {
@@ -1819,8 +1824,15 @@
     if (readingRangesValid()) {
       return;
     }
+    if (!supportsHighlightApi()) {
+      // 无 Highlight API 的浏览器用 <mark> 包裹：先移除旧标记（含 normalize）再重新采集
+      clearReadingMarks();
+    }
     if (refreshReadingMatches()) {
       reading.marks = [];
+      if (!supportsHighlightApi()) {
+        wrapReadingMatches();
+      }
       applyReadingHighlight();
     }
   }

@@ -1302,6 +1302,27 @@ MASTER_SCRIPT = """
         : '<p class="empty">没有匹配的文档</p>';
     });
   }
+  function rememberReadingQuery(href, query) {
+    var value = String(href || '');
+    var hashIndex = value.indexOf('#');
+    if (hashIndex === -1 || !query) { return; }
+    var route = value.slice(hashIndex + 1).split('?')[0].replace(/\.md$/i, '').replace(/\/+$/, '') || '/';
+    try {
+      localStorage.setItem('md2web:search-reading', JSON.stringify({
+        query: query, route: route, at: Date.now()
+      }));
+    } catch (error) { /* 隐私模式忽略 */ }
+  }
+
+  if (results) {
+    results.addEventListener('click', function (event) {
+      var link = event.target && event.target.closest ? event.target.closest('a[href]') : null;
+      if (link && input) {
+        rememberReadingQuery(link.getAttribute('href'), input.value.trim());
+      }
+    }, true);
+  }
+
   if (input) {
     input.addEventListener('input', function () { search(input.value); });
     input.addEventListener('keydown', function (event) {
