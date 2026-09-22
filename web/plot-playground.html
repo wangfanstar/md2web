@@ -51,6 +51,10 @@
   }
   textarea:focus { background: #fff; }
   .pg-error { color: #b42318; font-size: 12px; margin: 0; padding: 0 12px 10px; white-space: pre-wrap; }
+  .pg-copy-preview { border-top: 1px dashed var(--line); margin: 0 12px 12px; padding-top: 8px; }
+  .pg-copy-preview-head { align-items: baseline; color: var(--muted); display: flex; font-size: 11.5px; gap: 8px; margin-bottom: 6px; }
+  .pg-copy-preview-state { color: #1f6feb; }
+  .pg-copy-preview pre { background: var(--soft); border: 1px solid var(--line); border-radius: 6px; font-family: var(--mono); font-size: 12px; margin: 0; max-height: 220px; overflow: auto; padding: 8px 10px; white-space: pre-wrap; }
   .pg-error:empty { display: none; }
   .pg-preview { align-items: center; display: flex; justify-content: center; min-height: 340px; overflow: auto; padding: 12px; }
   .pg-preview canvas { height: auto; max-width: 100%; }
@@ -121,6 +125,13 @@ svg text[class*="actor"] {
       </div>
       <textarea id="pgPacketSource" spellcheck="false" aria-label="PacketDiag 源文本"></textarea>
       <p class="pg-error" id="pgPacketError" role="status"></p>
+      <div class="pg-copy-preview" data-copy-preview="packet">
+        <div class="pg-copy-preview-head">
+          <span>复制预览</span>
+          <span class="pg-copy-preview-state" data-copy-state></span>
+        </div>
+        <pre><code data-copy-code></code></pre>
+      </div>
       <details class="pg-help">
         <summary>语法说明</summary>
         <div class="pg-help-body">
@@ -179,6 +190,7 @@ svg text[class*="actor"] {
           <ul>
             <li>「位序」「编号」下拉框可覆盖源码中的 <code>bit_order</code> / <code>numbering</code>，选择「跟随源」则使用源码配置。</li>
             <li>「全局注释」显示在图形左侧，不写回源码；「适应宽度」控制图形是否缩放至容器宽度。</li>
+            <li>「带围栏」控制「复制源码」是否包含 <code>```packetdiag</code> 围栏；源码框下方的「复制预览」会实时显示将要复制的完整内容（勾选时带围栏、取消时纯源码）。</li>
           </ul>
         </div>
       </details>
@@ -204,10 +216,17 @@ svg text[class*="actor"] {
       <p class="pg-hint-line" id="pgMermaidHint"></p>
       <textarea id="pgMermaidSource" spellcheck="false" aria-label="Mermaid 源文本"></textarea>
       <p class="pg-error" id="pgMermaidError" role="status"></p>
+      <div class="pg-copy-preview" data-copy-preview="mermaid">
+        <div class="pg-copy-preview-head">
+          <span>复制预览</span>
+          <span class="pg-copy-preview-state" data-copy-state></span>
+        </div>
+        <pre><code data-copy-code></code></pre>
+      </div>
       <details class="pg-help">
         <summary>语法说明</summary>
         <div class="pg-help-body">
-          <p>在文档中把围栏语言写为 <code>mermaid</code> 即可渲染；本页选择类型会自动载入对应模板。直接把带 <code>```mermaid</code> 围栏的源码粘贴到下方文本框也可以，会自动去掉围栏。</p>
+          <p>在文档中把围栏语言写为 <code>mermaid</code> 即可渲染；本页选择类型会自动载入对应模板。直接把带 <code>```mermaid</code> 围栏的源码粘贴到下方文本框也可以，会自动去掉围栏；源码框下方的「复制预览」实时显示将要复制的内容（可用「带围栏」切换是否包含围栏）。</p>
           <table>
             <tr><th>类型</th><th>用途</th><th>关键语法</th></tr>
             <tr><td>flowchart</td><td>流程图</td><td><code>A[文本] --&gt; B{判断}</code>、<code>subgraph</code></td></tr>
@@ -322,6 +341,22 @@ svg text[class*="actor"] {
     return true;
   }
 
+  function updateCopyPreview(kind, area, fenceNode, language) {
+    var root = document.querySelector('[data-copy-preview="' + kind + '"]');
+    if (!root || !area) {
+      return;
+    }
+    var code = root.querySelector('[data-copy-code]');
+    var state = root.querySelector('[data-copy-state]');
+    var withFence = !fenceNode || fenceNode.checked;
+    if (code) {
+      code.textContent = fencedSource(area.value, language, withFence);
+    }
+    if (state) {
+      state.textContent = withFence ? '带围栏（可直接粘贴到 Markdown）' : '纯源码';
+    }
+  }
+
   function bindFencePaste(area) {
     if (!area) {
       return;
@@ -367,6 +402,9 @@ svg text[class*="actor"] {
   }
 
   var packetSource = document.getElementById('pgPacketSource');
+  var packetFenceNode = document.getElementById('pgPacketFence');
+  var mermaidSourceNode = document.getElementById('pgMermaidSource');
+  var mermaidFenceNode = document.getElementById('pgMermaidFence');
   bindFencePaste(packetSource);
   bindFencePaste(document.getElementById('pgMermaidSource'));
   var packetCanvas = document.getElementById('pgPacketCanvas');
@@ -390,6 +428,8 @@ svg text[class*="actor"] {
         try {
           window.localStorage.setItem(FENCE_STORAGE, node.checked ? '1' : '0');
         } catch (error) { /* 隐私模式忽略 */ }
+        updateCopyPreview('packet', packetSource, packetFenceNode, 'packetdiag');
+        updateCopyPreview('mermaid', mermaidSourceNode, mermaidFenceNode, 'mermaid');
       });
     }
   });
@@ -563,11 +603,13 @@ svg text[class*="actor"] {
 
   packetSource.addEventListener('input', function () {
     normalizeSourceArea(packetSource);
+    updateCopyPreview('packet', packetSource, packetFenceNode, 'packetdiag');
     clearTimeout(packetTimer);
     packetTimer = setTimeout(renderPacket, 250);
   });
   packetPreset.addEventListener('change', function () {
     packetSource.value = packetTemplate(packetPreset.value);
+    updateCopyPreview('packet', packetSource, packetFenceNode, 'packetdiag');
     renderPacket();
   });
   [packetBitOrder, packetNumbering, packetFit].forEach(function (control) {
@@ -645,6 +687,7 @@ svg text[class*="actor"] {
     var template = mermaidTemplate(mermaidType.value);
     mermaidSource.value = template.source;
     mermaidHint.textContent = '语法提示：' + template.hint;
+    updateCopyPreview('mermaid', mermaidSource, mermaidFenceNode, 'mermaid');
     renderMermaid();
   }
 
@@ -719,6 +762,7 @@ svg text[class*="actor"] {
   mermaidType.addEventListener('change', loadMermaidTemplate);
   mermaidSource.addEventListener('input', function () {
     normalizeSourceArea(mermaidSource);
+    updateCopyPreview('mermaid', mermaidSource, mermaidFenceNode, 'mermaid');
     clearTimeout(mermaidTimer);
     mermaidTimer = setTimeout(renderMermaid, 300);
   });
@@ -749,6 +793,9 @@ svg text[class*="actor"] {
 
   renderPacket();
   loadMermaidTemplate();
+  // 初始渲染后同步「复制预览」，保证一进页面就能看到带/不带围栏的完整复制内容
+  updateCopyPreview('packet', packetSource, packetFenceNode, 'packetdiag');
+  updateCopyPreview('mermaid', mermaidSource, mermaidFenceNode, 'mermaid');
 }());
 </script>
 </body>

@@ -1306,6 +1306,18 @@ class PlaygroundCopyTests(unittest.TestCase):
         self.assertIn("bindFencePaste", built, "构建产物未同步 plot-playground.html")
         self.assertIn("normalizeSourceArea", built, "构建产物未同步 plot-playground.html")
 
+    def test_copy_preview_shows_fenced_source(self):
+        """勾选「带围栏」时，页面下方要能看到包含围栏的完整复制内容（复制预览）。"""
+        html = (ROOT / "web" / "plot-playground.html").read_text(encoding="utf-8")
+        for needle in ("pg-copy-preview", "data-copy-preview=\"packet\"", "data-copy-preview=\"mermaid\"",
+                       "updateCopyPreview", "带围栏（可直接粘贴到 Markdown）", "纯源码"):
+            self.assertIn(needle, html, needle)
+        # 初始渲染、勾选变化、模板切换都要刷新预览
+        self.assertIn("updateCopyPreview('packet', packetSource, packetFenceNode, 'packetdiag')", html)
+        self.assertIn("updateCopyPreview('mermaid', mermaidSource, mermaidFenceNode, 'mermaid')", html)
+        built = (ROOT / "docs" / "lib" / "plot-playground.html").read_text(encoding="utf-8")
+        self.assertIn("updateCopyPreview", built, "构建产物未同步 plot-playground.html")
+
 
 class FolderGroupTests(TempDirTestCase):
     """未配置 SVN 的文件夹也能分组（folderGroups）。"""
