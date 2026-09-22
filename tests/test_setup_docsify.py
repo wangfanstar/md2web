@@ -1298,8 +1298,13 @@ class PlaygroundCopyTests(unittest.TestCase):
         self.assertIn("bindFencePaste", html, "粘贴带围栏内容时应只写入围栏里的源码")
         self.assertIn("bindFencePaste(packetSource)", html)
         self.assertIn("bindFencePaste(document.getElementById('pgMermaidSource'))", html)
+        # 兜底：任何方式写入的整段围栏都在 input 时去掉，源码框里永远只有源码
+        self.assertIn("function normalizeSourceArea", html)
+        self.assertIn("normalizeSourceArea(packetSource)", html)
+        self.assertIn("normalizeSourceArea(mermaidSource)", html)
         built = (ROOT / "docs" / "lib" / "plot-playground.html").read_text(encoding="utf-8")
         self.assertIn("bindFencePaste", built, "构建产物未同步 plot-playground.html")
+        self.assertIn("normalizeSourceArea", built, "构建产物未同步 plot-playground.html")
 
 
 class FolderGroupTests(TempDirTestCase):

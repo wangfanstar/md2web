@@ -304,6 +304,24 @@ svg text[class*="actor"] {
     area.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
+  // 输入/粘贴后兜底：源码框内容被整段围栏包住时就地去掉围栏（保证框里永远只有源码）
+  function normalizeSourceArea(area) {
+    if (!area) {
+      return false;
+    }
+    var inner = extractFenced(area.value);
+    if (inner === null) {
+      return false;
+    }
+    var caret = typeof area.selectionStart === 'number' ? area.selectionStart : inner.length;
+    area.value = inner;
+    if (area.setSelectionRange) {
+      var position = Math.min(caret, inner.length);
+      area.setSelectionRange(position, position);
+    }
+    return true;
+  }
+
   function bindFencePaste(area) {
     if (!area) {
       return;
@@ -544,6 +562,7 @@ svg text[class*="actor"] {
   }
 
   packetSource.addEventListener('input', function () {
+    normalizeSourceArea(packetSource);
     clearTimeout(packetTimer);
     packetTimer = setTimeout(renderPacket, 250);
   });
@@ -699,6 +718,7 @@ svg text[class*="actor"] {
 
   mermaidType.addEventListener('change', loadMermaidTemplate);
   mermaidSource.addEventListener('input', function () {
+    normalizeSourceArea(mermaidSource);
     clearTimeout(mermaidTimer);
     mermaidTimer = setTimeout(renderMermaid, 300);
   });
