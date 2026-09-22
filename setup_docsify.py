@@ -1306,7 +1306,7 @@ MASTER_SCRIPT = """
     var value = String(href || '');
     var hashIndex = value.indexOf('#');
     if (hashIndex === -1 || !query) { return; }
-    var route = value.slice(hashIndex + 1).split('?')[0].replace(/\.md$/i, '').replace(/\/+$/, '') || '/';
+    var route = value.slice(hashIndex + 1).split('?')[0].replace(/[.]md$/i, '').replace(/\/+$/, '') || '/';
     try {
       localStorage.setItem('md2web:search-reading', JSON.stringify({
         query: query, route: route, at: Date.now()

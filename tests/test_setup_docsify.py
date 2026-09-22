@@ -1181,6 +1181,20 @@ class HtmlLayoutTests(unittest.TestCase):
         self.assertNotIn("kind === 'open'", source, "旧的 open 分支已无调用方，应删除")
         self.assertIn("view.input.focus()", source, "回填后应聚焦输入框")
 
+    def test_repo_id_is_generated_automatically(self):
+        """配置页仓库 ID 由系统按文件夹名生成：用户只填 SVN 地址与更新频率。"""
+        script = (ROOT / "web" / "md2web-config.js").read_text(encoding="utf-8")
+        self.assertIn("function autoRepoId", script)
+        self.assertIn("仓库 ID（自动生成）", script)
+        self.assertNotIn('placeholder="如 hardware"', script, "不应再让用户手填仓库 ID")
+        self.assertIn("'<input type=\"hidden\" data-repo=\"id\" value=\"'", script, "既有仓库 ID 通过隐藏字段保留")
+        # 本地模式与 SVN 模式都按文件夹名生成
+        self.assertIn("repoId = folderName ? slugId(folderName) : '';", script)
+        page = (ROOT / "web" / "md2web_config.html").read_text(encoding="utf-8")
+        self.assertIn(".repo-id-auto", page, "自动生成的 ID 需要只读样式")
+        built = (ROOT / "docs" / "lib" / "md2web-config.js").read_text(encoding="utf-8")
+        self.assertIn("autoRepoId", built, "构建产物未同步 md2web-config.js")
+
     def test_search_repo_filter_multi_select(self):
         """搜索支持按仓库多选过滤：范围/模式之外提供仓库勾选菜单，并持久化选择。"""
         source = (ROOT / "web" / "custom-search.js").read_text(encoding="utf-8")

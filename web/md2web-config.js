@@ -159,15 +159,18 @@
       '<td>' + sizeCell(folder) + '</td>',
       '<td><span class="repo-health" data-health-badge>' + initialBadge(item, svnEnabled) + '</span>'
         + '<br><span class="hint" data-mode-cell>'
-        + (item.id && !svnEnabled ? '本地模式：' + escapeHtml(item.id) : '') + '</span>'
+        + (!svnEnabled && (item.id || autoRepoId(folder, item))
+          ? '本地模式：' + escapeHtml(item.id || autoRepoId(folder, item)) : '') + '</span>'
         + (allow ? '' : '<br><span class="repo-readonly">只读：由服务器自动更新</span>') + '</td>',
       '<td><label class="flag"><input type="checkbox" data-repo="svnEnabled"'
         + (svnEnabled ? ' checked' : '') + '>启用 SVN</label></td>',
       '</tr>',
       '<tr data-pair-detail="' + pair + '"' + (svnEnabled ? '' : ' hidden') + '>',
       '<td colspan="7"><div class="repo-detail">',
-      '<label class="repo-field repo-field-id"><span>仓库 ID</span><input type="text" data-repo="id" value="' + escapeHtml(item.id)
-        + '" placeholder="如 hardware"' + disabled + '></label>',
+      '<div class="repo-field repo-field-id"><span>仓库 ID（自动生成）</span>'
+        + '<span class="repo-id-auto" data-repo-id-auto title="按文件夹名自动生成：用于入口页命名与 SVN 绑定">'
+        + escapeHtml(autoRepoId(folder, item)) + '</span>'
+        + '<input type="hidden" data-repo="id" value="' + escapeHtml(item.id || '') + '"></div>',
       '<label class="repo-field repo-field-url"><span>SVN 地址</span><input type="text" data-repo="url" value="' + escapeHtml(item.url)
         + '" placeholder="https://svn.example.com/svn/xxx/trunk/docs/"' + disabled + '></label>',
       '<label class="repo-field repo-field-interval"><span>更新频率（秒）</span><input type="number" min="0" step="30" data-repo="syncIntervalSeconds" value="'
@@ -282,9 +285,9 @@
       var interval = pairField(entry, 'syncIntervalSeconds');
       var allow = !!(entry && entry.detail.querySelector('[data-repo="allowCommit"]').checked);
       var mount = pairField(entry, 'mount') || row.getAttribute('data-mount') || '';
+      // 仓库 ID 一律由系统生成：既有仓库沿用保存的 ID，新文件夹按名称生成（本地/SVN 一致）
       var repoId = pairField(entry, 'id');
-      if (!repoId && !svnEnabled && allow) {
-        // 本地模式：未填 id 时用「文件夹名」生成（每个一级文件夹唯一，避免多个 local 重复）
+      if (!repoId) {
         var folderName = row.getAttribute('data-name') || mount.replace(/^md\//, '');
         repoId = folderName ? slugId(folderName) : '';
       }
@@ -315,7 +318,7 @@
     for (var index = 0; index < repos.length; index += 1) {
       var repo = repos[index];
       if (!repo.id) {
-        return '第 ' + (index + 1) + ' 行缺少仓库 ID（不需要该仓库请点「移除配置」）。';
+        return '第 ' + (index + 1) + ' 行无法生成仓库 ID：请检查文件夹名，或点「移除映射」。';
       }
       if (repo.sourceMode === 'svn' && !repo.url) {
         return '仓库 ' + repo.id + ' 勾选了 SVN 但缺少地址：请填写 SVN 地址，或取消勾选使用本地模式。';
@@ -347,6 +350,15 @@
       }
     }
     return '默认';
+  }
+
+  // 仓库 ID 由系统生成：已配置的仓库保留原 ID（避免绑定/凭据失效），新文件夹按名称生成
+  function autoRepoId(folder, item) {
+    if (item && item.id) {
+      return item.id;
+    }
+    var name = (folder && folder.name) || String((item && item.mount) || '').replace(/^md\//, '');
+    return name ? slugId(name) : '';
   }
 
   function slugId(value) {

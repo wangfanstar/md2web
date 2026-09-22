@@ -68,7 +68,7 @@ docs/html/images|uploads                  (反馈截图/附件，运行时写入
 | `web/ai-assistant.js` / `.css` | AI 助手聊天面板与独立配置弹窗（`window.AIAssistant`）：设置面板（服务商预设、接口地址、模型、Key、代理策略，Key 仅存 localStorage）、**资料范围勾选**（按文件夹/文档过滤检索）、**上传文档**（.md/.txt，仅本机 localStorage，≤512 KB）、本地检索 + 引用来源、OpenAI/Anthropic 风格流式 SSE 解析、直连失败自动走 `/__ai/chat` 代理；侧栏「AI 配置」图标与对话面板 ⚙ 均可打开配置 |
 | `tests/test_ai_retrieval.js` | AI 检索算法测试（`node --test`） |
 | `web/plot-playground.html` | 独立绘图在线预览页（Mermaid 全部类型模板 + PacketDiag 增强控件与完整语法说明、一键复制源码、下载），构建复制到 `docs/lib/`；`docs/md/使用说明/绘图示例.md` 与之保持全部样例同步（`tests/test_setup_docsify.py::DrawingExamplesTests` 校验） |
-| `web/md2web_config.html` / `web/md2web-config.js` | 仓库配置页（构建复制到 `docs/html/md2web_config.html`）：默认只列 `docs/md` 一级文件夹（显示文件夹名、不带 `md/` 前缀）+ 入口页链接（已配置仓库用仓库 ID，未配置用文件夹名，均有对应 `index_*.html`）+ 最新更新（作者/时间）+ 仓库大小（合计/文档/附件/子文件夹分类）+ 状态，并有「刷新文件夹信息」按钮；勾选「配置 SVN」才展开 SVN 地址/分组/更新频率/只读/允许合入与操作按钮（不勾选按 `sourceMode=local` 保存并清空地址，切换时需确认）。另有「账号切换与验证（SVN）」面板：查看当前账号、保存/测试 SVN 认证路径（`PUT /__config` + `POST /__config/test-auth`）、退出登录切换账号、验证（可选直接切换）SVN 账号；管理员登录后保存配置、设置同步凭据，支持「创建并拉取」（`POST /__admin/provision`：目录不存在时创建并从 SVN 导出） |
+| `web/md2web_config.html` / `web/md2web-config.js` | 仓库配置页（构建复制到 `docs/html/md2web_config.html`）：**仓库 ID 由系统按文件夹名自动生成**（`autoRepoId`，既有仓库沿用保存的 ID 以免绑定/凭据失效），用户只填 SVN 地址与更新频率；默认只列 `docs/md` 一级文件夹（显示文件夹名、不带 `md/` 前缀）+ 入口页链接（已配置仓库用仓库 ID，未配置用文件夹名，均有对应 `index_*.html`）+ 最新更新（作者/时间）+ 仓库大小（合计/文档/附件/子文件夹分类）+ 状态，并有「刷新文件夹信息」按钮；勾选「配置 SVN」才展开 SVN 地址/分组/更新频率/只读/允许合入与操作按钮（不勾选按 `sourceMode=local` 保存并清空地址，切换时需确认）。另有「账号切换与验证（SVN）」面板：查看当前账号、保存/测试 SVN 认证路径（`PUT /__config` + `POST /__config/test-auth`）、退出登录切换账号、验证（可选直接切换）SVN 账号；管理员登录后保存配置、设置同步凭据，支持「创建并拉取」（`POST /__admin/provision`：目录不存在时创建并从 SVN 导出） |
 | `docs/index.html` / `docs/html/index_<仓库>.html` / `docs/html/index_all.html` | 构建生成：docs 根目录只留总览页 `index.html`（按分组列出各仓库入口 + 跨仓库搜索）；`docs/html/` 下是每仓库入口页（独立侧栏/离线快照，带只读与允许合入标记；**搜索索引统一为全站 `html/search-index.json`**，任意入口页的「全部文档」范围都能搜到其他仓库并跳转对应入口页）、合并视图、配置页与反馈页、`README.md`/`_sidebar*.md`/`search-index*.json` |
 | `docs/md/` | 唯一需要人工维护的源文档目录 |
 | `docs/lib/` | 离线依赖 + 生成资源，不要手工修改 |
@@ -186,7 +186,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 离线快照（`docs/lib/offline-data*.js`）的键以**站点根**为基准：md 用 `md/...`，侧栏/首页用 `html/_sidebar*.md`、`html/README.md`；`offline-file.js` 的 `SITE_BASE` 取 `lib/` 的上一级（`document.currentScript`），不要改回按页面目录计算。
 - 编辑器文字颜色用 `<span style="color:…">`；`web/sanitize.js` 已改为**只放行 `color` 单属性**（DOMPurify `afterSanitizeAttributes` 钩子 + 正则白名单），不要再把 `style` 加回 `FORBID_ATTR`，否则预览里颜色会消失（站点渲染不经过 `Sanitize`，只有编辑器预览/AI 回答经过）。
 - 附件目录名固定为 `附件/`（`documents.ATTACHMENT_DIR_NAME`），与 `images/` 同级；上传沿用原文件名（清理链接敏感字符、重名加 `-2/-3`），并禁止 `.html/.js/.svg` 等可脚本化后缀（同源静态分发有 XSS 风险）。提交随带依赖 `documents.referenced_attachments` 解析 `[名称](附件/…)` 与 `<a href="附件/…">`，改动目录名或链接写法要同步更新解析与测试。
-- 配置页 SVN 明细行（`.repo-detail`）是 12 栅格：仓库 ID/更新频率各 3 列、SVN 地址 6 列、权限与操作按钮整行；标签在上输入框在下，窄屏（≤980px/≤620px）逐级降为 6/12 列。改布局时保持 `.repo-field-*` 类名与 `md2web-config.js` 中 `repoRow` 的 class 对应。
+- 配置页 SVN 明细行（`.repo-detail`）是 12 栅格：仓库 ID（只读展示 `.repo-id-auto`，自动生成）/更新频率各 3 列、SVN 地址 6 列、权限与操作按钮整行；标签在上输入框在下，窄屏（≤980px/≤620px）逐级降为 6/12 列。改布局时保持 `.repo-field-*` 类名与 `md2web-config.js` 中 `repoRow` 的 class 对应；不要恢复成让用户手填仓库 ID（`data-repo="id"` 只作为隐藏字段保留既有值）。
 
 ## 完成前检查清单
 
