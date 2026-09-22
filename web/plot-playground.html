@@ -281,10 +281,43 @@ svg text[class*="actor"] {
   });
 
   // 源码里可能已经带了 ``` 围栏（从文档复制/粘贴回来）：先剥掉，避免预览报错或复制出嵌套围栏
+  function extractFenced(source) {
+    var match = String(source || '').match(/^\s*(?:```|~~~)[^\n]*\n([\s\S]*?)\n?\s*(?:```|~~~)\s*$/);
+    return match ? match[1].replace(/\s+$/, '') : null;
+  }
+
   function stripFence(source) {
-    var text = String(source || '').trim();
-    var match = text.match(/^(?:```|~~~)[^\n]*\n([\s\S]*?)\n?(?:```|~~~)\s*$/);
-    return match ? match[1].trim() : text;
+    var inner = extractFenced(source);
+    return inner === null ? String(source || '').trim() : inner;
+  }
+
+  // 粘贴时若内容是整段围栏代码，只把围栏里的源码放进编辑框（避免源码框里出现围栏行）
+  function insertSourceText(area, content) {
+    var value = area.value;
+    var start = typeof area.selectionStart === 'number' ? area.selectionStart : value.length;
+    var end = typeof area.selectionEnd === 'number' ? area.selectionEnd : value.length;
+    area.value = value.slice(0, start) + content + value.slice(end);
+    var caret = start + content.length;
+    if (area.setSelectionRange) {
+      area.setSelectionRange(caret, caret);
+    }
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function bindFencePaste(area) {
+    if (!area) {
+      return;
+    }
+    area.addEventListener('paste', function (event) {
+      var clipboard = event.clipboardData || window.clipboardData;
+      var pasted = clipboard && clipboard.getData ? clipboard.getData('text') : '';
+      var inner = extractFenced(pasted);
+      if (inner === null) {
+        return;
+      }
+      event.preventDefault();
+      insertSourceText(area, inner);
+    });
   }
 
   // ---------- PacketDiag ----------
@@ -316,6 +349,8 @@ svg text[class*="actor"] {
   }
 
   var packetSource = document.getElementById('pgPacketSource');
+  bindFencePaste(packetSource);
+  bindFencePaste(document.getElementById('pgMermaidSource'));
   var packetCanvas = document.getElementById('pgPacketCanvas');
   var packetError = document.getElementById('pgPacketError');
   var FENCE_STORAGE = 'md2web:playground-fence';

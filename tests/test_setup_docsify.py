@@ -1288,14 +1288,18 @@ class PlaygroundCopyTests(unittest.TestCase):
         self.assertIn("已复制（纯源码）", html)
 
     def test_fenced_input_is_stripped(self):
-        """粘贴带围栏的源码时：预览/渲染/复制都要先剥掉围栏，避免报错或嵌套围栏。"""
+        """粘贴带围栏的源码时：源码框只保留围栏内容，预览/渲染/复制都不出现围栏。"""
         html = (ROOT / "web" / "plot-playground.html").read_text(encoding="utf-8")
+        self.assertIn("function extractFenced", html)
         self.assertIn("function stripFence", html)
         self.assertIn("stripFence(source).replace", html, "fencedSource 应先剥离已有围栏再包裹")
         self.assertIn("stripFence(mermaidSource.value)", html, "Mermaid 渲染前应剥离围栏")
         self.assertIn("stripFence(packetSource.value)", html, "PacketDiag 渲染前应剥离围栏")
+        self.assertIn("bindFencePaste", html, "粘贴带围栏内容时应只写入围栏里的源码")
+        self.assertIn("bindFencePaste(packetSource)", html)
+        self.assertIn("bindFencePaste(document.getElementById('pgMermaidSource'))", html)
         built = (ROOT / "docs" / "lib" / "plot-playground.html").read_text(encoding="utf-8")
-        self.assertIn("stripFence", built, "构建产物未同步 plot-playground.html")
+        self.assertIn("bindFencePaste", built, "构建产物未同步 plot-playground.html")
 
 
 class FolderGroupTests(TempDirTestCase):
