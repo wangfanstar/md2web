@@ -417,7 +417,7 @@
     } else if (state.error) {
       statusText = state.error;
     } else if (!query) {
-      statusText = state.history.length ? '最近搜索' : '输入关键词开始搜索';
+      statusText = state.history.length ? '最近搜索' : '输入关键词，搜索全部仓库的文档名和全文';
       contentHtml = state.history.length ? historyPanelHtml(view) : '';
     } else if (!hasEnoughQuery(query)) {
       statusText = isLikelyChineseQuery(query) ? '搜索中...' : '请至少输入 ' + config.minQueryLength + ' 个字符';
@@ -428,11 +428,12 @@
         var allGroups = groupResults(state.results);
         var groups = capGroups(allGroups, view.max);
         statusText = '找到 ' + state.results.length + ' 条命中 · ' + allGroups.length + ' 个文档' +
+          (state.searchMode === 'both' ? '（文档名与全文结果已分组）' : '') +
           (groups.reduce(function (total, group) { return total + group.entries.length; }, 0) < state.results.length ? '（显示前 ' + groups.reduce(function (total, group) { return total + group.entries.length; }, 0) + ' 条）' : '');
         contentHtml = modeGroupsHtml(view, state.results, view.max);
       } else {
         statusText = '没有找到结果';
-        contentHtml = '<div class="custom-search-empty">换个更精确的寄存器、信号名或章节关键词试试。</div>';
+        contentHtml = '<div class="custom-search-empty">没有匹配结果，请更换关键词或调整搜索模式、仓库范围。</div>';
       }
     }
 
@@ -2261,7 +2262,7 @@
 
   function searchFiltersHtml() {
     return '<div class="custom-search-filters" data-role="search-filters" hidden>' +
-      '<label>模式 <select data-role="search-mode" aria-label="搜索模式"><option value="both">文档名和全文</option><option value="full">全文</option><option value="file">文档名</option></select></label>' +
+      '<label>搜索模式 <select data-role="search-mode" aria-label="搜索模式"><option value="both">文档名和全文</option><option value="full">仅全文</option><option value="file">仅文档名</option></select></label>' +
       '<div class="custom-search-repo" data-role="repo-filter">' +
       '<button type="button" class="custom-search-repo-toggle" data-role="repo-toggle" aria-expanded="false">' +
       '<span data-role="repo-label">仓库：全部仓库</span><span class="custom-search-repo-caret">▾</span></button>' +
@@ -2337,7 +2338,7 @@
       var active = state.searchMode !== 'both'
         || (state.repoFilter && state.repoFilter.length > 0);
       toggle.classList.toggle('is-active', active);
-      toggle.title = active ? '搜索模式或仓库已筛选（点击展开）' : '搜索模式与仓库';
+      toggle.title = active ? '搜索模式或仓库已筛选（点击展开）' : '搜索模式与仓库（默认：文档名和全文 / 全部仓库）';
     }
     refreshToggleState();
     var mode = root.querySelector('[data-role="search-mode"]');
@@ -2470,8 +2471,8 @@
       '</div>',
       '<div class="custom-search-input-row">',
       '<span class="custom-search-input-icon">🔍</span>',
-      '<button type="button" class="custom-search-filter-toggle" data-role="filter-toggle" title="搜索模式与仓库" aria-label="搜索模式与仓库" aria-expanded="false">⚙</button>',
-      '<input type="search" class="custom-search-sidebar-input" placeholder="搜索文档（/ 聚焦，Ctrl+K 全局）" aria-label="搜索文档">',
+      '<button type="button" class="custom-search-filter-toggle" data-role="filter-toggle" title="搜索模式与仓库（默认：文档名和全文 / 全部仓库）" aria-label="搜索模式与仓库" aria-expanded="false">⚙</button>',
+      '<input type="search" class="custom-search-sidebar-input" placeholder="搜索全部仓库（文档名和全文）" aria-label="搜索全部仓库的文档名和全文">',
       '<button type="button" class="custom-search-input-btn" data-role="clear-search" aria-label="清空搜索">×</button>',
       '</div>',
       searchFiltersHtml(),

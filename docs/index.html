@@ -12,8 +12,11 @@
   .wrap { margin: 0 auto; max-width: 1080px; }
   h1 { font-size: 24px; margin: 0 0 6px; }
   .sub { color: #57606a; font-size: 13px; margin: 0 0 18px; }
-  .tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
-  .tools input { border: 1px solid #d5dee8; border-radius: 8px; flex: 1 1 260px; font: inherit; padding: 8px 12px; }
+  .tools { align-items: center; background: #fff; border: 1px solid #e3e8ee; border-radius: 10px; display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; padding: 8px; }
+  .tools input { background: #f8fafc; border: 1px solid #d5dee8; border-radius: 7px; flex: 1 1 300px; font: inherit; min-width: 220px; padding: 8px 12px; }
+  .tools input:focus { border-color: #1f6feb; box-shadow: 0 0 0 3px rgba(31,111,235,.12); outline: 0; }
+  .tools select { background: #fff; border: 1px solid #d5dee8; border-radius: 7px; color: #334155; font: inherit; padding: 8px 9px; }
+  .tools label { align-items: center; color: #64748b; display: inline-flex; font-size: 12px; gap: 5px; white-space: nowrap; }
   .tools a, .tools button { background: #fff; border: 1px solid #d5dee8; border-radius: 8px; color: #1f6feb; cursor: pointer; font: inherit; padding: 8px 14px; text-decoration: none; }
   .tools a:hover, .tools button:hover { border-color: #1f6feb; }
   h2 { font-size: 15px; margin: 22px 0 10px; color: #57606a; }
@@ -25,27 +28,31 @@
   .badge { background: #eef4fd; border-radius: 999px; color: #1f6feb; display: inline-block; font-size: 11px; margin-left: 6px; padding: 1px 8px; }
   .badge.readonly { background: #fff7ed; color: #b45309; }
   .results { margin: 6px 0 18px; }
+  .master-mode-section { margin: 14px 0 18px; }
+  .master-mode-title { align-items: baseline; border-bottom: 1px solid #e3e8ee; color: #334155; display: flex; font-size: 14px; gap: 8px; margin: 0 0 8px; padding: 0 2px 7px; }
+  .master-mode-title span { color: #64748b; font-size: 11px; font-weight: 400; }
   .results a { background: #fff; border: 1px solid #e3e8ee; border-radius: 8px; color: inherit; display: block; margin-bottom: 6px; padding: 8px 12px; text-decoration: none; }
   .results a:hover { border-color: #1f6feb; }
   .results small { color: #6b7a89; display: block; }
   .empty { color: #57606a; font-size: 13px; }
-  .hint { color: #57606a; font-size: 12.5px; margin: -8px 0 16px; }
+  .hint { color: #57606a; font-size: 12.5px; margin: 0 0 16px; }
   .hint a { color: #1f6feb; }
 </style>
 </head>
 <body>
   <div class="wrap">
     <h1>文档中心</h1>
-    <p class="sub">按仓库分组浏览：每个仓库一个独立入口页（含独立搜索索引）。</p>
+    <p class="sub">按仓库分组浏览；搜索默认覆盖全部仓库，并将文档名与全文结果分组显示。</p>
     <div class="tools">
-      <input type="search" placeholder="仅按文件名/标题搜索（搜索文件内容请到全部文档）" data-master-search
-             aria-label="仅按文件名或标题搜索">
+      <input type="search" placeholder="搜索全部仓库（文档名和全文）" data-master-search
+             aria-label="搜索全部仓库的文档名和全文">
+      <label>仓库<select class="master-search-repo" data-master-repo aria-label="搜索仓库范围"><option value="">全部仓库</option><option value="使用说明">使用说明</option><option value="硬件设计">硬件设计</option><option value="软件工具链">软件工具链</option><option value="验证指南">验证指南</option></select></label>
+      <label>模式<select class="master-search-mode" data-master-mode aria-label="搜索模式"><option value="both" selected>文档名和全文</option><option value="file">仅文档名</option><option value="full">仅全文</option></select></label>
       <a href="html/index_all.html">全部文档（合并视图）</a>
       <a href="html/md2web_config.html">仓库配置</a>
       <a href="html/md2web_feedback.html">读者反馈</a>
     </div>
-    <p class="hint">本页搜索<strong>只匹配文件名与标题</strong>；需要搜索<strong>文件内容（全文检索）</strong>请到
-      <a href="html/index_all.html">全部文档（index_all.html）</a>。</p>
+    <p class="hint">当前搜索范围：<strong>全部仓库</strong>；默认模式：<strong>文档名和全文</strong>，结果按两类分组显示。</p>
     <div class="results" data-master-results></div>
     <h2>默认</h2><div class="cards"><a class="card" href="html/index_使用说明.html"><strong>使用说明<span class="badge readonly">未配置 SVN</span></strong><span>目录：md/使用说明</span><span>本地文件夹（不连接 SVN）</span></a><a class="card" href="html/index_硬件设计.html"><strong>硬件设计<span class="badge readonly">未配置 SVN</span></strong><span>目录：md/硬件设计</span><span>本地文件夹（不连接 SVN）</span></a><a class="card" href="html/index_软件工具链.html"><strong>软件工具链<span class="badge readonly">未配置 SVN</span></strong><span>目录：md/软件工具链</span><span>本地文件夹（不连接 SVN）</span></a><a class="card" href="html/index_验证指南.html"><strong>验证指南<span class="badge readonly">未配置 SVN</span></strong><span>目录：md/验证指南</span><span>本地文件夹（不连接 SVN）</span></a></div>
   </div>
@@ -54,6 +61,8 @@
   var repos = window.__MD2WEB_REPOS__ || [];
   var index = null;
   var input = document.querySelector('[data-master-search]');
+  var repoSelect = document.querySelector('[data-master-repo]');
+  var modeSelect = document.querySelector('[data-master-mode]');
   var results = document.querySelector('[data-master-results]');
   function load() {
     if (index) { return Promise.resolve(index); }
@@ -66,27 +75,56 @@
       return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char];
     });
   }
+  function flatten(data) {
+    var hits = [];
+    Object.keys(data || {}).forEach(function (routeKey) {
+      var page = data[routeKey] || {};
+      Object.keys(page).forEach(function (slug) {
+        var entry = page[slug] || {};
+        if (!entry.route && routeKey === '/') { return; }
+        hits.push({
+          route: entry.route || routeKey,
+          title: entry.headingTitle || entry.title || entry.pageTitle || routeKey,
+          pageTitle: entry.pageTitle || entry.title || routeKey,
+          body: entry.body || '',
+          site: page.site || 'html/index_all.html'
+        });
+      });
+    });
+    return hits;
+  }
+  function repoMatches(hit) {
+    var selected = repoSelect && repoSelect.value;
+    if (!selected) { return true; }
+    var repo = repos.filter(function (item) { return String(item.id || '') === selected; })[0];
+    var mount = String(repo && repo.mount || '').replace(/^\/+|\/+$/g, '');
+    var route = String(hit.route || '').replace(/^\/+|\/+$/g, '');
+    return !!mount && (route === mount || route.indexOf(mount + '/') === 0);
+  }
+  function renderMode(mode, hits) {
+    if (!hits.length) { return ''; }
+    var label = mode === 'file' ? '文档名匹配' : '全文匹配';
+    return '<section class="master-mode-section"><h3 class="master-mode-title">' + label + '<span>' + hits.length + ' 条</span></h3>' +
+      hits.slice(0, 40).map(function (hit) {
+        var href = hit.site + '#/' + String(hit.route || '/').replace(/^\//, '');
+        return '<a href="' + escapeHtml(href) + '"><strong>' + escapeHtml(hit.title) + '</strong>'
+          + '<small>' + escapeHtml(hit.site) + ' · ' + escapeHtml(hit.route) + '</small>'
+          + (mode === 'full' && hit.body ? '<small>' + escapeHtml(hit.body.slice(0, 120)) + '</small>' : '') + '</a>';
+      }).join('') + '</section>';
+  }
   function search(query) {
     load().then(function (data) {
       var keyword = String(query || '').trim().toLowerCase();
-      if (keyword.length < 2) { results.innerHTML = ''; return; }
-      var hits = [];
-      Object.keys(data).forEach(function (route) {
-        var page = data[route] || {};
-        var title = page.title || route;
-        var headings = (page.headings || []).map(function (item) { return item.text || ''; }).join(' ');
-        if ((title + ' ' + headings + ' ' + route).toLowerCase().indexOf(keyword) === -1) { return; }
-        hits.push({ route: route, title: title, site: page.site || 'index_all.html', headings: headings.slice(0, 80) });
-      });
-      hits = hits.slice(0, 40);
-      results.innerHTML = hits.length
-        ? hits.map(function (hit) {
-          var href = hit.site + '#/' + hit.route.replace(/^\//, '');
-          return '<a href="' + escapeHtml(href) + '"><strong>' + escapeHtml(hit.title) + '</strong>'
-            + '<small>' + escapeHtml(hit.site) + ' · ' + escapeHtml(hit.route) + '</small>'
-            + (hit.headings ? '<small>' + escapeHtml(hit.headings) + '</small>' : '') + '</a>';
-        }).join('')
-        : '<p class="empty">没有匹配的文档</p>';
+      if (!keyword || (keyword.length < 2 && !/[一-鿿]/.test(keyword))) { results.innerHTML = ''; return; }
+      var modes = modeSelect && modeSelect.value === 'both' ? ['file', 'full'] : [modeSelect ? modeSelect.value : 'both'];
+      var flattened = flatten(data).filter(repoMatches);
+      var html = modes.map(function (mode) {
+        return renderMode(mode, flattened.filter(function (hit) {
+          var fileText = [hit.route, hit.pageTitle, hit.title].join(' ').toLowerCase();
+          return (mode === 'file' ? fileText : String(hit.body || '').toLowerCase()).indexOf(keyword) !== -1;
+        }));
+      }).join('');
+      results.innerHTML = html || '<p class="empty">没有匹配的文档，请尝试更换关键词、仓库或搜索模式。</p>';
     });
   }
   function rememberReadingQuery(href, query) {
@@ -119,6 +157,9 @@
       }
     });
   }
+  [repoSelect, modeSelect].forEach(function (control) {
+    if (control) { control.addEventListener('change', function () { search(input && input.value); }); }
+  });
 </script>
   <script src="lib/md2web-feedback.js"></script>
 </body>

@@ -92,6 +92,8 @@ body { color: var(--workspace-ink); background: #f7f9fb; }
   top: 0;
   z-index: 950;
 }
+.workspace-page-actions [data-workspace-copy-svn] { border-color: #bfdbfe; color: var(--workspace-accent); }
+.workspace-page-actions [data-workspace-copy-svn]:hover { background: #eef4fd; border-color: var(--workspace-accent); }
 .markdown-section pre { position: relative; }
 .workspace-copy-code { position: absolute; top: 7px; right: 8px; border: 1px solid rgba(255,255,255,.25); border-radius: 4px; background: rgba(18,28,40,.7); color: #e8eef5; cursor: pointer; font-size: 11px; opacity: .75; padding: 3px 7px; }
 .workspace-copy-code:hover { opacity: 1; }

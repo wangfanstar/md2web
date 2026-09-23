@@ -1129,10 +1129,11 @@ class HtmlLayoutTests(unittest.TestCase):
     def test_master_page_links_into_html_dir(self):
         master = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
         self.assertIn('href="html/index_all.html"', master)
-        # 总览页只做文件名/标题搜索，需在输入框与提示中引导到 index_all.html 做全文检索
-        self.assertIn("仅按文件名/标题搜索", master)
-        self.assertIn("只匹配文件名与标题", master)
-        self.assertIn("全文检索", master)
+        # 总览页默认覆盖全部仓库，并按文档名/全文分组显示结果
+        self.assertIn("搜索全部仓库（文档名和全文）", master)
+        self.assertIn("当前搜索范围", master)
+        self.assertIn("文档名匹配", master)
+        self.assertIn("全文匹配", master)
         self.assertIn('href="html/md2web_config.html"', master)
         self.assertIn('href="html/md2web_feedback.html"', master)
         self.assertIn("fetch('html/search-index.json')", master)
@@ -1214,6 +1215,36 @@ class HtmlLayoutTests(unittest.TestCase):
         self.assertIn(".custom-search-repo-menu", css, "仓库过滤菜单需要样式")
         built = (ROOT / "docs" / "lib" / "custom-search.js").read_text(encoding="utf-8")
         self.assertIn("repoFilter", built, "构建产物未同步 custom-search.js")
+
+    def test_search_prompts_describe_default_scope_and_grouped_modes(self):
+        source = (ROOT / "web" / "custom-search.js").read_text(encoding="utf-8")
+        for needle in ("搜索全部仓库（文档名和全文）", "文档名与全文结果已分组", "仅全文", "仅文档名",
+                       "没有匹配结果，请更换关键词或调整搜索模式、仓库范围"):
+            self.assertIn(needle, source, needle)
+        css = (ROOT / "web" / "custom-search.css").read_text(encoding="utf-8")
+        self.assertIn(".custom-search-filters > label", css)
+
+    def test_master_search_has_all_repo_mode_controls_and_grouped_results(self):
+        """文档中心搜索默认全仓库，并按文档名/全文分组展示。"""
+        source = (ROOT / "setup_docsify.py").read_text(encoding="utf-8")
+        for needle in ("data-master-mode", "data-master-repo", "全部仓库", "文档名匹配", "全文匹配",
+                       "master-search-mode", "master-search-repo"):
+            self.assertIn(needle, source, needle)
+        page = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('data-master-mode', page)
+        self.assertIn('data-master-repo', page)
+        self.assertIn('文档名匹配', page)
+        self.assertIn('全文匹配', page)
+
+    def test_workspace_exposes_svn_copy_link_when_repository_is_configured(self):
+        """正文工具栏在当前文档属于 SVN 仓库时提供复制 SVN 链接。"""
+        source = (ROOT / "web" / "workspace.js").read_text(encoding="utf-8")
+        for needle in ("data-workspace-copy-svn", "repoInfo", "repositories", "sourceMode", "复制 SVN 链接"):
+            self.assertIn(needle, source, needle)
+        css = (ROOT / "web" / "workspace.css").read_text(encoding="utf-8")
+        self.assertIn("workspace-page-actions", css)
+        built = (ROOT / "docs" / "lib" / "workspace.js").read_text(encoding="utf-8")
+        self.assertIn("data-workspace-copy-svn", built, "构建产物未同步 workspace.js")
 
     def test_search_reading_highlight_robustness(self):
         """正文命中高亮：标题文字在 a.anchor 内不能被排除；DOM 重渲染后失效的 Range 要重新采集。"""

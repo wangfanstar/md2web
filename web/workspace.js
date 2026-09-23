@@ -175,6 +175,64 @@
     });
   }
 
+  function repositoryCandidates() {
+    var docsify = window.$docsify || {};
+    var candidates = [];
+    if (docsify.repoInfo && docsify.repoInfo.mount) {
+      candidates.push(docsify.repoInfo);
+    }
+    (docsify.repoList || []).forEach(function (repo) { candidates.push(repo); });
+    if (window.SiteAuth && window.SiteAuth.repositories) {
+      (window.SiteAuth.repositories() || []).forEach(function (repo) { candidates.push(repo); });
+    }
+    return candidates;
+  }
+
+  function svnUrlForRoute(route) {
+    var clean = String(route || '').replace(/^#/, '').split('?')[0].replace(/^\/+|\/+$/g, '');
+    if (!clean || clean === 'README.md') {
+      return '';
+    }
+    var best = null;
+    repositoryCandidates().forEach(function (repo) {
+      var mount = String(repo && repo.mount || '').replace(/^\/+|\/+$/g, '');
+      var url = String(repo && repo.url || '').trim();
+      var sourceMode = String(repo && (repo.sourceMode || repo.source_mode) || 'svn').toLowerCase();
+      if (!mount || !url || sourceMode === 'local') {
+        return;
+      }
+      if ((clean === mount || clean.indexOf(mount + '/') === 0) && (!best || mount.length > best.mount.length)) {
+        best = { mount: mount, url: url.replace(/\/+$/, '') };
+      }
+    });
+    if (!best || clean === best.mount) {
+      return '';
+    }
+    var relative = clean.slice(best.mount.length).replace(/^\/+/, '');
+    return best.url + '/' + relative.split('/').map(function (part) { return encodeURIComponent(part); }).join('/');
+  }
+
+  function updateSvnCopyAction(actions, route) {
+    var button = actions.querySelector('[data-workspace-copy-svn]');
+    var link = svnUrlForRoute(route);
+    if (!link) {
+      if (button) { button.parentNode.removeChild(button); }
+      return;
+    }
+    if (!button) {
+      button = document.createElement('button');
+      button.type = 'button';
+      button.setAttribute('data-workspace-copy-svn', '');
+      button.title = '复制当前文档的 SVN 地址';
+      button.textContent = '复制 SVN 链接';
+      button.addEventListener('click', function () {
+        copyText(svnUrlForRoute(currentRoute()), button);
+      });
+      var sourceButton = actions.querySelector('[data-workspace-source]');
+      actions.insertBefore(button, sourceButton || null);
+    }
+  }
+
   function addBreadcrumb() {
     var section = document.querySelector('.markdown-section');
     if (!section) return;
@@ -233,6 +291,7 @@
       actions.querySelector('[data-workspace-export]').addEventListener('click', function () { if (window.PageExport) { window.PageExport.download(); } });
       actions.querySelector('[data-workspace-numbers]').addEventListener('click', function () { var hidden = document.body.classList.toggle('hide-heading-numbers'); try { localStorage.setItem(STORAGE.numbers, hidden ? '0' : '1'); } catch (_) {} this.textContent = hidden ? '显示序号' : '隐藏序号'; });
     }
+    updateSvnCopyAction(actions, route);
   }
   function updateEditLabel(actions) {
     var button = actions ? actions.querySelector('[data-workspace-edit]') : document.querySelector('[data-workspace-edit]');
@@ -334,6 +393,12 @@
     state.observer = new MutationObserver(schedule);
     state.observer.observe(document.body, { childList: true, subtree: true });
     window.addEventListener('hashchange', schedule);
+  }
+  if (window.__WORKSPACE_TEST__) {
+    window.__WORKSPACE_TEST_API__ = {
+      repositoryCandidates: repositoryCandidates,
+      svnUrlForRoute: svnUrlForRoute
+    };
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 }());

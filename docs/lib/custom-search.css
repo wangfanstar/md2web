@@ -1107,6 +1107,52 @@ body.toc-resizing {
   display: none !important;
 }
 
+.custom-search-filters {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e3e8ee;
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 7px 8px;
+}
+
+.custom-search-filters > label {
+  align-items: center;
+  color: var(--docs-muted, #64748b);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 5px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.custom-search-filters > label:first-child {
+  color: var(--docs-ink, #334155);
+  font-weight: 600;
+}
+
+.custom-search-filters select {
+  background: #fff;
+  border: 1px solid #d5dee8;
+  border-radius: 6px;
+  color: var(--docs-ink, #334155);
+  font: inherit;
+  font-size: 11px;
+  min-width: 118px;
+  padding: 4px 6px;
+}
+
+.custom-search-filters select:focus,
+.custom-search-repo-toggle:focus-visible,
+.custom-search-filter-toggle:focus-visible {
+  border-color: var(--docs-accent, #1f6feb);
+  box-shadow: 0 0 0 2px rgba(31,111,235,.12);
+  outline: 0;
+}
+
 /* 仓库多选过滤（范围/模式之后） */
 .custom-search-repo { position: relative; }
 
