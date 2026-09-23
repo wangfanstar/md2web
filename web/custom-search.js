@@ -1030,7 +1030,10 @@
     if (!tocConfig.enabled) {
       return;
     }
-    window.addEventListener('hashchange', schedulePageTocBuild);
+    window.addEventListener('hashchange', function () {
+      schedulePageTocBuild();
+      syncRepoFilterUI();
+    });
 
     if (state.tocObserver || !window.MutationObserver) {
       schedulePageTocBuild();
@@ -1392,7 +1395,7 @@
     }
     state.repoFilter = Array.isArray(values) ? values.filter(function (item) {
       return typeof item === 'string' && item;
-    }).slice(0, 1) : [];
+    }) : [];
   }
 
   function persistRepoFilter() {
@@ -2248,6 +2251,10 @@
       '<button type="button" class="custom-search-repo-toggle" data-role="repo-toggle" aria-expanded="false">' +
       '<span data-role="repo-label">仓库：全部仓库</span><span class="custom-search-repo-caret">▾</span></button>' +
       '<div class="custom-search-repo-menu" data-role="repo-menu" hidden>' +
+      '<div class="custom-search-repo-actions">' +
+      '<button type="button" data-role="repo-all">全部仓库</button>' +
+      '<button type="button" data-role="repo-current">本仓库</button>' +
+      '</div>' +
       '<div class="custom-search-repo-list" data-role="repo-list"></div>' +
       '</div>' +
       '</div>' +
@@ -2262,16 +2269,20 @@
       return;
     }
     var current = currentRepoName();
-    if (state.repoFilter.length && state.repoFilter[0] !== current) {
-      state.repoFilter = [];
+    var options = searchRepoOptions();
+    list.innerHTML = options.length ? options.map(function (name) {
+      var checked = (state.repoFilter || []).indexOf(name) !== -1;
+      return '<label class="custom-search-repo-item"><input type="checkbox" data-repo-name="'
+        + escapeHtml(name) + '"' + (checked ? ' checked' : '') + '><span>' + escapeHtml(name) + '</span></label>';
+    }).join('') : '<span class="custom-search-repo-empty">没有可过滤的仓库</span>';
+    var count = (state.repoFilter || []).length;
+    label.textContent = count === 0 ? '仓库：全部仓库' : (count === 1 ? '仓库：' + state.repoFilter[0] : '仓库：' + count + ' 个');
+    toggle.classList.toggle('is-active', count > 0);
+    var currentButton = host.querySelector('[data-role="repo-current"]');
+    if (currentButton) {
+      currentButton.disabled = !current;
+      currentButton.title = current ? '仅搜索本仓库：' + current : '当前页面没有对应仓库';
     }
-    var selected = current && state.repoFilter && state.repoFilter[0] === current ? 'current' : 'all';
-    list.innerHTML = '<label class="custom-search-repo-item"><input type="radio" name="search-repo" data-repo-option="all"'
-      + (selected === 'all' ? ' checked' : '') + '><span>全部仓库</span></label>'
-      + (current ? '<label class="custom-search-repo-item"><input type="radio" name="search-repo" data-repo-option="current"'
-        + (selected === 'current' ? ' checked' : '') + '><span>本仓库（' + escapeHtml(current) + '）</span></label>' : '');
-    label.textContent = selected === 'current' ? '仓库：本仓库（' + current + '）' : '仓库：全部仓库';
-    toggle.classList.toggle('is-active', selected === 'current');
   }
 
   function syncRepoFilterUI() {
@@ -2337,11 +2348,16 @@
       var repoList = repoHost.querySelector('[data-role="repo-list"]');
       if (repoList) {
         repoList.addEventListener('change', function (event) {
-          var option = event.target && event.target.getAttribute ? event.target.getAttribute('data-repo-option') : '';
-          if (!option) {
+          var name = event.target && event.target.getAttribute ? event.target.getAttribute('data-repo-name') : '';
+          if (!name) {
             return;
           }
-          state.repoFilter = option === 'current' && currentRepoName() ? [currentRepoName()] : [];
+          var index = state.repoFilter.indexOf(name);
+          if (event.target.checked && index === -1) {
+            state.repoFilter.push(name);
+          } else if (!event.target.checked && index !== -1) {
+            state.repoFilter.splice(index, 1);
+          }
           applyRepoFilter();
         });
       }
@@ -2349,6 +2365,14 @@
       if (repoAll) {
         repoAll.addEventListener('click', function () {
           state.repoFilter = [];
+          applyRepoFilter();
+        });
+      }
+      var repoCurrent = repoHost.querySelector('[data-role="repo-current"]');
+      if (repoCurrent) {
+        repoCurrent.addEventListener('click', function () {
+          var current = currentRepoName();
+          state.repoFilter = current ? [current] : [];
           applyRepoFilter();
         });
       }

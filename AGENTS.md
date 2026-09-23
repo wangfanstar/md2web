@@ -181,7 +181,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 服务默认按认证模式启动（`--preview` 才是只读预览）；缺少 Flask/Waitress 时给出安装提示，不静默回退匿名写。
 - 搜索的排除词语法为 `-词`，短语为 `"词 组"`；改动 `parseQuery` 时注意与 UI 提示保持一致。
 - 搜索仓库过滤使用 `state.repoFilter`，仓库 = `md/` 下一级文件夹，见 `routeRepoName`；筛选菜单由 `renderRepoMenu`/`syncRepoFilterUI` 渲染，两个视图共用一份状态，改动过滤逻辑时同步更新 `tests/test_search.js` 的仓库过滤用例。
-- 搜索设置图标只提供“模式”和“仓库”两个筛选：移除范围控件；仓库选项固定为“全部仓库”和当前入口页对应的“本仓库”；默认模式 `both` 同时搜索文档名与正文，并在结果中分为“文档名匹配”“全文匹配”两组。入口页的当前仓库通过搜索索引条目的 `site` 映射到 `routeRepoName`。
+- 搜索设置图标只提供“模式”和“仓库”两个筛选：移除范围控件；仓库菜单支持全部仓库、任意仓库多选和当前入口页对应的本仓库快捷项；默认模式 `both` 同时搜索文档名与正文，并在结果中分为“文档名匹配”“全文匹配”两组。入口页的当前仓库通过搜索索引条目的 `site` 映射到 `routeRepoName`。
 - **站点页面在 `docs/html/`**：页面 head 必须保留 `<base href="../">`（相对路径含 API 都按站点根解析），docsify 用 `basePath: "../"`、`alias` 值 `html/_sidebar.md`、`homepage: html/README.md`、`customSearch.indexPath: html/search-index.json`；页面间链接与 `web/*.js` 里的入口链接一律写 `html/index_*.html`（`entryPage()`/`folder-view.js`/`md2web-feedback.js` 已统一）。`docsify.min.js` 的 hash 规范化补丁必须用 `slice(0,0<=n?n:location.href.length)`（`<base>` 下相对 `#/` 会被解析到站点根，导致跳错页）。
 - 反馈截图/附件目录固定为 `docs/html/images`（`documents.FEEDBACK_IMAGE_REL`，命名 `fb-<时间戳>-<序号>.<扩展名>`）与 `docs/html/uploads`（`FEEDBACK_UPLOAD_REL`，沿用原文件名、重名加序号、禁止可脚本化后缀）；提交反馈时服务端只保留 `html/images|uploads/` 下真实存在的文件路径，卡片按 `html/images/...` 相对路径展示（页面带 `<base>` 时正好解析到站点根）。
 - 离线快照（`docs/lib/offline-data*.js`）的键以**站点根**为基准：md 用 `md/...`，侧栏/首页用 `html/_sidebar*.md`、`html/README.md`；`offline-file.js` 的 `SITE_BASE` 取 `lib/` 的上一级（`document.currentScript`），不要改回按页面目录计算。

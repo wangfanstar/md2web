@@ -1199,7 +1199,8 @@ class HtmlLayoutTests(unittest.TestCase):
         """搜索支持按仓库多选过滤：范围/模式之外提供仓库勾选菜单，并持久化选择。"""
         source = (ROOT / "web" / "custom-search.js").read_text(encoding="utf-8")
         for needle in ("repoFilter", "SEARCH_REPOS_KEY", "routeRepoName", "searchRepoOptions",
-                       "renderRepoMenu", "syncRepoFilterUI", "全部仓库", "本仓库"):
+                       "renderRepoMenu", "syncRepoFilterUI", 'data-role="repo-all"',
+                       'data-role="repo-current"', "全部仓库", "本仓库"):
             self.assertIn(needle, source, needle)
         self.assertIn("state.repoFilter.indexOf(routeRepoName(item.route))", source,
                       "过滤应作用于搜索范围判定")

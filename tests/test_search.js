@@ -78,6 +78,9 @@ test('repository filter exposes all repositories and current repository options'
   assert.doesNotMatch(source, /data-role="search-scope"/);
   assert.match(source, /全部仓库/);
   assert.match(source, /本仓库/);
+  assert.match(source, /data-repo-name/);
+  assert.match(source, /data-role="repo-current"/);
+  assert.doesNotMatch(source, /type="radio" name="search-repo"/);
 });
 
 test('refreshing the merged page fetches the generated README under html', () => {
