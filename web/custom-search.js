@@ -1157,7 +1157,7 @@
     var index = {};
     var depth = Math.max(1, Math.min(6, parseInt(config.searchDepth, 10) || 4));
     routes.forEach(function (route) {
-      var resource = route === '/' ? 'README.md' : route.replace(/^\/+/, '');
+      var resource = routeToResource(route);
       if (Object.prototype.hasOwnProperty.call(contents, resource)) {
         index[route] = buildSearchPage(route, contents[resource], depth);
       }
@@ -1166,7 +1166,7 @@
   }
 
   function routeToResource(route) {
-    return route === '/' ? 'README.md' : route.replace(/^\/+/, '');
+    return route === '/' ? 'html/README.md' : route.replace(/^\/+/, '');
   }
 
   function getSearchRoutes() {
@@ -2737,7 +2737,8 @@
       search: search,
       state: state,
       normalizeText: normalizeText,
-      routeWithoutAnchor: routeWithoutAnchor
+      routeWithoutAnchor: routeWithoutAnchor,
+      routeToResource: routeToResource
     };
   }
 

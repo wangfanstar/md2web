@@ -80,6 +80,12 @@ test('repository filter exposes all repositories and current repository options'
   assert.match(source, /本仓库/);
 });
 
+test('refreshing the merged page fetches the generated README under html', () => {
+  const api = loadSearch();
+  assert.equal(api.routeToResource('/'), 'html/README.md');
+  assert.equal(api.routeToResource('/md/guide/a.md'), 'md/guide/a.md');
+});
+
 test('reading route matching ignores the optional markdown extension', () => {
   const api = loadSearch();
   assert.equal(

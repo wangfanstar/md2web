@@ -1157,7 +1157,7 @@
     var index = {};
     var depth = Math.max(1, Math.min(6, parseInt(config.searchDepth, 10) || 4));
     routes.forEach(function (route) {
-      var resource = route === '/' ? 'README.md' : route.replace(/^\/+/, '');
+      var resource = routeToResource(route);
       if (Object.prototype.hasOwnProperty.call(contents, resource)) {
         index[route] = buildSearchPage(route, contents[resource], depth);
       }
@@ -1166,7 +1166,7 @@
   }
 
   function routeToResource(route) {
-    return route === '/' ? 'README.md' : route.replace(/^\/+/, '');
+    return route === '/' ? 'html/README.md' : route.replace(/^\/+/, '');
   }
 
   function getSearchRoutes() {
@@ -1428,14 +1428,6 @@
       return [item.path, item.route, item.pageTitle, item.headingTitle, item.title].join('\n');
     }
     return item.body || '';
-  }
-
-  function repoFilterOptions() {
-    var current = currentRepoName();
-    if (state.repoFilter.length && state.repoFilter[0] !== current) {
-      state.repoFilter = [];
-    }
-    return { current: current, all: 'all' };
   }
 
   function matchesSearchText(text, parsed) {
@@ -2270,6 +2262,9 @@
       return;
     }
     var current = currentRepoName();
+    if (state.repoFilter.length && state.repoFilter[0] !== current) {
+      state.repoFilter = [];
+    }
     var selected = current && state.repoFilter && state.repoFilter[0] === current ? 'current' : 'all';
     list.innerHTML = '<label class="custom-search-repo-item"><input type="radio" name="search-repo" data-repo-option="all"'
       + (selected === 'all' ? ' checked' : '') + '><span>全部仓库</span></label>'
@@ -2742,7 +2737,8 @@
       search: search,
       state: state,
       normalizeText: normalizeText,
-      routeWithoutAnchor: routeWithoutAnchor
+      routeWithoutAnchor: routeWithoutAnchor,
+      routeToResource: routeToResource
     };
   }
 
