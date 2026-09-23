@@ -29,7 +29,7 @@
     results: [],
     query: '',
     repoFilter: [],
-    searchMode: 'full',
+    searchMode: 'both',
     searchScope: 'all',
     composing: false,
     queryTimer: null,
@@ -371,6 +371,21 @@
     }).join('');
   }
 
+  function modeGroupsHtml(view, results, max) {
+    var modes = state.searchMode === 'both' ? ['file', 'full'] : [state.searchMode];
+    return modes.map(function (mode) {
+      var modeResults = results.filter(function (item) { return item.matchMode === mode; });
+      if (!modeResults.length) {
+        return '';
+      }
+      var label = mode === 'file' ? '文档名匹配' : '全文匹配';
+      return '<section class="custom-search-mode-section" data-search-mode="' + mode + '">' +
+        '<h3 class="custom-search-mode-title">' + label + '<span>' + modeResults.length + ' 条</span></h3>' +
+        groupsHtml(view, capGroups(groupResults(modeResults), max)) +
+        '</section>';
+    }).join('');
+  }
+
   function applyActive(view) {
     var containers = [view.dropEl, view.resultsEl];
     containers.forEach(function (container) {
@@ -414,7 +429,7 @@
         var groups = capGroups(allGroups, view.max);
         statusText = '找到 ' + state.results.length + ' 条命中 · ' + allGroups.length + ' 个文档' +
           (groups.reduce(function (total, group) { return total + group.entries.length; }, 0) < state.results.length ? '（显示前 ' + groups.reduce(function (total, group) { return total + group.entries.length; }, 0) + ' 条）' : '');
-        contentHtml = groupsHtml(view, groups);
+        contentHtml = modeGroupsHtml(view, state.results, view.max);
       } else {
         statusText = '没有找到结果';
         contentHtml = '<div class="custom-search-empty">换个更精确的寄存器、信号名或章节关键词试试。</div>';
@@ -423,9 +438,7 @@
 
     view.statusEl.textContent = statusText;
     if (view.root) {
-      var scopeSelect = view.root.querySelector('[data-role="search-scope"]');
       var modeSelect = view.root.querySelector('[data-role="search-mode"]');
-      if (scopeSelect) scopeSelect.value = state.searchScope;
       if (modeSelect) modeSelect.value = state.searchMode;
     }
     view.resultsEl.innerHTML = contentHtml;
@@ -1177,15 +1190,6 @@
     state.loaded = true;
     state.error = '';
     state.results = search(state.query);
-    [state.sidebar, state.dialog].forEach(function (view) {
-      if (!view || !view.root) return;
-      var old = view.root.querySelector('[data-role="search-scope"]');
-      if (old) {
-        var value = state.searchScope;
-        old.innerHTML = searchScopeOptions();
-        old.value = value;
-      }
-    });
     renderAll();
     restoreReadingQuery();
     scheduleReadingModeBuild();
@@ -1287,6 +1291,7 @@
         items.push({
           slug: slug,
           url: routeToHash(slug, page && page.site),
+          site: page && page.site ? page.site : '',
           route: route,
           pageTitle: pageTitle,
           headingTitle: headingTitle,
@@ -1387,7 +1392,7 @@
     }
     state.repoFilter = Array.isArray(values) ? values.filter(function (item) {
       return typeof item === 'string' && item;
-    }) : [];
+    }).slice(0, 1) : [];
   }
 
   function persistRepoFilter() {
@@ -1422,7 +1427,32 @@
     if (state.searchMode === 'file') {
       return [item.path, item.route, item.pageTitle, item.headingTitle, item.title].join('\n');
     }
-    return item.combinedText;
+    return item.body || '';
+  }
+
+  function repoFilterOptions() {
+    var current = currentRepoName();
+    if (state.repoFilter.length && state.repoFilter[0] !== current) {
+      state.repoFilter = [];
+    }
+    return { current: current, all: 'all' };
+  }
+
+  function matchesSearchText(text, parsed) {
+    var normalized = normalizeText(text);
+    return parsed.positive.every(function (phrase) { return normalized.indexOf(phrase) !== -1; }) &&
+      !parsed.negative.some(function (term) { return normalized.indexOf(term) !== -1; });
+  }
+
+  function currentRepoName() {
+    var pageName = String(window.location.pathname || '').split('/').pop() || '';
+    if (pageName === 'index_all.html' || pageName === 'index.html') {
+      return routeRepoName(currentRouteBase().replace(/^#/, ''));
+    }
+    var item = state.items.filter(function (entry) {
+      return String(entry.site || '').split('/').pop() === pageName;
+    })[0];
+    return item ? routeRepoName(item.route) : '';
   }
 
   function search(query) {
@@ -1440,15 +1470,30 @@
         if (!itemInScope(item)) {
           return false;
         }
-        var text = normalizeText(searchableText(item));
-        var phraseOk = parsed.positive.every(function (phrase) { return text.indexOf(phrase) !== -1; });
-        var excluded = parsed.negative.some(function (term) { return text.indexOf(term) !== -1; });
-        return phraseOk && !excluded;
+        return state.searchMode === 'both'
+          ? matchesSearchText(searchableText(item), parsed) || matchesSearchText(
+            [item.path, item.route, item.pageTitle, item.headingTitle, item.title].join('\n'), parsed)
+          : matchesSearchText(searchableText(item), parsed);
       })
-      .map(function (item) {
-        return Object.assign({ score: scoreItem(item, tokens, query) }, item);
-      })
+      .reduce(function (results, item) {
+        var fileText = [item.path, item.route, item.pageTitle, item.headingTitle, item.title].join('\n');
+        var fullText = searchableText(item);
+        var modes = state.searchMode === 'both' ? ['file', 'full'] : [state.searchMode];
+        modes.forEach(function (mode) {
+          var text = mode === 'file' ? fileText : fullText;
+          if (matchesSearchText(text, parsed)) {
+            results.push(Object.assign({
+              score: scoreItem(item, tokens, query) + (mode === 'file' ? 20 : 0),
+              matchMode: mode
+            }, item));
+          }
+        });
+        return results;
+      }, [])
       .sort(function (left, right) {
+        if (state.searchMode === 'both' && left.matchMode !== right.matchMode) {
+          return left.matchMode === 'file' ? -1 : 1;
+        }
         if (right.score !== left.score) {
           return right.score - left.score;
         }
@@ -2202,41 +2247,15 @@
 
   // ---------- 界面构建 ----------
 
-  function searchScopeOptions() {
-    var routes = getSearchRoutes();
-    var folders = {};
-    routes.forEach(function (route) {
-      var path = routeWithoutAnchor(route).replace(/^\/+/, '');
-      var parts = path.split('/');
-      parts.pop();
-      var prefix = '';
-      parts.forEach(function (part) {
-        prefix += (prefix ? '/' : '') + part;
-        if (prefix && prefix !== 'md') {
-          folders['/md/' + prefix] = true;
-        }
-      });
-    });
-    return ['<option value="all">全部文档</option>', '<option value="current">当前文档</option>']
-      .concat(Object.keys(folders).sort().map(function (folder) {
-        return '<option value="folder:' + escapeHtml(folder) + '">文件夹：' + escapeHtml(folder.replace(/^\/md\//, '')) + '</option>';
-      })).join('');
-  }
-
   var SEARCH_FILTERS_KEY = 'md2web:search-filters-open';
 
   function searchFiltersHtml() {
     return '<div class="custom-search-filters" data-role="search-filters" hidden>' +
-      '<label>范围 <select data-role="search-scope" aria-label="搜索范围">' + searchScopeOptions() + '</select></label>' +
-      '<label>模式 <select data-role="search-mode" aria-label="搜索模式"><option value="full">全文</option><option value="file">文件名/路径</option></select></label>' +
+      '<label>模式 <select data-role="search-mode" aria-label="搜索模式"><option value="both">文档名和全文</option><option value="full">全文</option><option value="file">文档名</option></select></label>' +
       '<div class="custom-search-repo" data-role="repo-filter">' +
       '<button type="button" class="custom-search-repo-toggle" data-role="repo-toggle" aria-expanded="false">' +
-      '<span data-role="repo-label">仓库：全部</span><span class="custom-search-repo-caret">▾</span></button>' +
+      '<span data-role="repo-label">仓库：全部仓库</span><span class="custom-search-repo-caret">▾</span></button>' +
       '<div class="custom-search-repo-menu" data-role="repo-menu" hidden>' +
-      '<div class="custom-search-repo-actions">' +
-      '<button type="button" data-role="repo-all">全选</button>' +
-      '<button type="button" data-role="repo-none">清空</button>' +
-      '</div>' +
       '<div class="custom-search-repo-list" data-role="repo-list"></div>' +
       '</div>' +
       '</div>' +
@@ -2250,17 +2269,14 @@
     if (!list || !label || !toggle) {
       return;
     }
-    var options = searchRepoOptions();
-    list.innerHTML = options.length
-      ? options.map(function (name) {
-        var checked = (state.repoFilter || []).indexOf(name) !== -1;
-        return '<label class="custom-search-repo-item"><input type="checkbox" data-repo-name="'
-          + escapeHtml(name) + '"' + (checked ? ' checked' : '') + '><span>' + escapeHtml(name) + '</span></label>';
-      }).join('')
-      : '<span class="custom-search-repo-empty">没有可过滤的仓库</span>';
-    var count = (state.repoFilter || []).length;
-    label.textContent = '仓库：' + (count === 0 ? '全部' : (count === 1 ? state.repoFilter[0] : count + ' 个'));
-    toggle.classList.toggle('is-active', count > 0);
+    var current = currentRepoName();
+    var selected = current && state.repoFilter && state.repoFilter[0] === current ? 'current' : 'all';
+    list.innerHTML = '<label class="custom-search-repo-item"><input type="radio" name="search-repo" data-repo-option="all"'
+      + (selected === 'all' ? ' checked' : '') + '><span>全部仓库</span></label>'
+      + (current ? '<label class="custom-search-repo-item"><input type="radio" name="search-repo" data-repo-option="current"'
+        + (selected === 'current' ? ' checked' : '') + '><span>本仓库（' + escapeHtml(current) + '）</span></label>' : '');
+    label.textContent = selected === 'current' ? '仓库：本仓库（' + current + '）' : '仓库：全部仓库';
+    toggle.classList.toggle('is-active', selected === 'current');
   }
 
   function syncRepoFilterUI() {
@@ -2297,23 +2313,13 @@
       if (!toggle) {
         return;
       }
-      var active = state.searchScope !== 'all' || state.searchMode !== 'full'
+      var active = state.searchMode !== 'both'
         || (state.repoFilter && state.repoFilter.length > 0);
       toggle.classList.toggle('is-active', active);
-      toggle.title = active ? '搜索范围/模式已筛选（点击展开）' : '搜索范围与模式';
+      toggle.title = active ? '搜索模式或仓库已筛选（点击展开）' : '搜索模式与仓库';
     }
     refreshToggleState();
-    var scope = root.querySelector('[data-role="search-scope"]');
     var mode = root.querySelector('[data-role="search-mode"]');
-    if (scope) {
-      scope.value = state.searchScope;
-      scope.addEventListener('change', function () {
-        state.searchScope = scope.value;
-        state.results = search(state.query);
-        refreshToggleState();
-        renderAll();
-      });
-    }
     var repoHost = root.querySelector('[data-role="repo-filter"]');
     if (repoHost) {
       var repoToggle = repoHost.querySelector('[data-role="repo-toggle"]');
@@ -2336,23 +2342,18 @@
       var repoList = repoHost.querySelector('[data-role="repo-list"]');
       if (repoList) {
         repoList.addEventListener('change', function (event) {
-          var name = event.target && event.target.getAttribute ? event.target.getAttribute('data-repo-name') : '';
-          if (!name) {
+          var option = event.target && event.target.getAttribute ? event.target.getAttribute('data-repo-option') : '';
+          if (!option) {
             return;
           }
-          var index = state.repoFilter.indexOf(name);
-          if (event.target.checked && index === -1) {
-            state.repoFilter.push(name);
-          } else if (!event.target.checked && index !== -1) {
-            state.repoFilter.splice(index, 1);
-          }
+          state.repoFilter = option === 'current' && currentRepoName() ? [currentRepoName()] : [];
           applyRepoFilter();
         });
       }
       var repoAll = repoHost.querySelector('[data-role="repo-all"]');
       if (repoAll) {
         repoAll.addEventListener('click', function () {
-          state.repoFilter = searchRepoOptions();
+          state.repoFilter = [];
           applyRepoFilter();
         });
       }
@@ -2436,7 +2437,7 @@
       '</div>',
       '<div class="custom-search-input-row">',
       '<span class="custom-search-input-icon">🔍</span>',
-      '<button type="button" class="custom-search-filter-toggle" data-role="filter-toggle" title="搜索范围与模式" aria-label="搜索范围与模式" aria-expanded="false">⚙</button>',
+      '<button type="button" class="custom-search-filter-toggle" data-role="filter-toggle" title="搜索模式与仓库" aria-label="搜索模式与仓库" aria-expanded="false">⚙</button>',
       '<input type="search" class="custom-search-sidebar-input" placeholder="搜索文档（/ 聚焦，Ctrl+K 全局）" aria-label="搜索文档">',
       '<button type="button" class="custom-search-input-btn" data-role="clear-search" aria-label="清空搜索">×</button>',
       '</div>',

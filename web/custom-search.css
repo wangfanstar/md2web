@@ -516,6 +516,27 @@
   gap: 2px;
 }
 
+.custom-search-mode-section {
+  margin: 8px 0 12px;
+}
+
+.custom-search-mode-title {
+  align-items: center;
+  border-bottom: 1px solid #e7edf3;
+  color: var(--docs-ink);
+  display: flex;
+  font-size: 12px;
+  justify-content: space-between;
+  margin: 0 0 5px;
+  padding: 5px 2px;
+}
+
+.custom-search-mode-title span {
+  color: var(--docs-muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
 .custom-search-group-header {
   align-items: center;
   background: #f0f7f3;

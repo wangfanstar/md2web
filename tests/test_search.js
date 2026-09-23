@@ -61,6 +61,25 @@ test('full mode uses AND and excludes matching documents', () => {
   assert.deepEqual(Array.from(api.search('DMA ready -debug'), (item) => item.path), ['a.md']);
 });
 
+test('default search combines document names and full text with match groups', () => {
+  const api = loadSearch();
+  api.state.loaded = true;
+  api.state.items = api.flattenIndex({
+    '/md/a.md': {'/md/a.md': {route:'/md/a.md', pageTitle:'a.md', title:'DMA guide', body:'other text'}},
+    '/md/b.md': {'/md/b.md': {route:'/md/b.md', pageTitle:'b.md', title:'Other', body:'DMA control text'}},
+  });
+  assert.equal(api.state.searchMode, 'both');
+  const results = api.search('DMA');
+  assert.deepEqual(Array.from(results, item => item.matchMode), ['file', 'full']);
+});
+
+test('repository filter exposes all repositories and current repository options', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'web', 'custom-search.js'), 'utf8');
+  assert.doesNotMatch(source, /data-role="search-scope"/);
+  assert.match(source, /全部仓库/);
+  assert.match(source, /本仓库/);
+});
+
 test('reading route matching ignores the optional markdown extension', () => {
   const api = loadSearch();
   assert.equal(
