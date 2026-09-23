@@ -1201,7 +1201,7 @@ class HtmlLayoutTests(unittest.TestCase):
         source = (ROOT / "web" / "custom-search.js").read_text(encoding="utf-8")
         for needle in ("repoFilter", "SEARCH_REPOS_KEY", "routeRepoName", "searchRepoOptions",
                        "renderRepoMenu", "syncRepoFilterUI", 'data-role="repo-all"',
-                       'data-role="repo-current"', "全部仓库", "本仓库"):
+                       'data-role="repo-current"', "toggleAllRepoFilter", "repoFilterMode", "全部仓库", "本仓库"):
             self.assertIn(needle, source, needle)
         self.assertIn("state.repoFilter.indexOf(routeRepoName(item.route))", source,
                       "过滤应作用于搜索范围判定")
@@ -1213,6 +1213,7 @@ class HtmlLayoutTests(unittest.TestCase):
                       "索引就绪后应刷新仓库过滤菜单，否则仓库页只能看到当前仓库")
         css = (ROOT / "web" / "custom-search.css").read_text(encoding="utf-8")
         self.assertIn(".custom-search-repo-menu", css, "仓库过滤菜单需要样式")
+        self.assertIn(".custom-search-repo-actions button.is-selected", css, "全选状态需要颜色区分")
         built = (ROOT / "docs" / "lib" / "custom-search.js").read_text(encoding="utf-8")
         self.assertIn("repoFilter", built, "构建产物未同步 custom-search.js")
 
@@ -1227,9 +1228,10 @@ class HtmlLayoutTests(unittest.TestCase):
     def test_master_search_has_all_repo_mode_controls_and_grouped_results(self):
         """文档中心搜索默认全仓库，并按文档名/全文分组展示。"""
         source = (ROOT / "setup_docsify.py").read_text(encoding="utf-8")
-        for needle in ("data-master-mode", "data-master-repo", "全部仓库", "文档名匹配", "全文匹配",
-                       "master-search-mode", "master-search-repo"):
+        for needle in ("data-master-mode", "data-master-repo-list", "masterRepoFilter", "全部仓库",
+                       "文档名匹配", "全文匹配", "master-search-mode", "master-search-repo"):
             self.assertIn(needle, source, needle)
+        self.assertIn("master-search-repo-actions button.is-selected", source)
         page = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
         self.assertIn('data-master-mode', page)
         self.assertIn('data-master-repo', page)

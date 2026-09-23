@@ -29,6 +29,7 @@
     results: [],
     query: '',
     repoFilter: [],
+    repoFilterMode: null,
     searchMode: 'both',
     searchScope: 'all',
     composing: false,
@@ -1397,21 +1398,43 @@
         values = [];
       }
     }
-    state.repoFilter = Array.isArray(values) ? values.filter(function (item) {
+    if (Array.isArray(values)) {
+      state.repoFilter = values.filter(function (item) {
+        return typeof item === 'string' && item;
+      });
+      state.repoFilterMode = state.repoFilter.length ? 'selected' : 'all';
+      return;
+    }
+    state.repoFilter = values && Array.isArray(values.names) ? values.names.filter(function (item) {
       return typeof item === 'string' && item;
     }) : [];
+    state.repoFilterMode = values && (values.mode === 'all' || values.mode === 'none' || values.mode === 'selected')
+      ? values.mode : (state.repoFilter.length ? 'selected' : 'all');
   }
 
   function persistRepoFilter() {
     try {
-      localStorage.setItem(SEARCH_REPOS_KEY, JSON.stringify(state.repoFilter || []));
+      localStorage.setItem(SEARCH_REPOS_KEY, JSON.stringify({
+        mode: repoFilterMode(),
+        names: state.repoFilter || []
+      }));
     } catch (error) { /* 隐私模式忽略 */ }
+  }
+
+  function repoFilterMode() {
+    if (state.repoFilterMode === 'all' || state.repoFilterMode === 'none' || state.repoFilterMode === 'selected') {
+      return state.repoFilterMode;
+    }
+    return state.repoFilter && state.repoFilter.length ? 'selected' : 'all';
   }
 
   function itemInScope(item) {
     var scope = String(state.searchScope || 'all');
     // 仓库多选过滤：与范围、模式叠加生效
-    if (state.repoFilter && state.repoFilter.length) {
+    if (repoFilterMode() === 'none') {
+      return false;
+    }
+    if (repoFilterMode() === 'selected' && state.repoFilter && state.repoFilter.length) {
       if (state.repoFilter.indexOf(routeRepoName(item.route)) === -1) {
         return false;
       }
@@ -1460,9 +1483,20 @@
   function selectRepoPreset(preset) {
     if (preset === 'all') {
       state.repoFilter = searchRepoOptions();
+      state.repoFilterMode = 'all';
     } else if (preset === 'current') {
       var current = currentRepoName();
       state.repoFilter = current ? [current] : [];
+      state.repoFilterMode = current ? 'selected' : 'none';
+    }
+  }
+
+  function toggleAllRepoFilter() {
+    if (repoFilterMode() === 'all') {
+      state.repoFilter = [];
+      state.repoFilterMode = 'none';
+    } else {
+      selectRepoPreset('all');
     }
   }
 
@@ -2286,17 +2320,25 @@
     }
     var current = currentRepoName();
     var options = searchRepoOptions();
+    var mode = repoFilterMode();
     list.innerHTML = options.length ? options.map(function (name) {
-      var checked = (state.repoFilter || []).indexOf(name) !== -1;
+      var checked = mode === 'all' || (mode === 'selected' && (state.repoFilter || []).indexOf(name) !== -1);
       return '<label class="custom-search-repo-item"><input type="checkbox" data-repo-name="'
         + escapeHtml(name) + '"' + (checked ? ' checked' : '') + '><span>' + escapeHtml(name) + '</span></label>';
     }).join('') : '<span class="custom-search-repo-empty">没有可过滤的仓库</span>';
-    var count = (state.repoFilter || []).length;
-    label.textContent = count === 0 ? '仓库：全部仓库' : (count === 1 ? '仓库：' + state.repoFilter[0] : '仓库：' + count + ' 个');
-    toggle.classList.toggle('is-active', count > 0);
+    var count = mode === 'all' ? options.length : (state.repoFilter || []).length;
+    label.textContent = mode === 'all' ? '仓库：全部仓库' : (mode === 'none' ? '仓库：未选择' : (count === 1 ? '仓库：' + state.repoFilter[0] : '仓库：' + count + ' 个'));
+    toggle.classList.toggle('is-active', mode !== 'all');
+    var allButton = host.querySelector('[data-role="repo-all"]');
+    if (allButton) {
+      allButton.classList.toggle('is-selected', mode === 'all');
+      allButton.setAttribute('aria-pressed', mode === 'all' ? 'true' : 'false');
+      allButton.title = mode === 'all' ? '已全选，再次点击取消全选' : '选择全部仓库';
+    }
     var currentButton = host.querySelector('[data-role="repo-current"]');
     if (currentButton) {
       currentButton.disabled = !current;
+      currentButton.classList.toggle('is-selected', mode === 'selected' && current && state.repoFilter.length === 1 && state.repoFilter[0] === current);
       currentButton.title = current ? '仅搜索本仓库：' + current : '当前页面没有对应仓库';
     }
   }
@@ -2335,8 +2377,7 @@
       if (!toggle) {
         return;
       }
-      var active = state.searchMode !== 'both'
-        || (state.repoFilter && state.repoFilter.length > 0);
+        var active = state.searchMode !== 'both' || repoFilterMode() !== 'all';
       toggle.classList.toggle('is-active', active);
       toggle.title = active ? '搜索模式或仓库已筛选（点击展开）' : '搜索模式与仓库（默认：文档名和全文 / 全部仓库）';
     }
@@ -2369,18 +2410,26 @@
             return;
           }
           var index = state.repoFilter.indexOf(name);
+          if (repoFilterMode() === 'all') {
+            state.repoFilter = searchRepoOptions();
+            state.repoFilterMode = 'selected';
+            index = state.repoFilter.indexOf(name);
+          }
           if (event.target.checked && index === -1) {
             state.repoFilter.push(name);
           } else if (!event.target.checked && index !== -1) {
             state.repoFilter.splice(index, 1);
           }
+          var options = searchRepoOptions();
+          state.repoFilterMode = state.repoFilter.length === 0 ? 'none' :
+            (state.repoFilter.length === options.length ? 'all' : 'selected');
           applyRepoFilter();
         });
       }
       var repoAll = repoHost.querySelector('[data-role="repo-all"]');
       if (repoAll) {
         repoAll.addEventListener('click', function () {
-          selectRepoPreset('all');
+          toggleAllRepoFilter();
           applyRepoFilter();
         });
       }
@@ -2395,6 +2444,7 @@
       if (repoNone) {
         repoNone.addEventListener('click', function () {
           state.repoFilter = [];
+          state.repoFilterMode = 'none';
           applyRepoFilter();
         });
       }
@@ -2780,7 +2830,9 @@
       state: state,
       normalizeText: normalizeText,
       routeWithoutAnchor: routeWithoutAnchor,
-      routeToResource: routeToResource
+      routeToResource: routeToResource,
+      toggleAllRepoFilter: toggleAllRepoFilter,
+      repoFilterMode: repoFilterMode
     };
   }
 

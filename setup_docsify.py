@@ -1248,6 +1248,19 @@ MASTER_STYLE = """
   .tools input:focus { border-color: #1f6feb; box-shadow: 0 0 0 3px rgba(31,111,235,.12); outline: 0; }
   .tools select { background: #fff; border: 1px solid #d5dee8; border-radius: 7px; color: #334155; font: inherit; padding: 8px 9px; }
   .tools label { align-items: center; color: #64748b; display: inline-flex; font-size: 12px; gap: 5px; white-space: nowrap; }
+  .master-search-repo { position: relative; }
+  .master-search-repo-toggle { align-items: center; background: #fff; border: 1px solid #d5dee8; border-radius: 7px; color: #334155; cursor: pointer; display: inline-flex; font: inherit; font-size: 12px; gap: 6px; padding: 8px 9px; }
+  .master-search-repo-toggle:hover, .master-search-repo-toggle.is-active { border-color: #1f6feb; color: #1f6feb; }
+  .master-search-repo-toggle.is-all { background: #eef4fd; border-color: #bfdbfe; }
+  .master-search-repo-menu { background: #fff; border: 1px solid #d5dee8; border-radius: 8px; box-shadow: 0 12px 28px rgba(15,23,42,.16); min-width: 190px; padding: 6px; position: absolute; right: 0; top: calc(100% + 4px); z-index: 10; }
+  .master-search-repo-menu[hidden] { display: none; }
+  .master-search-repo-actions { border-bottom: 1px dashed #e6ebf1; display: flex; gap: 6px; margin-bottom: 4px; padding: 2px 4px 6px; }
+  .master-search-repo-actions button { background: #f6f9fc; border: 1px solid #dbe2ea; border-radius: 5px; color: #506174; cursor: pointer; font: inherit; font-size: 11px; padding: 3px 8px; }
+  .master-search-repo-actions button.is-selected { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  .master-search-repo-list { max-height: 220px; overflow: auto; }
+  .master-search-repo-item { align-items: center; border-radius: 6px; cursor: pointer; display: flex; font-size: 12px; gap: 6px; padding: 5px 6px; }
+  .master-search-repo-item:hover { background: #f2f6fb; }
+  .master-search-repo-item input { margin: 0; }
   .tools a, .tools button { background: #fff; border: 1px solid #d5dee8; border-radius: 8px; color: #1f6feb; cursor: pointer; font: inherit; padding: 8px 14px; text-decoration: none; }
   .tools a:hover, .tools button:hover { border-color: #1f6feb; }
   h2 { font-size: 15px; margin: 22px 0 10px; color: #57606a; }
@@ -1274,7 +1287,13 @@ MASTER_SCRIPT = """
   var repos = window.__MD2WEB_REPOS__ || [];
   var index = null;
   var input = document.querySelector('[data-master-search]');
-  var repoSelect = document.querySelector('[data-master-repo]');
+  var repoToggle = document.querySelector('[data-master-repo-toggle]');
+  var repoMenu = document.querySelector('[data-master-repo-menu]');
+  var repoList = document.querySelector('[data-master-repo-list]');
+  var repoLabel = document.querySelector('[data-master-repo-label]');
+  var repoAll = document.querySelector('[data-master-repo-all]');
+  var masterRepoFilter = [];
+  var repoFilterMode = 'all';
   var modeSelect = document.querySelector('[data-master-mode]');
   var results = document.querySelector('[data-master-results]');
   function load() {
@@ -1306,13 +1325,48 @@ MASTER_SCRIPT = """
     });
     return hits;
   }
+  function repoNames() {
+    return repos.map(function (repo) { return String(repo.id || repo.mount || ''); }).filter(Boolean);
+  }
+  function renderRepoMenu() {
+    if (!repoList) { return; }
+    var names = repoNames();
+    repoList.innerHTML = names.map(function (name) {
+      var checked = repoFilterMode === 'all' || masterRepoFilter.indexOf(name) !== -1;
+      return '<label class="master-search-repo-item"><input type="checkbox" data-master-repo-name="' + escapeHtml(name) + '"' + (checked ? ' checked' : '') + '><span>' + escapeHtml(name) + '</span></label>';
+    }).join('') || '<span class="empty">没有可过滤的仓库</span>';
+    if (repoLabel) { repoLabel.textContent = repoFilterMode === 'all' ? '仓库：全部仓库' : (repoFilterMode === 'none' ? '仓库：未选择' : '仓库：' + masterRepoFilter.length + ' 个'); }
+    if (repoToggle) {
+      repoToggle.classList.toggle('is-all', repoFilterMode === 'all');
+      repoToggle.classList.toggle('is-active', repoFilterMode !== 'all');
+    }
+    if (repoAll) {
+      repoAll.classList.toggle('is-selected', repoFilterMode === 'all');
+      repoAll.setAttribute('aria-pressed', repoFilterMode === 'all' ? 'true' : 'false');
+      repoAll.title = repoFilterMode === 'all' ? '已全选，再次点击取消全选' : '选择全部仓库';
+    }
+  }
+  function toggleAllRepos() {
+    if (repoFilterMode === 'all') {
+      masterRepoFilter = [];
+      repoFilterMode = 'none';
+    } else {
+      masterRepoFilter = repoNames();
+      repoFilterMode = 'all';
+    }
+    renderRepoMenu();
+    search(input && input.value);
+  }
   function repoMatches(hit) {
-    var selected = repoSelect && repoSelect.value;
-    if (!selected) { return true; }
-    var repo = repos.filter(function (item) { return String(item.id || '') === selected; })[0];
-    var mount = String(repo && repo.mount || '').replace(/^\/+|\/+$/g, '');
+    if (repoFilterMode === 'none') { return false; }
+    if (repoFilterMode === 'all') { return true; }
     var route = String(hit.route || '').replace(/^\/+|\/+$/g, '');
-    return !!mount && (route === mount || route.indexOf(mount + '/') === 0);
+    return repos.some(function (item) {
+      var name = String(item.id || item.mount || '');
+      if (masterRepoFilter.indexOf(name) === -1) { return false; }
+      var mount = String(item.mount || '').replace(/^\/+|\/+$/g, '');
+      return !!mount && (route === mount || route.indexOf(mount + '/') === 0);
+    });
   }
   function renderMode(mode, hits) {
     if (!hits.length) { return ''; }
@@ -1370,9 +1424,32 @@ MASTER_SCRIPT = """
       }
     });
   }
-  [repoSelect, modeSelect].forEach(function (control) {
-    if (control) { control.addEventListener('change', function () { search(input && input.value); }); }
-  });
+  renderRepoMenu();
+  if (repoToggle && repoMenu) {
+    repoToggle.addEventListener('click', function () {
+      repoMenu.hidden = !repoMenu.hidden;
+      repoToggle.setAttribute('aria-expanded', repoMenu.hidden ? 'false' : 'true');
+    });
+  }
+  if (repoAll) { repoAll.addEventListener('click', toggleAllRepos); }
+  if (repoList) {
+    repoList.addEventListener('change', function (event) {
+      var name = event.target && event.target.getAttribute('data-master-repo-name');
+      if (!name) { return; }
+      var index = masterRepoFilter.indexOf(name);
+      if (repoFilterMode === 'all') {
+        masterRepoFilter = repoNames();
+        repoFilterMode = 'selected';
+        index = masterRepoFilter.indexOf(name);
+      }
+      if (event.target.checked && index === -1) { masterRepoFilter.push(name); }
+      if (!event.target.checked && index !== -1) { masterRepoFilter.splice(index, 1); }
+      repoFilterMode = masterRepoFilter.length === 0 ? 'none' : (masterRepoFilter.length === repoNames().length ? 'all' : 'selected');
+      renderRepoMenu();
+      search(input && input.value);
+    });
+  }
+  if (modeSelect) { modeSelect.addEventListener('change', function () { search(input && input.value); }); }
 """
 
 
@@ -1475,10 +1552,6 @@ def generate_master_index_html(repos, title="文档中心", all_page="index_all.
     if not repos:
         sections.append('<p class="empty">还没有配置仓库：请在 <a href="' + config_page + '">' + config_page
                         + '</a> 中添加 SVN 仓库与目录映射，然后重新构建或等待自动同步。</p>')
-    repo_options = ['<option value="">全部仓库</option>']
-    for repo in repos:
-        repo_options.append('<option value="' + html.escape(str(repo.get("id") or ""), quote=True) + '">' +
-                            html.escape(str(repo.get("id") or repo.get("mount") or "")) + '</option>')
     page = f"""<!DOCTYPE html>
 <!-- 站点基于 docsify 4.13.1（MIT，https://github.com/docsifyjs/docsify）构建；
      第三方组件与许可见 THIRD-PARTY-NOTICES.md -->
@@ -1496,7 +1569,13 @@ def generate_master_index_html(repos, title="文档中心", all_page="index_all.
     <div class="tools">
       <input type="search" placeholder="搜索全部仓库（文档名和全文）" data-master-search
              aria-label="搜索全部仓库的文档名和全文">
-      <label>仓库<select class="master-search-repo" data-master-repo aria-label="搜索仓库范围">{''.join(repo_options)}</select></label>
+      <div class="master-search-repo" data-master-repo-filter>
+        <button type="button" class="master-search-repo-toggle is-all" data-master-repo-toggle aria-expanded="false" aria-label="搜索仓库范围"><span data-master-repo-label>仓库：全部仓库</span><span>▾</span></button>
+        <div class="master-search-repo-menu" data-master-repo-menu hidden>
+          <div class="master-search-repo-actions"><button type="button" data-master-repo-all class="is-selected" aria-pressed="true">全部仓库</button></div>
+          <div class="master-search-repo-list" data-master-repo-list></div>
+        </div>
+      </div>
       <label>模式<select class="master-search-mode" data-master-mode aria-label="搜索模式"><option value="both" selected>文档名和全文</option><option value="file">仅文档名</option><option value="full">仅全文</option></select></label>
       <a href="{HTML_PREFIX}{all_page}">全部文档（合并视图）</a>
       <a href="{HTML_PREFIX}{config_page}">仓库配置</a>

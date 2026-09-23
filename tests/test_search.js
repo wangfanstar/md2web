@@ -151,6 +151,36 @@ test('all repositories preset checks every repository in the menu', () => {
   assert.equal((list.innerHTML.match(/ checked/g) || []).length, 2);
 });
 
+test('all repositories preset toggles between all and none', () => {
+  const api = loadSearch();
+  api.state.index = {
+    '/md/硬件设计/a.md': {},
+    '/md/验证指南/b.md': {},
+  };
+  api.state.repoFilterMode = 'all';
+  api.toggleAllRepoFilter();
+  assert.equal(api.state.repoFilterMode, 'none');
+  assert.deepEqual(Array.from(api.state.repoFilter), []);
+  api.toggleAllRepoFilter();
+  assert.equal(api.state.repoFilterMode, 'all');
+  assert.deepEqual(Array.from(api.state.repoFilter).sort(), ['硬件设计', '验证指南'].sort());
+});
+
+test('cancelling all repository selection returns no repository results', () => {
+  const api = loadSearch();
+  api.state.loaded = true;
+  api.state.searchScope = 'all';
+  api.state.searchMode = 'full';
+  api.state.items = api.flattenIndex({
+    '/md/硬件设计/a.md': {'/md/硬件设计/a.md': {route:'/md/硬件设计/a.md', body:'target'}},
+    '/md/验证指南/b.md': {'/md/验证指南/b.md': {route:'/md/验证指南/b.md', body:'target'}},
+  });
+  api.state.repoFilterMode = 'none';
+  assert.equal(api.search('target').length, 0);
+  api.state.repoFilterMode = 'all';
+  assert.equal(api.search('target').length, 2);
+});
+
 test('current repository preset checks only the repository on an encoded entry page', () => {
   const api = loadSearch('/html/index_%E7%A1%AC%E4%BB%B6%E8%AE%BE%E8%AE%A1.html');
   api.state.index = {

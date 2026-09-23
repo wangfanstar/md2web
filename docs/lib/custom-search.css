@@ -1222,6 +1222,18 @@ body.toc-resizing {
 
 .custom-search-repo-actions button:hover { border-color: var(--docs-accent, #1f6feb); color: var(--docs-accent, #1f6feb); }
 
+.custom-search-repo-actions button.is-selected {
+  background: var(--docs-accent, #1f6feb);
+  border-color: var(--docs-accent, #1f6feb);
+  color: #fff;
+}
+
+.custom-search-repo-actions button.is-selected:hover {
+  background: #1759bd;
+  border-color: #1759bd;
+  color: #fff;
+}
+
 .custom-search-repo-item {
   align-items: center;
   border-radius: 6px;
