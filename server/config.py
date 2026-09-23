@@ -7,6 +7,7 @@
 import json
 import os
 import re
+import math
 import tempfile
 from pathlib import Path
 
@@ -185,12 +186,14 @@ def load_config(path, docs_dir, allow_incomplete=False):
             repo_url = ""
         sync_interval = item.get("syncIntervalSeconds", None)
         if sync_interval is not None:
+            if isinstance(sync_interval, bool):
+                raise ConfigError(f"repositories[{index}].syncIntervalSeconds 必须是数值（秒，0 表示不自动同步）")
             try:
                 sync_interval = float(sync_interval)
             except (TypeError, ValueError):
                 raise ConfigError(f"repositories[{index}].syncIntervalSeconds 必须是数值（秒，0 表示不自动同步）")
-            if sync_interval < 0:
-                raise ConfigError(f"repositories[{index}].syncIntervalSeconds 不能为负数")
+            if isinstance(sync_interval, bool) or not math.isfinite(sync_interval) or sync_interval < 0:
+                raise ConfigError(f"repositories[{index}].syncIntervalSeconds 必须是有限的非负数")
         repositories.append({
             "id": repo_id,
             "mount": mount,

@@ -359,6 +359,15 @@ class ServerTestBase(unittest.TestCase):
 
 
 class ConfigTests(ServerTestBase):
+    def test_repository_interval_rejects_nonfinite_values(self):
+        for value in ("NaN", "Infinity", "-Infinity", True):
+            path = self.write_config({"repositories": [{
+                "id": "x", "mount": "md/x", "url": "https://svn.example.invalid/svn/x/",
+                "syncIntervalSeconds": value,
+            }]})
+            with self.assertRaises(server_config.ConfigError, msg=str(value)):
+                server_config.load_config(path, self.docs)
+
     def test_load_config_resolves_storage_and_repositories(self):
         path = self.write_config()
         config = server_config.load_config(path, self.docs)
@@ -1800,6 +1809,22 @@ class SvnOperationTests(ServerTestBase):
         row = self.conn.execute("SELECT * FROM repo_bindings WHERE mount_path = 'md/硬件设计'").fetchone()
         self.assertEqual(row["sync_error"], "conflicts")
         self.assertEqual(row["published_revision"], 7)
+
+        # 同一远端版本再次同步，不能把尚未解决的草稿冲突清掉。
+        repeated = server_operations.sync_binding(self.conn, self.svn, self.config, self.md_dir,
+                                                  binding, ("alice", "good"))
+        self.assertEqual(repeated["conflicts"], [self.document_path])
+        row = self.conn.execute("SELECT * FROM repo_bindings WHERE mount_path = 'md/硬件设计'").fetchone()
+        self.assertEqual(row["sync_error"], "conflicts")
+        self.assertIn("远端基线", self.published_file.read_text(encoding="utf-8"))
+        with self.conn:
+            self.conn.execute("DELETE FROM drafts WHERE document_path = ?", (self.document_path,))
+        resolved = server_operations.sync_binding(self.conn, self.svn, self.config, self.md_dir,
+                                                  binding, ("alice", "good"))
+        self.assertEqual(resolved["conflicts"], [])
+        self.assertIn("远端新版本", self.published_file.read_text(encoding="utf-8"))
+        row = self.conn.execute("SELECT * FROM repo_bindings WHERE mount_path = 'md/硬件设计'").fetchone()
+        self.assertIsNone(row["sync_error"])
 
     def test_sync_all_skips_repositories_without_due_interval(self):
         for repo in self.config["repositories"]:

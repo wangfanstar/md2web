@@ -278,6 +278,10 @@
   }
 
   function readRepos() {
+    var usedIds = Object.create(null);
+    usedIds['site-backup'] = true;
+    var existing = (state.config && state.config.repositories) || [];
+    existing.forEach(function (item) { if (item.id) { usedIds[item.id] = true; } });
     return all('[data-repo-row]').map(function (row) {
       var entry = pairOf(row);
       var toggle = row.querySelector('[data-repo="svnEnabled"]');
@@ -285,11 +289,23 @@
       var interval = pairField(entry, 'syncIntervalSeconds');
       var allow = !!(entry && entry.detail.querySelector('[data-repo="allowCommit"]').checked);
       var mount = pairField(entry, 'mount') || row.getAttribute('data-mount') || '';
+      if (!mount) {
+        mount = row.getAttribute('data-mount') || '';
+      }
       // 仓库 ID 一律由系统生成：既有仓库沿用保存的 ID，新文件夹按名称生成（本地/SVN 一致）
       var repoId = pairField(entry, 'id');
+      if (row.getAttribute('data-repo-removed') === '1') {
+        return null;
+      }
       if (!repoId) {
         var folderName = row.getAttribute('data-name') || mount.replace(/^md\//, '');
         repoId = folderName ? slugId(folderName) : '';
+        var baseId = repoId;
+        var suffix = 2;
+        while (repoId && usedIds[repoId]) {
+          repoId = baseId + '-' + suffix;
+          suffix += 1;
+        }
       }
       if (!repoId && !svnEnabled && !allow) {
         return null;  // 未配置 SVN 且只读：不创建映射（仅保留分组）
@@ -305,6 +321,7 @@
         allowCommit: allow
       };
       repo.credential_group = repo.group;
+      if (repoId) { usedIds[repoId] = true; }
       if (svnEnabled && interval !== '') {
         repo.syncIntervalSeconds = Number(interval);
       }
@@ -317,6 +334,11 @@
   function validateRepos(repos) {
     for (var index = 0; index < repos.length; index += 1) {
       var repo = repos[index];
+      if (repo.syncIntervalSeconds !== undefined && repo.syncIntervalSeconds !== null
+          && repo.syncIntervalSeconds !== ''
+          && (!isFinite(Number(repo.syncIntervalSeconds)) || Number(repo.syncIntervalSeconds) < 0)) {
+        return '仓库 ' + repo.id + ' 的更新频率必须是大于等于 0 的有限数值。';
+      }
       if (!repo.id) {
         return '第 ' + (index + 1) + ' 行无法生成仓库 ID：请检查文件夹名，或点「移除映射」。';
       }
@@ -723,7 +745,7 @@
   function provision(button) {
     var repoId = pairField(pairOf(button), 'id');
     if (!repoId) {
-      setStatus('请先填写仓库 ID 再点「创建并拉取」。', true);
+      setStatus('仓库 ID 由系统按文件夹名生成，请先保存配置后再点「创建并拉取」。', true);
       return;
     }
     if (!savedRepo(repoId)) {
@@ -927,6 +949,9 @@
           toggle.checked = false;
         }
         entry.detail.hidden = true;
+        if (entry.summary) {
+          entry.summary.setAttribute('data-repo-removed', '1');
+        }
         updateSummary(entry);
         setStatus('已移除该文件夹的仓库配置（点「保存配置并重建站点」后生效）。');
       }
@@ -951,7 +976,7 @@
     } else if (action === 'health' || action === 'repair' || action === 'recreate') {
       var targetId = pairField(pairOf(target), 'id');
       if (!targetId) {
-        setStatus('请先填写仓库 ID。', true);
+        setStatus('仓库 ID 由系统按文件夹名生成，请先保存配置。', true);
         return;
       }
       if (action === 'health') {
@@ -964,7 +989,7 @@
       var repoId = pairField(entry, 'id');
       var mount = pairField(entry, 'mount');
       if (!repoId) {
-        setStatus('请先填写仓库 ID 再设置同步凭据。', true);
+        setStatus('仓库 ID 由系统按文件夹名生成，请先保存配置后再设置同步凭据。', true);
         return;
       }
       setCredential(repoId, mount || repoId);
@@ -999,9 +1024,7 @@
       if (target.checked) {
         var idInput = entry.detail.querySelector('[data-repo="id"]');
         var urlInput = entry.detail.querySelector('[data-repo="url"]');
-        if (idInput && !idInput.value.trim()) {
-          idInput.focus();
-        } else if (urlInput && !urlInput.value.trim()) {
+        if (urlInput && !urlInput.value.trim()) {
           urlInput.focus();
         }
       } else if (pairField(entry, 'id')) {

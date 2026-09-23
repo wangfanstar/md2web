@@ -1158,7 +1158,17 @@ def sync_binding(conn, svn_client, config, md_dir, binding, credential=None, for
         info = svn_client.info(binding["url"], config_dir, username=username, password=password)
         remote_revision = int(info.get("revision") or 0)
         published = int(row["published_revision"] or 0) if row else 0
-        if remote_revision and remote_revision <= published and not force:
+        if remote_revision and remote_revision <= published and not force and (not row or row["sync_error"] != "conflicts"):
+            # 远端版本未变时仍检查活动草稿；上次同步留下的冲突必须持续到草稿解决。
+            draft_paths = active_draft_paths(conn)
+            pending_conflicts = [path for path in draft_paths
+                                 if path == binding["mount"] or path.startswith(binding["mount"] + "/")]
+            if pending_conflicts:
+                with conn:
+                    conn.execute("UPDATE repo_bindings SET last_checked_at = ?, sync_error = 'conflicts' WHERE id = ?",
+                                 (database.now_iso(), row["id"]))
+                return {"updated": False, "revision": remote_revision, "files": [],
+                        "conflicts": sorted(pending_conflicts)}
             if row:
                 with conn:
                     conn.execute("UPDATE repo_bindings SET last_checked_at = ?, sync_error = NULL WHERE id = ?",

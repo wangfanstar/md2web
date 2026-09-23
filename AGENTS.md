@@ -187,6 +187,8 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 编辑器文字颜色用 `<span style="color:…">`；`web/sanitize.js` 已改为**只放行 `color` 单属性**（DOMPurify `afterSanitizeAttributes` 钩子 + 正则白名单），不要再把 `style` 加回 `FORBID_ATTR`，否则预览里颜色会消失（站点渲染不经过 `Sanitize`，只有编辑器预览/AI 回答经过）。
 - 附件目录名固定为 `附件/`（`documents.ATTACHMENT_DIR_NAME`），与 `images/` 同级；上传沿用原文件名（清理链接敏感字符、重名加 `-2/-3`），并禁止 `.html/.js/.svg` 等可脚本化后缀（同源静态分发有 XSS 风险）。提交随带依赖 `documents.referenced_attachments` 解析 `[名称](附件/…)` 与 `<a href="附件/…">`，改动目录名或链接写法要同步更新解析与测试。
 - 配置页 SVN 明细行（`.repo-detail`）是 12 栅格：仓库 ID（只读展示 `.repo-id-auto`，自动生成）/更新频率各 3 列、SVN 地址 6 列、权限与操作按钮整行；标签在上输入框在下，窄屏（≤980px/≤620px）逐级降为 6/12 列。改布局时保持 `.repo-field-*` 类名与 `md2web-config.js` 中 `repoRow` 的 class 对应；不要恢复成让用户手填仓库 ID（`data-repo="id"` 只作为隐藏字段保留既有值）。
+- SVN 配置页只让用户填写地址与更新频率；ID 由文件夹名稳定生成，既有 ID 必须保留，移除映射行通过 `data-repo-removed` 标记避免保存时又自动生成。频率必须是有限的非负数；同步若因活动草稿产生冲突，即使远端版本不变也要持续报告，直到草稿解决。
+- `web/plot-playground.html` 的返回链接指向 `html/index_all.html`（页面位于 `docs/lib/`，相对站点根解析）。
 
 ## 完成前检查清单
 
