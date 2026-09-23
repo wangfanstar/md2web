@@ -1163,6 +1163,9 @@
       var resource = routeToResource(route);
       if (Object.prototype.hasOwnProperty.call(contents, resource)) {
         index[route] = buildSearchPage(route, contents[resource], depth);
+        if (state.index[route] && state.index[route].site) {
+          index[route].site = state.index[route].site;
+        }
       }
     });
     return index;
@@ -1441,6 +1444,9 @@
 
   function currentRepoName() {
     var pageName = String(window.location.pathname || '').split('/').pop() || '';
+    try {
+      pageName = decodeURIComponent(pageName);
+    } catch (error) { /* 非法编码保留原文件名 */ }
     if (pageName === 'index_all.html' || pageName === 'index.html') {
       return routeRepoName(currentRouteBase().replace(/^#/, ''));
     }
@@ -1448,6 +1454,15 @@
       return String(entry.site || '').split('/').pop() === pageName;
     })[0];
     return item ? routeRepoName(item.route) : '';
+  }
+
+  function selectRepoPreset(preset) {
+    if (preset === 'all') {
+      state.repoFilter = searchRepoOptions();
+    } else if (preset === 'current') {
+      var current = currentRepoName();
+      state.repoFilter = current ? [current] : [];
+    }
   }
 
   function search(query) {
@@ -2364,15 +2379,14 @@
       var repoAll = repoHost.querySelector('[data-role="repo-all"]');
       if (repoAll) {
         repoAll.addEventListener('click', function () {
-          state.repoFilter = [];
+          selectRepoPreset('all');
           applyRepoFilter();
         });
       }
       var repoCurrent = repoHost.querySelector('[data-role="repo-current"]');
       if (repoCurrent) {
         repoCurrent.addEventListener('click', function () {
-          var current = currentRepoName();
-          state.repoFilter = current ? [current] : [];
+          selectRepoPreset('current');
           applyRepoFilter();
         });
       }
@@ -2758,6 +2772,9 @@
       parseQuery: parseQuery,
       buildSearchPage: buildSearchPage,
       flattenIndex: flattenIndex,
+      buildSearchIndex: buildSearchIndex,
+      renderRepoMenu: renderRepoMenu,
+      selectRepoPreset: selectRepoPreset,
       search: search,
       state: state,
       normalizeText: normalizeText,

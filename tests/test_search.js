@@ -4,11 +4,11 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function loadSearch() {
+function loadSearch(pathname = '/html/index_all.html') {
   const source = fs.readFileSync(path.join(__dirname, '..', 'web', 'custom-search.js'), 'utf8');
   const window = {
     __CUSTOM_SEARCH_TEST__: true,
-    location: { hash: '#/md/guide/a.md', protocol: 'file:' },
+    location: { hash: '#/md/guide/a.md', pathname, protocol: 'file:' },
     $docsify: {},
     addEventListener() {}
   };
@@ -130,4 +130,56 @@ test('repo filter also applies to folder scope and file mode', () => {
   api.state.repoFilter = ['验证指南'];
   assert.deepEqual(Array.from(api.search('b.md'), (item) => item.path), ['验证指南/b.md']);
   assert.equal(api.search('a.md').length, 0);
+});
+
+test('all repositories preset checks every repository in the menu', () => {
+  const api = loadSearch();
+  api.state.index = {
+    '/md/硬件设计/a.md': {},
+    '/md/验证指南/b.md': {},
+  };
+  api.selectRepoPreset('all');
+  assert.deepEqual(Array.from(api.state.repoFilter).sort(), ['硬件设计', '验证指南'].sort());
+  const list = { innerHTML: '' };
+  const host = { querySelector(selector) {
+    if (selector === '[data-role="repo-list"]') return list;
+    if (selector === '[data-role="repo-label"]') return { textContent: '' };
+    if (selector === '[data-role="repo-toggle"]') return { classList: { toggle() {} } };
+    return null;
+  } };
+  api.renderRepoMenu(host);
+  assert.equal((list.innerHTML.match(/ checked/g) || []).length, 2);
+});
+
+test('current repository preset checks only the repository on an encoded entry page', () => {
+  const api = loadSearch('/html/index_%E7%A1%AC%E4%BB%B6%E8%AE%BE%E8%AE%A1.html');
+  api.state.index = {
+    '/md/硬件设计/a.md': { site: 'html/index_硬件设计.html', '/md/硬件设计/a.md': { route: '/md/硬件设计/a.md', body: 'DMA' } },
+    '/md/验证指南/b.md': { site: 'html/index_验证指南.html', '/md/验证指南/b.md': { route: '/md/验证指南/b.md', body: 'DMA' } },
+  };
+  api.state.items = api.flattenIndex(api.state.index);
+  api.selectRepoPreset('current');
+  assert.deepEqual(Array.from(api.state.repoFilter), ['硬件设计']);
+  const list = { innerHTML: '' };
+  const host = { querySelector(selector) {
+    if (selector === '[data-role="repo-list"]') return list;
+    if (selector === '[data-role="repo-label"]') return { textContent: '' };
+    if (selector === '[data-role="repo-toggle"]') return { classList: { toggle() {} } };
+    return null;
+  } };
+  api.renderRepoMenu(host);
+  assert.match(list.innerHTML, /data-repo-name="硬件设计" checked/);
+  assert.doesNotMatch(list.innerHTML, /data-repo-name="验证指南" checked/);
+});
+
+test('refreshing the search index retains entry pages for the current repository preset', () => {
+  const api = loadSearch('/html/index_%E7%A1%AC%E4%BB%B6%E8%AE%BE%E8%AE%A1.html');
+  api.state.index = {
+    '/md/硬件设计/a.md': { site: 'html/index_硬件设计.html' },
+  };
+  const refreshed = api.buildSearchIndex(
+    { 'md/硬件设计/a.md': '# A\nDMA' },
+    ['/md/硬件设计/a.md']
+  );
+  assert.equal(refreshed['/md/硬件设计/a.md'].site, 'html/index_硬件设计.html');
 });
