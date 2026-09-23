@@ -1185,7 +1185,7 @@ class HtmlLayoutTests(unittest.TestCase):
         """配置页仓库 ID 由系统按文件夹名生成：用户只填 SVN 地址与更新频率。"""
         script = (ROOT / "web" / "md2web-config.js").read_text(encoding="utf-8")
         self.assertIn("function autoRepoId", script)
-        self.assertIn("仓库 ID（自动生成）", script)
+        self.assertNotIn("仓库 ID（自动生成）", script, "用户界面不应再显示仓库 ID")
         self.assertNotIn('placeholder="如 hardware"', script, "不应再让用户手填仓库 ID")
         self.assertIn("'<input type=\"hidden\" data-repo=\"id\" value=\"'", script, "既有仓库 ID 通过隐藏字段保留")
         # 本地模式与 SVN 模式都按文件夹名生成

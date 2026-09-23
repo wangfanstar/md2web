@@ -167,10 +167,7 @@
       '</tr>',
       '<tr data-pair-detail="' + pair + '"' + (svnEnabled ? '' : ' hidden') + '>',
       '<td colspan="7"><div class="repo-detail">',
-      '<div class="repo-field repo-field-id"><span>仓库 ID（自动生成）</span>'
-        + '<span class="repo-id-auto" data-repo-id-auto title="按文件夹名自动生成：用于入口页命名与 SVN 绑定">'
-        + escapeHtml(autoRepoId(folder, item)) + '</span>'
-        + '<input type="hidden" data-repo="id" value="' + escapeHtml(item.id || '') + '"></div>',
+      '<input type="hidden" data-repo="id" value="' + escapeHtml(item.id || '') + '">',
       '<label class="repo-field repo-field-url"><span>SVN 地址</span><input type="text" data-repo="url" value="' + escapeHtml(item.url)
         + '" placeholder="https://svn.example.com/svn/xxx/trunk/docs/"' + disabled + '></label>',
       '<label class="repo-field repo-field-interval"><span>更新频率（秒）</span><input type="number" min="0" step="30" data-repo="syncIntervalSeconds" value="'

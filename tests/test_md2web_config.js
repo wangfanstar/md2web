@@ -93,3 +93,13 @@ test('saved ID survives source mode changes and local mode drops SVN fields', ()
   assert.equal(repo.url, '');
   assert.equal(repo.syncIntervalSeconds, undefined);
 });
+
+test('repository detail keeps ID hidden and exposes only SVN address and interval', () => {
+  const p = page([]);
+  const html = p.repoRow({ id: 'legacy', mount: 'md/folder', url: 'https://svn.example.com/r' },
+    { name: 'folder', path: 'md/folder' }, 0);
+  assert.doesNotMatch(html, /仓库 ID（自动生成）/);
+  assert.match(html, /data-repo="id"/);
+  assert.match(html, /SVN 地址/);
+  assert.match(html, /更新频率（秒）/);
+});
