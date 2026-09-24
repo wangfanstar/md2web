@@ -1608,6 +1608,14 @@ def generate_master_index_html(repos, title="文档中心", all_page="index_all.
     if not repos:
         sections.append('<p class="empty">还没有配置仓库：请在 <a href="' + config_page + '">' + config_page
                         + '</a> 中添加 SVN 仓库与目录映射，然后重新构建或等待自动同步。</p>')
+    reference_cards = []
+    for kind, label in (("pdf", "PDF"), ("word", "Word"), ("excel", "Excel")):
+        ref_root = DOCS_DIR / kind
+        ref_root.mkdir(parents=True, exist_ok=True)
+        folders = sorted([p for p in ref_root.iterdir() if p.is_dir() and p.name != "回收站"], key=lambda p: p.name.lower())
+        links = ['<a class="card" href="' + HTML_PREFIX + 'reference_library.html?kind=' + kind + '"><strong>全部' + label + '</strong><span>浏览全部' + label + '资料</span></a>']
+        links += ['<a class="card" href="' + HTML_PREFIX + 'reference_library.html?kind=' + kind + '&path=' + urllib.parse.quote(p.name, safe="") + '"><strong>' + html.escape(p.name) + '</strong><span>' + label + '参考文献分组</span></a>' for p in folders]
+        reference_cards.append('<h3>' + label + '</h3><div class="cards">' + ''.join(links) + '</div>')
     page = f"""<!DOCTYPE html>
 <!-- 站点基于 docsify 4.13.1（MIT，https://github.com/docsifyjs/docsify）构建；
      第三方组件与许可见 THIRD-PARTY-NOTICES.md -->
@@ -1642,6 +1650,8 @@ def generate_master_index_html(repos, title="文档中心", all_page="index_all.
     <p class="hint">当前搜索范围：<strong>全部仓库</strong>；默认模式：<strong>文档名和全文</strong>，结果按两类分组显示。</p>
     <div class="results" data-master-results></div>
     {''.join(sections)}
+    <h2>参考文献</h2>
+    {''.join(reference_cards)}
   </div>
   <script>window.__MD2WEB_REPOS__ = {json.dumps(repos, ensure_ascii=False)};</script>
   <script>{MASTER_SCRIPT}</script>
@@ -1679,6 +1689,19 @@ def generate_config_page():
 def generate_feedback_page():
     """把读者反馈页（web/md2web_feedback.html + web/md2web-feedback.js）复制到 docs/。"""
     generate_standalone_page("md2web_feedback.html", "md2web-feedback.js", "读者反馈")
+
+
+def generate_reference_pages():
+    """生成统一的 PDF、Word、Excel 参考文献管理页及其入口别名。"""
+    generate_standalone_page("reference_library.html", "reference-library.js", "参考文献")
+    for kind in ("pdf", "word", "excel"):
+        root = DOCS_DIR / kind
+        root.mkdir(parents=True, exist_ok=True)
+        for folder in sorted([p for p in root.iterdir() if p.is_dir() and p.name != "回收站"], key=lambda p: p.name.lower()):
+            safe = re.sub(r"[^0-9A-Za-z一-鿿_-]+", "_", folder.name).strip("_") or "folder"
+            page = HTML_DIR / ("index_%s_%s.html" % (kind, safe))
+            href = "reference_library.html?kind=%s&path=%s" % (kind, urllib.parse.quote(folder.name, safe=""))
+            page.write_text('<!doctype html><html><head><meta charset="utf-8"><base href="../"><meta http-equiv="refresh" content="0;url=%s"></head><body>正在打开参考文献…</body></html>' % href, encoding="utf-8")
 
 
 def main(argv=None):
@@ -1766,6 +1789,7 @@ def main(argv=None):
         generate_config_page()
         generate_feedback_page()
         generate_standalone_page("md2web_recycle.html", "md2web-recycle.js", "回收站")
+        generate_reference_pages()
 
         print("\n=== 构建完成 ===")
         print("\n启动本地预览: python serve.py")

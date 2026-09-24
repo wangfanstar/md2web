@@ -7,13 +7,14 @@
 
 import hmac
 import json
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import Flask, jsonify, make_response, request, send_from_directory
 
 from . import config as server_config
-from . import database, documents as server_documents, drafts, operations, entries, recycle
+from . import database, documents as server_documents, drafts, operations, entries, recycle, references
 from .auth import AuthError
 from .config import authenticated_config, config_to_json, public_config, save_config
 from .documents import MdSaveError
@@ -459,11 +460,16 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             extra = dict(error.extra)
             code = extra.pop('code', 'entry_error')
             return json_error(error.status, code, error.message, **extra)
+        # 文件已成功持久化后立即响应；站点重建属于后台任务，不能阻塞编辑器保存确认。
         if on_config_changed is not None:
-            try:
-                on_config_changed()
-            except Exception:
-                pass
+            def rebuild_after_publish():
+                try:
+                    on_config_changed()
+                except Exception:
+                    app.logger.exception("站点重建失败")
+            threading.Thread(target=rebuild_after_publish, name="md2web-publish-rebuild",
+                             daemon=True).start()
+        result["saved"] = True
         return jsonify({"ok": True, "result": result})
 
     def repo_by_id(repo_id):
@@ -1369,6 +1375,72 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             except operations.OperationError as error:
                 results.append({"binding": binding["id"], "ok": False, "error": error.message})
         return jsonify({"ok": True, "results": results})
+
+    @app.get("/__references/list")
+    def reference_list():
+        try:
+            kind = request.args.get("kind") or "pdf"
+            return jsonify({"ok": True, "listing": references.listing(docs_root, kind, request.args.get("path") or "")})
+        except references.ReferenceError as error:
+            return json_error(error.status, "reference_error", error.message)
+
+    @app.get("/__references/tree")
+    def reference_tree():
+        try:
+            kind = request.args.get("kind") or "pdf"
+            return jsonify({"ok": True, "kind": kind, "folders": references.tree(docs_root, kind)})
+        except references.ReferenceError as error:
+            return json_error(error.status, "reference_error", error.message)
+
+    @app.get("/__references/trash")
+    def reference_trash():
+        session, rejected = require_session()
+        if rejected: return rejected
+        try:
+            kind = request.args.get("kind") or "pdf"
+            return jsonify({"ok": True, "kind": kind, "entries": references.trash_listing(docs_root, kind)})
+        except references.ReferenceError as error:
+            return json_error(error.status, "reference_error", error.message)
+
+    @app.post("/__references/upload")
+    def reference_upload():
+        session, rejected = require_session()
+        if rejected: return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error: return csrf_error
+        kind = request.form.get("kind") or "pdf"
+        try:
+            _, folder, _ = references.safe_path(docs_root, kind, request.form.get("path") or "")
+            uploaded = request.files.get("file")
+            if uploaded is None or not uploaded.filename: raise references.ReferenceError(400, "未选择文件")
+            name = references.check_name(uploaded.filename)
+            if Path(name).suffix.lower() not in references.KINDS[kind]: raise references.ReferenceError(400, "文件扩展名与资料类型不匹配")
+            target = folder / name
+            if target.exists(): raise references.ReferenceError(409, "目标已存在")
+            folder.mkdir(parents=True, exist_ok=True); uploaded.save(str(target))
+            return jsonify({"ok": True, "path": target.relative_to(references.root_for(docs_root, kind)).as_posix()})
+        except references.ReferenceError as error:
+            return json_error(error.status, "reference_error", error.message)
+
+    def reference_mutation(action):
+        session, rejected = require_session()
+        if rejected: return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error: return csrf_error
+        payload = request.get_json(silent=True) or {}; kind = payload.get("kind") or "pdf"
+        try:
+            if action == "mkdir": result = {"path": references.mkdir(docs_root, kind, payload.get("parent", ""), payload.get("name"))}
+            elif action == "rename": result = {"path": references.rename(docs_root, kind, payload.get("path"), payload.get("name"))}
+            elif action == "move": result = {"path": references.move(docs_root, kind, payload.get("path"), payload.get("parent", ""))}
+            elif action == "delete": result = references.delete(docs_root, kind, payload.get("path"))
+            elif action == "restore": result = {"path": references.restore(docs_root, kind, payload.get("entryId"))}
+            else: result = {"count": references.purge(docs_root, kind, payload.get("entryId"))}
+            return jsonify({"ok": True, "result": result})
+        except references.ReferenceError as error: return json_error(error.status, "reference_error", error.message)
+
+    for _action in ("mkdir", "rename", "move", "delete", "restore", "purge"):
+        app.add_url_rule("/__references/" + _action, "reference_" + _action,
+                         lambda action=_action: reference_mutation(action), methods=["POST"])
 
     # ---- 静态站点（白名单，无目录列表） ----
 
