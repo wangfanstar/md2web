@@ -1,1 +1,60 @@
-(function(){'use strict';var list=document.querySelector('[data-list]'),kind=document.querySelector('[data-kind]'),crumb=document.querySelector('[data-breadcrumb]'),status=document.getElementById('status'),path=(new URLSearchParams(location.search)).get('path')||'';function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]})}function api(u,o){var h={'Content-Type':'application/json'};if(window.SiteAuth&&SiteAuth.csrfToken())h['X-CSRF-Token']=SiteAuth.csrfToken();return fetch(u,Object.assign({},o||{},{headers:h})).then(function(r){return r.json().then(function(p){if(!r.ok)throw Error(p.error||('HTTP '+r.status));return p})})}function load(){var k=kind.value;api('__references/list?kind='+k+'&path='+encodeURIComponent(path)).then(function(p){crumb.textContent=(k==='pdf'?'PDF':k==='word'?'Word':'Excel')+(path?' / '+path:'');list.innerHTML=(p.listing.items||[]).map(function(x){var isFolder=x.kind==='folder',href=isFolder?'?kind='+k+'&path='+encodeURIComponent(x.path):'../'+k+'/'+x.path;return '<div class="item"><div><a href="'+esc(href)+'">'+esc(x.name)+'</a><div class="meta">'+(isFolder?'文件夹':esc(x.ext)+' · '+x.size+' 字节')+'</div></div><div><button data-rename="'+esc(x.path)+'">重命名</button><button class="danger" data-delete="'+esc(x.path)+'">删除</button></div></div>'}).join('')||'<p class="meta">当前文件夹为空</p>'}).catch(function(e){status.textContent=e.message})}document.querySelector('[data-upload]').addEventListener('click',function(){document.querySelector('[data-file]').click()});document.querySelector('[data-file]').addEventListener('change',function(){var f=this.files[0];if(!f)return;var d=new FormData();d.append('kind',kind.value);d.append('path',path);d.append('file',f);fetch('__references/upload',{method:'POST',headers:window.SiteAuth&&SiteAuth.csrfToken()?{'X-CSRF-Token':SiteAuth.csrfToken()}: {},body:d}).then(function(r){if(!r.ok)throw Error('上传失败');return r.json()}).then(load)});document.addEventListener('click',function(e){var n=e.target;if(n.hasAttribute('data-up'))load();if(n.hasAttribute('data-mkdir')){var name=prompt('文件夹名称');if(name)api('__references/mkdir',{method:'POST',body:JSON.stringify({kind:kind.value,parent:path,name:name})}).then(load)}if(n.hasAttribute('data-rename')){var name=prompt('新名称');if(name)api('__references/rename',{method:'POST',body:JSON.stringify({kind:kind.value,path:n.getAttribute('data-rename'),name:name})}).then(load)}if(n.hasAttribute('data-delete')&&confirm('删除后会进入回收站，确认继续？'))api('__references/delete',{method:'POST',body:JSON.stringify({kind:kind.value,path:n.getAttribute('data-delete')})}).then(load)});kind.value=(new URLSearchParams(location.search)).get('kind')||'pdf';load()}());
+(function () {
+  'use strict';
+  var params = new URLSearchParams(window.location.search || '');
+  var state = { kind: params.get('kind') || 'pdf', path: params.get('path') || '' };
+  var labels = { pdf: 'PDF 标准', word: 'Word 文档', excel: 'Excel 表格' };
+  var list = document.querySelector('[data-list]');
+  var status = document.querySelector('[data-status]');
+  var stats = document.querySelector('[data-stats]');
+  var title = document.querySelector('[data-title]');
+  var crumb = document.querySelector('[data-breadcrumb]');
+
+  function esc(value) { return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
+  function setStatus(message, error) { status.textContent = message || ''; status.className = 'status' + (error ? ' error' : ''); }
+  function api(url, options) {
+    var headers = Object.assign({ 'Content-Type': 'application/json' }, (options && options.headers) || {});
+    if (window.SiteAuth && SiteAuth.csrfToken()) { headers['X-CSRF-Token'] = SiteAuth.csrfToken(); }
+    return fetch(url, Object.assign({}, options || {}, { headers: headers })).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (payload) {
+        if (!response.ok || payload.ok === false) { throw new Error(payload.error || ('HTTP ' + response.status)); }
+        return payload;
+      });
+    });
+  }
+  function typeLabel(ext, isFolder) { return isFolder ? '文件夹' : ({ '.pdf': 'PDF', '.doc': 'Word', '.docx': 'Word', '.xls': 'Excel', '.xlsx': 'Excel' }[ext] || '文件'); }
+  function timeLabel(value) { if (!value) return '—'; var date = new Date(Number(value) * 1000); return isNaN(date.getTime()) ? '—' : date.toLocaleDateString(); }
+  function updateUrl() { history.replaceState(null, '', 'reference_library.html?kind=' + encodeURIComponent(state.kind) + (state.path ? '&path=' + encodeURIComponent(state.path) : '')); }
+  function render(items) {
+    list.innerHTML = items.map(function (item) {
+      var folder = item.kind === 'folder';
+      var href = folder ? '?kind=' + encodeURIComponent(state.kind) + '&path=' + encodeURIComponent(item.path) : '../' + state.kind + '/' + item.path.split('/').map(encodeURIComponent).join('/');
+      return '<div class="item"><div class="name"><span class="icon ' + (folder ? '' : 'file') + '">' + (folder ? '▰' : '▤') + '</span><a href="' + esc(href) + '"' + (folder ? '' : ' target="_blank" rel="noopener"') + '>' + esc(item.name) + '</a></div><div class="muted">' + typeLabel(item.ext, folder) + '</div><div class="muted">' + timeLabel(item.mtime) + '</div><div class="actions-cell"><button type="button" data-rename="' + esc(item.path) + '">重命名</button><button type="button" class="danger" data-delete="' + esc(item.path) + '">删除</button></div></div>';
+    }).join('') || '<div class="empty"><strong>这个文件夹还没有资料</strong><span>可以上传文件，或先新建一个子文件夹。</span></div>';
+    stats.textContent = items.length + ' 个项目 · 文件夹可继续展开，文件点击后在新窗口预览或下载';
+  }
+  function load() {
+    title.textContent = labels[state.kind];
+    document.querySelectorAll('[data-kind-nav]').forEach(function (node) { node.classList.toggle('active', node.getAttribute('data-kind-nav') === state.kind); });
+    crumb.textContent = state.path || '根目录';
+    setStatus('');
+    api('__references/list?kind=' + encodeURIComponent(state.kind) + '&path=' + encodeURIComponent(state.path)).then(function (payload) { render(payload.listing.items || []); }).catch(function (error) { list.innerHTML = '<div class="empty"><strong>暂时无法读取资料</strong><span>' + esc(error.message) + '</span></div>'; setStatus(error.message, true); });
+  }
+  function mutate(url, body) { return api(url, { method: 'POST', body: JSON.stringify(body) }).then(function () { load(); }); }
+  document.querySelectorAll('[data-kind-nav]').forEach(function (node) { node.addEventListener('click', function () { state.kind = node.getAttribute('data-kind-nav'); state.path = ''; updateUrl(); load(); }); });
+  document.querySelector('[data-root]').addEventListener('click', function () { state.path = ''; updateUrl(); load(); });
+  document.querySelector('[data-up]').addEventListener('click', load);
+  document.querySelector('[data-mkdir]').addEventListener('click', function () { var name = window.prompt('输入新文件夹名称'); if (name) mutate('__references/mkdir', { kind: state.kind, parent: state.path, name: name }); });
+  document.querySelector('[data-upload]').addEventListener('click', function () { document.querySelector('[data-file]').click(); });
+  document.querySelector('[data-file]').addEventListener('change', function () {
+    var file = this.files && this.files[0]; if (!file) return;
+    var form = new FormData(); form.append('kind', state.kind); form.append('path', state.path); form.append('file', file); setStatus('正在上传…');
+    var headers = {}; if (window.SiteAuth && SiteAuth.csrfToken()) headers['X-CSRF-Token'] = SiteAuth.csrfToken();
+    fetch('__references/upload', { method: 'POST', headers: headers, body: form }).then(function (response) { if (!response.ok) throw new Error('上传失败（' + response.status + '）'); return response.json(); }).then(function () { setStatus('上传完成'); load(); }).catch(function (error) { setStatus(error.message, true); }); this.value = '';
+  });
+  document.addEventListener('click', function (event) {
+    var node = event.target;
+    if (node.hasAttribute('data-rename')) { var name = window.prompt('输入新名称'); if (name) mutate('__references/rename', { kind: state.kind, path: node.getAttribute('data-rename'), name: name }); }
+    if (node.hasAttribute('data-delete') && window.confirm('删除后会进入回收站，确认继续？')) { mutate('__references/delete', { kind: state.kind, path: node.getAttribute('data-delete') }); }
+  });
+  load();
+}());
