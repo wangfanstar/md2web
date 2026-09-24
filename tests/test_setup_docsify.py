@@ -1148,6 +1148,16 @@ class HtmlLayoutTests(unittest.TestCase):
         self.assertIn('href="html/md2web_feedback.html"', master)
         self.assertIn("fetch('html/search-index.json')", master)
         self.assertRegex(master, r'href="html/index_[^"]+\.html"')
+        # 独立页统一登录快捷入口：auth.js 在无侧栏时渲染固定入口
+        self.assertIn("lib/auth.js", master)
+        self.assertIn("lib/auth.css", master)
+
+    def test_standalone_pages_offer_login_entry(self):
+        """独立页（配置/回收站）通过 auth.js 提供统一登录快捷入口。"""
+        for name in ("md2web_config.html", "md2web_recycle.html"):
+            page = (ROOT / "docs" / "html" / name).read_text(encoding="utf-8")
+            self.assertIn("lib/auth.js", page, name)
+            self.assertIn("lib/auth.css", page, name)
 
     def test_merged_offline_data_uses_html_keys(self):
         text = (ROOT / "docs" / "lib" / "offline-data.js").read_text(encoding="utf-8")
@@ -1203,8 +1213,14 @@ class HtmlLayoutTests(unittest.TestCase):
         self.assertIn("repoId = folderName ? slugId(folderName) : '';", script)
         page = (ROOT / "web" / "md2web_config.html").read_text(encoding="utf-8")
         self.assertIn(".repo-id-auto", page, "自动生成的 ID 需要只读样式")
+        # 默认同步凭据保留 ID：自动生成的仓库 ID 不能占用它
+        self.assertIn("usedIds['__default__'] = true", script, "默认同步凭据的保留 ID 应避开自动生成")
+        self.assertIn("default-credential", page, "配置页需要默认同步凭据面板")
+        self.assertIn("lib/auth.js", page, "配置页需要登录快捷入口")
+        self.assertIn("data-site-credential", page, "网站备份凭据应使用行内输入框")
         built = (ROOT / "docs" / "lib" / "md2web-config.js").read_text(encoding="utf-8")
         self.assertIn("autoRepoId", built, "构建产物未同步 md2web-config.js")
+        self.assertIn("saveDefaultCredential", built, "构建产物未同步 md2web-config.js")
 
     def test_search_repo_filter_multi_select(self):
         """搜索支持按仓库多选过滤：范围/模式之外提供仓库勾选菜单，并持久化选择。"""
@@ -1375,6 +1391,16 @@ class PlaygroundCopyTests(unittest.TestCase):
         self.assertIn("updateCopyPreview('mermaid', mermaidSource, mermaidFenceNode, 'mermaid')", html)
         built = (ROOT / "docs" / "lib" / "plot-playground.html").read_text(encoding="utf-8")
         self.assertIn("updateCopyPreview", built, "构建产物未同步 plot-playground.html")
+
+    def test_playground_has_login_entry(self):
+        """绘图预览页（docs/lib/）通过 MD2WEB_BASE 使用站点根的登录入口。"""
+        html = (ROOT / "web" / "plot-playground.html").read_text(encoding="utf-8")
+        self.assertIn("window.MD2WEB_BASE = '../'", html)
+        self.assertIn('src="auth.js"', html)
+        self.assertIn('href="auth.css"', html)
+        built = (ROOT / "docs" / "lib" / "plot-playground.html").read_text(encoding="utf-8")
+        self.assertIn("window.MD2WEB_BASE = '../'", built, "构建产物未同步 plot-playground.html")
+        self.assertIn('src="auth.js"', built, "构建产物未同步 plot-playground.html")
 
 
 class FolderGroupTests(TempDirTestCase):

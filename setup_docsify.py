@@ -1565,6 +1565,7 @@ def generate_master_index_html(repos, title="文档中心", all_page="index_all.
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{html.escape(title)}</title>
+  <link rel="stylesheet" href="lib/auth.css">
   <style>{MASTER_STYLE}</style>
 </head>
 <body>
@@ -1593,6 +1594,7 @@ def generate_master_index_html(repos, title="文档中心", all_page="index_all.
   </div>
   <script>window.__MD2WEB_REPOS__ = {json.dumps(repos, ensure_ascii=False)};</script>
   <script>{MASTER_SCRIPT}</script>
+  <script src="lib/auth.js"></script>
   <script src="lib/md2web-feedback.js"></script>
 </body>
 </html>

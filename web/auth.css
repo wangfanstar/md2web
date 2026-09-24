@@ -131,3 +131,27 @@
   color: var(--docs-muted, #6b7a8d);
   font-size: 11px;
 }
+
+/* 无侧栏的独立页：固定右上角登录入口（auth.js 在找不到侧栏宿主时创建） */
+.site-auth-fixed {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #dfe7ef;
+  border-radius: 999px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, .12);
+  display: inline-flex;
+  gap: 8px;
+  padding: 5px 10px;
+  position: fixed;
+  right: 16px;
+  top: 14px;
+  z-index: 1100;
+}
+
+.site-auth-fixed .site-auth-indicator {
+  margin-left: 0;
+}
+
+.site-auth-fixed .site-auth-user {
+  max-width: 160px;
+}

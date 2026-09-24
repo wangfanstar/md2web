@@ -94,6 +94,30 @@ test('saved ID survives source mode changes and local mode drops SVN fields', ()
   assert.equal(repo.syncIntervalSeconds, undefined);
 });
 
+test('automatic IDs avoid the default sync credential reserved ID', () => {
+  const p = page([{ name: '__default__', mount: 'md/__default__' }]);
+  assert.notEqual(p.readRepos()[0].id, '__default__');
+});
+
+test('repository detail renders inline credential inputs and status', () => {
+  const p = page([]);
+  const html = p.repoRow({ id: 'legacy', mount: 'md/folder' }, null, 0);
+  assert.match(html, /data-repo="credUsername"/);
+  assert.match(html, /data-repo="credPassword"/);
+  assert.match(html, /data-action="repo-credential"/);
+  assert.match(html, /repo-credential-status/);
+});
+
+test('sync credentials are edited inline without browser prompts', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../web/md2web-config.js'), 'utf8');
+  assert.doesNotMatch(source, /window\.prompt/);
+  for (const needle of ['saveRepoCredential', 'saveSiteCredential', 'saveDefaultCredential',
+                        'data-action="default-credential"', '__admin/default-credential',
+                        'data-site-credential']) {
+    assert.ok(source.includes(needle), needle);
+  }
+});
+
 test('repository detail keeps ID hidden and exposes only SVN address and interval', () => {
   const p = page([]);
   const html = p.repoRow({ id: 'legacy', mount: 'md/folder', url: 'https://svn.example.com/r' },

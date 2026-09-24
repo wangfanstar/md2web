@@ -745,6 +745,38 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             rows["site-backup"] = site_name
         return jsonify({"ok": True, "credentials": rows})
 
+    @app.get("/__admin/default-credential")
+    def get_default_credential():
+        """默认同步凭据（只返回用户名）：未单独配置凭据的仓库同步时统一使用。"""
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        username = auth_service.default_credential_username()
+        return jsonify({"ok": True, "credential": {"configured": bool(username), "username": username or ""}})
+
+    @app.post("/__admin/default-credential")
+    def set_default_credential():
+        """验证并保存默认同步凭据（管理员 + CSRF）：先经已配置的 SVN 认证路径校验。"""
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        username = str(payload.get("username") or "").strip()
+        password = payload.get("password") or ""
+        if not username or not password:
+            return json_error(400, "invalid_request", "需要 username 与 password")
+        result = auth_service.verify_account(username, password, request.remote_addr or "")
+        if result.get("admin"):
+            return json_error(400, "admin_account_not_allowed",
+                              "本机管理员账号没有 SVN 口令，不能作为同步凭据：请使用 SVN 账号")
+        if not auth_service.store_default_credential(username, password):
+            return json_error(500, "credential_error", "保存默认同步凭据失败（检查配置中的 security.secretKey）")
+        return jsonify({"ok": True, "username": username,
+                        "message": result.get("message") or "默认同步凭据已保存"})
+
     @app.post("/__admin/site-backup")
     def admin_site_backup():
         """立即把网站数据合入 SVN 库（管理员 + CSRF）。"""
@@ -816,8 +848,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 break
         if binding is None:
             return json_error(404, "not_found", "没有找到仓库：" + repo_id)
-        credential = (auth_service.repo_credential(binding["id"])
-                      or credential_of(session) or auth_service.sync_credential())
+        credential = auth_service.repo_sync_credential(binding, credential_of(session))
         try:
             result = operations.provision_repository(conn, auth_service.svn, config, md_dir(), binding,
                                                      credential)

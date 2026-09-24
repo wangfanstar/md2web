@@ -2415,6 +2415,125 @@ class FolderOpsTests(ServerTestBase):
         anonymous = self.app.test_client()
         self.assertEqual(anonymous.get("/__admin/credentials").status_code, 401)
 
+    def test_default_credential_roundtrip(self):
+        """默认同步凭据：验证通过后加密入库，GET 返回用户名，权限与参数校验齐全。"""
+        headers = {"X-CSRF-Token": self.csrf()}
+        listed = self.client.get("/__admin/default-credential").get_json()["credential"]
+        self.assertFalse(listed["configured"])
+        self.assertEqual(listed["username"], "")
+        response = self.client.post("/__admin/default-credential",
+                                    json={"username": "syncuser", "password": "good"}, headers=headers)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.get_json()["username"], "syncuser")
+        self.assertEqual(self.auth.default_credential(), ("syncuser", "good"))
+        row = self.conn.execute("SELECT * FROM repo_credentials").fetchone()
+        self.assertEqual(row["repository_id"], server_auth.DEFAULT_CREDENTIAL_ID)
+        self.assertNotIn("good", row["secret"], "库里不能是明文")
+        listed = self.client.get("/__admin/default-credential").get_json()["credential"]
+        self.assertTrue(listed["configured"])
+        self.assertEqual(listed["username"], "syncuser")
+        anonymous = self.app.test_client()
+        self.assertEqual(anonymous.get("/__admin/default-credential").status_code, 401)
+        self.assertEqual(anonymous.post("/__admin/default-credential",
+                                        json={"username": "u", "password": "p"}).status_code, 401)
+        self.assertEqual(self.client.post("/__admin/default-credential",
+                                          json={"username": "u", "password": "p"}).status_code, 403)
+        self.assertEqual(self.client.post("/__admin/default-credential", json={"username": "u"},
+                                          headers=headers).status_code, 400)
+
+    def test_default_credential_rejects_admin_account(self):
+        """本机管理员账号没有 SVN 口令，不能作为同步凭据保存。"""
+        headers = {"X-CSRF-Token": self.csrf()}
+        response = self.client.post("/__admin/default-credential",
+                                    json={"username": "admin", "password": "admin"}, headers=headers)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["code"], "admin_account_not_allowed")
+        self.assertIsNone(self.conn.execute("SELECT * FROM repo_credentials").fetchone())
+
+    def test_default_credential_verify_failure_not_saved(self):
+        """SVN 认证路径拒绝口令时不入库。"""
+        headers = {"X-CSRF-Token": self.csrf()}
+        self.auth.svn = FakeSvn(error=server_svn.SvnError("auth_failed", detail="bad password"))
+        response = self.client.post("/__admin/default-credential",
+                                    json={"username": "syncuser", "password": "bad"}, headers=headers)
+        self.assertEqual(response.status_code, 401)
+        self.assertIsNone(self.conn.execute("SELECT * FROM repo_credentials").fetchone())
+
+    def test_repo_sync_credential_precedence(self):
+        """同步凭据优先级：仓库自有 > 默认 > 会话 > 环境变量。"""
+        binding = {"id": "hardware"}
+        self.config["sync"]["credential_name"] = "MD2WEB_FAKE_SYNC"
+        with mock.patch.dict("os.environ", {"MD2WEB_FAKE_SYNC": "envuser:envpass"}):
+            self.assertEqual(self.auth.repo_sync_credential(binding, ("sessionuser", "sessionpass")),
+                             ("sessionuser", "sessionpass"))
+            self.assertEqual(self.auth.repo_sync_credential(binding), ("envuser", "envpass"))
+            self.assertTrue(self.auth.store_default_credential("defuser", "defpass"))
+            self.assertEqual(self.auth.repo_sync_credential(binding, ("sessionuser", "sessionpass")),
+                             ("defuser", "defpass"))
+            self.assertEqual(self.auth.default_credential_username(), "defuser")
+            self.assertTrue(self.auth.store_repo_credential("hardware", "repouser", "repopass"))
+            self.assertEqual(self.auth.repo_sync_credential(binding), ("repouser", "repopass"))
+        self.config["sync"]["credential_name"] = ""
+
+    def test_sync_repositories_uses_default_credential(self):
+        """未单独配置凭据的仓库同步时用默认凭据；仓库自有凭据优先。"""
+        state_path = self.tmp / "sync-default-state.json"
+        state_path.write_text(json.dumps({
+            "files": {"时钟树设计.md": "# A\n"}, "revision": 5, "log": [], "wc": {},
+            "uuid": "11111111-2222-3333-4444-555555555555"}, ensure_ascii=False), encoding="utf-8")
+        env = mock.patch.dict("os.environ", {"FAKE_SVN_STATE": str(state_path)})
+        env.start()
+        try:
+            fake = self.tmp / "fake_svn_sync_default.py"
+            fake.write_text(FAKE_SVN, encoding="utf-8")
+            self.auth.svn = server_svn.SvnClient(command=(sys.executable, str(fake)), timeout=5)
+            self.config["repositories"] = [repo for repo in self.config["repositories"]
+                                           if repo["id"] == "hardware"]
+            self.assertTrue(self.auth.store_default_credential("defuser", "good"))
+            results = self.auth.sync_repositories(self.docs / "md")
+            self.assertEqual(len(results), 1, results)
+            self.assertTrue(results[0].get("updated"), results)
+            recorded = json.loads(state_path.read_text(encoding="utf-8"))["credentials"]
+            self.assertEqual(recorded, {"username": "defuser", "password": "good"})
+            # 仓库自有凭据优先于默认凭据（重置检查时间与版本，保证再次同步）
+            with self.conn:
+                self.conn.execute("UPDATE repo_bindings SET last_checked_at = '1970-01-01T00:00:00Z',"
+                                  " published_revision = 0")
+            self.assertTrue(self.auth.store_repo_credential("hardware", "repouser", "good"))
+            results = self.auth.sync_repositories(self.docs / "md")
+            self.assertEqual(len(results), 1, results)
+            recorded = json.loads(state_path.read_text(encoding="utf-8"))["credentials"]
+            self.assertEqual(recorded, {"username": "repouser", "password": "good"})
+        finally:
+            env.stop()
+
+    def test_repo_health_and_provision_use_default_credential(self):
+        """健康检查与创建拉取在仓库无自有凭据时使用默认凭据。"""
+        state_path = self.tmp / "default-health-state.json"
+        state_path.write_text(json.dumps({
+            "files": {"手册.md": "# 手册\n"}, "revision": 6, "log": [], "wc": {},
+            "uuid": "33333333-4444-5555-6666-777777777777"}, ensure_ascii=False), encoding="utf-8")
+        env = mock.patch.dict("os.environ", {"FAKE_SVN_STATE": str(state_path)})
+        env.start()
+        try:
+            fake = self.tmp / "fake_svn_default_health.py"
+            fake.write_text(FAKE_SVN, encoding="utf-8")
+            self.auth.svn = server_svn.SvnClient(command=(sys.executable, str(fake)), timeout=5)
+            self.config["repositories"] = [repo for repo in self.config["repositories"]
+                                           if repo["id"] == "hardware"]
+            self.assertTrue(self.auth.store_default_credential("defuser", "good"))
+            headers = {"X-CSRF-Token": self.csrf()}
+            report = self.client.post("/__admin/repo-health", json={"id": "hardware"},
+                                      headers=headers).get_json()["reports"][0]
+            self.assertEqual(report["level"], "ok", report)
+            self.assertEqual(json.loads(state_path.read_text(encoding="utf-8"))["credentials"],
+                             {"username": "defuser", "password": "good"})
+            pull = self.client.post("/__admin/provision", json={"id": "hardware"}, headers=headers).get_json()
+            self.assertTrue(pull["ok"], pull)
+            self.assertTrue((self.docs / "md" / "硬件设计" / "手册.md").is_file())
+        finally:
+            env.stop()
+
     def test_folder_groups_roundtrip(self):
         payload = server_config.config_to_json(self.config)
         payload["folderGroups"] = {"md/未配置目录": "自定义组"}

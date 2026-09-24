@@ -29,6 +29,11 @@
     return window.location.protocol === 'file:';
   }
 
+  // 独立页面（如 docs/lib/plot-playground.html）通过 window.MD2WEB_BASE 指定站点根前缀
+  function assetBase() {
+    return String(window.MD2WEB_BASE || '');
+  }
+
   function emit() {
     try {
       document.dispatchEvent(new CustomEvent('siteauth:change', { detail: snapshot() }));
@@ -50,7 +55,7 @@
   }
 
   function request(path, options) {
-    return fetch(path, options).then(function (response) {
+    return fetch(assetBase() + path, options).then(function (response) {
       return response.json().catch(function () { return {}; }).then(function (payload) {
         if (!response.ok) {
           var error = new Error(payload.error || ('HTTP ' + response.status));
@@ -215,10 +220,54 @@
     return extra;
   }
 
-  function renderIndicator() {
-    var row = hostRow();
-    if (!row) {
+  function fixedHost() {
+    var host = document.querySelector('[data-site-auth-fixed]');
+    if (host) {
+      return host;
+    }
+    host = document.createElement('div');
+    host.className = 'site-auth-fixed';
+    host.setAttribute('data-site-auth-fixed', '');
+    document.body.appendChild(host);
+    watchForSidebar();
+    return host;
+  }
+
+  function removeFixedHost() {
+    var host = document.querySelector('[data-site-auth-fixed]');
+    if (host && host.parentNode) {
+      host.parentNode.removeChild(host);
+    }
+  }
+
+  // docsify 侧栏（含登录指示器）稍后才渲染：出现后收起固定入口，避免重复
+  function watchForSidebar() {
+    if (watchForSidebar.timer) {
       return;
+    }
+    var attempts = 0;
+    watchForSidebar.timer = window.setInterval(function () {
+      attempts += 1;
+      if (hostRow()) {
+        window.clearInterval(watchForSidebar.timer);
+        watchForSidebar.timer = null;
+        renderIndicator();
+      } else if (attempts >= 10) {
+        window.clearInterval(watchForSidebar.timer);
+        watchForSidebar.timer = null;
+      }
+    }, 600);
+  }
+
+  function renderIndicator() {
+    if (!document.body) {
+      return;
+    }
+    var row = hostRow();
+    if (row) {
+      removeFixedHost();
+    } else {
+      row = fixedHost();
     }
     var host = row.querySelector('[data-site-auth]');
     if (!host) {

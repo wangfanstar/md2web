@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>绘图在线预览 — PacketDiag / Mermaid</title>
+<link rel="stylesheet" href="auth.css">
 <style>
   :root {
     --ink: #1f2a37;
@@ -273,6 +274,8 @@ svg text[class*="actor"] {
 <script src="packetdiag.js"></script>
 <script src="mermaid.min.js"></script>
 <script src="media-viewer.js"></script>
+<script>window.MD2WEB_BASE = '../';</script>
+<script src="auth.js"></script>
 <script>
 (function () {
   'use strict';

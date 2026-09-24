@@ -1,7 +1,8 @@
 (function () {
   'use strict';
 
-  var state = { config: null, csrf: '', authenticated: false, editable: false, busy: false, user: null };
+  var state = { config: null, csrf: '', authenticated: false, editable: false, busy: false, user: null,
+    credentials: {}, defaultCredential: { configured: false, username: '' }, authFingerprint: '' };
 
   function query(selector, root) {
     return (root || document).querySelector(selector);
@@ -57,6 +58,7 @@
       + ' [data-action="health-all"], [data-action="health-site"],'
       + ' [data-action="repair-site"], [data-action="recreate-site"],'
       + ' [data-action="auth-save"], [data-action="auth-test"],'
+      + ' [data-action="default-credential"],'
       + ' [data-action="verify-account"], [data-action="verify-switch"]').forEach(function (button) {
       button.disabled = !state.editable;
     });
@@ -138,6 +140,7 @@
     var mount = (folder && folder.path) || item.mount || '';
     var manual = !folder;
     var svnEnabled = item.sourceMode ? item.sourceMode === 'svn' : !!item.id;
+    var credential = credentialInfo(item.id);
     // 入口页命名：已配置仓库用仓库 ID；未配置文件夹用文件夹名（与构建生成规则一致）
     var linkKey = item.id || (folder && folder.name) || '';
     var allow = !(item.allowCommit === false || item.readOnly);
@@ -172,6 +175,17 @@
         + '" placeholder="https://svn.example.com/svn/xxx/trunk/docs/"' + disabled + '></label>',
       '<label class="repo-field repo-field-interval"><span>更新频率（秒）</span><input type="number" min="0" step="30" data-repo="syncIntervalSeconds" value="'
         + escapeHtml(interval) + '" placeholder="默认"' + disabled + '></label>',
+      '<div class="repo-credential">',
+      '<label class="repo-field"><span>同步账号</span><input type="text" data-repo="credUsername" placeholder="SVN 用户名" autocomplete="off" value="'
+        + escapeHtml(credential.username) + '"' + disabled + '></label>',
+      '<label class="repo-field"><span>密码</span><input type="password" data-repo="credPassword" placeholder="保存时填写，不回显" autocomplete="new-password"'
+        + disabled + '></label>',
+      '<div class="repo-credential-actions">',
+      '<button type="button" data-action="repo-credential"' + disabled + '>保存凭据</button>',
+      '<span class="hint repo-credential-status' + (credential.cls ? ' ' + credential.cls : '') + '">'
+        + escapeHtml(credential.status) + '</span>',
+      '</div>',
+      '</div>',
       '<div class="repo-flags">',
       '<label class="flag" title="' + (svnEnabled
         ? '勾选后允许登录用户把草稿合入 SVN 库；取消勾选则网页只读，内容由服务器定时同步更新'
@@ -184,7 +198,6 @@
       '</div>',
       '</div>',
       '<div class="actions">'
-        + '<button type="button" data-action="repo-credential"' + disabled + '>同步凭据…</button>'
         + '<button type="button" data-action="health"' + disabled + '>检查</button>'
         + '<button type="button" data-action="repair"' + disabled + '>修复</button>'
         + '<button type="button" data-action="recreate"' + disabled + '>删除重建</button>'
@@ -277,6 +290,7 @@
   function readRepos() {
     var usedIds = Object.create(null);
     usedIds['site-backup'] = true;
+    usedIds['__default__'] = true;  // 默认同步凭据的保留 id，自动生成仓库 ID 时避开
     var existing = (state.config && state.config.repositories) || [];
     existing.forEach(function (item) { if (item.id) { usedIds[item.id] = true; } });
     return all('[data-repo-row]').map(function (row) {
@@ -509,27 +523,202 @@
     });
   }
 
-  function setCredential(repoId, label) {
+  function loadDefaultCredential() {
+    if (!state.authenticated) {
+      state.defaultCredential = { configured: false, username: '' };
+      return Promise.resolve(state.defaultCredential);
+    }
+    return api('__admin/default-credential').then(function (payload) {
+      state.defaultCredential = payload.credential || { configured: false, username: '' };
+      return state.defaultCredential;
+    }).catch(function () {
+      state.defaultCredential = { configured: false, username: '' };
+      return state.defaultCredential;
+    });
+  }
+
+  function credentialInfo(repoId) {
+    var own = (state.credentials && state.credentials[repoId]) || '';
+    if (own) {
+      return { username: own, status: '已单独配置：' + own, cls: 'is-own' };
+    }
+    var fallback = (state.defaultCredential && state.defaultCredential.username) || '';
+    if (fallback) {
+      return { username: '', status: '跟随默认凭据（' + fallback + '）', cls: 'is-default' };
+    }
+    return { username: '', status: '未配置（同步时回退环境变量）', cls: '' };
+  }
+
+  function updateCredentialStatus(entry) {
+    if (!entry || !entry.detail) {
+      return;
+    }
+    var info = credentialInfo(pairField(entry, 'id'));
+    var status = entry.detail.querySelector('.repo-credential-status');
+    if (status) {
+      status.textContent = info.status;
+      status.className = 'hint repo-credential-status' + (info.cls ? ' ' + info.cls : '');
+    }
+    var username = entry.detail.querySelector('[data-repo="credUsername"]');
+    if (username && !username.value && info.username) {
+      username.value = info.username;
+    }
+  }
+
+  function renderSiteCredentialStatus() {
+    var usernameNode = query('[data-site-credential="username"]');
+    var label = query('[data-site-credential-label]');
+    var own = (state.credentials && state.credentials['site-backup']) || '';
+    var fallback = (state.defaultCredential && state.defaultCredential.username) || '';
+    if (usernameNode && !usernameNode.value && own) {
+      usernameNode.value = own;
+    }
+    if (label) {
+      label.textContent = own
+        ? '已单独配置：' + own
+        : (fallback ? '未单独配置：跟随默认凭据（' + fallback + '）' : '未配置凭据（回退环境变量）');
+    }
+  }
+
+  function refreshCredentialStatuses() {
+    all('[data-repo-row]').forEach(function (row) {
+      updateCredentialStatus(pairOf(row));
+    });
+    renderSiteCredentialStatus();
+  }
+
+  function saveRepoCredential(button) {
     if (!state.editable) {
-      setStatus('请先用管理员账号登录后再设置同步凭据。', true);
+      setStatus('请先用管理员账号登录后再保存同步凭据。', true);
       return;
     }
-    var username = window.prompt('同步账号（' + label + '）用户名', state.credentials[repoId] || '');
-    if (!username) {
+    var entry = pairOf(button);
+    var repoId = pairField(entry, 'id');
+    var label = pairField(entry, 'mount') || repoId;
+    if (!repoId) {
+      setStatus('仓库 ID 由系统按文件夹名生成，请先保存配置后再保存同步凭据。', true);
       return;
     }
-    var password = window.prompt('同步账号（' + label + '）密码（加密保存到数据库）');
-    if (!password) {
+    var usernameInput = entry.detail.querySelector('[data-repo="credUsername"]');
+    var passwordInput = entry.detail.querySelector('[data-repo="credPassword"]');
+    var username = usernameInput ? usernameInput.value.trim() : '';
+    var password = passwordInput ? passwordInput.value : '';
+    if (!username || !password) {
+      setStatus('请填写 ' + label + ' 的同步账号与密码（保存后优先于默认凭据）。', true);
       return;
     }
     api('__admin/repo-credential', {
       method: 'POST',
       body: JSON.stringify({ id: repoId, username: username, password: password })
     }).then(function () {
-      setStatus('已保存 ' + label + ' 的同步凭据：' + username);
-      return loadCredentials();
+      state.credentials[repoId] = username;
+      if (passwordInput) {
+        passwordInput.value = '';
+      }
+      updateCredentialStatus(entry);
+      setStatus('已保存 ' + label + ' 的同步凭据：' + username + '（优先于默认凭据）');
     }).catch(function (error) {
       setStatus('保存同步凭据失败：' + error.message, true);
+    });
+  }
+
+  function saveSiteCredential() {
+    if (!state.editable) {
+      setStatus('请先用管理员账号登录后再保存备份凭据。', true);
+      return;
+    }
+    var usernameNode = query('[data-site-credential="username"]');
+    var passwordNode = query('[data-site-credential="password"]');
+    var username = usernameNode ? usernameNode.value.trim() : '';
+    var password = passwordNode ? passwordNode.value : '';
+    if (!username || !password) {
+      setStatus('请填写网站备份的同步账号与密码。', true);
+      return;
+    }
+    api('__admin/repo-credential', {
+      method: 'POST',
+      body: JSON.stringify({ id: 'site-backup', username: username, password: password })
+    }).then(function () {
+      state.credentials['site-backup'] = username;
+      if (passwordNode) {
+        passwordNode.value = '';
+      }
+      renderSiteCredentialStatus();
+      setStatus('已保存网站备份凭据：' + username);
+    }).catch(function (error) {
+      setStatus('保存备份凭据失败：' + error.message, true);
+    });
+  }
+
+  function renderDefaultCredentialPanel() {
+    var urlInput = query('[data-default="url"]');
+    var usernameInput = query('[data-default="username"]');
+    var passwordInput = query('[data-default="password"]');
+    var label = query('[data-default-credential-label]');
+    var auth = (state.config && state.config.auth) || {};
+    if (urlInput) {
+      urlInput.value = state.editable ? (auth.url || '') : '';
+      urlInput.disabled = !state.editable;
+      urlInput.placeholder = state.editable
+        ? 'https://svn.example.com/svn/accounts/auth-check/'
+        : '登录管理员后可查看/修改';
+    }
+    if (usernameInput) {
+      usernameInput.value = (state.defaultCredential && state.defaultCredential.username) || '';
+      usernameInput.disabled = !state.editable;
+    }
+    if (passwordInput) {
+      passwordInput.disabled = !state.editable;
+    }
+    if (label) {
+      label.textContent = (state.defaultCredential && state.defaultCredential.username)
+        ? '已配置默认凭据：' + state.defaultCredential.username
+        : (state.authenticated ? '未配置默认凭据（同步时回退环境变量）' : '登录管理员后可配置默认同步凭据');
+    }
+  }
+
+  function saveDefaultCredential() {
+    if (!state.editable) {
+      setStatus('请先用管理员账号登录后再保存默认同步凭据。', true);
+      return;
+    }
+    var urlNode = query('[data-default="url"]');
+    var usernameNode = query('[data-default="username"]');
+    var passwordNode = query('[data-default="password"]');
+    var url = urlNode ? urlNode.value.trim() : '';
+    var username = usernameNode ? usernameNode.value.trim() : '';
+    var password = passwordNode ? passwordNode.value : '';
+    if (!username || !password) {
+      setStatus('请填写默认同步账号与密码（保存前会用 SVN 认证路径校验）。', true);
+      return;
+    }
+    var currentUrl = ((state.config && state.config.auth) || {}).url || '';
+    var chain = Promise.resolve();
+    if (url && url !== currentUrl) {
+      var payload = JSON.parse(JSON.stringify(state.config));
+      payload.auth = Object.assign({}, payload.auth || {}, { url: url });
+      setStatus('正在保存 SVN 认证路径…');
+      chain = api('__config', { method: 'PUT', body: JSON.stringify(payload) }).then(function (result) {
+        state.config = result.config || state.config;
+      });
+    }
+    chain.then(function () {
+      setStatus('正在通过 SVN 认证路径校验账号 ' + username + ' …');
+      return api('__admin/default-credential', {
+        method: 'POST',
+        body: JSON.stringify({ username: username, password: password })
+      });
+    }).then(function (payload) {
+      state.defaultCredential = { configured: true, username: payload.username || username };
+      if (passwordNode) {
+        passwordNode.value = '';
+      }
+      renderDefaultCredentialPanel();
+      renderAuthPanel();
+      refreshCredentialStatuses();
+      setStatus(payload.message || ('默认同步凭据已保存：' + state.defaultCredential.username));
+    }).catch(function (error) {
+      setStatus('保存默认同步凭据失败：' + error.message, true);
     });
   }
 
@@ -553,11 +742,14 @@
         node.disabled = !state.editable;
       }
     });
-    var label = query('[data-site-credential-label]');
-    if (label) {
-      label.textContent = state.credentials && state.credentials['site-backup']
-        ? '已配置凭据：' + state.credentials['site-backup'] : '未配置凭据（回退环境变量）';
+    var siteUser = query('[data-site-credential="username"]');
+    if (siteUser) {
+      siteUser.value = (state.credentials && state.credentials['site-backup']) || '';
     }
+    all('[data-site-credential]').forEach(function (node) {
+      node.disabled = !state.editable;
+    });
+    renderSiteCredentialStatus();
     all('[data-action="site-credential"], [data-action="site-backup-now"]').forEach(function (button) {
       button.disabled = !state.editable;
     });
@@ -599,19 +791,27 @@
     });
   }
 
+  function authFingerprint(user, authenticated) {
+    return (authenticated ? '1' : '0') + '|' + ((user && user.username) || '') + '|' + ((user && user.role) || '');
+  }
+
   function loadConfig() {
     return api('__auth/session').then(function (payload) {
       state.user = payload.user || null;
       state.authenticated = !!payload.authenticated && !!(payload.user && payload.user.role === 'admin');
       state.csrf = payload.csrfToken || '';
+      state.authFingerprint = authFingerprint(payload.user, payload.authenticated);
       if (!state.authenticated) {
         // 未登录：用公开配置先展示所有仓库（只读），登录后即可编辑
         state.editable = false;
+        state.credentials = {};
+        state.defaultCredential = { configured: false, username: '' };
         state.config = { repositories: (payload.site && payload.site.repositories) || [] };
         return loadFolders().then(function () {
           renderRepos();
           renderSiteBackup();
           renderAuthPanel();
+          renderDefaultCredentialPanel();
           showPanels();
           var siteBadge = query('[data-site-health]');
           if (siteBadge) {
@@ -627,9 +827,12 @@
         return loadFolders().then(function () {
           return loadCredentials();
         }).then(function () {
+          return loadDefaultCredential();
+        }).then(function () {
           renderRepos();
           renderSiteBackup();
           renderAuthPanel();
+          renderDefaultCredentialPanel();
           showPanels();
           checkHealth(null, true);
           return state.config;
@@ -647,20 +850,27 @@
   function login() {
     var username = query('[data-login-username]').value.trim();
     var password = query('[data-login-password]').value;
+    var siteAuth = window.SiteAuth;
     setStatus('正在登录…');
-    fetch('__auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: username, password: password, mode: 'admin' })
-    }).then(function (response) {
-      return response.json().catch(function () { return {}; }).then(function (payload) {
-        if (!response.ok || payload.ok === false) {
-          throw new Error(payload.error || ('HTTP ' + response.status));
-        }
-        return payload;
+    var attempt = siteAuth && siteAuth.login
+      ? siteAuth.login(username, password, 'admin')
+      : fetch('__auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username, password: password, mode: 'admin' })
+      }).then(function (response) {
+        return response.json().catch(function () { return {}; }).then(function (payload) {
+          if (!response.ok || payload.ok === false) {
+            throw new Error(payload.error || ('HTTP ' + response.status));
+          }
+          return payload;
+        });
       });
-    }).then(function () {
+    attempt.then(function () {
       setStatus('登录成功，正在读取配置…');
+      if (siteAuth && siteAuth.login) {
+        return null;  // siteauth:change 监听器会重新读取配置并刷新页面状态
+      }
       return loadConfig();
     }).catch(function (error) {
       setStatus('登录失败：' + error.message, true);
@@ -796,6 +1006,7 @@
     api('__config', { method: 'PUT', body: JSON.stringify(payload) }).then(function (result) {
       state.config = result.config || state.config;
       renderAuthPanel();
+      renderDefaultCredentialPanel();
       setStatus('SVN 认证路径已保存并生效（SVN 用户会话失效，管理员会话保留）。');
     }).catch(function (error) {
       setStatus('保存认证路径失败：' + error.message, true);
@@ -982,16 +1193,11 @@
         repairRepo(targetId, action === 'recreate');
       }
     } else if (action === 'repo-credential') {
-      var entry = pairOf(target);
-      var repoId = pairField(entry, 'id');
-      var mount = pairField(entry, 'mount');
-      if (!repoId) {
-        setStatus('仓库 ID 由系统按文件夹名生成，请先保存配置后再设置同步凭据。', true);
-        return;
-      }
-      setCredential(repoId, mount || repoId);
+      saveRepoCredential(target);
     } else if (action === 'site-credential') {
-      setCredential('site-backup', '网站数据备份');
+      saveSiteCredential();
+    } else if (action === 'default-credential') {
+      saveDefaultCredential();
     } else if (action === 'site-backup-now') {
       siteBackupNow();
     } else if (action === 'provision') {
@@ -1037,6 +1243,17 @@
       badge.title = '';
     }
     updateSummary(entry);
+  });
+
+  // SiteAuth（auth.js）登录/退出后刷新页面：管理员登录面板与只读状态跟随变化
+  document.addEventListener('siteauth:change', function (event) {
+    var info = event.detail || {};
+    var next = authFingerprint(info.user, info.authenticated);
+    if (state.authFingerprint === next) {
+      return;
+    }
+    state.authFingerprint = next;
+    loadConfig();
   });
 
   showPanels();

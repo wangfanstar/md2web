@@ -20,6 +20,8 @@ from .svn import SvnError
 RATE_LIMIT_MAX = 5
 RATE_LIMIT_WINDOW = 300.0
 TOUCH_INTERVAL = 60.0
+# 默认同步凭据的保留 id：仓库自有凭据缺失时统一回退到它（配置页自动生成仓库 ID 时会避开）
+DEFAULT_CREDENTIAL_ID = "__default__"
 
 ERROR_STATUS = {
     "invalid_request": 400,
@@ -406,6 +408,27 @@ class AuthService:
             row = database.find_repo_credential(self.conn, str(repository_id or "").strip())
         return row["username"] if row is not None else None
 
+    def store_default_credential(self, username, password):
+        """保存默认同步凭据（所有未单独配置凭据的仓库共用）。"""
+        return self.store_repo_credential(DEFAULT_CREDENTIAL_ID, username, password)
+
+    def default_credential(self):
+        """读取默认同步凭据；返回 (username, password) 或 None。"""
+        return self.repo_credential(DEFAULT_CREDENTIAL_ID)
+
+    def default_credential_username(self):
+        return self.repo_credential_username(DEFAULT_CREDENTIAL_ID)
+
+    def repo_sync_credential(self, binding, session_credential=None):
+        """同步/导出用凭据：仓库自有 → 默认凭据 → 会话凭据 → 环境变量。"""
+        credential = self.repo_credential((binding or {}).get("id"))
+        if credential:
+            return credential
+        credential = self.default_credential()
+        if credential:
+            return credential
+        return session_credential or self.sync_credential()
+
     def sync_credential(self):
         """定时同步用的只读凭据：环境变量 sync.credential_name 的 "用户名:口令"（可选）。"""
         name = str((self.config.get("sync") or {}).get("credential_name") or "").strip()
@@ -422,30 +445,30 @@ class AuthService:
     def sync_repositories(self, md_dir, logger=None):
         """按各仓库频率拉取远端更新（跳过有活动草稿的文档并报告冲突）。
 
-        凭据优先使用仓库自己配置的同步账号（数据库加密保存），否则回退到环境变量 sync.credential_name。
+        凭据优先使用仓库自己配置的同步账号（数据库加密保存），其次默认同步凭据，
+        最后回退到环境变量 sync.credential_name。
         """
         fallback = self.sync_credential()
         with self._db_lock:
             return operations.sync_all(
                 self.conn, self.svn, self.config, md_dir, credential=fallback, logger=logger,
-                credential_of=lambda binding: self.repo_credential(binding.get("id")),
+                credential_of=lambda binding: self.repo_credential(binding.get("id")) or self.default_credential(),
             )
 
     def backup_site_data(self, root, logger=None):
-        """把网站数据合入到配置的 SVN 库（凭据优先仓库配置，其次环境变量）。"""
-        settings = self.config.get("site_backup") or {}
-        credential = self.repo_credential("site-backup") or self.sync_credential()
+        """把网站数据合入到配置的 SVN 库（凭据优先仓库配置，其次默认凭据/环境变量）。"""
+        credential = self.repo_sync_credential({"id": "site-backup"})
         with self._db_lock:
             return operations.backup_site(self.conn, self.svn, self.config, root, credential)
 
     def repo_health_reports(self, md_dir, bindings, credential=None, include_site_backup=False):
-        """检查仓库健康（凭据优先仓库配置）；include_site_backup 时附带网站备份工作副本报告。"""
+        """检查仓库健康（凭据优先仓库配置，其次默认凭据）；include_site_backup 时附带网站备份工作副本报告。"""
         with self._db_lock:
             reports = []
             for binding in bindings:
                 reports.append(operations.repo_health(
                     self.conn, self.svn, self.config, md_dir, binding,
-                    self.repo_credential(binding.get("id")) or credential))
+                    self.repo_sync_credential(binding, credential)))
             if include_site_backup:
                 report = operations.site_workcopy_health(self.svn, self.config)
                 if report is not None:
@@ -455,12 +478,12 @@ class AuthService:
     def repair_repository(self, md_dir, binding, credential=None):
         with self._db_lock:
             return operations.repair_repo(self.conn, self.svn, self.config, md_dir, binding,
-                                          self.repo_credential(binding.get("id")) or credential)
+                                          self.repo_sync_credential(binding, credential))
 
     def recreate_repository(self, md_dir, binding, credential=None):
         with self._db_lock:
             return operations.recreate_repo(self.conn, self.svn, self.config, md_dir, binding,
-                                            self.repo_credential(binding.get("id")) or credential)
+                                            self.repo_sync_credential(binding, credential))
 
     def repair_site_backup_workcopy(self):
         with self._db_lock:
@@ -470,7 +493,7 @@ class AuthService:
         with self._db_lock:
             return operations.recreate_site_workcopy(
                 self.conn, self.svn, self.config, root,
-                self.repo_credential("site-backup") or self.sync_credential())
+                self.repo_sync_credential({"id": "site-backup"}))
 
     def record_document_snapshot(self, md_dir):
         """扫描 docs/md 并记录增删改（首次为基线，不产生事件）。"""

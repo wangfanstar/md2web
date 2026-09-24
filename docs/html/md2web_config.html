@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <base href="../">
   <title>md2web 仓库配置</title>
+  <link rel="stylesheet" href="lib/auth.css?v=4bb4992613">
   <style>
     :root { color-scheme: light; }
     body { background: #f7f9fb; color: #1f2a37; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 26px 18px 60px; }
@@ -108,6 +109,27 @@
     .repo-detail .repo-flags .flag { font-weight: 600; }
     .repo-detail .repo-flags .perm-hint { color: #b45309; font-size: 11.5px; }
     .repo-detail .repo-flags .perm-hint:empty { display: none; }
+    /* 同步凭据：行内输入（不再是浏览器弹窗） */
+    .repo-detail .repo-credential {
+      align-items: flex-end;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 14px;
+      grid-column: 1 / -1;
+    }
+    .repo-detail .repo-credential .repo-field { flex: 1 1 180px; }
+    .repo-detail .repo-credential .repo-field input { min-width: 0; width: 100%; }
+    .repo-detail .repo-credential-status { align-self: center; }
+    .repo-credential-status.is-own { color: #047857; }
+    .repo-credential-status.is-default { color: #1f6feb; }
+    .repo-detail .repo-credential-actions {
+      align-items: center;
+      align-self: flex-end;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      min-height: 34px;
+    }
     @media (max-width: 980px) {
       .repo-field-id, .repo-field-interval { grid-column: span 6; }
       .repo-field-url { grid-column: span 12; }
@@ -159,7 +181,7 @@
         <p><b>状态说明</b>（登录管理员后自动检查，也可点「检查」/「检查全部状态」）：</p>
         <ul>
           <li><b>✔ 正常</b>：远端可访问且本地目录存在（显示当前版本 r 号）。</li>
-          <li><b>✖ 认证失败 / 无法连接 / 路径不存在 / 证书错误 / SVN 客户端不可用</b>：检查 SVN 地址，或用「同步凭据…」设置该仓库的账号密码。</li>
+          <li><b>✖ 认证失败 / 无法连接 / 路径不存在 / 证书错误 / SVN 客户端不可用</b>：检查 SVN 地址，或在下方「默认同步凭据」统一配置账号，或在仓库明细里单独填写同步凭据。</li>
           <li><b>⚠ 同步异常 / 本地内容缺失</b>：点「修复」执行 svn cleanup 并强制重新拉取远端内容（覆盖同名文档，不删除本地新增文件）。</li>
           <li><b>✖ 仓库身份变化</b>（远端库被重建，UUID 不一致）或修复仍失败：点「删除重建」——本地目录（含未提交修改）移入 <code>data/trash</code> 后重新绑定仓库身份并完整拉取。</li>
           <li><b>⚠ 存在冲突</b>：有文档正在编辑（草稿），同步时已跳过；在编辑器中查看「远端差异」并合并后提交。</li>
@@ -171,17 +193,37 @@
     </section>
 
     <section class="panel" data-config-main hidden>
+      <h2>默认同步凭据（SVN 账号）</h2>
+      <p class="hint">用于统一同步所有文件夹的 SVN 库：仓库没有单独配置凭据时自动使用这里的账号。
+        保存前会先用 SVN 认证路径校验用户名与密码（必须是<b>强制账号密码认证</b>的路径），校验通过后加密存入本机数据库。</p>
+      <div class="row">
+        <label>SVN 认证路径<input type="text" data-default="url" placeholder="https://svn.example.com/svn/accounts/auth-check/"></label>
+        <label>同步账号<input type="text" data-default="username" placeholder="SVN 用户名" autocomplete="off"></label>
+        <label>密码<input type="password" data-default="password" placeholder="SVN 口令（不回显）" autocomplete="new-password"></label>
+      </div>
+      <div class="actions">
+        <button class="primary" type="button" data-action="default-credential">验证并保存为默认凭据</button>
+        <span class="hint" data-default-credential-label>正在读取…</span>
+      </div>
+      <p class="hint">仓库明细里单独保存的同步凭据优先于默认凭据；未配置默认凭据时回退到环境变量同步凭据（设置 → SVN 与仓库）。</p>
+    </section>
+
+    <section class="panel" data-config-main hidden>
       <h2>网站数据备份（SVN）</h2>
       <p class="hint">把网站数据（默认 <code>docs/</code>，含生成的页面、搜索索引与源文档）按频率定时合入到指定的 SVN 库；
-        凭据单独设置（加密保存），未设置时回退到环境变量同步凭据。</p>
+        凭据优先使用下面单独设置的备份账号（加密保存），未设置时回退到「默认同步凭据」或环境变量同步凭据。</p>
       <div class="row">
         <label>启用<input type="checkbox" data-site-backup="enabled"></label>
         <label>仓库地址<input type="text" data-site-backup="url" placeholder="https://svn.example.com/svn/md2web-site/trunk/"></label>
         <label>备份频率（秒）<input type="number" min="0" step="300" data-site-backup="intervalSeconds" placeholder="3600"></label>
         <label>提交说明前缀<input type="text" data-site-backup="message" placeholder="site backup"></label>
       </div>
+      <div class="row" style="margin-top:10px">
+        <label>备份同步账号<input type="text" data-site-credential="username" placeholder="SVN 用户名" autocomplete="off"></label>
+        <label>密码<input type="password" data-site-credential="password" placeholder="SVN 口令（不回显）" autocomplete="new-password"></label>
+      </div>
       <div class="actions">
-        <button type="button" data-action="site-credential">设置备份凭据…</button>
+        <button type="button" data-action="site-credential">保存备份凭据</button>
         <button type="button" data-action="site-backup-now">立即备份</button>
         <button type="button" data-action="health-site">检查备份状态</button>
         <button type="button" data-action="repair-site">修复工作副本</button>
@@ -196,7 +238,8 @@
     <section class="panel" data-config-main hidden>
       <h2>账号切换与验证（SVN）</h2>
       <p class="hint">SVN 认证路径用于<b>登录时验证账号合法性</b>：必须是强制账号密码认证的路径（允许匿名访问的会被拒绝）。
-        例如只读的 <code>https://svn.example.com/svn/accounts/auth-check/</code>。修改路径只失效 SVN 用户会话，管理员会话保留。</p>
+        例如只读的 <code>https://svn.example.com/svn/accounts/auth-check/</code>。修改路径只失效 SVN 用户会话，管理员会话保留；
+        「默认同步凭据」（上方面板）也用该路径校验账号。</p>
       <div class="row">
         <label>SVN 认证路径<input type="text" data-auth="url" placeholder="https://svn.example.com/svn/accounts/auth-check/"></label>
         <label>当前账号<input type="text" data-auth="current" readonly></label>
@@ -224,7 +267,8 @@
         <code>http://localhost:8882/html/md2web_config.html</code>。</p>
     </section>
   </div>
-  <script src="lib/md2web-config.js?v=0c42c933e4"></script>
+  <script src="lib/auth.js?v=119d9241e0"></script>
+  <script src="lib/md2web-config.js?v=688e1c2617"></script>
   <script src="lib/md2web-feedback.js?v=a8de97626a"></script>
 </body>
 </html>
