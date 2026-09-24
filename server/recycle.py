@@ -61,7 +61,7 @@ def _asset_paths(md_dir, document_path, content):
     return paths
 
 
-def move_to_trash(md_dir, relative, mount):
+def move_to_trash(md_dir, relative, mount, entry_id=None):
     target = operations._managed_path(md_dir, relative)
     if not target.exists() or target.name == NAME or str(relative).rstrip("/").endswith("/" + NAME):
         raise operations.OperationError(404, "目标不存在或不能删除回收站")
@@ -69,7 +69,7 @@ def move_to_trash(md_dir, relative, mount):
         raise operations.OperationError(400, "不能删除 docs/md 根目录")
     root = root_for(md_dir, mount)
     root.mkdir(parents=True, exist_ok=True)
-    entry_id = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
+    entry_id = entry_id or (time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8])
     entry = root / entry_id
     payload = entry / "payload"
     payload.mkdir(parents=True)

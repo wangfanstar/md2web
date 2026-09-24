@@ -4,6 +4,7 @@ import json
 import re
 import shutil
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -130,6 +131,8 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
     committed = False
     committing = False
     revision = None
+    if action == 'delete':
+        payload['_trash_id'] = payload.get('_trash_id') or (time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
     baseline = signature(target) if action not in ('create', 'restore', 'trash-empty') else None
     try:
         if svn_enabled:
@@ -161,14 +164,31 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
             elif action == 'rename':
                 svn.move(source, remote_destination, **auth)
             elif action == 'delete':
+                remote_trash = wc / '回收站' / payload['_trash_id']
+                remote_payload = remote_trash / 'payload'
+                remote_payload.mkdir(parents=True, exist_ok=True)
+                remote_saved = remote_payload / ('document' if source.is_file() else 'folder')
+                if source.is_dir():
+                    shutil.copytree(str(source), str(remote_saved))
+                else:
+                    shutil.copy2(str(source), str(remote_saved))
+                remote_meta = {'id': payload['_trash_id'], 'path': path, 'mount': binding['mount'],
+                                'kind': 'document' if source.is_file() else 'folder', 'name': source.name,
+                                'deletedAt': int(time.time()), 'assets': []}
                 if source.is_file():
                     content = documents.read_md_text(source)
                     for asset in recycle._asset_paths(md_dir, path, content):
                         asset_rel = asset.relative_to(Path(md_dir).resolve()).as_posix()
                         remote_asset = wc / asset_rel[len(binding['mount']):].lstrip('/')
                         if remote_asset.exists():
+                            saved_asset = remote_payload / 'assets' / asset_rel
+                            saved_asset.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(str(remote_asset), str(saved_asset))
+                            remote_meta['assets'].append(asset_rel)
                             svn.delete(remote_asset, **auth)
                 svn.delete(source, **auth)
+                (remote_trash / recycle.META).write_text(json.dumps(remote_meta, ensure_ascii=False, indent=2), encoding='utf-8')
+                svn.add(remote_trash, **auth)
             elif action == 'restore':
                 meta = payload['_trash_meta']
                 entry = recycle._entry_path(recycle.root_for(md_dir, binding['mount']), meta['id'])
@@ -189,9 +209,14 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
                         remote_asset.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(str(saved_asset), str(remote_asset))
                         svn.add(remote_asset, **auth)
+                remote_trash = wc / '回收站' / str(meta.get('id'))
+                if remote_trash.exists():
+                    svn.delete(remote_trash, **auth)
             elif action == 'trash-empty':
-                # 回收站内容已经在之前的删除提交中脱离版本树；清空只清理本地保留物。
-                pass
+                remote_trash_root = wc / '回收站'
+                if remote_trash_root.is_dir():
+                    for remote_entry in remote_trash_root.iterdir():
+                        svn.delete(remote_entry, **auth)
             if action != 'trash-empty':
                 committing = True
                 revision = svn.commit(wc, '文档管理：%s %s [%s]' % (action, path, request_id), **auth)
@@ -211,7 +236,7 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
         elif action == 'rename':
             result = operations.rename_entry(md_dir, path, destination.name)
         elif action == 'delete':
-            result = recycle.move_to_trash(md_dir, path, binding['mount'] if binding else 'md')
+            result = recycle.move_to_trash(md_dir, path, binding['mount'] if binding else 'md', payload.get('_trash_id'))
         elif action == 'restore':
             result = recycle.restore(md_dir, payload.get('mount') or 'md', payload.get('entryId'))
         else:
