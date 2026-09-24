@@ -339,22 +339,32 @@
     var raw = link ? (link.getAttribute('href') || '') : (node.getAttribute('data-path') || '');
     raw = raw.replace(/^#/, '');
     var hashIndex = raw.indexOf('md/');
-    if (hashIndex === -1) {
-      var sidebarItem = node.closest ? node.closest('.sidebar-nav li') : null;
-      var child = sidebarItem && sidebarItem.querySelector('a[href*="md/"]');
-      if (!child) return null;
-      raw = child.getAttribute('href') || '';
-      hashIndex = raw.indexOf('md/');
-      if (hashIndex === -1) return null;
-      path = raw.slice(hashIndex).split('?')[0].replace(/\/$/, '');
-      var slash = path.lastIndexOf('/');
-      return slash > 2 ? path.slice(0, slash) : null;
+    if (hashIndex !== -1) {
+      var path = raw.slice(hashIndex).split('?')[0].replace(/\/$/, '');
+      try {
+        path = decodeURIComponent(path);
+      } catch (error) { /* 保留原值 */ }
+      return path || null;
     }
-    var path = raw.slice(hashIndex).split('?')[0].replace(/\/$/, '');
-    try {
-      path = decodeURIComponent(path);
-    } catch (error) { /* 保留原值 */ }
-    return path || null;
+    // 分组节点（所有文档 / 仓库分组 / 子文件夹分组）：生成侧栏时写入 data-folder，精确指向该目录
+    var group = node.closest ? node.closest('[data-folder]') : null;
+    if (group) {
+      return group.getAttribute('data-folder') || null;
+    }
+    // 兜底（旧产物没有 data-folder）：用分组下第一个文档链接推导所属目录
+    var sidebarItem = node.closest ? node.closest('.sidebar-nav li') : null;
+    var child = sidebarItem && sidebarItem.querySelector('a[href*="md/"]');
+    if (!child) {
+      return null;
+    }
+    raw = child.getAttribute('href') || '';
+    hashIndex = raw.indexOf('md/');
+    if (hashIndex === -1) {
+      return null;
+    }
+    var childPath = raw.slice(hashIndex).split('?')[0].replace(/\/$/, '');
+    var slash = childPath.lastIndexOf('/');
+    return slash > 2 ? childPath.slice(0, slash) : null;
   }
 
   document.addEventListener('contextmenu', function (event) {
@@ -396,6 +406,6 @@
     });
   }
   window.addEventListener('hashchange', function () { window.setTimeout(loadFolderView, 120); });
-  window.FolderView = { isFolderRoute: isFolderRoute, reload: loadFolderView };
+  window.FolderView = { isFolderRoute: isFolderRoute, reload: loadFolderView, pathFromElement: pathFromElement };
   window.setTimeout(loadFolderView, 200);
 }());

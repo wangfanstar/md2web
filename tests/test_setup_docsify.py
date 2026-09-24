@@ -112,7 +112,7 @@ class ScanTests(TempDirTestCase):
         self.assertEqual(
             lines,
             [
-                "  - **指南**",
+                '  - <span class="sidebar-group-name" data-folder="md/指南">**指南**</span>',
                 "    - [入门](/md/指南/入门.md)",
                 "    - [进阶](/md/指南/进阶.md)",
                 "  - [FAQ](/md/FAQ.md)",
@@ -126,8 +126,8 @@ class ScanTests(TempDirTestCase):
         self.assertEqual(
             lines,
             [
-                "- **a**",
-                "  - **b**",
+                '- <span class="sidebar-group-name" data-folder="md/a">**a**</span>',
+                '  - <span class="sidebar-group-name" data-folder="md/a/b">**b**</span>',
                 "    - [深](/md/a/b/c/深.md)",
             ],
         )
@@ -1175,15 +1175,16 @@ class HtmlLayoutTests(unittest.TestCase):
         sidebar = (ROOT / "docs" / "html" / "_sidebar.md").read_text(encoding="utf-8")
         self.assertIn('<a class="sidebar-group-link" href="html/index_', sidebar,
                       "全局侧栏的一级分组名应链接到仓库入口页")
-        self.assertIn('href="html/index_all.html">**所有文档**</a>', sidebar,
-                      "侧栏标题应为「所有文档」并链接到合并视图")
+        self.assertIn('href="html/index_all.html" data-folder="md">**所有文档**</a>', sidebar,
+                      "侧栏标题应为「所有文档」并链接到合并视图（data-folder 指向 md）")
         repo_sidebar = next((ROOT / "docs" / "html").glob("_sidebar_*.md"))
         repo_sidebar_text = repo_sidebar.read_text(encoding="utf-8")
         self.assertIn("所有文档", repo_sidebar_text, "各仓库侧栏标题同样应为「所有文档」")
         # 仓库侧栏的一级分组名指回本仓库入口页：进入文档后点分组名可返回仓库首页
         repo_sidebar_id = repo_sidebar.name[len("_sidebar_"):-len(".md")]
-        self.assertIn('<a class="sidebar-group-link" href="html/index_' + repo_sidebar_id + '.html">',
-                      repo_sidebar_text, "仓库侧栏的一级分组名应链接回本仓库入口页")
+        self.assertIn('<a class="sidebar-group-link" href="html/index_' + repo_sidebar_id + '.html"'
+                      ' data-folder="md/' + repo_sidebar_id + '">',
+                      repo_sidebar_text, "仓库侧栏的一级分组名应链接回本仓库入口页并带 data-folder")
         source = (ROOT / "setup_docsify.py").read_text(encoding="utf-8")
         self.assertIn("top_link=HTML_PREFIX + page", source,
                       "各仓库侧栏生成时应指向自己的入口页")
@@ -1565,7 +1566,7 @@ class GenerationTests(TempDirTestCase):
     def test_sidebar_tree(self):
         self.build_site()
         sidebar = (self.module.HTML_DIR / "_sidebar.md").read_text(encoding="utf-8")
-        self.assertIn("- **指南**", sidebar)
+        self.assertIn('<span class="sidebar-group-name" data-folder="md/指南">**指南**</span>', sidebar)
         self.assertIn("[入门](/md/指南/入门.md)", sidebar)
         self.assertIn("[常见问题](/md/常见问题.md)", sidebar)
 

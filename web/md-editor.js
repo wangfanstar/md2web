@@ -27,7 +27,9 @@
     dragging: false,
     previewTimer: 0,
     highlightTimer: 0,
-    previewToken: 0
+    previewToken: 0,
+    find: { open: false, replace: false, query: '', replacement: '', caseSensitive: false, wholeWord: false, regex: false, matches: [], index: -1 },
+    findTimer: 0
   };
 
   // ---------- 路由与源文件读取 ----------
@@ -1385,6 +1387,10 @@
     if (state.outline && !state.outline.hidden) {
       scheduleOutline();
     }
+    if (state.find && state.find.open) {
+      window.clearTimeout(state.findTimer);
+      state.findTimer = window.setTimeout(function () { refreshFind(false); }, 120);
+    }
     if (immediate) {
       updateHighlight();
       updatePreview();
@@ -1751,6 +1757,8 @@
       revert: function () { revert(); },
       undo: function () { undo(); },
       redo: function () { redo(); },
+      find: function () { openFind(false); },
+      replace: function () { openFind(true); },
       outline: function () { toggleOutline(); },
       'remote-diff': function () { showRemoteDiff(); },
       help: function () { toggleHelp(); },
@@ -1793,6 +1801,9 @@
     { action: 'undo', label: '↶', title: '撤销（Ctrl+Z）' },
     { action: 'redo', label: '↷', title: '恢复（Ctrl+Y / Ctrl+Shift+Z）' },
     { divider: true },
+    { action: 'find', label: '查找', title: '查找（Ctrl+F）' },
+    { action: 'replace', label: '替换', title: '查找与替换（Ctrl+H）' },
+    { divider: true },
     { action: 'outline', label: '目录', title: '大纲导航：跳转到章节（Ctrl+Shift+H）' },
     { action: 'help', label: '快捷键', title: '快捷键说明（Ctrl+/）' }
   ];
@@ -1822,6 +1833,8 @@
     { key: 'z', ctrl: true, action: 'undo' },
     { key: 'z', ctrl: true, shift: true, action: 'redo' },
     { key: 'y', ctrl: true, action: 'redo' },
+    { key: 'f', ctrl: true, action: 'find' },
+    { key: 'h', ctrl: true, action: 'replace' },
     { key: '1', ctrl: true, alt: true, action: 'h1' },
     { key: '2', ctrl: true, alt: true, action: 'h2' },
     { key: '3', ctrl: true, alt: true, action: 'h3' }
@@ -1874,6 +1887,15 @@
     }
     if (isModified() && !window.confirm('有未保存的修改，确定关闭编辑器？')) {
       return;
+    }
+    if (state.find && state.find.open) {
+      state.find.open = false;
+      state.find.matches = [];
+      state.find.index = -1;
+      var findBar = state.overlay.querySelector('[data-editor-find]');
+      if (findBar) {
+        findBar.hidden = true;
+      }
     }
     state.overlay.classList.remove('is-open');
     document.body.classList.remove('md-editor-open');
@@ -1965,6 +1987,7 @@
       state.textarea.addEventListener(name, updateMetrics);
     });
 
+    bindFindBar();
     bindOutlineEvents();
 
     var divider = state.overlay.querySelector('.md-editor-divider');
@@ -1997,11 +2020,21 @@
           closePickers();
           return;
         }
+        if (state.find.open) {
+          closeFind();
+          return;
+        }
         if (state.outline && !state.outline.hidden) {
           closeOutline();
           return;
         }
         close();
+        return;
+      }
+      if (event.key === 'F3' && state.find.open) {
+        event.preventDefault();
+        event.stopPropagation();
+        findNext(event.shiftKey ? -1 : 1);
         return;
       }
       var action = matchShortcut(event);
@@ -2021,6 +2054,267 @@
         moveLines(event.key === 'ArrowUp' ? -1 : 1);
       }
     }, true);
+  }
+
+  // ---------- 查找 / 替换 ----------
+
+  function textFind() {
+    return window.TextFind || null;
+  }
+
+  function findFields() {
+    return {
+      bar: state.overlay ? state.overlay.querySelector('[data-editor-find]') : null,
+      input: state.overlay ? state.overlay.querySelector('[data-editor-find-input]') : null,
+      replaceRow: state.overlay ? state.overlay.querySelector('[data-editor-find-replace]') : null,
+      replaceInput: state.overlay ? state.overlay.querySelector('[data-editor-find-replace-input]') : null,
+      count: state.overlay ? state.overlay.querySelector('[data-editor-find-count]') : null
+    };
+  }
+
+  function findOptions() {
+    return {
+      caseSensitive: !!state.find.caseSensitive,
+      wholeWord: !!state.find.wholeWord,
+      regex: !!state.find.regex
+    };
+  }
+
+  function revealFindMatch(index) {
+    var match = state.find.matches[index];
+    if (!match) {
+      return;
+    }
+    var fields = findFields();
+    var textarea = state.textarea;
+    textarea.setSelectionRange(match.start, match.end);
+    // 软换行下按行号估算滚动位置，保证命中行可见
+    var line = textarea.value.slice(0, match.start).split('\n').length - 1;
+    var lineHeight = parseFloat(window.getComputedStyle(textarea).lineHeight) || 22;
+    var target = line * lineHeight;
+    if (target < textarea.scrollTop || target > textarea.scrollTop + textarea.clientHeight - lineHeight * 2) {
+      textarea.scrollTop = Math.max(0, target - textarea.clientHeight / 3);
+    }
+    if (fields.count) {
+      fields.count.textContent = (index + 1) + '/' + state.find.matches.length;
+      fields.count.className = 'md-editor-find-count';
+    }
+  }
+
+  function refreshFind(selectFirst) {
+    var api = textFind();
+    var fields = findFields();
+    if (!api || !fields.input) {
+      return;
+    }
+    state.find.query = fields.input.value;
+    if (fields.replaceInput) {
+      state.find.replacement = fields.replaceInput.value;
+    }
+    if (!state.find.query) {
+      state.find.matches = [];
+      state.find.index = -1;
+      if (fields.count) {
+        fields.count.textContent = '';
+      }
+      return;
+    }
+    var result = api.findMatches(state.textarea.value, state.find.query, findOptions());
+    state.find.matches = result.matches || [];
+    if (!state.find.matches.length) {
+      state.find.index = -1;
+      if (fields.count) {
+        fields.count.textContent = result.error === 'invalid_regex' ? '正则无效' : '无匹配';
+        fields.count.className = 'md-editor-find-count' + (result.error === 'invalid_regex' ? ' is-error' : '');
+      }
+      return;
+    }
+    var preferred = 0;
+    if (selectFirst) {
+      var caret = state.textarea.selectionStart || 0;
+      for (var i = 0; i < state.find.matches.length; i += 1) {
+        if (state.find.matches[i].start >= caret) {
+          preferred = i;
+          break;
+        }
+      }
+    } else if (state.find.index >= 0 && state.find.index < state.find.matches.length) {
+      preferred = state.find.index;
+    }
+    state.find.index = preferred;
+    revealFindMatch(preferred);
+  }
+
+  function findNext(direction) {
+    if (!state.find.matches.length) {
+      refreshFind(true);
+      return;
+    }
+    var step = direction < 0 ? -1 : 1;
+    state.find.index = (state.find.index + step + state.find.matches.length) % state.find.matches.length;
+    revealFindMatch(state.find.index);
+  }
+
+  function openFind(replaceMode) {
+    if (!state.overlay || !state.textarea) {
+      return;
+    }
+    var fields = findFields();
+    if (!fields.bar || !fields.input) {
+      return;
+    }
+    var selected = state.textarea.value.slice(state.textarea.selectionStart, state.textarea.selectionEnd);
+    if (selected && selected.indexOf('\n') === -1 && selected.length <= 120) {
+      fields.input.value = selected;
+    }
+    state.find.open = true;
+    state.find.replace = !!replaceMode || state.find.replace;
+    fields.bar.hidden = false;
+    if (fields.replaceRow) {
+      fields.replaceRow.hidden = !state.find.replace;
+    }
+    refreshFind(true);
+    fields.input.focus();
+    fields.input.select();
+  }
+
+  function closeFind() {
+    var fields = findFields();
+    if (!fields.bar) {
+      return;
+    }
+    state.find.open = false;
+    state.find.matches = [];
+    state.find.index = -1;
+    fields.bar.hidden = true;
+    if (state.textarea) {
+      state.textarea.focus();
+    }
+  }
+
+  function replacementForMatch(value, match) {
+    var api = textFind();
+    if (!api) {
+      return state.find.replacement;
+    }
+    var slice = value.slice(match.start, match.end);
+    var result = api.replaceAll(slice, state.find.query, state.find.replacement, findOptions());
+    return result.error ? state.find.replacement : result.text;
+  }
+
+  function replaceCurrentMatch() {
+    if (!state.find.query) {
+      setStatus('请先输入查找内容');
+      return;
+    }
+    refreshFind(false);
+    if (state.find.index < 0 || !state.find.matches.length) {
+      setStatus('没有可替换的匹配');
+      return;
+    }
+    var match = state.find.matches[state.find.index];
+    var value = state.textarea.value;
+    var replacement = replacementForMatch(value, match);
+    historyRecord();
+    state.textarea.value = value.slice(0, match.start) + replacement + value.slice(match.end);
+    var caret = match.start + replacement.length;
+    state.textarea.setSelectionRange(caret, caret);
+    afterContentChanged(true);
+    refreshFind(true);
+    setStatus('已替换 1 处（Ctrl+Z 可撤销）');
+  }
+
+  function replaceAllMatches() {
+    var api = textFind();
+    var fields = findFields();
+    if (!api || !fields.input) {
+      return;
+    }
+    state.find.query = fields.input.value;
+    state.find.replacement = fields.replaceInput ? fields.replaceInput.value : '';
+    if (!state.find.query) {
+      setStatus('请先输入查找内容');
+      return;
+    }
+    var result = api.replaceAll(state.textarea.value, state.find.query, state.find.replacement, findOptions());
+    if (result.error === 'invalid_regex') {
+      setStatus('正则表达式无效，请检查查找内容');
+      return;
+    }
+    if (!result.count) {
+      setStatus('没有可替换的匹配');
+      return;
+    }
+    historyRecord();
+    state.textarea.value = result.text;
+    state.textarea.setSelectionRange(0, 0);
+    afterContentChanged(true);
+    refreshFind(true);
+    setStatus('已全部替换 ' + result.count + ' 处（Ctrl+Z 可撤销）');
+  }
+
+  function toggleFindOption(button, option) {
+    state.find[option] = !state.find[option];
+    button.classList.toggle('is-active', state.find[option]);
+    refreshFind(true);
+  }
+
+  function bindFindBar() {
+    var fields = findFields();
+    if (!fields.bar) {
+      return;
+    }
+    fields.bar.addEventListener('click', function (event) {
+      var target = event.target;
+      var option = target.getAttribute && target.getAttribute('data-editor-find-option');
+      if (option) {
+        toggleFindOption(target, option);
+        return;
+      }
+      var action = target.getAttribute && target.getAttribute('data-editor-find-action');
+      if (action === 'prev') {
+        findNext(-1);
+      } else if (action === 'next') {
+        findNext(1);
+      } else if (action === 'replace') {
+        replaceCurrentMatch();
+      } else if (action === 'replace-all') {
+        replaceAllMatches();
+      } else if (action === 'close') {
+        closeFind();
+      }
+    });
+    if (fields.input) {
+      fields.input.addEventListener('input', function () {
+        state.find.index = -1;
+        refreshFind(true);
+      });
+      fields.input.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          findNext(event.shiftKey ? -1 : 1);
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          closeFind();
+        }
+      });
+    }
+    if (fields.replaceInput) {
+      fields.replaceInput.addEventListener('input', function () {
+        state.find.replacement = fields.replaceInput.value;
+      });
+      fields.replaceInput.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          replaceCurrentMatch();
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          closeFind();
+        }
+      });
+    }
   }
 
   function buildOverlay() {
@@ -2065,6 +2359,23 @@
       '<div class="md-editor-pane md-editor-pane-source">',
       '<pre class="md-editor-highlight" aria-hidden="true"></pre>',
       '<textarea class="md-editor-text" spellcheck="false" aria-label="Markdown 源文本" wrap="soft"></textarea>',
+      '<div class="md-editor-find" data-editor-find hidden>',
+      '<div class="md-editor-find-row">',
+      '<input type="text" class="md-editor-find-input" data-editor-find-input placeholder="查找" aria-label="查找">',
+      '<span class="md-editor-find-count" data-editor-find-count></span>',
+      '<button type="button" class="md-editor-find-option" data-editor-find-option="caseSensitive" title="区分大小写">Aa</button>',
+      '<button type="button" class="md-editor-find-option" data-editor-find-option="wholeWord" title="全字匹配">W</button>',
+      '<button type="button" class="md-editor-find-option" data-editor-find-option="regex" title="正则表达式">.*</button>',
+      '<button type="button" class="md-editor-find-btn" data-editor-find-action="prev" title="上一个（Shift+Enter / Shift+F3）">↑</button>',
+      '<button type="button" class="md-editor-find-btn" data-editor-find-action="next" title="下一个（Enter / F3）">↓</button>',
+      '<button type="button" class="md-editor-find-btn" data-editor-find-action="close" title="关闭（Esc）">×</button>',
+      '</div>',
+      '<div class="md-editor-find-row" data-editor-find-replace hidden>',
+      '<input type="text" class="md-editor-find-input" data-editor-find-replace-input placeholder="替换为" aria-label="替换为">',
+      '<button type="button" class="md-editor-find-btn" data-editor-find-action="replace" title="替换当前匹配（Enter）">替换</button>',
+      '<button type="button" class="md-editor-find-btn" data-editor-find-action="replace-all" title="替换全部匹配">全部替换</button>',
+      '</div>',
+      '</div>',
       '</div>',
       '<div class="md-editor-divider" role="separator" aria-label="拖动调整分栏" title="拖动调整左右宽度"></div>',
       '<div class="md-editor-pane md-editor-pane-preview">',
@@ -2094,6 +2405,7 @@
       '<li><code>Ctrl+S</code> 保存 · <code>Ctrl+Shift+S</code> 另存为 · <code>Esc</code> 关闭</li>',
       '<li><code>Ctrl+Shift+T</code> 表格行列选择 · <code>Ctrl+Alt+K</code> 文字颜色 · 工具栏可上传本地图片与附件</li>',
       '<li><code>Ctrl+Z</code> 撤销 · <code>Ctrl+Y</code>/<code>Ctrl+Shift+Z</code> 恢复 · <code>Ctrl+Shift+H</code> 大纲导航</li>',
+      '<li><code>Ctrl+F</code> 查找 · <code>Ctrl+H</code> 查找替换 · <code>Enter</code>/<code>F3</code> 下一个 · <code>Shift+Enter</code>/<code>Shift+F3</code> 上一个</li>',
       '<li>直接粘贴或拖入图片会自动上传到文档同级 <code>images/</code>，拖入其他文件会上传到 <code>附件/</code> 并插入链接</li>',
       '</ul>',
       '</div>',
@@ -2152,6 +2464,13 @@
     state.highlight.innerHTML = '';
     state.preview.innerHTML = '';
     historyReset('');
+    state.find.open = false;
+    state.find.index = -1;
+    state.find.matches = [];
+    var findBar = state.overlay.querySelector('[data-editor-find]');
+    if (findBar) {
+      findBar.hidden = true;
+    }
     if (state.outline) {
       // 每次打开都默认显示目录（仅本次会话内可通过「目录」按钮临时收起）
       state.outline.hidden = false;

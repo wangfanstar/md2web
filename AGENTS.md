@@ -54,7 +54,7 @@ docs/html/images|uploads                  (反馈截图/附件，运行时写入
 | `config/server.example.json` | 认证服务示例配置（可提交）；`config/server.local.json` 为真实配置，不提交（缺失时 `--config` 会自动生成默认文件） |
 | `tests/test_server.py` | 认证服务单元/HTTP 集成测试（配置、数据库、SVN 假 CLI、登录会话、静态白名单） |
 | `web/custom-search.js` / `.css` | 搜索算法与界面、结果列表、搜索/目录视图切换、**按仓库多选过滤**（⚙ 筛选区的仓库勾选菜单，`state.repoFilter` + `localStorage: md2web:search-repos`，与范围/模式叠加）、正文命中高亮、右侧本文目录 |
-| `web/folder-view.js` | `html/index_all.html` 与各仓库入口页的递归 Markdown 文件夹视图（正文只显示当前仓库/文件夹的文档与子文件夹，隐藏本文目录）+ 列表按钮和左侧导航全局右键菜单共用新建文档/新建文件夹/重命名/删除/回收站/设置分组；对应接口 `GET /__folder?recursive=1`、`GET /__trash`（登录）与 `POST /__md/create|rename|delete|restore|trash-empty`、`POST /__admin/group`；关联 SVN 的操作由 `server/entries.py` 先提交成功再发布本地，`.md` 文档路由保持正文与右侧本文目录 |
+| `web/folder-view.js` | `html/index_all.html` 与各仓库入口页的递归 Markdown 文件夹视图（正文只显示当前仓库/文件夹的文档与子文件夹，隐藏本文目录）+ 列表按钮和左侧导航全局右键菜单共用新建文档/新建文件夹/重命名/删除/回收站/设置分组；`pathFromElement` 先取文档链接、其次分组标签的 `data-folder`（生成侧栏写入的 `md/...` 真实目录），旧产物才回退到「第一个子文档的目录」，保证在分组上右键新建不会落到第一个子文件夹；对应接口 `GET /__folder?recursive=1`、`GET /__trash`（登录）与 `POST /__md/create|rename|delete|restore|trash-empty`、`POST /__admin/group`；关联 SVN 的操作由 `server/entries.py` 先提交成功再发布本地，`.md` 文档路由保持正文与右侧本文目录 |
 | `server/entries.py` / `server/content_lock.py` | 文档/文件夹在线操作的路径、权限、活动草稿、远端基线、幂等操作号与 SVN 工作副本提交；提交、发布、后台同步使用独立内容锁串行化，网络调用不持数据库锁；不确定提交状态禁止自动重试 |
 | `server/recycle.py` | 每个仓库挂载目录下的 `回收站/` 条目、原路径元数据、关联图片/附件搬运、恢复与清空；构建扫描、普通目录列表和搜索索引均跳过回收站 |
 | `web/workspace.js` / `.css` | 目录树（折叠/过滤/计数/定位）、面包屑、首页卡片、复制、查看源码/编辑/下载 MD、章节序号、Mermaid 样式 |
@@ -63,7 +63,8 @@ docs/html/images|uploads                  (反馈截图/附件，运行时写入
 | `web/packetdiag-init.js` | docsify 插件：把 ```packetdiag 围栏渲染为报文图（figure 保留 `data-source`），失败回退源码；暴露 `PacketDiagRerender`（按源码重绘 data URL）与 `PacketDiagEnsureRendered`（导出前修复空白画布） |
 | `web/media-viewer.js` | 图片、Mermaid 图形与 PacketDiag 图形的全屏放大查看（放大时用 `MermaidRender.render(source)` 重渲染、PacketDiag 用 `PacketDiagRerender` 重绘，避免克隆丢字/丢箭头）与下载（Mermaid 导出 SVG/PNG，PacketDiag 导出 PNG） |
 | `web/page-export.js` | 「下载本页」：把当前文档导出为自包含 HTML（样式内联、Canvas/图片转 data URL、本文目录固定左侧导航；导出前会调用 `PacketDiagEnsureRendered` 重绘空白画布） |
-| `web/md-editor.js` | 「编辑 MD / 下载 MD」（含草稿、历史、差异、提交 SVN 与 SVN 日志）：双栏编辑器（左：可拖拽分栏的 Markdown 高亮源码；右：marked + Prism + Mermaid + PacketDiag + KaTeX 实时预览，默认 38%/62% 偏向预览、面板最宽 1720px）、**左侧固定大纲导航**（默认显示、不遮挡内容，点击跳转章节并让右侧预览同步滚动）、**撤销/恢复**（Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z）、**上传本地图片**、**上传附件**（写入文档同级 `附件/`，沿用原文件名、重名加序号，插入 `[文件名](附件/…)` 链接）、**文字颜色**（Ctrl+Alt+K，HTML span）、**表格行列选择器**（Ctrl+Shift+T，1–8 行列）、**远端差异/提交后差异**（同步冲突时提示合并）、粘贴或拖入图片自动上传到文档同级 `images/`（命名 `<文档名>-<时间戳>-<序号>.<扩展名>`，并插入引用）、拖入其他文件上传到 `附件/`、工具栏与快捷键、`Ctrl+S` 直连写回；`window.MdEditor = { open, download, save, close, uploadImage, uploadAttachment, undo, redo }` |
+| `web/md-editor.js` | 「编辑 MD / 下载 MD」（含草稿、历史、差异、提交 SVN 与 SVN 日志）：双栏编辑器（左：可拖拽分栏的 Markdown 高亮源码；右：marked + Prism + Mermaid + PacketDiag + KaTeX 实时预览，默认 38%/62% 偏向预览、面板最宽 1720px）、**左侧固定大纲导航**（默认显示、不遮挡内容，点击跳转章节并让右侧预览同步滚动）、**查找/替换**（Ctrl+F / Ctrl+H，浮在源码区右上角：大小写/整词/正则、计数、上一个/下一个、替换/全部替换，Enter/F3 导航、Esc 先关查找条；全部替换可撤销）、**撤销/恢复**（Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z）、**上传本地图片**、**上传附件**（写入文档同级 `附件/`，沿用原文件名、重名加序号，插入 `[文件名](附件/…)` 链接）、**文字颜色**（Ctrl+Alt+K，HTML span）、**表格行列选择器**（Ctrl+Shift+T，1–8 行列）、**远端差异/提交后差异**（同步冲突时提示合并）、粘贴或拖入图片自动上传到文档同级 `images/`（命名 `<文档名>-<时间戳>-<序号>.<扩展名>`，并插入引用）、拖入其他文件上传到 `附件/`、工具栏与快捷键、`Ctrl+S` 直连写回；`window.MdEditor = { open, download, save, close, uploadImage, uploadAttachment, undo, redo }` |
+| `web/text-find.js` | 查找/替换的离线纯逻辑（`window.TextFind`：`findMatches` / `replaceAll`，支持大小写、整词（前后非 `[0-9A-Za-z_]`，兼容 CJK）、正则与 `$1`/`$&` 替换，非法正则返回 `invalid_regex`）；编辑器 UI 只做接线，`tests/test_text_find.js` 覆盖 |
 | `web/math-init.js` | docsify 插件：`$...$` / `$$...$$` 等分隔符的 KaTeX 离线渲染；暴露 `window.MathRender.render` 供编辑器预览复用 |
 | `web/prism-init.js` | docsify 插件：`beforeEach` 阶段按围栏语言预载 Prism 组件，保证 docsify 渲染期即可高亮（docsify 内置 Prism 覆盖了 `window.Prism`，autoloader 必须在其之后加载） |
 | `web/ai-retrieval.js` | AI 助手的离线检索核心（纯函数，`window.AIRetrieval`）：分词（CJK 单字+双字）、从 `searchIndex`/Markdown 构建语料、TF-IDF 打分、摘录与上下文/消息组装；`tests/test_ai_retrieval.js` 覆盖 |
@@ -99,7 +100,9 @@ python -m unittest discover -s tests -v
 node --test tests/test_search.js
 node --test tests/test_packetdiag.js
 node --test tests/test_ai_retrieval.js
-node --check web/custom-search.js       # 前端语法检查（workspace/mermaid-init/media-viewer/packetdiag/page-export/md-editor/math-init/prism-init/ai-assistant/ai-retrieval/auth/sanitize 同理）
+node --test tests/test_text_find.js
+node --test tests/test_folder_view.js
+node --check web/custom-search.js       # 前端语法检查（workspace/mermaid-init/media-viewer/packetdiag/page-export/md-editor/text-find/math-init/prism-init/ai-assistant/ai-retrieval/auth/sanitize 同理）
 ```
 
 > 验收只跑 3.6.8：把上面的 `python` 换成 3.6.8 解释器（本机 `C:\Users\wangf\AppData\Local\Temp\opencode\py36\python\python.exe`，Linux 为 `python3`），例如
@@ -162,7 +165,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 后台就绪判断（约 20 秒）：pidfile 进程存活 **且端口已监听**（`port_holders`）即视为就绪，日志关键字仅作无 ss/lsof/fuser 时的回退；后台启动用 `python -u`（关闭输出缓冲）保证 `data/serve.log` 即时可读（否则缓冲会让日志长时间为空、误判“未就绪”）。失败时打印 pidfile 进程状态、端口监听状态与日志尾部，日志为空时明确提示。
 - Linux 进程名：`serve.py` 启动时调用 `set_process_title()`（libc `prctl(PR_SET_NAME)`）把进程名设为 `md2web-serve`，便于 `pgrep -af md2web` / `ps -o pid,comm,args -C md2web-serve` 查找；Windows 下仅设置控制台标题（进程名仍是 python.exe），实例管理仍以 pidfile 为准。
 - 搜索索引：所有 docsify 页面（含每个仓库入口页）的 `customSearch.indexPath` 都是 `html/search-index.json`，因此「全部文档」范围是**全站**范围；跨仓库结果靠索引条目的 `site`（`html/index_<仓库>.html`）跳转，配合关键词交接（localStorage）在目标页恢复高亮。不要改回每仓库索引，否则仓库入口页搜不到其他仓库。
-- 侧栏导航：顶部「返回上一层」图标（`SIDEBAR_BACK_ICON`）固定指向 `html/index_all.html`（全部文档合并视图），「返回首页」链接固定指向站点总览 `index.html`（不再读 `window.$docsify.homeLink`，该配置仍随页面生成但前端未使用）；全局侧栏（`_sidebar.md`）的一级分组名由 `generate_sidebar(link_first_level=True)` 生成为 `<a class="sidebar-group-link" href="html/index_<仓库>.html">`（Markdown 链接会被 docsify 重写成 hash 路由，必须用原始 HTML 锚点）；各仓库侧栏（`_sidebar_<仓库>.md`）的一级分组名同样是指回本仓库入口页的原始 HTML 锚点（`generate_sidebar(top_link=HTML_PREFIX + page)`），进入文档后点分组名即可返回仓库首页（`index_<仓库>.html#/`）。合并视图的左侧导航**不再按仓库过滤**（`workspace.js` 已移除 `filterByCurrentRepo`），进入文档后仍显示全部文档。
+- 侧栏导航：顶部「返回上一层」图标（`SIDEBAR_BACK_ICON`）固定指向 `html/index_all.html`（全部文档合并视图），「返回首页」链接固定指向站点总览 `index.html`（不再读 `window.$docsify.homeLink`，该配置仍随页面生成但前端未使用）；全局侧栏（`_sidebar.md`）的一级分组名由 `generate_sidebar(link_first_level=True)` 生成为 `<a class="sidebar-group-link" href="html/index_<仓库>.html" data-folder="md/...">`（Markdown 链接会被 docsify 重写成 hash 路由，必须用原始 HTML 锚点）；各仓库侧栏（`_sidebar_<仓库>.md`）的一级分组名同样是指回本仓库入口页的原始 HTML 锚点（`generate_sidebar(top_link=HTML_PREFIX + page)`），进入文档后点分组名即可返回仓库首页（`index_<仓库>.html#/`）。分组标签一律带 `data-folder="md/..."`（「所有文档」为 `md`），子文件夹分组是 `<span class="sidebar-group-name" data-folder="...">**名称**</span>`：`folder-view.js` 的右键菜单据此精确定位目录，不再落到第一个子文件夹；构建把 `scan_directories` 收集的真实目录（跳过隐藏目录与 `images/`、`附件/`、`回收站/`）并入侧栏，**空文件夹也会显示**，可直接右键在其中新建文档/子文件夹。合并视图的左侧导航**不再按仓库过滤**（`workspace.js` 已移除 `filterByCurrentRepo`），进入文档后仍显示全部文档。
 - 仓库同步凭据：`repo_credentials`（v6，按 repository_id 存密文，`site-backup` 为网站备份专用 id，`__default__` 为默认同步凭据保留 id，配置页自动生成仓库 ID 时避开）；`AuthService.repo_credential` 解密，`repo_sync_credential` 按「仓库自有 → 默认 → 会话/环境变量」解析（同步、健康检查、修复/重建、创建并拉取共用）；默认凭据保存前必须经 SVN 认证路径校验（本机管理员账号被拒绝）；接口 `POST /__admin/repo-credential`、`GET /__admin/credentials`、`GET/POST /__admin/default-credential`（均需管理员）。
 - 网站数据备份：配置 `siteBackup`（enabled/url/intervalSeconds/include/message），`operations.backup_site` 在 `data/site-wc` 检出后复制 `docs/` 并 `svn add` + `svn commit`（`svn status` 为空则跳过）；`serve.py` 同步线程按频率触发，`POST /__admin/site-backup` 可立即备份。
 - 读者反馈：`web/md2web_feedback.html` + `web/md2web-feedback.js`（构建复制到 `docs/html/` 与 `docs/lib/`）：`GET /__feedback`（公开只读，含状态字典）、`POST /__feedback`（登录 + CSRF，标题≥2 字 + 描述，可带 `images`/`attachments`）、`POST /__feedback/image|attachment`（登录 + CSRF，截图写 `docs/html/images/`、附件写 `docs/html/uploads/`）、`POST /__feedback/delete`（登录 + CSRF，作者本人或管理员）、`POST /__admin/feedback`（管理员 + CSRF，更新 status/note）；数据库 v9 `feedback` 表（含 images/attachments JSON，服务端只接受真实存在的 `html/images|uploads` 文件路径）。入口：docsify 页面在侧栏 AI 设置图标旁（`[data-sidebar-feedback]`，点击打开 `window.FeedbackDialog` 弹窗），无 AI 图标的独立页（配置页/总览页）显示右上角固定入口（`.feedback-fixed-entry`，侧栏渲染后自动收起）；反馈卡片与弹窗样式由 `md2web-feedback.js` 注入（`FEEDBACK_STYLE`），独立页只保留页面框架样式。
@@ -196,7 +199,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 ## 完成前检查清单
 
 1. **用 Python 3.6.8 跑** `python -m unittest discover -s tests` 全绿（含 `tests/test_server.py`：配置、数据库、SVN 假 CLI、登录会话、静态白名单）；不再跑 3.12
-2. `node --test tests/test_search.js`、`node --test tests/test_packetdiag.js`、`node --test tests/test_ai_retrieval.js` 全绿
-3. `node --check web/custom-search.js`、`web/workspace.js`、`web/mermaid-init.js`、`web/media-viewer.js`、`web/packetdiag.js`、`web/packetdiag-init.js`、`web/page-export.js`、`web/md-editor.js`、`web/math-init.js`、`web/prism-init.js`、`web/auth.js`、`web/sanitize.js` 通过
+2. `node --test tests/test_search.js`、`node --test tests/test_packetdiag.js`、`node --test tests/test_ai_retrieval.js`、`node --test tests/test_text_find.js`、`node --test tests/test_folder_view.js` 全绿
+3. `node --check web/custom-search.js`、`web/workspace.js`、`web/mermaid-init.js`、`web/media-viewer.js`、`web/packetdiag.js`、`web/packetdiag-init.js`、`web/page-export.js`、`web/md-editor.js`、`web/text-find.js`、`web/math-init.js`、`web/prism-init.js`、`web/auth.js`、`web/sanitize.js` 通过
 4. **用 3.6.8 跑** `python setup_docsify.py` 后 `git status` 无意外生成物差异（构建幂等）
 5. `docs/md` 内容逐字节未变

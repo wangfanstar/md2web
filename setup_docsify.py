@@ -600,6 +600,7 @@ def generate_custom_search_assets():
         "packetdiag-init.js",
         "page-export.js",
         "plot-playground.html",
+        "text-find.js",
         "md-editor.js",
         "math-init.js",
         "prism-init.js",
@@ -614,7 +615,7 @@ def generate_custom_search_assets():
         "folder-view.js",
     ):
         shutil.copyfile(WEB_DIR / name, LIB_DIR / name)
-    print("  [生成] custom-search.* / workspace.* / mermaid-init.js / media-viewer.js / packetdiag* / page-export.js / plot-playground.html / md-editor.js / math-init.js / prism-init.js / ai-*.js|css / sanitize.js / auth.* / settings.*")
+    print("  [生成] custom-search.* / workspace.* / mermaid-init.js / media-viewer.js / packetdiag* / page-export.js / plot-playground.html / text-find.js / md-editor.js / math-init.js / prism-init.js / ai-*.js|css / sanitize.js / auth.* / settings.*")
 
 
 # Docsify 4.13.1 slugify 实际删除的标点集合（docsify.min.js 中的 En 正则），
@@ -771,6 +772,34 @@ def files_for_mount(md_files, mount):
     if not sub:
         return []
     return [rel for rel in md_files if rel == sub or rel.startswith(sub + "/")]
+
+
+def dirs_for_mount(md_dirs, mount):
+    """挂载目录内的子目录（与 files_for_mount 同形：相对 docs/md 的 posix 路径）。"""
+    return files_for_mount(md_dirs, mount)
+
+
+# 左侧导航展示真实目录，但这些目录只放附件/回收站，不进入导航
+SIDEBAR_IGNORED_DIRS = {"images", "附件", "回收站"}
+
+
+def scan_directories(md_dir):
+    """列出 docs/md 下的真实目录（相对 md 的 posix 路径），跳过隐藏目录与附件/回收站目录。
+
+    空文件夹也要出现在左侧导航里，方便在新建的子文件夹中继续新建文档。
+    """
+    root = Path(md_dir)
+    directories = []
+    if not root.is_dir():
+        return directories
+    for path in sorted(root.rglob("*")):
+        if not path.is_dir():
+            continue
+        parts = path.relative_to(root).parts
+        if any(part.startswith(".") or part in SIDEBAR_IGNORED_DIRS for part in parts):
+            continue
+        directories.append("/".join(parts))
+    return directories
 
 
 def _slugify_heading(text: str, seen: dict) -> str:
@@ -935,9 +964,15 @@ def generate_offline_data(md_files, path=None, search_index_path=None, sidebar="
     print(f"  [生成] offline-data.js / offline-file.js ({size_mb:.1f} MB)")
 
 
-def build_doc_tree(rel_paths):
-    """把相对路径列表构造成 {files, dirs} 嵌套树。"""
+def build_doc_tree(rel_paths, dir_paths=()):
+    """把相对路径列表构造成 {files, dirs} 嵌套树；dir_paths 用于保留空文件夹。"""
     root = {"files": [], "dirs": {}}
+    for rel in dir_paths:
+        node = root
+        for part in str(rel).split("/"):
+            if not part:
+                continue
+            node = node["dirs"].setdefault(part, {"files": [], "dirs": {}})
     for rel in rel_paths:
         parts = rel.split("/")
         node = root
@@ -951,6 +986,7 @@ def render_doc_tree(node, route_prefix, indent, lines, link, preserve_folders=Fa
     """递归渲染；站点保留目录身份，默认保留旧调用的折叠行为。
 
     dir_link(name) 返回一级目录的链接（如仓库入口页）；返回空则不生成链接。
+    分组标签一律带 data-folder（md 下的目录路径），供左侧导航右键菜单精确定位目录。
     """
     for name in sorted(node["dirs"]):
         child = node["dirs"][name]
@@ -962,16 +998,20 @@ def render_doc_tree(node, route_prefix, indent, lines, link, preserve_folders=Fa
                 f"({link(route_prefix + '/' + name + '/' + filename)})"
             )
             continue
+        folder = (route_prefix + "/" + name).strip("/")
         label = f"**{html.escape(name)}**"
         target = dir_link(name) if dir_link else ""
         if target:
             # 原始 HTML 锚点：Markdown 链接会被 docsify 重写成 hash 路由
             lines.append(
-                f'{indent}- <a class="sidebar-group-link" href="{html.escape(target, quote=True)}">'
-                f"{label}</a>"
+                f'{indent}- <a class="sidebar-group-link" href="{html.escape(target, quote=True)}"'
+                f' data-folder="{html.escape(folder, quote=True)}">{label}</a>'
             )
         else:
-            lines.append(f"{indent}- {label}")
+            lines.append(
+                f'{indent}- <span class="sidebar-group-name"'
+                f' data-folder="{html.escape(folder, quote=True)}">{label}</span>'
+            )
         render_doc_tree(child, route_prefix + "/" + name, indent + "  ", lines, link, preserve_folders)
     for filename in sorted(node["files"]):
         lines.append(
@@ -979,16 +1019,17 @@ def render_doc_tree(node, route_prefix, indent, lines, link, preserve_folders=Fa
         )
 
 
-def generate_sidebar(md_files, path=None, heading="目录", link_first_level=False, top_link=""):
+def generate_sidebar(md_files, path=None, heading="目录", link_first_level=False, top_link="", dir_paths=()):
     """生成 _sidebar.md 侧边栏文件。
 
     link_first_level=True 时一级分组名按名称链接到仓库入口页（全局侧栏）；
-    top_link 直接指定一级分组的链接（各仓库侧栏指回自己的入口页 index_<仓库>.html）。
+    top_link 直接指定一级分组的链接（各仓库侧栏指回自己的入口页 index_<仓库>.html）；
+    dir_paths 为 docs/md 下的真实目录，用于把空文件夹也显示在左侧导航里。
     """
     # 侧栏第一行固定为「所有文档」，链接回全部文档合并视图
     lines = ['- <a class="sidebar-group-link" href="' + HTML_PREFIX
-             + 'index_all.html">**所有文档**</a>']
-    tree = build_doc_tree(md_files)
+             + 'index_all.html" data-folder="md">**所有文档**</a>']
+    tree = build_doc_tree(md_files, dir_paths)
 
     def dir_link(name):
         if top_link:
@@ -1236,6 +1277,7 @@ def generate_index_html(title="文档中心", path=None, page_name="index.html",
   <script src="lib/packetdiag-init.js"></script>
   <script src="lib/media-viewer.js"></script>
   <script src="lib/page-export.js"></script>
+  <script src="lib/text-find.js"></script>
   <script src="lib/md-editor.js"></script>
   <script src="lib/ai-retrieval.js"></script>
   <script src="lib/ai-assistant.js"></script>
@@ -1683,8 +1725,10 @@ def main(argv=None):
 
         print("2. 生成导航、首页、搜索索引...")
         repos = load_all_repos()
+        md_dirs = scan_directories(MD_DIR)
         HTML_DIR.mkdir(parents=True, exist_ok=True)
-        generate_sidebar(md_files, path=HTML_DIR / "_sidebar.md", link_first_level=True)
+        generate_sidebar(md_files, path=HTML_DIR / "_sidebar.md", link_first_level=True,
+                         dir_paths=md_dirs)
         generate_readme(md_files, args.title, repos=repos, path=HTML_DIR / "README.md")
         generate_search_index(md_files, args.title, repos=repos, path=HTML_DIR / "search-index.json")
         generate_offline_data(md_files, sidebar=HTML_PREFIX + "_sidebar.md")
@@ -1703,7 +1747,8 @@ def main(argv=None):
             search_index = "search-index.json"
             offline_data = f"lib/offline-data_{repo['id']}.js"
             generate_sidebar(repo_files, path=HTML_DIR / sidebar, heading=repo["id"],
-                             top_link=HTML_PREFIX + page)
+                             top_link=HTML_PREFIX + page,
+                             dir_paths=dirs_for_mount(md_dirs, repo["mount"]))
             generate_offline_data(repo_files, path=LIB_DIR / f"offline-data_{repo['id']}.js",
                                   search_index_path=HTML_DIR / "search-index.json",
                                   sidebar=HTML_PREFIX + sidebar,

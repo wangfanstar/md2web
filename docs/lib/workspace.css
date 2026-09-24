@@ -517,6 +517,84 @@ body.media-viewer-open {
   width: 1px;
 }
 
+/* 查找/替换（Ctrl+F / Ctrl+H）：浮在源码区右上角，不改变分栏宽度 */
+.md-editor-find {
+  background: #fff;
+  border: 1px solid var(--workspace-line);
+  border-radius: 8px;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, .14);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  position: absolute;
+  right: 12px;
+  top: 8px;
+  z-index: 6;
+}
+
+.md-editor-find[hidden] {
+  display: none;
+}
+
+.md-editor-find-row {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+.md-editor-find-input {
+  background: #f8fafc;
+  border: 1px solid #d7dee6;
+  border-radius: 5px;
+  color: #1f2a37;
+  font: inherit;
+  font-size: 12px;
+  min-width: 150px;
+  padding: 4px 8px;
+}
+
+.md-editor-find-input:focus {
+  border-color: var(--workspace-accent);
+  outline: 0;
+}
+
+.md-editor-find-count {
+  color: #64748b;
+  font-family: var(--workspace-mono);
+  font-size: 11px;
+  min-width: 44px;
+  text-align: center;
+}
+
+.md-editor-find-count.is-error {
+  color: #b91c1c;
+}
+
+.md-editor-find-option,
+.md-editor-find-btn {
+  background: #fff;
+  border: 1px solid #d7dee6;
+  border-radius: 5px;
+  color: #334155;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  padding: 3px 8px;
+}
+
+.md-editor-find-option.is-active {
+  background: #eef4fd;
+  border-color: var(--workspace-accent);
+  color: var(--workspace-accent);
+}
+
+.md-editor-find-option:hover,
+.md-editor-find-btn:hover {
+  border-color: var(--workspace-accent);
+  color: var(--workspace-accent);
+}
+
 .md-editor-body {
   display: flex;
   flex: 1;
