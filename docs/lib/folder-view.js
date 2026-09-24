@@ -78,11 +78,15 @@
         + '</tr>';
     }).join('');
     var folders = (folder.folders || []).map(function (item) {
-      return '<li><a href="#/' + escapeHtml(item.path) + '/">' + escapeHtml(item.name) + '/</a></li>';
+      return '<li><a href="#/' + escapeHtml(item.path) + '/">' + escapeHtml(item.name) + '/</a>'
+        + '<button type="button" data-folder-action="menu" data-path="' + escapeHtml(item.path)
+        + '" aria-label="操作 ' + escapeHtml(item.name) + '">操作</button></li>';
     }).join('');
     article.innerHTML = [
       '<div class="folder-view" data-folder-view>',
       '<h1>' + escapeHtml(folder.name || '') + '</h1>',
+      '<div class="folder-view-actions"><button type="button" data-folder-action="menu" data-path="' + escapeHtml(folder.path)
+        + '">新建文档或文件夹</button></div>',
       '<p class="folder-view-meta">目录：<code>' + escapeHtml(folder.path || '') + '</code>'
         + ' · 文档 ' + ((folder.documents || []).length) + ' 个 · 合计 '
         + escapeHtml(formatBytes(folder.totalBytes)) + '</p>',
@@ -114,9 +118,14 @@
       return;
     }
     var route = currentRoute();
+    var repoInfo = config.repoInfo || {};
+    var rootFolder = repoInfo.all ? 'md' : (repoInfo.mount || '');
     if (!route || route === 'README.md' || route === '/') {
-      document.body.classList.remove('folder-view-active');
-      return;
+      if (!rootFolder) {
+        document.body.classList.remove('folder-view-active');
+        return;
+      }
+      route = rootFolder + '/';
     }
     if (!isFolderRoute(route)) {
       // 文档页：恢复正文与本文目录
@@ -128,7 +137,7 @@
       document.body.classList.remove('folder-view-active');
       return;
     }
-    fetch('__folder?path=' + encodeURIComponent(folder)).then(function (response) {
+    fetch('__folder?path=' + encodeURIComponent(folder) + '&recursive=1').then(function (response) {
       return response.json();
     }).then(function (payload) {
       if (payload && payload.ok) {
@@ -157,7 +166,10 @@
     return fetch(path, Object.assign({}, options, { headers: headers })).then(function (response) {
       return response.json().catch(function () { return {}; }).then(function (payload) {
         if (!response.ok || payload.ok === false) {
-          throw new Error(payload.error || ('HTTP ' + response.status));
+          var error = new Error(payload.error || ('HTTP ' + response.status));
+          error.code = payload.code || '';
+          error.status = response.status;
+          throw error;
         }
         return payload;
       });
@@ -184,21 +196,26 @@
     window.setTimeout(function () { window.location.reload(); }, 400);
   }
 
+  function operationNotice(prefix, result) {
+    var revision = result && result.svnRevision ? '（已提交 SVN r' + result.svnRevision + '）' : '（本地已更新）';
+    return prefix + revision;
+  }
+
   function runAction(action, path, isFolder) {
-    var parent = folderPathOf(path || currentRoute());
+    var parent = isFolder ? (path || currentRoute()) : folderPathOf(path || currentRoute());
     if (action === 'new-document') {
       var docName = window.prompt('新建文档名称（不含 .md）', '新文档');
       if (!docName) return;
-      api('__md/create', { method: 'POST', body: JSON.stringify({ parent: parent, kind: 'document', name: docName }) })
-        .then(function () { reloadSoon('已创建文档：' + docName); })
+      mutate('__md/create', { parent: parent, kind: 'document', name: docName })
+        .then(function (payload) { reloadSoon(operationNotice('已创建文档：' + docName, payload.result)); })
         .catch(function (error) { window.alert('创建失败：' + error.message); });
       return;
     }
     if (action === 'new-folder') {
       var folderName = window.prompt('新建文件夹名称', '新文件夹');
       if (!folderName) return;
-      api('__md/create', { method: 'POST', body: JSON.stringify({ parent: parent, kind: 'folder', name: folderName }) })
-        .then(function () { reloadSoon('已创建文件夹：' + folderName); })
+      mutate('__md/create', { parent: parent, kind: 'folder', name: folderName })
+        .then(function (payload) { reloadSoon(operationNotice('已创建文件夹：' + folderName, payload.result)); })
         .catch(function (error) { window.alert('创建失败：' + error.message); });
       return;
     }
@@ -206,15 +223,15 @@
       var newName = window.prompt('重命名为（' + (isFolder ? '文件夹' : '文档，可不带 .md') + '）',
         String(path || '').split('/').pop());
       if (!newName) return;
-      api('__md/rename', { method: 'POST', body: JSON.stringify({ path: path, name: newName }) })
-        .then(function () { reloadSoon('已重命名'); })
+      mutate('__md/rename', { path: path, name: newName })
+        .then(function (payload) { reloadSoon(operationNotice('已重命名，请检查文档中的引用链接', payload.result)); })
         .catch(function (error) { window.alert('重命名失败：' + error.message); });
       return;
     }
     if (action === 'delete') {
       if (!window.confirm('确定删除 ' + path + ' ？（会移动到 data/trash，可手动找回）')) return;
-      api('__md/delete', { method: 'POST', body: JSON.stringify({ path: path }) })
-        .then(function () { reloadSoon('已删除（已移动到 data/trash）'); })
+      mutate('__md/delete', { path: path })
+        .then(function (payload) { reloadSoon(operationNotice('已删除（已移动到 data/trash）', payload.result)); })
         .catch(function (error) { window.alert('删除失败：' + error.message); });
       return;
     }
@@ -230,6 +247,21 @@
         .then(function () { reloadSoon('已设置分组：' + group + '（站点正在重建）'); })
         .catch(function (error) { window.alert('设置分组失败：' + error.message); });
     }
+  }
+
+  function mutate(url, data) {
+    data.requestId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID().replace(/-/g, '') :
+      (Date.now().toString(16) + Math.random().toString(16).slice(2) + '00000000000000000000000000000000').slice(0, 32);
+    return api(url, { method: 'POST', body: JSON.stringify(data) }).catch(function (error) {
+      if (error.code !== 'svn_credentials_required') throw error;
+      var username = window.prompt('该 SVN 库需要账号，用户名：', '');
+      if (!username) throw error;
+      var password = window.prompt('SVN 口令（仅本次操作使用）：', '');
+      if (password === null) throw error;
+      data.svnUsername = username;
+      data.svnPassword = password;
+      return api(url, { method: 'POST', body: JSON.stringify(data) });
+    });
   }
 
   function openMenu(x, y, path, isFolder) {
@@ -267,7 +299,15 @@
     raw = raw.replace(/^#/, '');
     var hashIndex = raw.indexOf('md/');
     if (hashIndex === -1) {
-      return null;
+      var sidebarItem = node.closest ? node.closest('.sidebar-nav li') : null;
+      var child = sidebarItem && sidebarItem.querySelector('a[href*="md/"]');
+      if (!child) return null;
+      raw = child.getAttribute('href') || '';
+      hashIndex = raw.indexOf('md/');
+      if (hashIndex === -1) return null;
+      path = raw.slice(hashIndex).split('?')[0].replace(/\/$/, '');
+      var slash = path.lastIndexOf('/');
+      return slash > 2 ? path.slice(0, slash) : null;
     }
     var path = raw.slice(hashIndex).split('?')[0].replace(/\/$/, '');
     try {
@@ -290,7 +330,7 @@
     if (trigger) {
       var path = trigger.getAttribute('data-path');
       var rect = trigger.getBoundingClientRect();
-      openMenu(rect.left, rect.bottom + 4, path, false);
+      openMenu(rect.left, rect.bottom + 4, path, !/\.md$/i.test(path));
       return;
     }
     if (menu && !menu.contains(event.target)) {

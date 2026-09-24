@@ -308,6 +308,17 @@ class SvnClient:
         args = ["add", "--parents", "--non-interactive", "--no-auth-cache"] + creds + [str(path)]
         return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
 
+    def move(self, source, target, config_dir=None, username=None, password=None):
+        """工作副本内重命名，保留 SVN 历史。末尾 @ 关闭 peg revision 解析。"""
+        creds, stdin_text = self._credential_args(username, password)
+        args = ["move", "--non-interactive", "--no-auth-cache"] + creds + [str(source) + "@", str(target) + "@"]
+        return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
+
+    def delete(self, path, config_dir=None, username=None, password=None):
+        creds, stdin_text = self._credential_args(username, password)
+        args = ["delete", "--non-interactive", "--no-auth-cache"] + creds + [str(path) + "@"]
+        return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
+
     def diff(self, path, config_dir=None, username=None, password=None):
         creds, stdin_text = self._credential_args(username, password)
         args = ["diff", "--non-interactive", "--no-auth-cache"] + creds + [str(path)]

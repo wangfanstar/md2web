@@ -1081,6 +1081,9 @@ class FolderViewTests(unittest.TestCase):
         self.assertIn("isFolderRoute", source)
         self.assertIn("\\.md$", source, "应识别 .md 文档路由并跳过文件夹视图")
         self.assertIn("folder-view-active", source)
+        self.assertIn("recursive=1", source)
+        self.assertIn('data-folder-action="menu"', source)
+        self.assertIn("function mutate", source)
         built = (ROOT / "docs" / "lib" / "folder-view.js").read_text(encoding="utf-8")
         self.assertIn("isFolderRoute", built, "构建产物未同步 folder-view.js")
 

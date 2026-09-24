@@ -2693,7 +2693,17 @@ class FolderOpsTests(ServerTestBase):
         self.assertIn("时钟树设计.md", names)
         self.assertGreater(payload["folder"]["totalBytes"], 0)
 
+    def test_recursive_folder_listing_includes_nested_markdown(self):
+        nested = self.docs / "md" / "硬件设计" / "接口"
+        nested.mkdir(parents=True, exist_ok=True)
+        (nested / "uart.md").write_text("# UART\n", encoding="utf-8")
+        payload = self.client.get("/__folder?path=md/硬件设计&recursive=1").get_json()
+        self.assertIn("接口/uart.md", [item["path"].split("md/硬件设计/", 1)[-1] for item in payload["folder"]["documents"]])
+
     def test_create_rename_delete_flow(self):
+        for repository in self.config.get("repositories") or []:
+            repository["source_mode"] = "local"
+            repository["url"] = ""
         headers = {"X-CSRF-Token": self.csrf()}
         created = self.client.post("/__md/create", json={"parent": "md/硬件设计", "kind": "document",
                                                          "name": "新接口"}, headers=headers).get_json()
@@ -2710,6 +2720,9 @@ class FolderOpsTests(ServerTestBase):
         self.assertTrue(Path(deleted["result"]["trash"]).is_file())
 
     def test_create_folder_and_reject_bad_paths(self):
+        for repository in self.config.get("repositories") or []:
+            repository["source_mode"] = "local"
+            repository["url"] = ""
         headers = {"X-CSRF-Token": self.csrf()}
         created = self.client.post("/__md/create", json={"parent": "md/硬件设计", "kind": "folder",
                                                          "name": "子目录"}, headers=headers).get_json()

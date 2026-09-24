@@ -13,7 +13,7 @@ from pathlib import Path
 from flask import Flask, jsonify, make_response, request, send_from_directory
 
 from . import config as server_config
-from . import database, documents as server_documents, drafts, operations
+from . import database, documents as server_documents, drafts, operations, entries
 from .auth import AuthError
 from .config import authenticated_config, config_to_json, public_config, save_config
 from .documents import MdSaveError
@@ -399,57 +399,25 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         """文件夹信息（公开只读）：当前文件夹下的文档与子文件夹列表。"""
         path = request.args.get("path") or "md"
         try:
-            listing = operations.folder_listing(md_dir(), path)
+            listing = operations.folder_listing(md_dir(), path, recursive=request.args.get('recursive') == '1')
         except operations.OperationError as error:
             return json_error(error.status, "folder_error", error.message)
         return jsonify({"ok": True, "folder": listing})
 
     @app.post("/__md/create")
     def create_entry():
-        """新建文档或文件夹（登录用户 + CSRF）。"""
-        session, rejected = require_session()
-        if rejected:
-            return rejected
-        csrf_error = require_csrf(session)
-        if csrf_error:
-            return csrf_error
-        payload = request.get_json(silent=True) or {}
-        try:
-            result = operations.create_entry(md_dir(), payload.get("parent") or "md",
-                                             payload.get("kind") or "document", payload.get("name"))
-        except operations.OperationError as error:
-            return json_error(error.status, "create_error", error.message)
-        if on_config_changed is not None:
-            try:
-                on_config_changed()
-            except Exception:
-                pass
-        return jsonify({"ok": True, "result": result})
+        return mutate_entry("create")
 
     @app.post("/__md/rename")
     def rename_entry():
-        """重命名文档或文件夹（登录用户 + CSRF）。"""
-        session, rejected = require_session()
-        if rejected:
-            return rejected
-        csrf_error = require_csrf(session)
-        if csrf_error:
-            return csrf_error
-        payload = request.get_json(silent=True) or {}
-        try:
-            result = operations.rename_entry(md_dir(), payload.get("path"), payload.get("name"))
-        except operations.OperationError as error:
-            return json_error(error.status, "rename_error", error.message)
-        if on_config_changed is not None:
-            try:
-                on_config_changed()
-            except Exception:
-                pass
-        return jsonify({"ok": True, "result": result})
+        return mutate_entry("rename")
 
     @app.post("/__md/delete")
     def delete_entry():
-        """删除文档或文件夹（移动到 data/trash，登录用户 + CSRF）。"""
+        return mutate_entry("delete")
+
+    def mutate_entry(action):
+        """即时提交 SVN 后发布本地；所有入口共用权限与冲突检查。"""
         session, rejected = require_session()
         if rejected:
             return rejected
@@ -458,10 +426,18 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             return csrf_error
         payload = request.get_json(silent=True) or {}
         try:
-            result = operations.delete_entry(md_dir(), payload.get("path"),
-                                             config["storage"]["database"].parent / "trash")
+            credential = credential_of(session)
+            if not credential and payload.get("svnUsername") and payload.get("svnPassword"):
+                auth_service.check_svn_credential(payload['svnUsername'], payload['svnPassword'])
+                auth_service.remember_credential(session['sessionId'], payload['svnUsername'], payload['svnPassword'])
+                credential = (payload['svnUsername'], payload['svnPassword'])
+            result = entries.mutate(conn, auth_service._db_lock, auth_service.svn, config, md_dir(),
+                                    session['user']['id'], credential, action, payload)
         except operations.OperationError as error:
-            return json_error(error.status, "delete_error", error.message)
+            credential_invalidated(session, error)
+            extra = dict(error.extra)
+            code = extra.pop('code', 'entry_error')
+            return json_error(error.status, code, error.message, **extra)
         if on_config_changed is not None:
             try:
                 on_config_changed()
@@ -1090,7 +1066,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
 
     def credential_invalidated(session, error):
         """SVN 拒绝口令（401 needs_auth）时清理库里的旧密文，避免一直用旧密码重试。"""
-        if getattr(error, "status", None) != 401:
+        if getattr(error, "status", None) != 401 or getattr(error, "extra", {}).get("code") == "svn_credentials_required":
             return
         auth_service.forget_stored_credential(session.get("user"))
         auth_service.forget_credential(session["sessionId"])

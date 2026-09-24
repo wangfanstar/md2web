@@ -422,13 +422,12 @@ body.media-viewer-open {
   display: flex;
   flex-direction: column;
   height: 92vh;
-  left: 50%;
+  inset: 4vh 2vw;
+  margin: auto;
   max-width: 1720px;
   width: 96vw;
   overflow: hidden;
   position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
   width: min(96vw, 1720px);
 }
 
@@ -597,6 +596,7 @@ body.media-viewer-open {
 .md-editor-preview {
   max-width: none;
   padding: 16px 20px 40px;
+  text-rendering: geometricPrecision;
 }
 
 .md-editor-preview .katex-display {
@@ -927,6 +927,38 @@ body.folder-view-active .docs-page-toc {
 .folder-view-meta {
   color: var(--docs-muted, #57606a);
   font-size: 13px;
+}
+
+.folder-view-actions {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 12px;
+}
+
+.folder-view-actions button,
+.folder-view-folders button,
+.folder-view-table button {
+  background: var(--docs-surface, #fff);
+  border: 1px solid var(--docs-border, #d5dee8);
+  border-radius: 6px;
+  color: var(--docs-accent, #1f6feb);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.folder-view-actions button:hover,
+.folder-view-folders button:hover,
+.folder-view-table button:hover {
+  background: #eef4fd;
+}
+
+.folder-view-folders li {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin: 4px 0;
 }
 
 .folder-view-table {

@@ -22,6 +22,7 @@ from pathlib import Path
 from . import database, documents
 from .drafts import unified_diff as documents_diff
 from .svn import SvnError
+from .content_lock import serialized
 
 ACTIVE_STATES = ("prepared", "running")
 DONE_STATES = ("svn_committed", "published")
@@ -403,6 +404,7 @@ def prepare_commit(conn, user_id, config, md_dir, document_path, message, expect
     }
 
 
+@serialized
 def run_commit(conn, svn_client, config, md_dir, workspace_root, operation_id, user_id, credential):
     """执行提交：幂等、私有工作副本、实际 diff 核对、发布到 docs/md。"""
     operation = get_operation(conn, operation_id, user_id)
@@ -746,7 +748,7 @@ def list_md_folders(md_dir, repos=None):
     return folders
 
 
-def folder_listing(md_dir, relative):
+def folder_listing(md_dir, relative, recursive=False):
     """列出某个文件夹下的文档与子文件夹（公开信息：名称/大小/修改时间）。"""
     target = _managed_path(md_dir, relative)
     if not target.is_dir():
@@ -768,6 +770,10 @@ def folder_listing(md_dir, relative):
                 "size": int(stat.st_size),
                 "mtime": int(stat.st_mtime),
             })
+    if recursive:
+        for child in folders[:]:
+            nested = folder_listing(md_dir, child["path"], recursive=True)
+            documents.extend(nested["documents"])
     return {
         "path": "md/" + target.resolve().relative_to(root).as_posix(),
         "name": target.name,
@@ -826,7 +832,7 @@ def delete_entry(md_dir, relative, trash_root):
     root = Path(md_dir).resolve()
     if target.resolve() == root:
         raise OperationError(400, "不能删除 docs/md 根目录")
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
     trash = Path(trash_root) / stamp / target.name
     trash.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(target), str(trash))
@@ -1145,11 +1151,15 @@ def provision_repository(conn, svn_client, config, md_dir, binding, credential=N
     }
 
 
+@serialized
 def sync_binding(conn, svn_client, config, md_dir, binding, credential=None, force=False):
     """把绑定仓库的远端内容同步到 docs/md（导出快照后只覆盖受管 Markdown）。
 
     force=True 时即使远端版本 ≤ 已发布版本也重新导出（修复/删除重建场景）。
     """
+    from .entries import pending
+    if pending(conn, binding['mount']):
+        raise OperationError(409, '仓库有待核对的文档操作，请先检查 SVN 日志和本地文件')
     row = _binding_row(conn, binding) or ensure_binding(conn, binding, svn_client, config, credential)
     username, password = credential or (None, None)
     config_dir = tempfile.mkdtemp(prefix="md2web-svn-sync-")
