@@ -1,3 +1,3 @@
 - <a class="sidebar-group-link" href="html/index_all.html">**所有文档**</a>
-  - **验证指南**
+  - <a class="sidebar-group-link" href="html/index_验证指南.html">**验证指南**</a>
     - [仿真环境搭建](/md/验证指南/仿真环境搭建.md)

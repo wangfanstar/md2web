@@ -1,4 +1,4 @@
 - <a class="sidebar-group-link" href="html/index_all.html">**所有文档**</a>
-  - **硬件设计**
+  - <a class="sidebar-group-link" href="html/index_硬件设计.html">**硬件设计**</a>
     - [寄存器手册](/md/硬件设计/寄存器手册.md)
     - [时钟树设计](/md/硬件设计/时钟树设计.md)

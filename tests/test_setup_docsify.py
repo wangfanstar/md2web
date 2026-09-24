@@ -1178,8 +1178,15 @@ class HtmlLayoutTests(unittest.TestCase):
         self.assertIn('href="html/index_all.html">**所有文档**</a>', sidebar,
                       "侧栏标题应为「所有文档」并链接到合并视图")
         repo_sidebar = next((ROOT / "docs" / "html").glob("_sidebar_*.md"))
-        self.assertIn("所有文档", repo_sidebar.read_text(encoding="utf-8"),
-                      "各仓库侧栏标题同样应为「所有文档」")
+        repo_sidebar_text = repo_sidebar.read_text(encoding="utf-8")
+        self.assertIn("所有文档", repo_sidebar_text, "各仓库侧栏标题同样应为「所有文档」")
+        # 仓库侧栏的一级分组名指回本仓库入口页：进入文档后点分组名可返回仓库首页
+        repo_sidebar_id = repo_sidebar.name[len("_sidebar_"):-len(".md")]
+        self.assertIn('<a class="sidebar-group-link" href="html/index_' + repo_sidebar_id + '.html">',
+                      repo_sidebar_text, "仓库侧栏的一级分组名应链接回本仓库入口页")
+        source = (ROOT / "setup_docsify.py").read_text(encoding="utf-8")
+        self.assertIn("top_link=HTML_PREFIX + page", source,
+                      "各仓库侧栏生成时应指向自己的入口页")
         workspace = (ROOT / "web" / "workspace.js").read_text(encoding="utf-8")
         self.assertNotIn("filterByCurrentRepo", workspace,
                          "index_all 合并视图不应再按仓库过滤左侧导航")

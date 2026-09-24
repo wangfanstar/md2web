@@ -979,15 +979,24 @@ def render_doc_tree(node, route_prefix, indent, lines, link, preserve_folders=Fa
         )
 
 
-def generate_sidebar(md_files, path=None, heading="目录", link_first_level=False):
-    """生成 _sidebar.md 侧边栏文件；link_first_level=True 时一级分组名链接到仓库入口页。"""
+def generate_sidebar(md_files, path=None, heading="目录", link_first_level=False, top_link=""):
+    """生成 _sidebar.md 侧边栏文件。
+
+    link_first_level=True 时一级分组名按名称链接到仓库入口页（全局侧栏）；
+    top_link 直接指定一级分组的链接（各仓库侧栏指回自己的入口页 index_<仓库>.html）。
+    """
     # 侧栏第一行固定为「所有文档」，链接回全部文档合并视图
     lines = ['- <a class="sidebar-group-link" href="' + HTML_PREFIX
              + 'index_all.html">**所有文档**</a>']
     tree = build_doc_tree(md_files)
-    dir_link = None
-    if link_first_level:
-        dir_link = lambda name: HTML_PREFIX + repo_page_name(name)
+
+    def dir_link(name):
+        if top_link:
+            return top_link
+        if link_first_level:
+            return HTML_PREFIX + repo_page_name(name)
+        return ""
+
     render_doc_tree(tree, "/md", "  ", lines, lambda route: route, preserve_folders=True, dir_link=dir_link)
 
     sidebar_path = Path(path) if path else (HTML_DIR / "_sidebar.md")
@@ -1693,7 +1702,8 @@ def main(argv=None):
             # 统一使用全站索引：仓库入口页的「全部文档」范围也能搜到其他仓库的内容
             search_index = "search-index.json"
             offline_data = f"lib/offline-data_{repo['id']}.js"
-            generate_sidebar(repo_files, path=HTML_DIR / sidebar, heading=repo["id"])
+            generate_sidebar(repo_files, path=HTML_DIR / sidebar, heading=repo["id"],
+                             top_link=HTML_PREFIX + page)
             generate_offline_data(repo_files, path=LIB_DIR / f"offline-data_{repo['id']}.js",
                                   search_index_path=HTML_DIR / "search-index.json",
                                   sidebar=HTML_PREFIX + sidebar,
