@@ -887,7 +887,9 @@
       }
       output.push('\n');
     }
-    return output.join('') + '\n';
+    // 每一行已经在循环中写入一个换行；这里不能再追加，否则文末会多出一行，
+    // 长文档滚动和大纲定位会逐步与 textarea 的实际行号脱节。
+    return output.join('');
   }
 
   function updateHighlight() {
