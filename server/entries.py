@@ -215,8 +215,12 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
             elif action == 'trash-empty':
                 remote_trash_root = wc / '回收站'
                 if remote_trash_root.is_dir():
-                    for remote_entry in remote_trash_root.iterdir():
-                        svn.delete(remote_entry, **auth)
+                    requested_entry = payload.get('entryId')
+                    remote_entries = ([remote_trash_root / str(requested_entry)]
+                                      if requested_entry else list(remote_trash_root.iterdir()))
+                    for remote_entry in remote_entries:
+                        if remote_entry.exists():
+                            svn.delete(remote_entry, **auth)
             if action != 'trash-empty':
                 committing = True
                 revision = svn.commit(wc, '文档管理：%s %s [%s]' % (action, path, request_id), **auth)

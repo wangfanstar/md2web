@@ -8,6 +8,7 @@ import re
 import shutil
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from urllib.parse import quote
 from pathlib import Path
@@ -1112,6 +1113,8 @@ def generate_index_html(title="文档中心", path=None, page_name="index.html",
     read_only_js = "true" if read_only else "false"
     allow_commit_js = "true" if allow_commit else "false"
     repo_js = json.dumps(repo or {}, ensure_ascii=False).replace("<", "\\u003c")
+    recycle_mount = (repo or {}).get("mount") if repo and not (repo or {}).get("all") else "md"
+    recycle_href = HTML_PREFIX + "md2web_recycle.html?mount=" + urllib.parse.quote(str(recycle_mount or "md"), safe="")
     html_text = f"""<!DOCTYPE html>
 <!-- 基于 docsify 4.13.1（MIT，https://github.com/docsifyjs/docsify）构建，含本地修改；
      第三方组件与许可见 THIRD-PARTY-NOTICES.md -->
@@ -1129,10 +1132,12 @@ def generate_index_html(title="文档中心", path=None, page_name="index.html",
   <link rel="stylesheet" href="lib/ai-assistant.css">
   <link rel="stylesheet" href="lib/auth.css">
   <link rel="stylesheet" href="lib/settings.css">
+  <style>.md2web-page-tools{{position:fixed;right:18px;top:14px;z-index:20}}.md2web-page-tools a{{background:#fff;border:1px solid #d5dee8;border-radius:6px;color:#1f6feb;font-size:13px;padding:6px 10px;text-decoration:none}}</style>
 </head>
 <body>
   <script src="{offline_data_path}"></script>
   <script src="lib/offline-file.js"></script>
+  <nav class="md2web-page-tools"><a href="{html.escape(recycle_href, quote=True)}">回收站</a></nav>
   <div id="app">加载中...</div>
   <script>
     window.$docsify = {{
@@ -1580,6 +1585,7 @@ def generate_master_index_html(repos, title="文档中心", all_page="index_all.
       <a href="{HTML_PREFIX}{all_page}">全部文档（合并视图）</a>
       <a href="{HTML_PREFIX}{config_page}">仓库配置</a>
       <a href="{HTML_PREFIX}md2web_feedback.html">读者反馈</a>
+      <a href="{HTML_PREFIX}md2web_recycle.html?mount=md">回收站</a>
     </div>
     <p class="hint">当前搜索范围：<strong>全部仓库</strong>；默认模式：<strong>文档名和全文</strong>，结果按两类分组显示。</p>
     <div class="results" data-master-results></div>
@@ -1702,6 +1708,7 @@ def main(argv=None):
         generate_master_index_html(repos, args.title)
         generate_config_page()
         generate_feedback_page()
+        generate_standalone_page("md2web_recycle.html", "md2web-recycle.js", "回收站")
 
         print("\n=== 构建完成 ===")
         print("\n启动本地预览: python serve.py")
