@@ -1062,6 +1062,31 @@ body.folder-view-active .docs-page-toc {
   margin: 6px 0 16px;
 }
 
+/* 文档按文件夹分组：标题显示文件夹相对路径 + 配置分组 */
+.folder-view-group {
+  align-items: center;
+  border-bottom: 1px dashed var(--docs-border, #e3e8ee);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 13.5px;
+  gap: 8px;
+  margin: 18px 0 8px;
+  padding-bottom: 5px;
+}
+
+.folder-view-group-name {
+  font-family: var(--docs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-weight: 600;
+}
+
+.folder-view-group-badge {
+  background: #eef4fd;
+  border-radius: 999px;
+  color: var(--docs-accent, #1f6feb);
+  font-size: 11px;
+  padding: 2px 9px;
+}
+
 .folder-view-hint {
   color: var(--docs-muted, #57606a);
   font-size: 12.5px;
@@ -1150,6 +1175,81 @@ body.folder-view-active .docs-page-toc {
 .folder-trash-hint,
 .folder-trash-empty { color: var(--docs-muted, #57606a); font-size: 12px; }
 .folder-trash-empty-action { margin-top: 12px; color: #b42318; }
+
+/* 移动文档弹窗 */
+.folder-move-dialog {
+  align-items: center;
+  background: rgba(15, 23, 42, .45);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  position: fixed;
+  z-index: 1250;
+}
+
+.folder-move-card {
+  background: var(--docs-surface, #fff);
+  border: 1px solid var(--docs-border, #d5dee8);
+  border-radius: 10px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, .25);
+  max-width: min(560px, 92vw);
+  padding: 16px;
+  width: 480px;
+}
+
+.folder-move-head {
+  align-items: center;
+  border-bottom: 1px solid var(--docs-border, #e3e8ee);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding-bottom: 10px;
+}
+
+.folder-move-head button,
+.folder-move-actions button {
+  background: var(--docs-surface, #fff);
+  border: 1px solid var(--docs-border, #d5dee8);
+  border-radius: 6px;
+  color: var(--docs-accent, #1f6feb);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 9px;
+}
+
+.folder-move-field {
+  color: var(--docs-muted, #57606a);
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 5px;
+  margin-top: 12px;
+}
+
+.folder-move-field select {
+  border: 1px solid var(--docs-border, #d5dee8);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  width: 100%;
+}
+
+.folder-move-hint,
+.folder-move-note {
+  color: var(--docs-muted, #57606a);
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 10px 0 0;
+}
+
+.folder-move-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
 
 /* 读者反馈弹窗与固定入口（无 AI 设置图标的页面显示右上角） */
 .feedback-fixed-entry {

@@ -77,6 +77,35 @@ class EntryTests(unittest.TestCase):
         self.assertFalse((self.remote / '重命名.md').exists())
         self.assertTrue(Path(response.get_json()['result']['trash']).is_dir())
 
+    def test_svn_move_document_and_assets(self):
+        """移动文档：svn move + 提交，引用的图片随移。"""
+        content = b"# \xe6\x97\xb6\xe9\x92\x9f\xe6\xa0\x91\n\n![x](images/x.png)\n"
+        for base in (self.root, self.remote):
+            (base / "子目录").mkdir(exist_ok=True)
+            (base / "images").mkdir(exist_ok=True)
+            (base / "images" / "x.png").write_bytes(b"PNG-X")
+            (base / "时钟树设计.md").write_bytes(content)
+        response = self.post('move', path='md/硬件设计/时钟树设计.md', parent='md/硬件设计/子目录')
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertIn('move', self.calls)
+        self.assertIn('commit', self.calls)
+        self.assertTrue((self.remote / "子目录" / "时钟树设计.md").exists())
+        self.assertFalse((self.remote / "时钟树设计.md").exists())
+        self.assertTrue((self.remote / "子目录" / "images" / "x.png").exists())
+        self.assertFalse((self.remote / "images" / "x.png").exists())
+        self.assertTrue((self.root / "子目录" / "时钟树设计.md").exists())
+        self.assertTrue((self.root / "子目录" / "images" / "x.png").exists())
+        self.assertTrue((self.remote / "子目录" / "images" / "x.png").read_bytes() == b"PNG-X")
+
+    def test_svn_move_rejects_cross_repository_and_missing_destination(self):
+        (self.fixture.docs / "md" / "其他").mkdir(exist_ok=True)
+        response = self.post('move', path='md/硬件设计/时钟树设计.md', parent='md/其他')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['error'].count('跨仓库'), 1)
+        response = self.post('move', path='md/硬件设计/时钟树设计.md', parent='md/硬件设计/不存在')
+        self.assertEqual(response.status_code, 404)
+        self.assertNotIn('commit', self.calls)
+
     def test_failed_svn_commit_does_not_change_local_files(self):
         self.svn.commit = mock.Mock(side_effect=SvnError('conflict'))
         response = self.post('rename', path='md/硬件设计/时钟树设计.md', name='新名')

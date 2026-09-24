@@ -399,7 +399,8 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         """文件夹信息（公开只读）：当前文件夹下的文档与子文件夹列表。"""
         path = request.args.get("path") or "md"
         try:
-            listing = operations.folder_listing(md_dir(), path, recursive=request.args.get('recursive') == '1')
+            listing = operations.folder_listing(md_dir(), path, recursive=request.args.get('recursive') == '1',
+                                                config=config)
         except operations.OperationError as error:
             return json_error(error.status, "folder_error", error.message)
         return jsonify({"ok": True, "folder": listing})
@@ -419,6 +420,10 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
     @app.post("/__md/rename")
     def rename_entry():
         return mutate_entry("rename")
+
+    @app.post("/__md/move")
+    def move_entry():
+        return mutate_entry("move")
 
     @app.post("/__md/delete")
     def delete_entry():

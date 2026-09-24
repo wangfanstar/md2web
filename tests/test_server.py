@@ -2884,14 +2884,20 @@ class LocalPublishTests(ServerTestBase):
         self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
         server_database.migrate(self.conn)
         server_database.ensure_admin(self.conn)
-        self.config = server_config.load_config(self.write_config({"repositories": [
-            {"id": "localdocs", "mount": "md/本地库", "sourceMode": "local"},
-            {"id": "lockedlocal", "mount": "md/只读本地", "sourceMode": "local", "readOnly": True},
-            {"id": "hardware", "mount": "md/硬件设计",
-             "url": "https://svn.example.invalid/svn/hardware/trunk/docs/"},
-        ]}), self.docs)
+        self.config = server_config.load_config(self.write_config({
+            "folderGroups": {"md/硬件设计": "硬件"},
+            "repositories": [
+                {"id": "localdocs", "mount": "md/本地库", "sourceMode": "local"},
+                {"id": "lockedlocal", "mount": "md/只读本地", "sourceMode": "local", "readOnly": True},
+                {"id": "hardware", "mount": "md/硬件设计",
+                 "url": "https://svn.example.invalid/svn/hardware/trunk/docs/"},
+            ]}), self.docs)
         for relative, text in (
-            ("其他/文档.md", "# A\n"),
+            ("其他/文档.md", "# A\n\n![图](images/a.png)\n"),
+            ("其他/另一个.md", "# B\n\n![图](images/a.png)\n"),
+            ("其他/仅此一份.md", "# C\n\n![图](images/b.png)\n"),
+            ("其他/images/a.png", "PNG-A"),
+            ("其他/images/b.png", "PNG-B"),
             ("本地库/a.md", "# local\n"),
             ("只读本地/b.md", "# ro\n"),
             ("硬件设计/时钟树.md", "# svn\n"),
@@ -2990,6 +2996,91 @@ class LocalPublishTests(ServerTestBase):
         discarded = self.client.post("/__md/discard", json={"path": path}, headers=headers)
         self.assertEqual(discarded.status_code, 200, discarded.get_data(as_text=True))
         self.assertEqual(self.client.get("/__md/drafts").get_json()["drafts"], [])
+
+    def test_folder_listing_includes_groups_and_all_folders(self):
+        nested_dir = self.docs / "md" / "硬件设计" / "子目录"
+        nested_dir.mkdir(parents=True, exist_ok=True)
+        (nested_dir / "嵌套.md").write_text("# N\n", encoding="utf-8")
+        payload = self.client.get("/__folder?path=md/硬件设计&recursive=1").get_json()["folder"]
+        self.assertEqual(payload["group"], "硬件")
+        all_folders = {item["path"]: item.get("group") for item in payload["allFolders"]}
+        self.assertIn("md/硬件设计", all_folders)
+        self.assertIn("md/硬件设计/子目录", all_folders)
+        self.assertEqual(all_folders["md/硬件设计/子目录"], "硬件")
+        nested = [item for item in payload["documents"] if item["path"].endswith("子目录/嵌套.md")][0]
+        self.assertEqual(nested["folder"], "md/硬件设计/子目录")
+        self.assertEqual(nested["group"], "硬件")
+        top = [item for item in payload["documents"] if item["path"] == "md/硬件设计/时钟树.md"][0]
+        self.assertEqual(top["folder"], "md/硬件设计")
+
+    def test_move_document_between_folders_with_assets(self):
+        headers = {"X-CSRF-Token": self.csrf()}
+        dest = self.docs / "md" / "其他" / "归档"
+        dest.mkdir(parents=True, exist_ok=True)
+        response = self.client.post("/__md/move",
+                                    json={"path": "md/其他/文档.md", "parent": "md/其他/归档",
+                                          "requestId": "11" * 16}, headers=headers)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        result = response.get_json()["result"]
+        self.assertEqual(result["path"], "md/其他/归档/文档.md")
+        self.assertEqual(result["from"], "md/其他/文档.md")
+        self.assertTrue((dest / "文档.md").is_file())
+        self.assertFalse((self.docs / "md" / "其他" / "文档.md").exists())
+        # 图片被同目录「另一个.md」也引用 → 保留原件并在目标目录复制
+        self.assertTrue((dest / "images" / "a.png").is_file())
+        self.assertTrue((self.docs / "md" / "其他" / "images" / "a.png").is_file())
+        self.assertIn("images/a.png", result["assets"]["copied"])
+        # 只被本文档引用的资源 → 移动
+        moved = self.client.post("/__md/move",
+                                 json={"path": "md/其他/仅此一份.md", "parent": "md/其他/归档",
+                                       "requestId": "22" * 16}, headers=headers)
+        self.assertEqual(moved.status_code, 200, moved.get_data(as_text=True))
+        assets = moved.get_json()["result"]["assets"]
+        self.assertIn("images/b.png", assets["moved"])
+        self.assertTrue((dest / "images" / "b.png").is_file())
+        self.assertFalse((self.docs / "md" / "其他" / "images" / "b.png").exists())
+        # 原地移动 / 同名冲突 / 跨仓库 / 只允许文档
+        same = self.client.post("/__md/move",
+                                json={"path": "md/其他/归档/文档.md", "parent": "md/其他/归档",
+                                      "requestId": "33" * 16}, headers=headers)
+        self.assertEqual(same.status_code, 400)
+        (dest / "另一个.md").write_text("# 占位\n", encoding="utf-8")
+        conflict = self.client.post("/__md/move",
+                                    json={"path": "md/其他/另一个.md", "parent": "md/其他/归档",
+                                          "requestId": "44" * 16}, headers=headers)
+        self.assertEqual(conflict.status_code, 409)
+        cross = self.client.post("/__md/move",
+                                 json={"path": "md/其他/另一个.md", "parent": "md/硬件设计",
+                                       "requestId": "55" * 16}, headers=headers)
+        self.assertEqual(cross.status_code, 400)
+        self.assertEqual(cross.get_json()["error"].count("跨仓库"), 1)
+        folder = self.client.post("/__md/move",
+                                  json={"path": "md/其他/归档", "parent": "md/其他",
+                                        "requestId": "66" * 16}, headers=headers)
+        self.assertEqual(folder.status_code, 400)
+        self.assertEqual(self.client.post("/__md/move",
+                                          json={"path": "md/其他/另一个.md", "parent": "md/其他/归档"}
+                                          ).status_code, 403)
+        anonymous = self.app.test_client()
+        self.assertEqual(anonymous.post("/__md/move",
+                                        json={"path": "md/其他/另一个.md", "parent": "md/其他/归档"}
+                                        ).status_code, 401)
+
+    def test_move_blocked_by_draft_and_readonly(self):
+        headers = {"X-CSRF-Token": self.csrf()}
+        (self.docs / "md" / "本地库" / "子目录").mkdir(parents=True, exist_ok=True)
+        drafted = self.client.put("/__md/draft",
+                                  json={"path": "md/本地库/a.md", "content": "# x\n", "expectedVersion": 0},
+                                  headers=headers)
+        self.assertEqual(drafted.status_code, 200, drafted.get_data(as_text=True))
+        blocked = self.client.post("/__md/move",
+                                   json={"path": "md/本地库/a.md", "parent": "md/本地库/子目录",
+                                         "requestId": "77" * 16}, headers=headers)
+        self.assertEqual(blocked.status_code, 409)
+        readonly = self.client.post("/__md/move",
+                                    json={"path": "md/只读本地/b.md", "parent": "md/其他",
+                                          "requestId": "88" * 16}, headers=headers)
+        self.assertEqual(readonly.status_code, 403)
 
 
 class FeedbackTests(ServerTestBase):

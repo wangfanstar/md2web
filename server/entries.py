@@ -98,6 +98,8 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
         if target.is_file() and target.suffix.lower() != '.md':
             raise operations.OperationError(400, '只允许操作 Markdown 文档或文件夹')
     destination = None
+    dest_parent = None
+    dest_path = None
     kind = payload.get('kind') or 'document'
     if action in ('create', 'rename'):
         name = operations._safe_name(payload.get('name'))
@@ -111,6 +113,20 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
             raise operations.OperationError(409, '同名目标已存在')
         if action == 'create' and (not target.is_dir() or kind not in ('folder', 'document')):
             raise operations.OperationError(400, '请选择有效目录及文档/文件夹类型')
+    elif action == 'move':
+        dest_parent, dest_path = canonical(md_dir, payload.get('parent') or '')
+        if not dest_parent.is_dir():
+            raise operations.OperationError(404, '目标文件夹不存在')
+        if dest_parent == target.parent:
+            raise operations.OperationError(400, '目标文件夹与当前位置相同')
+        destination = dest_parent / target.name
+        if destination.exists():
+            raise operations.OperationError(409, '目标文件夹已有同名文档')
+        dest_binding = match_repository(config, dest_path)
+        if (binding or {}).get('id') != (dest_binding or {}).get('id'):
+            raise operations.OperationError(400, '不能跨仓库移动文档：请选择同一仓库内的文件夹')
+        if dest_binding and (dest_binding.get('read_only') or not dest_binding.get('allow_commit', True)):
+            raise operations.OperationError(403, '目标仓库只读或未允许在线修改')
     with db_lock:
         if action not in ('create', 'trash-empty'):
             check_drafts(conn, path)
@@ -148,7 +164,9 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
             svn.checkout(binding['url'], wc, revision=info.get('revision'), depth='infinity', **auth)
             relative = path[len(binding['mount']):].lstrip('/')
             source = wc / relative
-            remote_destination = (source if action == 'create' else source.parent) / destination.name if destination else None
+            remote_destination = None
+            if destination is not None and action != 'move':
+                remote_destination = (source if action == 'create' else source.parent) / destination.name
             if action not in ('create', 'restore', 'trash-empty') and signature(source) != baseline:
                 raise operations.OperationError(409, '远端与本地内容不同，请先同步并检查后再操作')
             if remote_destination and remote_destination.exists():
@@ -163,6 +181,36 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
                 svn.add(remote_destination, **auth)
             elif action == 'rename':
                 svn.move(source, remote_destination, **auth)
+            elif action == 'move':
+                relative_parent = dest_path[len(binding['mount']):].lstrip('/')
+                remote_parent = (wc / relative_parent) if relative_parent else wc
+                remote_destination = remote_parent / destination.name
+                if not remote_parent.is_dir():
+                    raise operations.OperationError(409, 'SVN 中不存在目标文件夹，请先同步')
+                if remote_destination.exists():
+                    raise operations.OperationError(409, 'SVN 中已存在同名目标，请先同步')
+                svn.move(source, remote_destination, **auth)
+                md_root = Path(md_dir).resolve()
+                mount_prefix = binding['mount'][len('md/'):].lstrip('/') if binding['mount'].startswith('md/') else ''
+
+                def wc_path(local_path):
+                    relative = Path(local_path).resolve().relative_to(md_root).as_posix()
+                    if mount_prefix and relative.startswith(mount_prefix + '/'):
+                        relative = relative[len(mount_prefix) + 1:]
+                    return wc / relative
+
+                def wc_prepare(local_target):
+                    target = wc_path(local_target)
+                    if not target.parent.exists():
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        svn.add(target.parent, **auth)
+                    return target
+
+                operations.move_document_assets(
+                    md_dir, path, dest_path,
+                    move=lambda src, dst: svn.move(wc_path(src), wc_prepare(dst), **auth),
+                    copy=lambda src, dst: (shutil.copy2(str(wc_path(src)), str(wc_prepare(dst))),
+                                           svn.add(wc_prepare(dst), **auth)))
             elif action == 'delete':
                 remote_trash = wc / '回收站' / payload['_trash_id']
                 remote_payload = remote_trash / 'payload'
@@ -239,6 +287,8 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
             result = operations.create_entry(md_dir, path, kind, destination.name)
         elif action == 'rename':
             result = operations.rename_entry(md_dir, path, destination.name)
+        elif action == 'move':
+            result = operations.move_entry(md_dir, path, dest_path)
         elif action == 'delete':
             result = recycle.move_to_trash(md_dir, path, binding['mount'] if binding else 'md', payload.get('_trash_id'))
         elif action == 'restore':

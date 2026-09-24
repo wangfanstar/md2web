@@ -798,37 +798,67 @@ def list_md_folders(md_dir, repos=None):
     return folders
 
 
-def folder_listing(md_dir, relative, recursive=False):
-    """列出某个文件夹下的文档与子文件夹（公开信息：名称/大小/修改时间）。"""
+def _folder_group(config, folder_path):
+    """文件夹的分组名称：优先 folderGroups，其次仓库配置的 group，默认「默认」。"""
+    parts = [part for part in str(folder_path or "").strip("/").split("/") if part]
+    if config is None or len(parts) < 2:
+        return ""
+    top = "md/" + parts[1]
+    groups = config.get("folder_groups") or {}
+    if groups.get(top):
+        return groups[top]
+    for repo in config.get("repositories") or []:
+        if repo.get("mount") == top:
+            return repo.get("group") or "默认"
+    return "默认"
+
+
+def folder_listing(md_dir, relative, recursive=False, config=None):
+    """列出某个文件夹下的文档与子文件夹（公开信息：名称/大小/修改时间/分组）。"""
     target = _managed_path(md_dir, relative)
     if not target.is_dir():
         raise OperationError(404, "文件夹不存在")
     root = Path(md_dir).resolve()
+    group_of = lambda path: _folder_group(config, path)
+
+    def folder_path_of(path):
+        return path.rsplit("/", 1)[0] if "/" in path else path
+
     documents = []
     folders = []
     for entry in sorted(target.iterdir(), key=lambda item: item.name):
         if entry.name.startswith(".") or entry.name == "回收站":
             continue
         if entry.is_dir():
-            folders.append({"name": entry.name,
-                            "path": "md/" + entry.resolve().relative_to(root).as_posix()})
+            folder_path = "md/" + entry.resolve().relative_to(root).as_posix()
+            folders.append({"name": entry.name, "path": folder_path, "group": group_of(folder_path)})
         elif entry.suffix.lower() == ".md":
             stat = entry.stat()
+            document_path = "md/" + entry.resolve().relative_to(root).as_posix()
+            folder_path = folder_path_of(document_path)
             documents.append({
                 "name": entry.name,
-                "path": "md/" + entry.resolve().relative_to(root).as_posix(),
+                "path": document_path,
+                "folder": folder_path,
+                "group": group_of(folder_path),
                 "size": int(stat.st_size),
                 "mtime": int(stat.st_mtime),
             })
+    target_path = "md/" + target.resolve().relative_to(root).as_posix()
+    all_folders = []
     if recursive:
+        all_folders.append({"name": target.name, "path": target_path, "group": group_of(target_path)})
         for child in folders[:]:
-            nested = folder_listing(md_dir, child["path"], recursive=True)
+            nested = folder_listing(md_dir, child["path"], recursive=True, config=config)
             documents.extend(nested["documents"])
+            all_folders.extend(nested["allFolders"])
     return {
-        "path": "md/" + target.resolve().relative_to(root).as_posix(),
+        "path": target_path,
         "name": target.name,
+        "group": group_of(target_path),
         "documents": documents,
         "folders": folders,
+        "allFolders": all_folders,
         "totalBytes": sum(item["size"] for item in documents),
     }
 
@@ -872,6 +902,98 @@ def rename_entry(md_dir, relative, name):
     target.rename(new_path)
     return {"path": "md/" + new_path.resolve().relative_to(Path(md_dir).resolve()).as_posix(),
             "oldPath": str(relative)}
+
+
+def _file_digest(path):
+    digest = hashlib.sha1()
+    with open(str(path), "rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _referenced_assets(md_dir, relative, content):
+    return (documents.referenced_images(Path(md_dir), relative, content)
+            + documents.referenced_attachments(Path(md_dir), relative, content))
+
+
+def move_document_assets(md_dir, relative, parent, move=None, copy=None):
+    """把文档引用的 images/附件 搬到新目录：
+
+    - 只被本文档引用 → 移动；被同目录其他文档也引用 → 复制（保留原文件）；
+    - 目标目录已有同名资源：内容相同则跳过，内容不同则跳过并计入 conflicts。
+
+    move/copy 为回调 (source_path, target_path)，默认在 docs/md 上直接操作（SVN 工作副本可传入）。
+    返回 {"moved": [...], "copied": [...], "conflicts": [...]}（引用相对路径）。
+    """
+    empty = {"moved": [], "copied": [], "conflicts": []}
+    base = Path(md_dir).resolve()
+    source = _managed_path(md_dir, relative)
+    directory = _managed_path(md_dir, parent)
+    try:
+        content = documents.read_md_text(source)
+    except (OSError, UnicodeDecodeError):
+        return empty
+    refs = _referenced_assets(base, relative, content)
+    if not refs:
+        return empty
+    folder_rel = "md/" + source.parent.resolve().relative_to(base).as_posix()
+    others_refs = set()
+    for item in sorted(source.parent.glob("*.md")):
+        if item.name == source.name:
+            continue
+        try:
+            other_text = documents.read_md_text(item)
+        except (OSError, UnicodeDecodeError):
+            continue
+        others_refs.update(_referenced_assets(base, folder_rel + "/" + item.name, other_text))
+    result = {"moved": [], "copied": [], "conflicts": []}
+    for ref in refs:
+        old_asset = source.parent / ref
+        if not old_asset.is_file():
+            continue
+        new_asset = directory / ref
+        if new_asset.exists():
+            try:
+                same = _file_digest(old_asset) == _file_digest(new_asset)
+            except OSError:
+                same = False
+            if not same:
+                result["conflicts"].append(ref)
+            continue
+        new_asset.parent.mkdir(parents=True, exist_ok=True)
+        if ref in others_refs:
+            (copy or shutil.copy2)(str(old_asset), str(new_asset))
+            result["copied"].append(ref)
+        else:
+            (move or shutil.move)(str(old_asset), str(new_asset))
+            result["moved"].append(ref)
+    return result
+
+
+def move_entry(md_dir, relative, parent):
+    """把文档移动到另一个文件夹（保持文件名），并随移引用的 images/附件。"""
+    source = _managed_path(md_dir, relative)
+    directory = _managed_path(md_dir, parent)
+    base = Path(md_dir).resolve()
+    source_path = "md/" + source.resolve().relative_to(base).as_posix()
+    if not source.is_file() or source.suffix.lower() != ".md":
+        raise OperationError(400, "只允许移动 Markdown 文档")
+    if not directory.is_dir():
+        raise OperationError(404, "目标文件夹不存在")
+    if source.parent == directory:
+        raise OperationError(400, "目标文件夹与当前位置相同")
+    destination = directory / source.name
+    if destination.exists():
+        raise OperationError(409, "目标文件夹已有同名文档")
+    assets = move_document_assets(md_dir, relative, parent)
+    shutil.move(str(source), str(destination))
+    return {
+        "path": "md/" + destination.resolve().relative_to(base).as_posix(),
+        "from": source_path,
+        "kind": "document",
+        "assets": assets,
+    }
 
 
 def delete_entry(md_dir, relative, trash_root):

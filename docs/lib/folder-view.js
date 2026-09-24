@@ -36,6 +36,38 @@
     return folder || 'md';
   }
 
+  // 按父文件夹给文档分组（路径排序、组内按名称排序），并带上文件夹的分组信息
+  function groupDocuments(documents) {
+    var groups = {};
+    var order = [];
+    (documents || []).forEach(function (item) {
+      var folder = folderPathOf(item.path);
+      if (!groups[folder]) {
+        groups[folder] = { folder: folder, group: item.group || '', documents: [] };
+        order.push(folder);
+      } else if (!groups[folder].group && item.group) {
+        groups[folder].group = item.group;
+      }
+      groups[folder].documents.push(item);
+    });
+    return order.sort().map(function (folder) {
+      var section = groups[folder];
+      section.documents.sort(function (left, right) {
+        return String(left.name || '').localeCompare(String(right.name || ''), 'zh-Hans-CN');
+      });
+      return section;
+    });
+  }
+
+  function relativeFolderLabel(root, folder) {
+    var base = String(root || '');
+    var value = String(folder || '');
+    if (base && (value === base || value.indexOf(base + '/') === 0)) {
+      value = value.slice(base.length).replace(/^\/+/, '');
+    }
+    return value || '（当前文件夹）';
+  }
+
   function formatBytes(size) {
     var value = Number(size || 0);
     if (value < 1024) return value + ' B';
@@ -67,16 +99,36 @@
       return;
     }
     document.body.classList.add('folder-view-active');
-    var rows = (folder.documents || []).map(function (item) {
-      return '<tr>'
-        + '<td><a href="' + escapeHtml(siteForPath(item.path)) + '#/' + escapeHtml(item.path) + '">'
-        + escapeHtml(item.name) + '</a></td>'
-        + '<td>' + escapeHtml(formatBytes(item.size)) + '</td>'
-        + '<td>' + escapeHtml(formatTime(item.mtime)) + '</td>'
-        + '<td><button type="button" data-folder-action="menu" data-path="' + escapeHtml(item.path)
-        + '">操作</button></td>'
-        + '</tr>';
-    }).join('');
+    function documentTable(items) {
+      var rows = (items || []).map(function (item) {
+        return '<tr>'
+          + '<td><a href="' + escapeHtml(siteForPath(item.path)) + '#/' + escapeHtml(item.path) + '" title="'
+          + escapeHtml(item.path) + '">'
+          + escapeHtml(item.name) + '</a></td>'
+          + '<td>' + escapeHtml(formatBytes(item.size)) + '</td>'
+          + '<td>' + escapeHtml(formatTime(item.mtime)) + '</td>'
+          + '<td><button type="button" data-folder-action="menu" data-path="' + escapeHtml(item.path)
+          + '">操作</button></td>'
+          + '</tr>';
+      }).join('');
+      return '<table class="folder-view-table"><thead><tr><th>名称</th><th>大小</th><th>更新时间</th><th></th></tr></thead>'
+        + '<tbody>' + (rows || '<tr><td colspan="4">该文件夹暂无文档</td></tr>') + '</tbody></table>';
+    }
+    var sections = groupDocuments(folder.documents || []);
+    var singleFolder = sections.length <= 1 && (!sections.length || sections[0].folder === folder.path);
+    var documentsHtml;
+    if (singleFolder) {
+      documentsHtml = '<h2>文档</h2>' + documentTable(sections.length ? sections[0].documents : []);
+    } else {
+      documentsHtml = '<h2>文档</h2>' + sections.map(function (section) {
+        var badge = section.group
+          ? '<span class="folder-view-group-badge">分组：' + escapeHtml(section.group) + '</span>'
+          : '';
+        return '<h3 class="folder-view-group"><span class="folder-view-group-name">'
+          + escapeHtml(relativeFolderLabel(folder.path, section.folder)) + '/</span>' + badge + '</h3>'
+          + documentTable(section.documents);
+      }).join('');
+    }
     var folders = (folder.folders || []).map(function (item) {
       return '<li><a href="#/' + escapeHtml(item.path) + '/">' + escapeHtml(item.name) + '/</a>'
         + '<button type="button" data-folder-action="menu" data-path="' + escapeHtml(item.path)
@@ -93,11 +145,9 @@
         + ' · 文档 ' + ((folder.documents || []).length) + ' 个 · 合计 '
         + escapeHtml(formatBytes(folder.totalBytes)) + '</p>',
       (folders ? '<h2>子文件夹</h2><ul class="folder-view-folders">' + folders + '</ul>' : ''),
-      '<h2>文档</h2>',
-      '<table class="folder-view-table"><thead><tr><th>名称</th><th>大小</th><th>更新时间</th><th></th></tr></thead>'
-        + '<tbody>' + (rows || '<tr><td colspan="4">该文件夹暂无文档</td></tr>') + '</tbody></table>',
-      '<p class="folder-view-hint">在条目上右键（或点「操作」）可新建、重命名、删除、设置分组；'
-        + '点击文档名会在对应仓库入口页打开。</p>',
+      documentsHtml,
+      '<p class="folder-view-hint">在条目上右键（或点「操作」）可新建、重命名、移动到其他文件夹、删除、设置分组；'
+        + '正文按文件夹分组显示（标题里是文件夹路径与分组）。</p>',
       '</div>'
     ].join('');
   }
@@ -242,6 +292,74 @@
     }).catch(function (error) { window.alert('读取回收站失败：' + error.message); });
   }
 
+  function openMoveDialog(path) {
+    var top = 'md/' + String(path || '').split('/')[1];
+    api('__folder?path=' + encodeURIComponent(top) + '&recursive=1').then(function (payload) {
+      closeMenu();
+      var folder = payload.folder || {};
+      var current = folderPathOf(path);
+      var targets = (folder.allFolders || []).filter(function (item) {
+        if (!item.path || item.path === current) {
+          return false;
+        }
+        var name = String(item.name || item.path.split('/').pop());
+        return name !== 'images' && name !== '附件';
+      });
+      var dialog = document.createElement('div');
+      dialog.className = 'folder-move-dialog';
+      dialog.innerHTML = '<div class="folder-move-card">'
+        + '<div class="folder-move-head"><strong>移动文档到…</strong>'
+        + '<button type="button" data-move-close>关闭</button></div>'
+        + '<p class="folder-move-hint">文档：<code>' + escapeHtml(path) + '</code></p>'
+        + '<label class="folder-move-field">目标文件夹'
+        + '<select data-move-target>' + targets.map(function (item) {
+          var label = item.path + (item.group ? '（分组：' + item.group + '）' : '');
+          return '<option value="' + escapeHtml(item.path) + '">' + escapeHtml(label) + '</option>';
+        }).join('') + '</select></label>'
+        + '<p class="folder-move-note">移动会带上该文档在 <code>images/</code>、<code>附件/</code> 里引用的文件；'
+        + '若文件同时被源文件夹的其他文档引用，会保留原文件并在目标文件夹复制一份。跨仓库不能移动。</p>'
+        + '<div class="folder-move-actions"><button type="button" data-move-confirm>移动</button>'
+        + '<button type="button" data-move-close>取消</button></div>'
+        + '</div>';
+      document.body.appendChild(dialog);
+      dialog.addEventListener('click', function (event) {
+        if (event.target === dialog || event.target.closest('[data-move-close]')) {
+          dialog.remove();
+          return;
+        }
+        if (!event.target.closest('[data-move-confirm]')) {
+          return;
+        }
+        var select = dialog.querySelector('[data-move-target]');
+        var parent = select ? select.value : '';
+        if (!parent) {
+          window.alert('没有可移动的目标文件夹');
+          return;
+        }
+        dialog.remove();
+        mutate('__md/move', { path: path, parent: parent }).then(function (result) {
+          var info = result.result || {};
+          var assets = info.assets || {};
+          var notes = [operationNotice('已移动文档到 ' + parent, result.result)];
+          if ((assets.moved || []).length) {
+            notes.push('随移资源：' + assets.moved.join('、'));
+          }
+          if ((assets.copied || []).length) {
+            notes.push('被其他文档引用、已复制：' + assets.copied.join('、'));
+          }
+          if ((assets.conflicts || []).length) {
+            notes.push('目标目录已有同名资源、未覆盖：' + assets.conflicts.join('、') + '（请检查该文档引用）');
+          }
+          reloadSoon(notes.join('\n'));
+        }).catch(function (error) {
+          window.alert('移动失败：' + error.message);
+        });
+      });
+    }).catch(function (error) {
+      window.alert('读取文件夹列表失败：' + error.message);
+    });
+  }
+
   function runAction(action, path, isFolder) {
     var parent = isFolder ? (path || currentRoute()) : folderPathOf(path || currentRoute());
     if (action === 'new-document') {
@@ -258,6 +376,14 @@
       mutate('__md/create', { parent: parent, kind: 'folder', name: folderName })
         .then(function (payload) { reloadSoon(operationNotice('已创建文件夹：' + folderName, payload.result)); })
         .catch(function (error) { window.alert('创建失败：' + error.message); });
+      return;
+    }
+    if (action === 'move') {
+      if (isFolder) {
+        window.alert('只支持移动 Markdown 文档；文件夹请用重命名，或进入文件夹后逐个移动文档');
+        return;
+      }
+      openMoveDialog(path);
       return;
     }
     if (action === 'rename') {
@@ -313,6 +439,7 @@
       '<button type="button" data-menu-action="new-document">新建文档</button>',
       '<button type="button" data-menu-action="new-folder">新建文件夹</button>',
       '<button type="button" data-menu-action="rename">重命名</button>',
+      '<button type="button" data-menu-action="move">移动到…</button>',
       '<button type="button" data-menu-action="delete">删除</button>',
       '<button type="button" data-menu-action="group">设置分组…</button>'
     ].join('');
@@ -406,6 +533,7 @@
     });
   }
   window.addEventListener('hashchange', function () { window.setTimeout(loadFolderView, 120); });
-  window.FolderView = { isFolderRoute: isFolderRoute, reload: loadFolderView, pathFromElement: pathFromElement };
+  window.FolderView = { isFolderRoute: isFolderRoute, reload: loadFolderView, pathFromElement: pathFromElement,
+                        groupDocuments: groupDocuments };
   window.setTimeout(loadFolderView, 200);
 }());

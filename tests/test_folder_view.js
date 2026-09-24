@@ -99,3 +99,26 @@ test('menu buttons keep working through data-path', () => {
   };
   assert.equal(view.pathFromElement(node), 'md/软件工具链/编译工具链');
 });
+
+test('groupDocuments groups documents by parent folder in path order', () => {
+  const view = loadFolderView();
+  const sections = view.groupDocuments([
+    { name: 'b.md', path: 'md/硬件设计/子目录/b.md', group: '硬件' },
+    { name: 'a.md', path: 'md/硬件设计/a.md', group: '硬件' },
+    { name: 'c.md', path: 'md/硬件设计/子目录/更深/c.md', group: '硬件' },
+    { name: 'a2.md', path: 'md/硬件设计/子目录/a2.md', group: '硬件' }
+  ]);
+  assert.equal(sections.length, 3);
+  assert.deepEqual(Array.from(sections, (section) => section.folder),
+    ['md/硬件设计', 'md/硬件设计/子目录', 'md/硬件设计/子目录/更深']);
+  assert.equal(sections[0].group, '硬件');
+  assert.deepEqual(Array.from(sections[1].documents, (item) => item.name), ['a2.md', 'b.md']);
+});
+
+test('groupDocuments keeps documents without group info', () => {
+  const view = loadFolderView();
+  const sections = view.groupDocuments([{ name: 'a.md', path: 'md/其他/a.md' }]);
+  assert.equal(sections.length, 1);
+  assert.equal(sections[0].group, '');
+  assert.equal(sections[0].folder, 'md/其他');
+});
