@@ -7,7 +7,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from . import database, operations
+from . import database, documents, operations, recycle
 from .config import match_repository
 from .content_lock import serialized
 from .svn import SvnError
@@ -59,7 +59,7 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
     request_id = payload.get('requestId') or uuid.uuid4().hex
     if not re.match(r'^[a-fA-F0-9]{32}$', str(request_id)):
         raise operations.OperationError(400, '操作 ID 不合法')
-    request_data = {key: payload.get(key) for key in ('parent', 'path', 'name', 'kind')}
+    request_data = {key: payload.get(key) for key in ('parent', 'path', 'name', 'kind', 'mount', 'entryId')}
     with db_lock:
         previous = operations.get_operation(conn, request_id)
         if previous:
@@ -71,11 +71,24 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
                 return manifest['result']
             raise operations.OperationError(409, '该操作已执行，请核对操作状态，勿重复提交',
                                              operationId=request_id, state=previous['state'])
-    target, path = canonical(md_dir, payload.get('parent', 'md') if action == 'create' else payload.get('path'))
+    if action == 'restore':
+        mount = str(payload.get('mount') or 'md').replace('\\', '/').rstrip('/')
+        candidates = recycle.list_entries(md_dir, mount)
+        selected = [item for item in candidates if item.get('id') == payload.get('entryId')]
+        if not selected:
+            raise operations.OperationError(404, '回收站条目不存在')
+        path = selected[0]['path']
+        target, path = canonical(md_dir, path)
+        payload['_trash_meta'] = selected[0]
+    elif action == 'trash-empty':
+        mount = str(payload.get('mount') or 'md').replace('\\', '/').rstrip('/')
+        target, path = canonical(md_dir, mount)
+    else:
+        target, path = canonical(md_dir, payload.get('parent', 'md') if action == 'create' else payload.get('path'))
     binding = match_repository(config, path)
     if binding and (binding.get('read_only') or not binding.get('allow_commit', True)):
         raise operations.OperationError(403, '该仓库只读或未允许在线修改 / 合入 SVN')
-    if action != 'create':
+    if action not in ('create', 'restore', 'trash-empty'):
         if path == 'md' or any(repo['mount'] == path or repo['mount'].startswith(path + '/')
                                for repo in config.get('repositories', [])):
             raise operations.OperationError(400, '仓库根目录请在仓库配置页管理，不能在此删除或重命名')
@@ -98,7 +111,7 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
         if action == 'create' and (not target.is_dir() or kind not in ('folder', 'document')):
             raise operations.OperationError(400, '请选择有效目录及文档/文件夹类型')
     with db_lock:
-        if action != 'create':
+        if action not in ('create', 'trash-empty'):
             check_drafts(conn, path)
         blocked = pending(conn, binding['mount'] if binding else path)
         if blocked:
@@ -117,7 +130,7 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
     committed = False
     committing = False
     revision = None
-    baseline = signature(target) if action != 'create' else None
+    baseline = signature(target) if action not in ('create', 'restore', 'trash-empty') else None
     try:
         if svn_enabled:
             staging = Path(tempfile.mkdtemp(prefix='md2web-entry-'))
@@ -133,7 +146,7 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
             relative = path[len(binding['mount']):].lstrip('/')
             source = wc / relative
             remote_destination = (source if action == 'create' else source.parent) / destination.name if destination else None
-            if action != 'create' and signature(source) != baseline:
+            if action not in ('create', 'restore', 'trash-empty') and signature(source) != baseline:
                 raise operations.OperationError(409, '远端与本地内容不同，请先同步并检查后再操作')
             if remote_destination and remote_destination.exists():
                 raise operations.OperationError(409, 'SVN 中已存在同名目标，请先同步')
@@ -147,27 +160,62 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
                 svn.add(remote_destination, **auth)
             elif action == 'rename':
                 svn.move(source, remote_destination, **auth)
-            else:
+            elif action == 'delete':
+                if source.is_file():
+                    content = documents.read_md_text(source)
+                    for asset in recycle._asset_paths(md_dir, path, content):
+                        asset_rel = asset.relative_to(Path(md_dir).resolve()).as_posix()
+                        remote_asset = wc / asset_rel[len(binding['mount']):].lstrip('/')
+                        if remote_asset.exists():
+                            svn.delete(remote_asset, **auth)
                 svn.delete(source, **auth)
-            committing = True
-            revision = svn.commit(wc, '文档管理：%s %s [%s]' % (action, path, request_id), **auth)
-            if not revision:
-                raise operations.OperationError(409, '未获得提交版本号，请核对 SVN 日志', state='uncertain')
-            committed = True
-            with db_lock:
-                operations._set_state(conn, request_id, 'svn_committed', svn_revision=revision)
+            elif action == 'restore':
+                meta = payload['_trash_meta']
+                entry = recycle._entry_path(recycle.root_for(md_dir, binding['mount']), meta['id'])
+                saved = entry / ('document' if meta.get('kind') == 'document' else 'folder')
+                if not saved.exists():
+                    raise operations.OperationError(409, '回收站内容缺失，无法恢复')
+                remote_target = wc / relative
+                remote_target.parent.mkdir(parents=True, exist_ok=True)
+                if saved.is_dir():
+                    shutil.copytree(str(saved), str(remote_target))
+                else:
+                    shutil.copy2(str(saved), str(remote_target))
+                svn.add(remote_target, **auth)
+                for asset_rel in meta.get('assets') or []:
+                    saved_asset = entry / 'payload' / 'assets' / asset_rel
+                    remote_asset = wc / asset_rel[len(binding['mount']):].lstrip('/')
+                    if saved_asset.exists() and not remote_asset.exists():
+                        remote_asset.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(str(saved_asset), str(remote_asset))
+                        svn.add(remote_asset, **auth)
+            elif action == 'trash-empty':
+                # 回收站内容已经在之前的删除提交中脱离版本树；清空只清理本地保留物。
+                pass
+            if action != 'trash-empty':
+                committing = True
+                revision = svn.commit(wc, '文档管理：%s %s [%s]' % (action, path, request_id), **auth)
+                if not revision:
+                    raise operations.OperationError(409, '未获得提交版本号，请核对 SVN 日志', state='uncertain')
+                committed = True
+                with db_lock:
+                    operations._set_state(conn, request_id, 'svn_committed', svn_revision=revision)
         # 外部文件写入或提交期间出现的新草稿不能被覆盖。
         with db_lock:
             if action != 'create':
                 check_drafts(conn, path)
-        if action != 'create' and signature(target) != baseline:
+        if action not in ('create', 'restore', 'trash-empty') and signature(target) != baseline:
             raise operations.OperationError(409, '本地内容在操作期间变化，请核对后再同步')
         if action == 'create':
             result = operations.create_entry(md_dir, path, kind, destination.name)
         elif action == 'rename':
             result = operations.rename_entry(md_dir, path, destination.name)
+        elif action == 'delete':
+            result = recycle.move_to_trash(md_dir, path, binding['mount'] if binding else 'md')
+        elif action == 'restore':
+            result = recycle.restore(md_dir, payload.get('mount') or 'md', payload.get('entryId'))
         else:
-            result = operations.delete_entry(md_dir, path, config['storage']['database'].parent / 'trash')
+            result = {'count': recycle.empty(md_dir, payload.get('mount') or 'md', payload.get('entryId'))}
         result.update({'operationId': request_id, 'svnRevision': revision, 'state': 'published'})
         manifest['result'] = result
         with db_lock:

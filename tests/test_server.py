@@ -2700,6 +2700,14 @@ class FolderOpsTests(ServerTestBase):
         payload = self.client.get("/__folder?path=md/硬件设计&recursive=1").get_json()
         self.assertIn("接口/uart.md", [item["path"].split("md/硬件设计/", 1)[-1] for item in payload["folder"]["documents"]])
 
+    def test_folder_listing_hides_recycle_bin(self):
+        recycle = self.docs / "md" / "硬件设计" / "回收站"
+        recycle.mkdir(parents=True, exist_ok=True)
+        (recycle / "hidden.md").write_text("# hidden\n", encoding="utf-8")
+        payload = self.client.get("/__folder?path=md/硬件设计&recursive=1").get_json()
+        self.assertNotIn("hidden.md", [item["name"] for item in payload["folder"]["documents"]])
+        self.assertNotIn("回收站", [item["name"] for item in payload["folder"]["folders"]])
+
     def test_create_rename_delete_flow(self):
         for repository in self.config.get("repositories") or []:
             repository["source_mode"] = "local"
@@ -2717,7 +2725,7 @@ class FolderOpsTests(ServerTestBase):
                                    headers=headers).get_json()
         self.assertTrue(deleted["ok"], deleted)
         self.assertFalse((self.docs / "md" / "硬件设计" / "接口说明.md").exists())
-        self.assertTrue(Path(deleted["result"]["trash"]).is_file())
+        self.assertTrue(Path(deleted["result"]["trash"]).is_dir())
 
     def test_create_folder_and_reject_bad_paths(self):
         for repository in self.config.get("repositories") or []:

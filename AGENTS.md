@@ -54,8 +54,9 @@ docs/html/images|uploads                  (反馈截图/附件，运行时写入
 | `config/server.example.json` | 认证服务示例配置（可提交）；`config/server.local.json` 为真实配置，不提交（缺失时 `--config` 会自动生成默认文件） |
 | `tests/test_server.py` | 认证服务单元/HTTP 集成测试（配置、数据库、SVN 假 CLI、登录会话、静态白名单） |
 | `web/custom-search.js` / `.css` | 搜索算法与界面、结果列表、搜索/目录视图切换、**按仓库多选过滤**（⚙ 筛选区的仓库勾选菜单，`state.repoFilter` + `localStorage: md2web:search-repos`，与范围/模式叠加）、正文命中高亮、右侧本文目录 |
-| `web/folder-view.js` | `html/index_all.html` 与各仓库入口页的递归 Markdown 文件夹视图（正文只显示当前仓库/文件夹的文档与子文件夹，隐藏本文目录）+ 列表按钮和左侧导航全局右键菜单共用新建文档/新建文件夹/重命名/删除/设置分组；对应接口 `GET /__folder?recursive=1`（公开）与 `POST /__md/create|rename|delete`、`POST /__admin/group`；关联 SVN 的操作由 `server/entries.py` 先提交成功再发布本地，`.md` 文档路由保持正文与右侧本文目录 |
+| `web/folder-view.js` | `html/index_all.html` 与各仓库入口页的递归 Markdown 文件夹视图（正文只显示当前仓库/文件夹的文档与子文件夹，隐藏本文目录）+ 列表按钮和左侧导航全局右键菜单共用新建文档/新建文件夹/重命名/删除/回收站/设置分组；对应接口 `GET /__folder?recursive=1`、`GET /__trash`（登录）与 `POST /__md/create|rename|delete|restore|trash-empty`、`POST /__admin/group`；关联 SVN 的操作由 `server/entries.py` 先提交成功再发布本地，`.md` 文档路由保持正文与右侧本文目录 |
 | `server/entries.py` / `server/content_lock.py` | 文档/文件夹在线操作的路径、权限、活动草稿、远端基线、幂等操作号与 SVN 工作副本提交；提交、发布、后台同步使用独立内容锁串行化，网络调用不持数据库锁；不确定提交状态禁止自动重试 |
+| `server/recycle.py` | 每个仓库挂载目录下的 `回收站/` 条目、原路径元数据、关联图片/附件搬运、恢复与清空；构建扫描、普通目录列表和搜索索引均跳过回收站 |
 | `web/workspace.js` / `.css` | 目录树（折叠/过滤/计数/定位）、面包屑、首页卡片、复制、查看源码/编辑/下载 MD、章节序号、Mermaid 样式 |
 | `web/mermaid-init.js` | docsify 插件：把 ```mermaid 围栏渲染为图形（离线）；容器保留 `data-source`，并暴露 `window.MermaidRender.render(source)` 供放大查看/导出重渲染 |
 | `web/packetdiag.js` | PacketDiag 解析与 Canvas 绘制核心（从 `PacketDiagPic.html` 抽取，`window.PacketDiag = { parse, render, presets, defaultSource, extractSource, bitOrderFor, numberingFor }`）；支持 `bit_order`/`numbering`/`@row`/`@left`/`desctable` 等扩展语法 |

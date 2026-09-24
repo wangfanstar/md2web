@@ -716,7 +716,7 @@ def list_md_folders(md_dir, repos=None):
         return []
     folders = []
     for path in sorted(root.iterdir()):
-        if not path.is_dir() or path.name.startswith("."):
+        if not path.is_dir() or path.name.startswith(".") or path.name == "回收站":
             continue
         try:
             relative = path.relative_to(root).as_posix()
@@ -757,7 +757,7 @@ def folder_listing(md_dir, relative, recursive=False):
     documents = []
     folders = []
     for entry in sorted(target.iterdir(), key=lambda item: item.name):
-        if entry.name.startswith("."):
+        if entry.name.startswith(".") or entry.name == "回收站":
             continue
         if entry.is_dir():
             folders.append({"name": entry.name,

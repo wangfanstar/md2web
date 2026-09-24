@@ -82,11 +82,13 @@
         + '<button type="button" data-folder-action="menu" data-path="' + escapeHtml(item.path)
         + '" aria-label="操作 ' + escapeHtml(item.name) + '">操作</button></li>';
     }).join('');
+    var trashMount = (config.repoInfo && config.repoInfo.all) ? 'md' : ((config.repoInfo && config.repoInfo.mount) || folder.path);
     article.innerHTML = [
       '<div class="folder-view" data-folder-view>',
       '<h1>' + escapeHtml(folder.name || '') + '</h1>',
       '<div class="folder-view-actions"><button type="button" data-folder-action="menu" data-path="' + escapeHtml(folder.path)
-        + '">新建文档或文件夹</button></div>',
+        + '">新建文档或文件夹</button><button type="button" data-folder-action="trash" data-mount="' + escapeHtml(trashMount)
+        + '">回收站</button></div>',
       '<p class="folder-view-meta">目录：<code>' + escapeHtml(folder.path || '') + '</code>'
         + ' · 文档 ' + ((folder.documents || []).length) + ' 个 · 合计 '
         + escapeHtml(formatBytes(folder.totalBytes)) + '</p>',
@@ -201,6 +203,45 @@
     return prefix + revision;
   }
 
+  function openTrash(mount) {
+    api('__trash?mount=' + encodeURIComponent(mount), { method: 'GET' }).then(function (payload) {
+      closeMenu();
+      var dialog = document.createElement('div');
+      dialog.className = 'folder-trash-dialog';
+      var entries = payload.entries || [];
+      dialog.innerHTML = '<div class="folder-trash-card"><div class="folder-trash-head"><strong>回收站</strong>'
+        + '<button type="button" data-trash-close>关闭</button></div>'
+        + '<p class="folder-trash-hint">删除的文档、引用的图片和附件会保留在这里，恢复后回到原路径。</p>'
+        + '<div class="folder-trash-list">' + (entries.length ? entries.map(function (item) {
+          return '<div class="folder-trash-row"><span><strong>' + escapeHtml(item.name || item.path) + '</strong>'
+            + '<small>' + escapeHtml(item.path || '') + '</small></span><button type="button" data-trash-restore="'
+            + escapeHtml(item.id) + '">恢复</button></div>';
+        }).join('') : '<p class="folder-trash-empty">回收站为空</p>') + '</div>'
+        + (entries.length ? '<button type="button" class="folder-trash-empty-action" data-trash-empty>清空回收站</button>' : '')
+        + '</div>';
+      document.body.appendChild(dialog);
+      dialog.addEventListener('click', function (event) {
+        if (event.target === dialog || event.target.closest('[data-trash-close]')) {
+          dialog.remove();
+          return;
+        }
+        var restore = event.target.closest('[data-trash-restore]');
+        if (restore) {
+          mutate('__md/restore', { mount: mount, entryId: restore.getAttribute('data-trash-restore') })
+            .then(function (result) { dialog.remove(); reloadSoon(operationNotice('已恢复文档', result.result)); })
+            .catch(function (error) { window.alert('恢复失败：' + error.message); });
+          return;
+        }
+        if (event.target.closest('[data-trash-empty]')) {
+          if (!window.confirm('清空后将永久删除回收站中的内容，确定继续？')) return;
+          mutate('__md/trash-empty', { mount: mount })
+            .then(function (result) { dialog.remove(); reloadSoon(operationNotice('回收站已清空', result.result)); })
+            .catch(function (error) { window.alert('清空失败：' + error.message); });
+        }
+      });
+    }).catch(function (error) { window.alert('读取回收站失败：' + error.message); });
+  }
+
   function runAction(action, path, isFolder) {
     var parent = isFolder ? (path || currentRoute()) : folderPathOf(path || currentRoute());
     if (action === 'new-document') {
@@ -229,7 +270,7 @@
       return;
     }
     if (action === 'delete') {
-      if (!window.confirm('确定删除 ' + path + ' ？（会移动到 data/trash，可手动找回）')) return;
+      if (!window.confirm('确定删除 ' + path + ' ？（会移动到回收站，可恢复）')) return;
       mutate('__md/delete', { path: path })
         .then(function (payload) { reloadSoon(operationNotice('已删除（已移动到 data/trash）', payload.result)); })
         .catch(function (error) { window.alert('删除失败：' + error.message); });
@@ -331,6 +372,11 @@
       var path = trigger.getAttribute('data-path');
       var rect = trigger.getBoundingClientRect();
       openMenu(rect.left, rect.bottom + 4, path, !/\.md$/i.test(path));
+      return;
+    }
+    var trash = event.target.closest ? event.target.closest('[data-folder-action="trash"]') : null;
+    if (trash) {
+      openTrash(trash.getAttribute('data-mount') || 'md');
       return;
     }
     if (menu && !menu.contains(event.target)) {

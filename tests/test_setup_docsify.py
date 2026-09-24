@@ -1084,6 +1084,8 @@ class FolderViewTests(unittest.TestCase):
         self.assertIn("recursive=1", source)
         self.assertIn('data-folder-action="menu"', source)
         self.assertIn("function mutate", source)
+        self.assertIn("__trash", source)
+        self.assertIn("__md/restore", source)
         built = (ROOT / "docs" / "lib" / "folder-view.js").read_text(encoding="utf-8")
         self.assertIn("isFolderRoute", built, "构建产物未同步 folder-view.js")
 
@@ -1091,6 +1093,11 @@ class FolderViewTests(unittest.TestCase):
         page = (ROOT / "docs" / "html" / "index_all.html").read_text(encoding="utf-8")
         self.assertIn("folderView: true", page)
         self.assertIn("customToc", page, "页面仍应启用右侧本文目录")
+
+    def test_repository_entry_uses_the_same_folder_operation_view(self):
+        page = (ROOT / "docs" / "html" / "index_硬件设计.html").read_text(encoding="utf-8")
+        self.assertIn("folderView: true", page)
+        self.assertIn('repoInfo: {"id": "硬件设计"', page)
 
 
 class HtmlLayoutTests(unittest.TestCase):

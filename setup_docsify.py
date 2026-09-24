@@ -70,7 +70,7 @@ def scan_markdown(md_dir) -> list:
         if not path.is_file():
             continue
         rel = path.relative_to(root)
-        if any(part.startswith(".") for part in rel.parts):
+        if any(part.startswith(".") or part == "回收站" for part in rel.parts):
             continue
         if path.suffix == ".md":
             files.append(rel.as_posix())
@@ -1697,6 +1697,7 @@ def main(argv=None):
                                 sidebar=sidebar, search_index=search_index, offline_data=offline_data,
                                 homepage=homepage, read_only=repo.get("read_only", False),
                                 allow_commit=repo.get("allow_commit", True), repo=repo,
+                                repos=repos, route_sidebar=True,
                                 home_link=HTML_PREFIX + "index_all.html")
         generate_master_index_html(repos, args.title)
         generate_config_page()

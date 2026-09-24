@@ -13,7 +13,7 @@ from pathlib import Path
 from flask import Flask, jsonify, make_response, request, send_from_directory
 
 from . import config as server_config
-from . import database, documents as server_documents, drafts, operations, entries
+from . import database, documents as server_documents, drafts, operations, entries, recycle
 from .auth import AuthError
 from .config import authenticated_config, config_to_json, public_config, save_config
 from .documents import MdSaveError
@@ -404,6 +404,14 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             return json_error(error.status, "folder_error", error.message)
         return jsonify({"ok": True, "folder": listing})
 
+    @app.get("/__trash")
+    def trash_info():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        mount = (request.args.get("mount") or "md").replace("\\", "/").rstrip("/")
+        return jsonify({"ok": True, "mount": mount, "entries": recycle.list_entries(md_dir(), mount)})
+
     @app.post("/__md/create")
     def create_entry():
         return mutate_entry("create")
@@ -415,6 +423,14 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
     @app.post("/__md/delete")
     def delete_entry():
         return mutate_entry("delete")
+
+    @app.post("/__md/restore")
+    def restore_entry():
+        return mutate_entry("restore")
+
+    @app.post("/__md/trash-empty")
+    def empty_trash():
+        return mutate_entry("trash-empty")
 
     def mutate_entry(action):
         """即时提交 SVN 后发布本地；所有入口共用权限与冲突检查。"""

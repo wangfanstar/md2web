@@ -1021,6 +1021,58 @@ body.folder-view-active .docs-page-toc {
   color: var(--docs-accent, #1f6feb);
 }
 
+.folder-trash-dialog {
+  align-items: center;
+  background: rgba(15, 23, 42, .45);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  position: fixed;
+  z-index: 1250;
+}
+
+.folder-trash-card {
+  background: var(--docs-surface, #fff);
+  border: 1px solid var(--docs-border, #d5dee8);
+  border-radius: 10px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, .25);
+  max-height: min(78vh, 620px);
+  max-width: min(680px, 92vw);
+  overflow: auto;
+  padding: 16px;
+  width: 560px;
+}
+
+.folder-trash-head,
+.folder-trash-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.folder-trash-head { border-bottom: 1px solid var(--docs-border, #e3e8ee); padding-bottom: 10px; }
+.folder-trash-head button,
+.folder-trash-row button,
+.folder-trash-empty-action {
+  background: var(--docs-surface, #fff);
+  border: 1px solid var(--docs-border, #d5dee8);
+  border-radius: 6px;
+  color: var(--docs-accent, #1f6feb);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 9px;
+}
+.folder-trash-row { border-bottom: 1px solid var(--docs-border, #e3e8ee); padding: 9px 0; }
+.folder-trash-row span { min-width: 0; }
+.folder-trash-row strong,
+.folder-trash-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-trash-row small,
+.folder-trash-hint,
+.folder-trash-empty { color: var(--docs-muted, #57606a); font-size: 12px; }
+.folder-trash-empty-action { margin-top: 12px; color: #b42318; }
+
 /* 读者反馈弹窗与固定入口（无 AI 设置图标的页面显示右上角） */
 .feedback-fixed-entry {
   background: var(--docs-accent, #1f6feb);

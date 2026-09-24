@@ -75,7 +75,7 @@ class EntryTests(unittest.TestCase):
         response = self.post('delete', path='md/硬件设计/重命名.md')
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertFalse((self.remote / '重命名.md').exists())
-        self.assertTrue(Path(response.get_json()['result']['trash']).is_file())
+        self.assertTrue(Path(response.get_json()['result']['trash']).is_dir())
 
     def test_failed_svn_commit_does_not_change_local_files(self):
         self.svn.commit = mock.Mock(side_effect=SvnError('conflict'))
@@ -124,6 +124,32 @@ class EntryTests(unittest.TestCase):
         response = self.post('create', parent='md/硬件设计', name='本地')
         self.assertEqual(response.status_code, 200, response.get_json())
         self.svn.info.assert_not_called()
+
+    def test_delete_moves_referenced_assets_and_restore_returns_them(self):
+        self.config['repositories'][0]['source_mode'] = 'local'
+        self.config['repositories'][0]['url'] = ''
+        image = self.root / 'images' / 'diagram.png'
+        attachment = self.root / '附件' / '说明.pdf'
+        image.parent.mkdir(exist_ok=True)
+        attachment.parent.mkdir(exist_ok=True)
+        image.write_bytes(b'png')
+        attachment.write_bytes(b'pdf')
+        document = self.root / '带资源.md'
+        document.write_text('![图](images/diagram.png)\n[附件](附件/说明.pdf)\n', encoding='utf-8')
+        deleted = self.post('delete', path='md/硬件设计/带资源.md').get_json()
+        self.assertTrue(deleted['ok'], deleted)
+        self.assertFalse(document.exists())
+        self.assertFalse(image.exists())
+        self.assertFalse(attachment.exists())
+        listed = self.client.get('/__trash?mount=md/硬件设计').get_json()['entries']
+        entry = next(item for item in listed if item['path'].endswith('带资源.md'))
+        restored = self.post('restore', mount='md/硬件设计', entryId=entry['id']).get_json()
+        self.assertTrue(restored['ok'], restored)
+        self.assertTrue(document.exists())
+        self.assertTrue(image.exists())
+        self.assertTrue(attachment.exists())
+        emptied = self.post('trash-empty', mount='md/硬件设计').get_json()
+        self.assertTrue(emptied['ok'], emptied)
 
     def test_active_draft_blocks_rename(self):
         actor = self.fixture.conn.execute('SELECT id FROM users LIMIT 1').fetchone()[0]
