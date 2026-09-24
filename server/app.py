@@ -24,7 +24,7 @@ def server_documents_error():
     return MdSaveError
 
 COOKIE_NAME = "md2web_session"
-FEATURES = {"editDraft": True, "svnCommit": False, "localPublish": False}
+FEATURES = {"editDraft": True, "svnCommit": False, "localPublish": True}
 MAX_BODY = 2 * 1024 * 1024
 
 
@@ -1068,13 +1068,52 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
 
     @app.route("/__md/publish", methods=["POST"])
     def pending_publish():
+        """无 SVN 库文档的一步保存：写入 docs/md（本地模式走 SQLite 主库）并触发站点重建。"""
         session, rejected = require_session()
         if rejected:
             return rejected
         csrf_error = require_csrf(session)
         if csrf_error:
             return csrf_error
-        return json_error(501, "not_implemented", "未关联 SVN 的本地发布将在后续版本提供")
+        payload = request.get_json(silent=True) or {}
+        path = payload.get("path") or ""
+        binding = server_config.match_repository(config, path)
+        if binding is not None:
+            guard = repo_write_guard(binding)
+            if guard is not None:
+                return guard
+            if binding.get("source_mode", "svn") == "svn":
+                return json_error(400, "use_svn_commit",
+                                  "该文档关联 SVN 仓库：请先「本地暂存」，再用「提交 SVN」写入仓库")
+        try:
+            if binding is not None and binding.get("source_mode") == "local":
+                result = operations.local_publish_content(
+                    conn, config, md_dir(), session["user"]["id"], path,
+                    payload.get("content"), payload.get("baseHash"))
+            else:
+                result = operations.publish_file(
+                    conn, md_dir(), session["user"]["id"], path,
+                    payload.get("content"), payload.get("baseHash"))
+        except operations.OperationError as error:
+            extra = dict(error.extra)
+            code = extra.pop("code", "publish_error")
+            return json_error(error.status, code, error.message, **extra)
+        except server_documents_error() as error:
+            return json_error(error.status, "publish_error", error.message, **getattr(error, "extra", {}))
+        if on_config_changed is not None:
+            try:
+                on_config_changed()
+            except Exception:
+                pass
+        return jsonify({"ok": True, "result": result})
+
+    @app.get("/__md/drafts")
+    def list_my_drafts():
+        """当前用户未提交的本地暂存（活动草稿），供离开页面时的提醒。"""
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        return jsonify({"ok": True, **drafts.list_active_drafts(conn, session["user"]["id"])})
 
     # ---- 阶段三：SVN 提交与同步 ----
 

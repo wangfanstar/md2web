@@ -168,6 +168,42 @@ def local_import_repository(conn, config, md_dir, binding, actor_id=None, force=
             "hash": manifest_hash}
 
 
+def _local_publish(conn, md_dir, binding, binding_row, rel, content, old_hash, user_id, operation_id):
+    """把内容写入本地 SQLite 主库并物化 docs/md（调用方负责权限与基线校验）。"""
+    text = documents.normalize_eol(content)
+    new_hash = documents.text_hash(text)
+    revision = int(binding_row.get("source_revision") or 0) + 1
+    now = database.now_iso()
+    try:
+        with conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO repository_documents"
+                " (id, binding_id, path, content, content_hash, eol, source_revision, state, updated_at)"
+                " VALUES ((SELECT id FROM repository_documents WHERE binding_id = ? AND path = ?), ?, ?, ?, ?, ?, ?, 'published', ?)",
+                (binding_row["id"], rel, binding_row["id"], rel, text, new_hash,
+                 documents.detect_eol(text), revision, now),
+            )
+            rows = conn.execute("SELECT path, content_hash, state FROM repository_documents WHERE binding_id = ?",
+                                (binding_row["id"],)).fetchall()
+            manifest_hash = _manifest_hash({row["path"]: {"hash": row["content_hash"]}
+                                             for row in rows if row["state"] != "deleted"})
+            conn.execute("UPDATE repo_bindings SET source_revision = ?, source_hash = ?, last_success_at = ?,"
+                         " sync_state = 'idle', last_error_code = NULL, updated_at = ? WHERE id = ?",
+                         (revision, manifest_hash, now, now, binding_row["id"]))
+            conn.execute("INSERT INTO source_events (binding_id, operation_id, mode, event_type, path,"
+                         " before_hash, after_hash, base_revision, target_revision, actor_id, created_at)"
+                         " VALUES (?, ?, 'local', 'local_publish', ?, ?, ?, ?, ?, ?, ?)",
+                         (binding_row["id"], operation_id, rel, old_hash, new_hash,
+                          binding_row.get("source_revision"), revision, user_id, now))
+        _materialize_repository(conn, md_dir, binding_row["id"], binding["mount"])
+        _set_state(conn, operation_id, "published", finished_at=database.now_iso())
+    except Exception as error:
+        _set_state(conn, operation_id, "failed", error_code="local_publish_failed", finished_at=database.now_iso())
+        raise OperationError(500, "本地发布失败：%s" % error)
+    return {"operationId": operation_id, "state": "published", "revision": revision, "path": rel,
+            "hash": new_hash, "mode": "local"}
+
+
 def local_publish_draft(conn, config, md_dir, user_id, document_path, expected_version=None):
     """把当前用户草稿发布到本地 SQLite 主库，再物化 docs/md。"""
     from . import drafts as drafts_module
@@ -193,39 +229,53 @@ def local_publish_draft(conn, config, md_dir, user_id, document_path, expected_v
     if revision_row["before_hash"] != old_hash:
         raise OperationError(409, "本地源已变化，请先重新加载并合并", code="local_external_change")
     content = documents.normalize_eol(revision_row["content"])
-    revision = int(binding_row.get("source_revision") or 0) + 1
-    now = database.now_iso()
     operation_id = create_operation(conn, user_id, binding_row["id"], "local_publish", {
         "path": rel, "repositoryId": binding["id"], "contentHash": documents.text_hash(content),
         "baseHash": old_hash, "message": "local publish",
     })
-    try:
-        with conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO repository_documents"
-                " (id, binding_id, path, content, content_hash, eol, source_revision, state, updated_at)"
-                " VALUES ((SELECT id FROM repository_documents WHERE binding_id = ? AND path = ?), ?, ?, ?, ?, ?, ?, 'published', ?)",
-                (binding_row["id"], rel, binding_row["id"], rel, content, documents.text_hash(content),
-                 documents.detect_eol(content), revision, now),
-            )
-            rows = conn.execute("SELECT path, content_hash, state FROM repository_documents WHERE binding_id = ?",
-                                (binding_row["id"],)).fetchall()
-            manifest_hash = _manifest_hash({row["path"]: {"hash": row["content_hash"]}
-                                             for row in rows if row["state"] != "deleted"})
-            conn.execute("UPDATE repo_bindings SET source_revision = ?, source_hash = ?, last_success_at = ?,"
-                         " sync_state = 'idle', last_error_code = NULL, updated_at = ? WHERE id = ?",
-                         (revision, manifest_hash, now, now, binding_row["id"]))
-            conn.execute("INSERT INTO source_events (binding_id, operation_id, mode, event_type, path,"
-                         " before_hash, after_hash, base_revision, target_revision, actor_id, created_at)"
-                         " VALUES (?, ?, 'local', 'local_publish', ?, ?, ?, ?, ?, ?, ?)",
-                         (binding_row["id"], operation_id, rel, old_hash, documents.text_hash(content),
-                          binding_row.get("source_revision"), revision, user_id, now))
-        _materialize_repository(conn, md_dir, binding_row["id"], binding["mount"])
-        _set_state(conn, operation_id, "published", finished_at=database.now_iso())
-    except Exception as error:
-        _set_state(conn, operation_id, "failed", error_code="local_publish_failed", finished_at=database.now_iso())
-        raise OperationError(500, "本地发布失败：%s" % error)
-    return {"operationId": operation_id, "state": "published", "revision": revision, "path": rel}
+    return _local_publish(conn, md_dir, binding, binding_row, rel, content, old_hash, user_id, operation_id)
+
+
+def local_publish_content(conn, config, md_dir, user_id, document_path, content, base_hash=None):
+    """编辑器一步保存：内容直接发布到本地 SQLite 主库并物化 docs/md（无 SVN 库）。"""
+    if content is None:
+        raise OperationError(400, "缺少 content")
+    rel = documents.normalize_md_path(document_path)
+    binding = binding_for_path(config, rel)
+    if binding is None or binding.get("source_mode", "svn") != "local":
+        raise OperationError(400, "该文档未关联本地 SQLite 仓库")
+    if binding.get("read_only") or binding.get("allow_commit", True) is False:
+        raise OperationError(403, "该仓库已设置为只读或关闭本地发布")
+    binding_row = _ensure_local_binding(conn, binding, config)
+    old = conn.execute("SELECT * FROM repository_documents WHERE binding_id = ? AND path = ?",
+                       (binding_row["id"], rel)).fetchone()
+    store_hash = old["content_hash"] if old is not None and old["state"] != "deleted" else None
+    file_path = documents.resolve_md_file(md_dir, rel)
+    file_hash = None
+    if file_path.is_file():
+        file_hash = documents.text_hash(documents.read_md_text(file_path))
+    # 主库与 docs/md 里已知的内容都必须与编辑器基线一致，任一处被外部改动都拒绝
+    known = [value for value in (store_hash, file_hash) if value is not None]
+    if any(value != base_hash for value in known) or (not known and base_hash):
+        raise OperationError(409, "本地源已变化，请先重新加载并合并", code="local_external_change",
+                             currentHash=file_hash or store_hash)
+    text = documents.normalize_eol(content)
+    old_hash = file_hash if file_hash is not None else store_hash
+    operation_id = create_operation(conn, user_id, binding_row["id"], "local_publish", {
+        "path": rel, "repositoryId": binding["id"], "contentHash": documents.text_hash(text),
+        "baseHash": old_hash, "message": "local publish",
+    })
+    return _local_publish(conn, md_dir, binding, binding_row, rel, text, old_hash, user_id, operation_id)
+
+
+def publish_file(conn, md_dir, user_id, document_path, content, base_hash=None):
+    """未关联仓库的文档：直接原子写回 docs/md（base_hash 冲突检测）并记审计。"""
+    rel = documents.normalize_md_path(document_path)
+    documents.save_md(md_dir, rel, content, base_hash=base_hash)
+    text = documents.normalize_eol(content)
+    with conn:
+        database.audit(conn, "file_publish", "ok", actor_id=user_id, resource=rel)
+    return {"state": "published", "path": rel, "hash": documents.text_hash(text), "mode": "file"}
 
 
 def _materialize_repository(conn, md_dir, binding_id, mount):

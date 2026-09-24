@@ -2876,6 +2876,122 @@ class FolderOpsTests(ServerTestBase):
         self.assertEqual(repos["hardware"]["group"], "新分组")
 
 
+class LocalPublishTests(ServerTestBase):
+    """无 SVN 库文档的一步发布（保存到服务器）与未提交草稿列表。"""
+
+    def setUp(self):
+        super().setUp()
+        self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
+        server_database.migrate(self.conn)
+        server_database.ensure_admin(self.conn)
+        self.config = server_config.load_config(self.write_config({"repositories": [
+            {"id": "localdocs", "mount": "md/本地库", "sourceMode": "local"},
+            {"id": "lockedlocal", "mount": "md/只读本地", "sourceMode": "local", "readOnly": True},
+            {"id": "hardware", "mount": "md/硬件设计",
+             "url": "https://svn.example.invalid/svn/hardware/trunk/docs/"},
+        ]}), self.docs)
+        for relative, text in (
+            ("其他/文档.md", "# A\n"),
+            ("本地库/a.md", "# local\n"),
+            ("只读本地/b.md", "# ro\n"),
+            ("硬件设计/时钟树.md", "# svn\n"),
+        ):
+            target = self.docs / "md" / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+        self.auth = server_auth.AuthService(self.conn, FakeSvn(), self.config)
+        self.auth.on_startup()
+        from server.app import create_app
+        self.app = create_app(self.config, self.conn, self.auth, self.docs,
+                              on_config_changed=lambda: None)
+        self.client = self.app.test_client()
+        self.client.post("/__auth/login", json={"username": "admin", "password": "admin"})
+
+    def tearDown(self):
+        self.conn.close()
+        super().tearDown()
+
+    def csrf(self):
+        return self.client.get("/__auth/session").get_json()["csrfToken"]
+
+    def published_hash(self, path):
+        return self.client.get("/__md/document?path=" + path).get_json()["document"]["published"]["hash"]
+
+    def test_publish_unbound_document_writes_file(self):
+        headers = {"X-CSRF-Token": self.csrf()}
+        path = "md/其他/文档.md"
+        base_hash = self.published_hash(path)
+        response = self.client.post("/__md/publish",
+                                    json={"path": path, "content": "# B\n", "baseHash": base_hash},
+                                    headers=headers)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        result = response.get_json()["result"]
+        self.assertEqual(result["mode"], "file")
+        self.assertEqual((self.docs / "md" / "其他" / "文档.md").read_text(encoding="utf-8"), "# B\n")
+        self.assertEqual(result["hash"], server_documents.text_hash("# B\n"))
+        # 过期基线：409 且不覆盖
+        stale = self.client.post("/__md/publish",
+                                 json={"path": path, "content": "# C\n", "baseHash": base_hash},
+                                 headers=headers)
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual((self.docs / "md" / "其他" / "文档.md").read_text(encoding="utf-8"), "# B\n")
+        # 关联 SVN 的文档请走提交 SVN
+        svn_path = "md/硬件设计/时钟树.md"
+        denied = self.client.post("/__md/publish",
+                                  json={"path": svn_path, "content": "# X\n",
+                                        "baseHash": self.published_hash(svn_path)}, headers=headers)
+        self.assertEqual(denied.status_code, 400)
+        self.assertEqual(denied.get_json()["code"], "use_svn_commit")
+        # 参数与权限
+        self.assertEqual(self.client.post("/__md/publish", json={"path": path}, headers=headers).status_code, 400)
+        self.assertEqual(self.client.post("/__md/publish",
+                                          json={"path": path, "content": "# X\n"}).status_code, 403)
+        anonymous = self.app.test_client()
+        self.assertEqual(anonymous.post("/__md/publish",
+                                        json={"path": path, "content": "# X\n"}).status_code, 401)
+
+    def test_publish_local_repository_document(self):
+        headers = {"X-CSRF-Token": self.csrf()}
+        path = "md/本地库/a.md"
+        response = self.client.post("/__md/publish",
+                                    json={"path": path, "content": "# changed\n",
+                                          "baseHash": self.published_hash(path)}, headers=headers)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        result = response.get_json()["result"]
+        self.assertEqual(result["mode"], "local")
+        self.assertGreaterEqual(int(result["revision"]), 1)
+        self.assertEqual((self.docs / "md" / "本地库" / "a.md").read_text(encoding="utf-8"), "# changed\n")
+        row = self.conn.execute("SELECT content FROM repository_documents WHERE path = ?", (path,)).fetchone()
+        self.assertEqual(row["content"], "# changed\n")
+        # 本地源被外部改动后基线不符：409
+        (self.docs / "md" / "本地库" / "a.md").write_text("# external\n", encoding="utf-8")
+        stale = self.client.post("/__md/publish",
+                                 json={"path": path, "content": "# again\n",
+                                       "baseHash": result["hash"]}, headers=headers)
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(stale.get_json()["code"], "local_external_change")
+        # 只读的本地仓库拒绝发布
+        locked = self.client.post("/__md/publish",
+                                  json={"path": "md/只读本地/b.md", "content": "# x\n",
+                                        "baseHash": self.published_hash("md/只读本地/b.md")}, headers=headers)
+        self.assertEqual(locked.status_code, 403)
+
+    def test_drafts_endpoint_lists_uncommitted_scratch(self):
+        headers = {"X-CSRF-Token": self.csrf()}
+        path = "md/硬件设计/时钟树.md"
+        saved = self.client.put("/__md/draft",
+                                json={"path": path, "content": "# 暂存\n", "expectedVersion": 0},
+                                headers=headers)
+        self.assertEqual(saved.status_code, 200, saved.get_data(as_text=True))
+        listed = self.client.get("/__md/drafts").get_json()["drafts"]
+        self.assertEqual([item["path"] for item in listed], [path])
+        anonymous = self.app.test_client()
+        self.assertEqual(anonymous.get("/__md/drafts").status_code, 401)
+        discarded = self.client.post("/__md/discard", json={"path": path}, headers=headers)
+        self.assertEqual(discarded.status_code, 200, discarded.get_data(as_text=True))
+        self.assertEqual(self.client.get("/__md/drafts").get_json()["drafts"], [])
+
+
 class FeedbackTests(ServerTestBase):
     """读者反馈：未登录只读、登录可提交、管理员可更新进度。"""
 

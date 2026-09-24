@@ -29,7 +29,9 @@
     highlightTimer: 0,
     previewToken: 0,
     find: { open: false, replace: false, query: '', replacement: '', caseSensitive: false, wholeWord: false, regex: false, matches: [], index: -1 },
-    findTimer: 0
+    findTimer: 0,
+    pendingDrafts: 0,
+    publishedOnServer: false
   };
 
   // ---------- 路由与源文件读取 ----------
@@ -241,8 +243,56 @@
       state.original = content;
       state.draftVersion = payload.version;
       refreshModifiedState();
-      setStatus('已保存个人草稿 v' + payload.version + '（尚未提交 SVN）');
+      setStatus('已本地暂存 v' + payload.version + '（只在本机服务器，尚未提交 SVN）');
+      refreshPendingDrafts();
       return payload;
+    });
+  }
+
+  function bindingSourceMode() {
+    var binding = state.binding || {};
+    return String(binding.source_mode || binding.sourceMode || '').toLowerCase();
+  }
+
+  // 没有 SVN 库的文档（未关联仓库或本地模式）：保存 = 直接写到服务器
+  function isLocalDocument() {
+    if (state.localMode || state.readOnlyHome) {
+      return false;
+    }
+    return !state.binding || bindingSourceMode() === 'local';
+  }
+
+  function publishToServer() {
+    var content = state.textarea.value;
+    setStatus('正在保存到服务器并更新站点…');
+    return authApi('__md/publish', {
+      method: 'POST',
+      body: JSON.stringify({ path: state.resource, content: content, baseHash: state.baseHash })
+    }).then(function (payload) {
+      var result = payload.result || {};
+      state.original = content;
+      state.baseHash = result.hash || state.baseHash;
+      state.draftVersion = 0;
+      state.publishedOnServer = true;
+      refreshModifiedState();
+      setStatus('已保存到服务器：' + (result.path || state.resource) + '（站点已更新，关闭编辑器后自动刷新）');
+      refreshPendingDrafts();
+      return result;
+    }).catch(function (error) {
+      if (error.status === 401) {
+        setStatus('会话已过期：' + error.message + '（内容已保留，可先下载 MD 再重新登录）');
+        window.SiteAuth.openLogin();
+        return null;
+      }
+      if (error.status === 409) {
+        state.conflict = error.payload || {};
+        showDiffPanel('服务器上的文件已变化：' + error.message
+          + '\n可点「载入最新」放弃本地修改，或手动合并后再次保存（不会覆盖服务器文件）。');
+        setStatus('保存冲突（未覆盖服务器文件）：请查看差异后处理');
+        return null;
+      }
+      setStatus('保存到服务器失败：' + error.message);
+      return null;
     });
   }
 
@@ -256,6 +306,9 @@
       return;
     }
     if (authAvailable()) {
+      if (isLocalDocument()) {
+        return publishToServer();
+      }
       saveDraft().catch(function (error) {
         if (error.status === 401) {
           setStatus('会话已过期：' + error.message + '（内容已保留，可先下载 MD 再重新登录）');
@@ -284,13 +337,52 @@
 
   // ---------- 版本历史与差异 ----------
 
+  function updateSaveButtonLabel() {
+    if (!state.overlay) {
+      return;
+    }
+    var button = state.overlay.querySelector('[data-editor-action="save"]');
+    if (!button) {
+      return;
+    }
+    if (state.localMode) {
+      button.textContent = '保存到本地';
+      return;
+    }
+    button.textContent = isLocalDocument() ? '保存到服务器' : '本地暂存';
+  }
+
+  function updateSvnButtons() {
+    if (!state.overlay) {
+      return;
+    }
+    var local = isLocalDocument();
+    ['svn-commit', 'svn-log'].forEach(function (name) {
+      var button = state.overlay.querySelector('[data-editor-action="' + name + '"]');
+      if (button) {
+        button.hidden = local || !authAvailable() || state.readOnlyHome;
+      }
+    });
+    var remote = state.overlay.querySelector('[data-editor-action="remote-diff"]');
+    if (remote && local) {
+      remote.hidden = true;
+    }
+  }
+
   function updateBindingLabel() {
+    updateSaveButtonLabel();
     var el = state.overlay && state.overlay.querySelector('[data-editor-binding]');
     if (!el) {
       return;
     }
     if (!authAvailable()) {
       el.textContent = '未登录（只读）';
+      return;
+    }
+    if (isLocalDocument()) {
+      el.textContent = state.binding
+        ? '本地库 ' + state.binding.id + ' · ' + state.binding.mount + '（保存到服务器）'
+        : '未关联 SVN（保存到服务器）';
       return;
     }
     if (!state.binding) {
@@ -314,7 +406,7 @@
   }
 
   function refreshSyncStatus() {
-    if (!authAvailable() || state.localMode || state.readOnlyHome) {
+    if (!authAvailable() || state.localMode || state.readOnlyHome || isLocalDocument()) {
       state.syncStatus = null;
       updateBindingLabel();
       return Promise.resolve(null);
@@ -424,6 +516,7 @@
       if (panels) {
         panels.hidden = true;
       }
+      refreshPendingDrafts();
       return loadDocumentFromServer();
     }).catch(function (error) {
       setStatus('放弃草稿失败：' + error.message);
@@ -572,6 +665,7 @@
       + '\n' + result.path + '\n'
       + ((result.images || []).length ? '已一并存档图片：' + result.images.join('、') + '\n' : '')
       + ((result.attachments || []).length ? '已一并存档附件：' + result.attachments.join('、') + '\n' : '');
+    refreshPendingDrafts();
     if (result.diff) {
       showDiffPanel(head + '\n本次提交差异：\n' + result.diff, '本次提交差异（已写入 SVN）');
     } else {
@@ -1888,6 +1982,12 @@
     if (isModified() && !window.confirm('有未保存的修改，确定关闭编辑器？')) {
       return;
     }
+    if (state.publishedOnServer) {
+      // 已保存到服务器：关闭编辑器后整页刷新，让正文显示最新内容
+      state.publishedOnServer = false;
+      window.location.reload();
+      return;
+    }
     if (state.find && state.find.open) {
       state.find.open = false;
       state.find.matches = [];
@@ -2402,7 +2502,7 @@
       '<li><code>Ctrl+Shift+Q</code> 引用 · <code>Ctrl+Shift+C</code> 代码块 · <code>Ctrl+Shift+T</code> 表格 · <code>Ctrl+Shift+L</code> 分隔线</li>',
       '<li><code>Ctrl+Shift+G</code> Mermaid · <code>Ctrl+Shift+D</code> PacketDiag</li>',
       '<li><code>Tab</code> / <code>Shift+Tab</code> 缩进 · <code>Alt+↑/↓</code> 移动行</li>',
-      '<li><code>Ctrl+S</code> 保存 · <code>Ctrl+Shift+S</code> 另存为 · <code>Esc</code> 关闭</li>',
+      '<li><code>Ctrl+S</code> 保存（无 SVN 库=保存到服务器；有 SVN 库=本地暂存） · <code>Ctrl+Shift+S</code> 另存为 · <code>Esc</code> 关闭</li>',
       '<li><code>Ctrl+Shift+T</code> 表格行列选择 · <code>Ctrl+Alt+K</code> 文字颜色 · 工具栏可上传本地图片与附件</li>',
       '<li><code>Ctrl+Z</code> 撤销 · <code>Ctrl+Y</code>/<code>Ctrl+Shift+Z</code> 恢复 · <code>Ctrl+Shift+H</code> 大纲导航</li>',
       '<li><code>Ctrl+F</code> 查找 · <code>Ctrl+H</code> 查找替换 · <code>Enter</code>/<code>F3</code> 下一个 · <code>Shift+Enter</code>/<code>Shift+F3</code> 上一个</li>',
@@ -2436,7 +2536,6 @@
     state.lastFocus = document.activeElement;
     state.fileHandle = null;
     var serverButtons = ['history', 'diff', 'load-latest', 'svn-commit', 'svn-log'];
-    var saveButton = null;
     if (!state.overlay) {
       buildOverlay();
     }
@@ -2448,16 +2547,13 @@
       setStatus(restriction);
     }
     if (state.overlay) {
-      saveButton = state.overlay.querySelector('[data-editor-action="save"]');
-      if (saveButton) {
-        saveButton.textContent = state.localMode ? '保存到本地' : '保存';
-      }
       serverButtons.forEach(function (name) {
         var button = state.overlay.querySelector('[data-editor-action="' + name + '"]');
         if (button) {
           button.hidden = state.localMode;
         }
       });
+      updateSvnButtons();
     }
     state.original = '';
     state.textarea.value = '';
@@ -2518,17 +2614,10 @@
       return;
     }
     state.readOnlyHome = false;
-    var commitButton = state.overlay.querySelector('[data-editor-action="svn-commit"]');
-    var logButton = state.overlay.querySelector('[data-editor-action="svn-log"]');
-    if (commitButton) {
-      commitButton.hidden = !authAvailable();
-    }
-    if (logButton) {
-      logButton.hidden = !authAvailable();
-    }
     if (authAvailable()) {
       loadDocumentFromServer().then(function () {
         state.textarea.focus();
+        updateSvnButtons();
         return refreshSyncStatus();
       }).then(function (status) {
         var button = state.overlay.querySelector('[data-editor-action="remote-diff"]');
@@ -2559,6 +2648,47 @@
     }).catch(function (error) {
       setStatus('读取失败：' + message(error));
     });
+  }
+
+  // ---------- 未提交暂存提醒（离开页面前） ----------
+
+  function hasUnsavedEditorWork() {
+    return !!state.overlay && state.overlay.classList.contains('is-open') && isModified();
+  }
+
+  function refreshPendingDrafts() {
+    if (!authAvailable()) {
+      state.pendingDrafts = 0;
+      return Promise.resolve(0);
+    }
+    return authApi('__md/drafts').then(function (payload) {
+      state.pendingDrafts = (payload.drafts || []).length;
+      return state.pendingDrafts;
+    }).catch(function () {
+      state.pendingDrafts = 0;
+      return 0;
+    });
+  }
+
+  window.addEventListener('beforeunload', function (event) {
+    if (!state.pendingDrafts && !hasUnsavedEditorWork()) {
+      return undefined;
+    }
+    var message = state.pendingDrafts
+      ? '有本地暂存（草稿）未提交 SVN，确定离开？'
+      : '编辑器里有未保存的修改，确定离开？';
+    event.preventDefault();
+    event.returnValue = message;
+    return message;
+  });
+
+  document.addEventListener('siteauth:change', function () {
+    refreshPendingDrafts();
+  });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', refreshPendingDrafts);
+  } else {
+    refreshPendingDrafts();
   }
 
   window.MdEditor = {

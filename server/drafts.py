@@ -256,3 +256,17 @@ def discard_draft(conn, user_id, document_path):
         )
         database.audit(conn, "draft_discard", "ok", actor_id=user_id, resource=rel)
     return {"path": rel, "discarded": True}
+
+
+def list_active_drafts(conn, user_id):
+    """当前用户未提交的本地暂存（活动草稿），用于离开页面时的提醒。"""
+    rows = conn.execute(
+        "SELECT document_path, version, updated_at FROM drafts"
+        " WHERE user_id = ? AND state = 'active' AND head_revision_id IS NOT NULL"
+        " ORDER BY updated_at DESC",
+        (user_id,),
+    ).fetchall()
+    return {"drafts": [
+        {"path": row["document_path"], "version": row["version"], "updatedAt": row["updated_at"]}
+        for row in rows
+    ]}
