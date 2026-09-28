@@ -23,8 +23,8 @@ def _path(value):
     return os.path.abspath(os.fspath(value))
 
 
-def _windows_reparse_tag(path):
-    """读取 Windows 重解析点标记（Python 3.6/3.7 无 st_reparse_tag 时的回退）。"""
+def _windows_reparse_info(path):
+    """读取 Windows 重解析点 (tag, 替代名)（Python 3.6/3.7 无 st_reparse_tag 时的回退）。"""
     try:
         import ctypes
         import struct
@@ -53,11 +53,77 @@ def _windows_reparse_tag(path):
                                           ctypes.sizeof(buffer), ctypes.byref(returned), None)
             if not ok or returned.value < 8:
                 return None
-            return struct.unpack('<I', buffer.raw[0:4])[0]
+            tag = struct.unpack_from('<I', buffer.raw, 0)[0]
+            target = ''
+            if tag in (_TAG_MOUNT_POINT, _TAG_SYMLINK) and returned.value >= 16:
+                offset, length = struct.unpack_from('<HH', buffer.raw, 8)
+                if length:
+                    raw = buffer.raw[16 + offset:16 + offset + length]
+                    target = raw.decode('utf-16-le', 'replace')
+                    for prefix in ('\\??\\', '\\\\?\\'):
+                        if target.startswith(prefix):
+                            target = target[len(prefix):]
+                            break
+            return tag, target
         finally:
             kernel32.CloseHandle(handle)
     except (OSError, ValueError):
         return None
+
+
+def _windows_final_path(path):
+    """跟随链接取得最终本地路径（Python 3.6 的 realpath 不解析 Windows 联接）。"""
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except (ImportError, AttributeError, ValueError):
+        return ''
+    try:
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                         ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD,
+                                         wintypes.HANDLE]
+        kernel32.CreateFileW.restype = wintypes.HANDLE
+        kernel32.GetFinalPathNameByHandleW.argtypes = [wintypes.HANDLE, wintypes.LPWSTR,
+                                                       wintypes.DWORD, wintypes.DWORD]
+        kernel32.GetFinalPathNameByHandleW.restype = wintypes.DWORD
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel32.CreateFileW(_path(path), 0, 0x7, None, 3, 0x02000000, None)
+        if not handle or handle == ctypes.c_void_p(-1).value:
+            return ''
+        try:
+            buffer = ctypes.create_unicode_buffer(32768)
+            length = kernel32.GetFinalPathNameByHandleW(handle, buffer, 32768, 0)
+            if not length or length >= 32768:
+                return ''
+            value = buffer.value
+            for prefix in ('\\\\?\\UNC\\', '\\\\?\\'):
+                if value.startswith(prefix):
+                    value = value[len(prefix):]
+                    if prefix.startswith('\\\\?\\UNC'):
+                        value = '\\\\' + value
+                    break
+            return value
+        finally:
+            kernel32.CloseHandle(handle)
+    except (OSError, ValueError):
+        return ''
+
+
+def _link_target(path):
+    """链接目标：优先 realpath，Windows 3.6 走句柄解析，悬空链接退回重解析点替代名。"""
+    path = _path(path)
+    real = os.path.realpath(path)
+    if os.path.normcase(real) != os.path.normcase(path):
+        return real
+    if os.name == 'nt':
+        final = _windows_final_path(path)
+        if final:
+            return final
+        info = _windows_reparse_info(path)
+        if info and info[1]:
+            return info[1]
+    return real
 
 
 def is_directory_link(path):
@@ -74,7 +140,8 @@ def is_directory_link(path):
         return False
     tag = getattr(info, 'st_reparse_tag', None)
     if tag is None and os.name == 'nt':
-        tag = _windows_reparse_tag(path)
+        reparse = _windows_reparse_info(path)
+        tag = reparse[0] if reparse else None
     if tag is not None:
         return tag in (_TAG_MOUNT_POINT, _TAG_SYMLINK)
     try:
@@ -87,10 +154,7 @@ def is_directory_link(path):
 def describe(path):
     path = _path(path)
     if is_directory_link(path):
-        try:
-            target = os.path.realpath(path)
-        except OSError:
-            target = ''
+        target = _link_target(path)
         return {'sourceMode': 'symlink', 'linkTarget': target,
                 'linkExists': bool(target and os.path.isdir(target))}
     return {'sourceMode': 'local', 'linkTarget': '',
