@@ -74,10 +74,34 @@
   document.querySelector('[data-mkdir]').addEventListener('click', function () { var name = window.prompt('输入新文件夹名称'); if (name) mutate('__references/mkdir', { kind: state.kind, parent: state.path, name: name }); });
   document.querySelector('[data-upload]').addEventListener('click', function () { document.querySelector('[data-file]').click(); });
   document.querySelector('[data-file]').addEventListener('change', function () {
-    var file = this.files && this.files[0]; if (!file) return;
-    var form = new FormData(); form.append('kind', state.kind); form.append('path', state.path); form.append('file', file); setStatus('正在上传…');
+    var input = this;
+    var files = Array.prototype.slice.call(input.files || []);
+    if (!files.length) return;
+    if (window.SiteAuth && !SiteAuth.isAuthenticated()) {
+      setStatus('请先登录后再上传文件。', true);
+      SiteAuth.openLogin();
+      input.value = '';
+      return;
+    }
+    var form = new FormData(); form.append('kind', state.kind); form.append('path', state.path);
+    files.forEach(function (file) { form.append('file', file, file.name); });
+    setStatus('正在上传 ' + files.length + ' 个文件…');
     var headers = {}; if (window.SiteAuth && SiteAuth.csrfToken()) headers['X-CSRF-Token'] = SiteAuth.csrfToken();
-    fetch('__references/upload', { method: 'POST', headers: headers, body: form }).then(function (response) { if (!response.ok) throw new Error('上传失败（' + response.status + '）'); return response.json(); }).then(function () { setStatus('上传完成'); load(); }).catch(function (error) { setStatus(error.message, true); }); this.value = '';
+    fetch('__references/upload', { method: 'POST', headers: headers, body: form }).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (payload) {
+        if (!response.ok || payload.ok === false) { throw new Error(payload.error || ('上传失败（HTTP ' + response.status + '）')); }
+        return payload;
+      });
+    }).then(function (payload) {
+      var results = payload.results || [];
+      var failed = results.filter(function (item) { return !item.ok; });
+      if (failed.length) {
+        setStatus('已上传 ' + (results.length - failed.length) + ' 个，失败 ' + failed.length + ' 个：' + failed.map(function (item) { return item.name + '（' + item.error + '）'; }).join('、'), true);
+      } else {
+        setStatus('已上传 ' + results.length + ' 个文件');
+      }
+      load();
+    }).catch(function (error) { setStatus(error.message, true); }).then(function () { input.value = ''; });
   });
   document.addEventListener('click', function (event) {
     var node = event.target;

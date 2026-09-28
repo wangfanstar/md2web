@@ -161,6 +161,11 @@
   z-index: 1100;
 }
 
+/* 参考文献页有自己的顶部账号栏，避免 auth.js 再在页面底部或角落创建重复入口。 */
+.reference-library-page > .site-auth-fixed {
+  display: none;
+}
+
 .site-auth-fixed .site-auth-indicator {
   margin-left: 0;
 }

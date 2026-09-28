@@ -41,7 +41,7 @@
     .muted { color:var(--muted); font-size:12px; } .actions-cell { display:flex; gap:5px; justify-content:flex-end; } .actions-cell button { font-size:12px; padding:5px 8px; } .danger { color:#b84242; }
     .empty { color:var(--muted); padding:48px 20px; text-align:center; } .empty strong { color:var(--ink); display:block; font-size:15px; margin-bottom:6px; }
     .status { color:#b45309; font-size:12px; margin-top:12px; min-height:18px; } .status.error { color:#b91c1c; }
-    .account-bar { align-items:center; background:rgba(255,255,255,.72); border:1px solid var(--line); border-radius:10px; display:flex; gap:10px; justify-content:flex-end; margin-bottom:16px; padding:8px 12px; }
+    .account-bar { align-items:center; background:rgba(255,255,255,.96); border:1px solid var(--line); border-radius:10px; display:flex; gap:10px; justify-content:flex-end; margin-bottom:16px; padding:8px 12px; position:sticky; top:12px; z-index:12; }
     .account-info { color:var(--muted); font-size:12px; margin-right:auto; } .account-info.is-user { color:#216e4e; font-weight:600; }
     .account-bar button,.account-bar a { font-size:12px; padding:5px 10px; }
     @media (max-width:800px) { .shell { display:block; } .side { padding:15px 16px; } .brand { margin-bottom:15px; } .kind-nav { display:flex; overflow:auto; } .kind-nav button { min-width:110px; } .side-label,.side-links { display:none; } .main { padding:24px 15px 40px; } .topline { display:block; } .actions { justify-content:flex-start; margin-top:16px; } .list-head { display:none; } .item { grid-template-columns:1fr; gap:8px; padding:13px 15px; } .item > .muted { padding-left:45px; } .actions-cell { justify-content:flex-start; padding-left:45px; } }
@@ -56,7 +56,7 @@
     .preview-message { color:var(--muted); padding:40px; text-align:center; }
   </style>
 </head>
-<body>
+<body class="reference-library-page">
   <div class="shell">
     <aside class="side">
       <div class="brand"><span class="brand-mark">▤</span><span>参考文献库</span></div>
@@ -71,7 +71,7 @@
     </aside>
     <main class="main">
       <div class="account-bar"><span class="account-info" data-auth-info>正在读取登录状态…</span><button type="button" data-auth-login>登录</button><button type="button" data-auth-logout hidden>退出</button><a href="html/md2web_feedback.html">问题反馈</a></div>
-      <div class="topline"><div><h1 data-title>PDF 标准</h1><p class="sub">按文件夹整理标准、规范与项目资料</p></div><div class="actions"><button type="button" data-up>刷新</button><button type="button" class="primary" data-upload>上传文件</button><button type="button" data-mkdir>新建文件夹</button><input type="file" data-file hidden></div></div>
+      <div class="topline"><div><h1 data-title>PDF 标准</h1><p class="sub">按文件夹整理标准、规范与项目资料</p></div><div class="actions"><button type="button" data-up>刷新</button><button type="button" class="primary" data-upload>上传文件</button><button type="button" data-mkdir>新建文件夹</button><input type="file" data-file multiple hidden></div></div>
       <section class="crumb-card"><div class="crumb-row"><span class="crumb-home" data-root>全部资料</span><span class="crumb-sep">/</span><strong class="crumb-current" data-breadcrumb>根目录</strong></div><div class="stats" data-stats>正在读取…</div><div class="status" data-status></div></section>
       <section class="list-card"><div class="list-head"><span>名称</span><span>类型</span><span>修改时间</span><span></span></div><div data-list></div></section>
     </main>

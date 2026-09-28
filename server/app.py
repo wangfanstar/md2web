@@ -1411,14 +1411,26 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         kind = request.form.get("kind") or "pdf"
         try:
             _, folder, _ = references.safe_path(docs_root, kind, request.form.get("path") or "")
-            uploaded = request.files.get("file")
-            if uploaded is None or not uploaded.filename: raise references.ReferenceError(400, "未选择文件")
-            name = references.check_name(uploaded.filename)
-            if Path(name).suffix.lower() not in references.KINDS[kind]: raise references.ReferenceError(400, "文件扩展名与资料类型不匹配")
-            target = folder / name
-            if target.exists(): raise references.ReferenceError(409, "目标已存在")
-            folder.mkdir(parents=True, exist_ok=True); uploaded.save(str(target))
-            return jsonify({"ok": True, "path": target.relative_to(references.root_for(docs_root, kind)).as_posix()})
+            uploads = request.files.getlist("file")
+            if not uploads or not any(item.filename for item in uploads):
+                raise references.ReferenceError(400, "未选择文件")
+            folder.mkdir(parents=True, exist_ok=True)
+            results = []
+            for uploaded in uploads:
+                if not uploaded.filename:
+                    continue
+                name = references.check_name(uploaded.filename)
+                if Path(name).suffix.lower() not in references.KINDS[kind]:
+                    results.append({"name": name, "ok": False, "error": "文件扩展名与资料类型不匹配"})
+                    continue
+                target = folder / name
+                if target.exists():
+                    results.append({"name": name, "ok": False, "error": "目标已存在"})
+                    continue
+                uploaded.save(str(target))
+                results.append({"name": name, "ok": True,
+                                "path": target.relative_to(references.root_for(docs_root, kind)).as_posix()})
+            return jsonify({"ok": True, "results": results})
         except references.ReferenceError as error:
             return json_error(error.status, "reference_error", error.message)
 
