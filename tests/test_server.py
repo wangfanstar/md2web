@@ -453,6 +453,68 @@ class ConfigTests(ServerTestBase):
         self.assertNotIn("https://svn.example.invalid/svn/accounts/auth-check/", json.dumps(public))
         self.assertEqual(public["repositories"][0]["id"], "hardware")
 
+    def test_symlink_repository_resolves_target_and_forces_read_only(self):
+        target = self.tmp / "shared" / "hw"
+        target.mkdir(parents=True)
+        path = self.write_config({"repositories": [{
+            "id": "hw", "mount": "md/硬件设计", "sourceMode": "symlink",
+            "linkTarget": str(target), "url": "",
+            "readOnly": False, "allowCommit": True, "syncIntervalSeconds": 30,
+        }]})
+        config = server_config.load_config(path, self.docs)
+        repo = config["repositories"][0]
+        self.assertEqual(repo["source_mode"], "symlink")
+        self.assertEqual(repo["link_target"], str(target.resolve()))
+        self.assertTrue(repo["read_only"])
+        self.assertFalse(repo["allow_commit"])
+        self.assertIsNone(repo["sync_interval"])
+
+    def test_symlink_repository_resolves_relative_target_and_allows_offline_target(self):
+        (self.tmp / "config" / "shared").mkdir(parents=True)
+        path = self.write_config({"repositories": [{
+            "id": "hw", "mount": "md/硬件设计", "sourceMode": "symlink",
+            "linkTarget": "shared",
+        }]})
+        config = server_config.load_config(path, self.docs)
+        self.assertEqual(config["repositories"][0]["link_target"],
+                         str((self.tmp / "config" / "shared").resolve()))
+        path = self.write_config({"repositories": [{
+            "id": "hw", "mount": "md/硬件设计", "sourceMode": "symlink",
+            "linkTarget": str(self.tmp / "offline-share"),
+        }]})
+        config = server_config.load_config(path, self.docs)
+        self.assertTrue(config["repositories"][0]["link_target"].endswith("offline-share"))
+
+    def test_symlink_repository_rejects_unsafe_targets(self):
+        (self.tmp / "shared").mkdir()
+        for item in (
+            {"id": "x", "mount": "md/x", "sourceMode": "symlink", "linkTarget": ""},
+            {"id": "x", "mount": "md/x", "sourceMode": "symlink",
+             "linkTarget": str(self.tmp / "shared"),
+             "url": "https://svn.example.invalid/svn/x/"},
+            {"id": "x", "mount": "md/x", "sourceMode": "symlink",
+             "linkTarget": str(self.docs / "md")},
+            {"id": "x", "mount": "md/x", "sourceMode": "symlink",
+             "linkTarget": str(self.tmp)},
+        ):
+            path = self.write_config({"repositories": [item]})
+            with self.assertRaises(server_config.ConfigError, msg=json.dumps(item, ensure_ascii=False)):
+                server_config.load_config(path, self.docs)
+
+    def test_public_and_saved_config_keep_symlink_fields(self):
+        target = self.tmp / "shared"
+        target.mkdir()
+        path = self.write_config({"repositories": [{
+            "id": "hw", "mount": "md/硬件设计", "sourceMode": "symlink",
+            "linkTarget": str(target),
+        }]})
+        config = server_config.load_config(path, self.docs)
+        public = server_config.public_config(config)
+        self.assertEqual(public["repositories"][0]["linkTarget"], str(target.resolve()))
+        saved = server_config.config_to_json(config)
+        self.assertEqual(saved["repositories"][0]["linkTarget"], str(target.resolve()))
+        self.assertEqual(saved["repositories"][0]["sourceMode"], "symlink")
+
 
 class DatabaseTests(ServerTestBase):
     def test_migrate_creates_tables_and_version(self):

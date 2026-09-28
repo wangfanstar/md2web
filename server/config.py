@@ -71,6 +71,26 @@ def _resolve_path(base, value, label, docs_dir):
     return resolved
 
 
+def _resolve_link_target(base, value, docs_dir):
+    """解析并校验软链接目标：相对路径按配置文件目录解析，禁止指向/包含 docs 或 md。"""
+    raw = str(value or "").strip()
+    if not raw:
+        raise ConfigError("repositories[].linkTarget 不能为空（软链接必须填写目标目录）")
+    if raw.startswith("\\\\") or raw.startswith("//"):
+        raise ConfigError("linkTarget 不支持 UNC 网络路径，请先挂载为本地目录: %s" % raw)
+    path = Path(raw)
+    resolved = (base / path).resolve() if not path.is_absolute() else path.resolve()
+    docs = Path(docs_dir).resolve()
+    if resolved == docs or docs in resolved.parents:
+        raise ConfigError("linkTarget 不能放在 docs/ 内（会随站点分发）: %s" % resolved)
+    md_root = docs / "md"
+    if resolved == md_root or md_root in resolved.parents:
+        raise ConfigError("linkTarget 不能位于 md 目录内: %s" % resolved)
+    if resolved in md_root.parents:
+        raise ConfigError("linkTarget 不能包含 md 目录（会造成递归收录）: %s" % resolved)
+    return str(resolved)
+
+
 def load_config(path, docs_dir, allow_incomplete=False):
     """读取并校验配置；路径相对配置文件目录解析。"""
     config_path = Path(path)
@@ -175,15 +195,19 @@ def load_config(path, docs_dir, allow_incomplete=False):
             raise ConfigError(f"repository.mount 重复: {mount}")
         seen_mounts.add(mount)
         source_mode = str(item.get("sourceMode", item.get("source_mode", "svn")) or "svn").strip().lower()
-        if source_mode not in ("local", "svn"):
-            raise ConfigError(f"repositories[{index}].sourceMode 必须是 local 或 svn")
+        if source_mode not in ("local", "svn", "symlink"):
+            raise ConfigError(f"repositories[{index}].sourceMode 必须是 local、svn 或 symlink")
         raw_url = str(item.get("url") or "").strip()
+        link_target = ""
         if source_mode == "svn":
             repo_url = _check_url(raw_url, f"repositories[{index}].url")
         else:
             if raw_url:
-                raise ConfigError(f"repositories[{index}] 本地模式不能配置 SVN URL，请清空 url")
+                raise ConfigError(f"repositories[{index}] 非 SVN 模式不能配置 SVN URL，请清空 url")
             repo_url = ""
+        if source_mode == "symlink":
+            link_target = _resolve_link_target(
+                base, item.get("linkTarget", item.get("link_target", "")), docs_dir)
         sync_interval = item.get("syncIntervalSeconds", None)
         if sync_interval is not None:
             if isinstance(sync_interval, bool):
@@ -194,15 +218,18 @@ def load_config(path, docs_dir, allow_incomplete=False):
                 raise ConfigError(f"repositories[{index}].syncIntervalSeconds 必须是数值（秒，0 表示不自动同步）")
             if isinstance(sync_interval, bool) or not math.isfinite(sync_interval) or sync_interval < 0:
                 raise ConfigError(f"repositories[{index}].syncIntervalSeconds 必须是有限的非负数")
+        if source_mode == "symlink":
+            sync_interval = None
         repositories.append({
             "id": repo_id,
             "mount": mount,
             "source_mode": source_mode,
+            "link_target": link_target,
             "url": repo_url,
             "credential_group": str(item.get("credential_group") or credential_group).strip() or credential_group,
             "group": str(item.get("group") or "").strip() or str(item.get("credential_group") or credential_group).strip() or "默认",
-            "read_only": bool(item.get("readOnly", False)),
-            "allow_commit": bool(item.get("allowCommit", True)),
+            "read_only": True if source_mode == "symlink" else bool(item.get("readOnly", False)),
+            "allow_commit": False if source_mode == "symlink" else bool(item.get("allowCommit", True)),
             "sync_interval": sync_interval,
         })
 
@@ -286,6 +313,7 @@ def config_to_json(config):
         },
         "repositories": [
             {"id": repo["id"], "mount": repo["mount"], "sourceMode": repo.get("source_mode", "svn"),
+             "linkTarget": repo.get("link_target", ""),
              "url": repo["url"],
              "credential_group": repo["credential_group"], "group": repo.get("group") or "默认",
              "readOnly": bool(repo.get("read_only")), "allowCommit": bool(repo.get("allow_commit", True)),
@@ -383,6 +411,7 @@ def public_config(config):
     return {
         "repositories": [
             {"id": repo["id"], "mount": repo["mount"], "sourceMode": repo.get("source_mode", "svn"),
+             "linkTarget": repo.get("link_target", ""),
              "url": repo["url"],
              "group": repo.get("group") or "默认", "readOnly": bool(repo.get("read_only")),
              "allowCommit": bool(repo.get("allow_commit", True)),
