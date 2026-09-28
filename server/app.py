@@ -14,7 +14,7 @@ from pathlib import Path
 from flask import Flask, jsonify, make_response, request, send_from_directory
 
 from . import config as server_config
-from . import database, documents as server_documents, drafts, operations, entries, recycle, references
+from . import database, documents as server_documents, drafts, operations, entries, recycle, references, folder_sources
 from .auth import AuthError
 from .config import authenticated_config, config_to_json, public_config, save_config
 from .documents import MdSaveError
@@ -335,21 +335,28 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             md_files = md_bytes = other_files = other_bytes = 0
             nested_files = nested_bytes = 0
             subfolders = 0
-            for item in child.rglob("*"):
-                if not item.is_file() or ".svn" in item.parts:
+            for candidate in folder_sources.walk_paths(child):
+                path = Path(candidate)
+                if not path.is_file():
                     continue
                 try:
-                    stat = item.stat()
+                    relative = path.relative_to(child)
+                except ValueError:
+                    continue
+                if ".svn" in relative.parts:
+                    continue
+                try:
+                    stat = path.stat()
                 except OSError:
                     continue
                 file_size = int(stat.st_size)
                 files += 1
                 size += file_size
                 newest = max(newest, int(stat.st_mtime))
-                if len(item.relative_to(child).parts) > 1:
+                if len(relative.parts) > 1:
                     nested_files += 1
                     nested_bytes += file_size
-                if item.suffix.lower() == ".md":
+                if path.suffix.lower() == ".md":
                     md_files += 1
                     md_bytes += file_size
                 else:
@@ -380,6 +387,12 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         metrics = folder_metrics()
         latest = database.folder_latest_updates(conn)
         for folder in folders:
+            source = folder_sources.describe(Path(md_dir()) / folder["path"].split("/", 1)[1])
+            configured = next((item for item in config.get("repositories", [])
+                               if item.get("mount") == folder["path"]), None)
+            folder["sourceMode"] = (configured or {}).get("source_mode") or source.get("sourceMode", "local")
+            folder["linkTarget"] = (configured or {}).get("link_target", "") or source.get("linkTarget", "")
+            folder["linkExists"] = bool(source.get("linkExists", False))
             item = metrics.get(folder["path"]) or {}
             for name in ("sizeBytes", "files", "mdFiles", "mdBytes", "otherFiles", "otherBytes",
                          "subfolders", "nestedFiles", "nestedBytes"):

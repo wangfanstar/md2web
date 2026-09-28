@@ -6,6 +6,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -1051,6 +1052,108 @@ class MultiRepoTests(TempDirTestCase):
         self.assertIn("folderView: true", html)
 
 
+class FolderSourceBuildTests(TempDirTestCase):
+    """未配置文件夹的来源探测：软链接/失效链接/普通目录与循环安全。"""
+
+    def link(self, name, target):
+        try:
+            os.symlink(str(target), str(self.md / name), target_is_directory=True)
+            return True
+        except (OSError, NotImplementedError):
+            pass
+        if os.name != 'nt':
+            return False
+        try:
+            subprocess.check_call(['cmd', '/c', 'mklink', '/J', str(self.md / name), str(target)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            return True
+        except (OSError, subprocess.CalledProcessError):
+            return False
+
+    def test_unconfigured_symlink_detected_and_marked_in_overview(self):
+        self.write_doc("本地/a.md", "# A")
+        external = self.tmp / "外部资料"
+        external.mkdir()
+        (external / "b.md").write_text("# B", encoding="utf-8")
+        if not self.link("外部资料", external):
+            self.skipTest('link unavailable')
+        auto = self.module.auto_folder_repos([])
+        item = [entry for entry in auto if entry["id"] == "外部资料"][0]
+        self.assertEqual(item["source_mode"], "symlink")
+        self.assertEqual(item["link_target"], str(external.resolve()))
+        self.assertTrue(item["link_exists"])
+        self.assertTrue(item["read_only"])
+        self.assertFalse(item["allow_commit"])
+        with mock.patch.object(self.module, "load_repositories", lambda: []):
+            with redirect_stdout(io.StringIO()):
+                repos = self.module.load_all_repos()
+        self.module.generate_master_index_html(repos, "测试站")
+        page = (self.docs / "index.html").read_text(encoding="utf-8")
+        self.assertIn('badge symlink', page)
+        self.assertIn("↗ 软链接", page)
+        self.assertIn("本地文件夹", page)
+        self.assertNotIn("未配置 SVN", page)
+
+    def dangling_link(self, name):
+        """创建“目标失效”的链接：Windows 联接不允许悬空创建，先建后删目标。"""
+        target = self.tmp / ("gone-" + name)
+        target.mkdir()
+        if not self.link(name, target):
+            return False
+        shutil.rmtree(str(target))
+        return True
+
+    def test_broken_link_marked_and_skipped_by_scan(self):
+        self.write_doc("本地/a.md", "# A")
+        if not self.dangling_link("失效资料"):
+            self.skipTest('link unavailable')
+        auto = self.module.auto_folder_repos([])
+        item = [entry for entry in auto if entry["id"] == "失效资料"][0]
+        self.assertEqual(item["source_mode"], "symlink")
+        self.assertFalse(item["link_exists"])
+        self.module.generate_master_index_html(auto, "测试站")
+        page = (self.docs / "index.html").read_text(encoding="utf-8")
+        self.assertIn("链接失效", page)
+        self.assertEqual(self.scan(), ["本地/a.md"])
+
+    def test_scan_follows_top_level_link_but_not_nested_links(self):
+        self.write_doc("本地/a.md", "# A")
+        external = self.tmp / "外部资料"
+        nested_target = self.tmp / "深层"
+        (external / "sub").mkdir(parents=True)
+        (external / "sub" / "b.md").write_text("# B", encoding="utf-8")
+        nested_target.mkdir()
+        (nested_target / "hidden.md").write_text("# C", encoding="utf-8")
+        if not self.link("外部资料", external):
+            self.skipTest('link unavailable')
+        if not self.link("外部资料/nested-link", nested_target):
+            self.skipTest('link unavailable')
+        files = self.scan()
+        self.assertIn("外部资料/sub/b.md", files)
+        self.assertNotIn("外部资料/nested-link/hidden.md", files)
+
+    def test_readme_repo_list_labels_sources(self):
+        repos = [
+            {"id": "svn", "mount": "md/svn", "url": "https://svn.example.invalid/x/",
+             "source_mode": "svn", "group": "默认", "read_only": False, "allow_commit": True},
+            {"id": "link", "mount": "md/link", "source_mode": "symlink",
+             "link_target": "D:/share", "link_exists": True, "group": "默认",
+             "read_only": True, "allow_commit": False},
+            {"id": "missing", "mount": "md/missing", "source_mode": "symlink",
+             "link_target": "D:/gone", "link_exists": False, "group": "默认",
+             "read_only": True, "allow_commit": False},
+            {"id": "local", "mount": "md/local", "source_mode": "local",
+             "group": "默认", "read_only": True, "allow_commit": False},
+        ]
+        with redirect_stdout(io.StringIO()):
+            self.module.generate_readme(["svn/a.md"], "测试站", repos=repos)
+        text = (self.docs / "html" / "README.md").read_text(encoding="utf-8")
+        self.assertIn("来源：SVN 库", text)
+        self.assertIn("来源：↗ 软链接", text)
+        self.assertIn("链接失效", text)
+        self.assertIn("来源：本地文件夹", text)
+
+
 class ThirdPartyNoticeTests(unittest.TestCase):
     """本项目基于 docsify 构建：需保留版权/许可声明与第三方组件清单。"""
 
@@ -1806,7 +1909,8 @@ class EndToEndTests(TempDirTestCase):
         self.assertTrue((self.docs / "html" / "search-index.json").is_file())
         overview = (self.docs / "index.html").read_text(encoding="utf-8")
         self.assertIn("index_使用说明.html", overview)
-        self.assertIn("未配置 SVN", overview)
+        self.assertIn("本地文件夹", overview)
+        self.assertNotIn("未配置 SVN", overview)
         # 文件夹被删除后重建：入口页等产物应被清理
         shutil.rmtree(self.md / "硬件设计")
         with mock.patch.object(self.module, "load_repositories", lambda: []):

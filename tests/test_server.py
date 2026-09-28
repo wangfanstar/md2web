@@ -2,6 +2,7 @@ import importlib.util
 import io
 import base64
 import json
+import os
 import shutil
 import sqlite3
 import sys
@@ -29,6 +30,7 @@ def load_module(name, filename):
 server_package = __import__("server")
 from server import auth as server_auth  # noqa: E402
 from server import drafts as server_drafts  # noqa: E402
+from server import folder_sources as server_folder_sources  # noqa: E402
 from server import operations as server_operations  # noqa: E402
 from server import config as server_config  # noqa: E402
 from server import database as server_database  # noqa: E402
@@ -3422,6 +3424,23 @@ class FolderMetadataTests(ServerTestBase):
         self.assertEqual(latest["author"], "管理员")
         self.assertEqual(latest["at"], "2026-09-20T01:00:05Z")
         self.assertEqual(folders["md/本地笔记"]["latestUpdate"]["source"], "filesystem")
+
+    def test_folders_report_symlink_detection_and_size(self):
+        external = self.tmp / "外部资料"
+        external.mkdir()
+        (external / "link.md").write_text("# L\n", encoding="utf-8")
+        try:
+            server_folder_sources.manage_link(self.docs / "md", "md/外部资料",
+                                              str(external), "create")
+        except (OSError, ValueError):
+            self.skipTest('link unavailable')
+        folders = {item["path"]: item for item in self.client.get("/__folders").get_json()["folders"]}
+        item = folders["md/外部资料"]
+        self.assertEqual(item["sourceMode"], "symlink")
+        self.assertEqual(item["linkTarget"], str(external.resolve()))
+        self.assertTrue(item["linkExists"])
+        self.assertEqual(item["mdFiles"], 1)
+        self.assertGreater(item["sizeBytes"], 0)
 
     def test_health_reports_local_mode_without_svn_check(self):
         headers = {"X-CSRF-Token": self.csrf()}

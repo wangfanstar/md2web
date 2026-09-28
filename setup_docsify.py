@@ -4,6 +4,7 @@ import argparse
 import html
 import hashlib
 import json
+import os
 import re
 import shutil
 import sys
@@ -12,6 +13,7 @@ import urllib.parse
 import urllib.request
 from urllib.parse import quote
 from pathlib import Path
+from server import folder_sources
 from server import references as reference_tools
 
 ROOT = Path(__file__).parent
@@ -68,16 +70,20 @@ def scan_markdown(md_dir) -> list:
             f"源文档目录不存在: {display_path(root)}，请创建该目录并放入 .md 文档"
         )
     files = []
-    for path in sorted(root.rglob("*")):
+    root = Path(md_dir)
+    for candidate in folder_sources.walk_paths(root):
+        path = Path(candidate)
         if not path.is_file():
             continue
-        rel = path.relative_to(root)
-        if any(part.startswith(".") or part == "回收站" for part in rel.parts):
+        try:
+            relative = path.relative_to(root)
+        except ValueError:
             continue
         if path.suffix == ".md":
-            files.append(rel.as_posix())
+            files.append(relative.as_posix())
         elif path.suffix.lower() == ".md":
             print(f"  [警告] 跳过非小写扩展名文档: {display_path(path)}（请重命名为 .md）")
+    files.sort()
     if not files:
         raise BuildError(
             f"源文档目录中没有 .md 文件: {display_path(root)}，请放入文档后重试"
@@ -652,6 +658,8 @@ def load_repositories():
                 "id": repo_id,
                 "mount": mount,
                 "url": str(item.get("url") or "").strip(),
+                "source_mode": str(item.get("sourceMode", item.get("source_mode", "svn")) or "svn").strip().lower(),
+                "link_target": str(item.get("linkTarget", item.get("link_target", "")) or "").strip(),
                 "group": str(item.get("group") or item.get("credential_group") or "默认").strip() or "默认",
                 "read_only": bool(item.get("readOnly", False)),
                 "allow_commit": bool(item.get("allowCommit", True)),
@@ -662,6 +670,10 @@ def load_repositories():
             override = folder_groups.get(repo["mount"])
             if override and str(override).strip():
                 repo["group"] = str(override).strip()
+        for repo in repos:
+            sub = mount_subpath(repo["mount"])
+            probe = folder_sources.describe(MD_DIR / sub) if sub else {"linkExists": False}
+            repo["link_exists"] = bool(probe.get("linkExists", False))
         if repos or items == []:
             return repos
     return []
@@ -713,11 +725,17 @@ def load_all_repos():
 
 
 def first_level_folders():
-    """docs/md 下的一级文件夹名（不含隐藏目录）。"""
+    """docs/md 下的一级文件夹名（含失效链接，不含隐藏目录与回收站）。"""
     if not MD_DIR.is_dir():
         return []
-    return sorted(path.name for path in MD_DIR.iterdir()
-                  if path.is_dir() and not path.name.startswith("."))
+    names = []
+    for name in sorted(os.listdir(str(MD_DIR))):
+        if name.startswith(".") or name == "回收站":
+            continue
+        path = MD_DIR / name
+        if path.is_dir() or folder_sources.is_directory_link(path):
+            names.append(name)
+    return names
 
 
 def load_folder_groups():
@@ -755,13 +773,17 @@ def auto_folder_repos(repos):
             continue
         if repo_page_name(name) in reserved:
             continue
+        info = folder_sources.describe(MD_DIR / name)
         auto.append({
             "id": name,
             "mount": "md/" + name,
             "url": "",
+            "source_mode": info.get("sourceMode", "local"),
+            "link_target": info.get("linkTarget", ""),
+            "link_exists": bool(info.get("linkExists", False)),
             "group": groups.get("md/" + name, "默认"),
-            "read_only": False,
-            "allow_commit": True,
+            "read_only": info.get("sourceMode") == "symlink",
+            "allow_commit": info.get("sourceMode") != "symlink",
             "sync_interval": None,
             "auto": True,
         })
@@ -793,13 +815,18 @@ def scan_directories(md_dir):
     directories = []
     if not root.is_dir():
         return directories
-    for path in sorted(root.rglob("*")):
+    for candidate in folder_sources.walk_paths(root):
+        path = Path(candidate)
         if not path.is_dir():
             continue
-        parts = path.relative_to(root).parts
-        if any(part.startswith(".") or part in SIDEBAR_IGNORED_DIRS for part in parts):
+        try:
+            relative = path.relative_to(root)
+        except ValueError:
             continue
-        directories.append("/".join(parts))
+        if any(part in SIDEBAR_IGNORED_DIRS for part in relative.parts):
+            continue
+        directories.append(relative.as_posix())
+    directories.sort()
     return directories
 
 
@@ -1096,12 +1123,18 @@ def generate_readme(md_files, title="文档中心", path=None, repos=None):
             lines.append(f"## {group}")
             lines.append("")
             for repo in groups[group]:
-                flags = []
+                source_mode = repo.get("source_mode", "svn")
+                labels = {"svn": "SVN 库", "symlink": "↗ 软链接", "local": "本地文件夹"}
+                flags = ["来源：" + labels.get(source_mode, "SVN 库")]
+                if source_mode == "symlink":
+                    flags.append("→ " + (repo.get("link_target") or "目标未配置"))
+                    if not repo.get("link_exists", True):
+                        flags.append("链接失效")
                 if repo.get("read_only"):
                     flags.append("只读")
                 if not repo.get("allow_commit", True):
                     flags.append("禁止合入")
-                suffix = ("（" + "、".join(flags) + "）") if flags else ""
+                suffix = "（" + "、".join(flags) + "）"
                 page = HTML_PREFIX + repo_page_name(repo["id"])
                 lines.append(f'- <a href="{page}">{repo["id"]}</a> · `{repo["mount"]}`{suffix}')
             lines.append("")
@@ -1157,7 +1190,8 @@ def generate_index_html(title="文档中心", path=None, page_name="index.html",
     repo_list_js = json.dumps([
         {"id": item["id"], "sub": mount_subpath(item["mount"]),
          "sidebar": f"_sidebar_{item['id']}.md", "mount": item["mount"],
-         "url": item.get("url", ""), "sourceMode": item.get("source_mode", "svn")}
+         "url": item.get("url", ""), "sourceMode": item.get("source_mode", "svn"),
+         "linkTarget": item.get("link_target", ""), "linkExists": bool(item.get("link_exists", False))}
         for item in (repos or [])
     ], ensure_ascii=False).replace("<", "\\u003c")
     homepage_js = json.dumps(str(homepage), ensure_ascii=False) if homepage else "false"
@@ -1328,6 +1362,10 @@ MASTER_STYLE = """
   .card span { color: #57606a; display: block; font-size: 12.5px; overflow-wrap: anywhere; }
   .badge { background: #eef4fd; border-radius: 999px; color: #1f6feb; display: inline-block; font-size: 11px; margin-left: 6px; padding: 1px 8px; }
   .badge.readonly { background: #fff7ed; color: #b45309; }
+  .badge.svn { background: #e8f1ff; color: #1d4ed8; }
+  .badge.symlink { background: #f3e8ff; color: #7e22ce; }
+  .badge.local { background: #ecfdf5; color: #047857; }
+  .badge.broken { background: #fee2e2; color: #b91c1c; }
   .results { margin: 6px 0 18px; }
   .master-mode-section { margin: 14px 0 18px; }
   .master-mode-title { align-items: baseline; border-bottom: 1px solid #e3e8ee; color: #334155; display: flex; font-size: 14px; gap: 8px; margin: 0 0 8px; padding: 0 2px 7px; }
@@ -1591,13 +1629,27 @@ def generate_master_index_html(repos, title="文档中心", all_page="index_all.
         cards = []
         for repo in groups[group]:
             badges = ''
-            if repo.get("auto"):
-                badges += '<span class="badge readonly">未配置 SVN</span>'
+            source_mode = repo.get("source_mode", "svn")
+            if source_mode == "symlink":
+                badges += '<span class="badge symlink">↗ 软链接</span>'
+                if not repo.get("link_exists", True):
+                    badges += '<span class="badge broken">链接失效</span>'
+            elif source_mode == "local":
+                badges += '<span class="badge local">本地文件夹</span>'
+            else:
+                badges += '<span class="badge svn">SVN 库</span>'
             if repo.get("read_only"):
                 badges += '<span class="badge readonly">只读</span>'
             if not repo.get("allow_commit", True):
                 badges += '<span class="badge readonly">禁止合入</span>'
-            note = repo.get("url") or ("本地文件夹（不连接 SVN）" if repo.get("auto") else "（未填写 SVN 地址）")
+            if source_mode == "symlink":
+                note = "→ " + (repo.get("link_target") or "目标目录未配置")
+                if not repo.get("link_exists", True):
+                    note += "（链接失效，请检查目标目录）"
+            elif source_mode == "svn":
+                note = repo.get("url") or "（未填写 SVN 地址）"
+            else:
+                note = "本地文件夹（不连接 SVN）"
             cards.append(
                 '<a class="card" href="' + HTML_PREFIX + repo_page_name(repo["id"]) + '">'
                 + '<strong>' + html.escape(str(repo["id"])) + badges + '</strong>'

@@ -19,7 +19,7 @@ import uuid
 import hashlib
 from pathlib import Path
 
-from . import database, documents
+from . import database, documents, folder_sources
 from .drafts import unified_diff as documents_diff
 from .svn import SvnError
 from .content_lock import serialized
@@ -766,7 +766,9 @@ def list_md_folders(md_dir, repos=None):
         return []
     folders = []
     for path in sorted(root.iterdir()):
-        if not path.is_dir() or path.name.startswith(".") or path.name == "回收站":
+        if path.name.startswith(".") or path.name == "回收站":
+            continue
+        if not path.is_dir() and not folder_sources.is_directory_link(path):
             continue
         try:
             relative = path.relative_to(root).as_posix()
@@ -774,9 +776,10 @@ def list_md_folders(md_dir, repos=None):
             continue
         mount = "md/" + relative
         documents = 0
-        for child in path.iterdir():
-            if child.is_file() and child.suffix.lower() == ".md" and not child.name.startswith("."):
-                documents += 1
+        if path.is_dir():
+            for child in path.iterdir():
+                if child.is_file() and child.suffix.lower() == ".md" and not child.name.startswith("."):
+                    documents += 1
         repo = None
         for item in repos or []:
             if item.get("mount") == mount:
@@ -789,6 +792,8 @@ def list_md_folders(md_dir, repos=None):
             "repo": {
                 "id": repo["id"],
                 "url": repo["url"],
+                "sourceMode": repo.get("source_mode", "svn"),
+                "linkTarget": repo.get("link_target", ""),
                 "group": repo.get("group") or "默认",
                 "readOnly": bool(repo.get("read_only")),
                 "allowCommit": bool(repo.get("allow_commit", True)),
