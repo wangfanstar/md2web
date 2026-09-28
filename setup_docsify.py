@@ -1708,6 +1708,7 @@ def generate_reference_pages():
         encoding="utf-8"
     )
     generate_standalone_page("reference_library.html", "reference-library.js", "参考文献")
+    generate_standalone_page("reference_preview.html", "reference-preview.js", "参考文献预览")
     office_bundle = ROOT / "web" / "reference-office.bundle.js"
     if office_bundle.is_file():
         (LIB_DIR / office_bundle.name).write_bytes(office_bundle.read_bytes())

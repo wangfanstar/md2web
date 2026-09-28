@@ -55,14 +55,6 @@
     .account-bar [hidden] { display:none; }
     @media (max-width:800px) { .shell { display:block; } .side { padding:15px 16px; } .brand { margin-bottom:15px; } .kind-nav { display:flex; overflow:auto; } .kind-nav button { min-width:110px; } .side-label,.side-links { display:none; } .main { padding:24px 15px 40px; } .topline { display:block; } .actions { justify-content:flex-start; margin-top:16px; } .account-bar { align-items:flex-start; flex-wrap:wrap; } .account-info { flex:1 0 100%; } .account-form { flex:1 1 100%; } .account-form input { flex:1; min-width:0; width:auto; } .list-head { display:none; } .item { grid-template-columns:1fr; gap:8px; padding:13px 15px; } .item > .muted { padding-left:45px; } .actions-cell { justify-content:flex-start; padding-left:45px; } }
     @media (prefers-reduced-motion:reduce) { .item { transition:none; } }
-    .preview { background:rgba(10,22,40,.72); inset:0; padding:5vh 5vw; position:fixed; z-index:30; }
-    .preview[hidden] { display:none; }
-    .preview-panel { background:#fff; border-radius:12px; display:flex; flex-direction:column; height:90vh; overflow:hidden; }
-    .preview-head { align-items:center; border-bottom:1px solid var(--line); display:flex; gap:12px; justify-content:space-between; padding:12px 16px; }
-    .preview-title { font-size:14px; font-weight:650; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .preview-body { flex:1; min-height:0; overflow:auto; position:relative; }
-    .preview-body > div { height:100%; min-height:100%; }
-    .preview-message { color:var(--muted); padding:40px; text-align:center; }
   </style>
 </head>
 <body class="reference-library-page">
@@ -86,7 +78,6 @@
       <section class="list-card"><div class="list-head"><span>名称</span><span>类型 / 大小 / 页数</span><span>修改时间</span><span></span></div><div data-list></div></section>
     </main>
   </div>
-  <div class="preview" data-preview hidden><div class="preview-panel"><div class="preview-head"><span class="preview-title" data-preview-title></span><button type="button" data-preview-close>关闭</button></div><div class="preview-body" data-preview-body></div></div></div>
-  <script src="lib/auth.js"></script><script src="lib/reference-data.js"></script><script src="lib/reference-office.bundle.js"></script><script src="lib/reference-library.js"></script>
+  <script src="lib/auth.js"></script><script src="lib/reference-data.js"></script><script src="lib/reference-library.js"></script>
 </body>
 </html>

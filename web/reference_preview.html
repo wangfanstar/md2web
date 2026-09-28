@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <base href="../">
+  <title>参考文献预览</title>
+  <style>
+    :root { color-scheme: light; --ink:#172033; --muted:#718096; --line:#e4eaf2; --blue:#2563eb; --canvas:#f4f7fb; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; background:var(--canvas); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","Microsoft YaHei",sans-serif; }
+    .topbar { align-items:center; background:#fff; border-bottom:1px solid var(--line); display:flex; gap:16px; min-height:64px; padding:12px clamp(18px,4vw,48px); }
+    .back { color:var(--blue); font-size:13px; text-decoration:none; white-space:nowrap; }
+    .title { min-width:0; flex:1; } .title strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .title span { color:var(--muted); display:block; font-size:12px; margin-top:3px; }
+    .download { border:1px solid #cbd8ea; border-radius:7px; color:var(--blue); font-size:13px; padding:7px 11px; text-decoration:none; white-space:nowrap; }
+    .stage { margin:24px auto 50px; max-width:1440px; padding:0 18px; }
+    .notice { background:#fff; border:1px solid var(--line); border-radius:12px; color:var(--muted); padding:13px 16px; }
+    .notice.error { border-color:#f1caca; color:#a43f3f; } .notice a { color:var(--blue); }
+    .viewer { background:#fff; border:1px solid var(--line); border-radius:12px; box-shadow:0 18px 45px rgba(40,59,90,.08); min-height:calc(100vh - 145px); margin-top:14px; overflow:auto; padding:18px; }
+    #office-viewer { min-height:calc(100vh - 185px); }
+    @media (max-width:650px) { .topbar { align-items:flex-start; flex-wrap:wrap; } .title { order:3; flex-basis:100%; } .stage { margin-top:15px; padding:0 10px; } .viewer { padding:8px; } }
+  </style>
+</head>
+<body>
+  <header class="topbar"><a class="back" href="html/reference_library.html">‹ 返回参考文献库</a><div class="title"><strong data-title>文档预览</strong><span data-meta>正在读取文件…</span></div><a class="download" data-download hidden>打开或下载原文件</a></header>
+  <main class="stage"><div class="notice" data-notice>正在加载本地预览组件…</div><section class="viewer" id="office-viewer" aria-label="Office 文档预览"></section></main>
+  <script src="lib/reference-office.bundle.js"></script><script src="lib/reference-preview.js"></script>
+</body>
+</html>

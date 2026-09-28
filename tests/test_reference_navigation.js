@@ -35,6 +35,15 @@ test('reference page keeps login fields beside the login action', () => {
 
 test('PDF file links open in a new browser tab', () => {
   const script = fs.readFileSync(path.join(__dirname, '..', 'web', 'reference-library.js'), 'utf8');
-  assert.match(script, /item\.ext === '\.pdf' \? ' target="_blank" rel="noopener"'/);
-  assert.match(script, /folder \|\| item\.ext === '\.pdf' \? '' : ' data-preview-file=/);
+  assert.match(script, /var newTabAttr = folder \? '' : ' target="_blank" rel="noopener"'/);
+  assert.match(script, /item\.ext !== '\.pdf'/);
+  assert.doesNotMatch(script, /data-preview-file/);
+});
+
+test('Office file links open the local preview page in a new tab', () => {
+  const script = fs.readFileSync(path.join(__dirname, '..', 'web', 'reference-library.js'), 'utf8');
+  const viewer = fs.readFileSync(path.join(__dirname, '..', 'web', 'reference_preview.html'), 'utf8');
+  assert.match(script, /html\/reference_preview\.html\?kind=/);
+  assert.match(script, /target="_blank" rel="noopener"/);
+  assert.match(viewer, /lib\/reference-office\.bundle\.js/);
 });

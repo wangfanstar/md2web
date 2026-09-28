@@ -1,6 +1,6 @@
 # AGENTS.md — AI 助手开发指南
 
-参考文献库：`docs/pdf/`、`docs/word/`、`docs/excel/`、`docs/ppt/` 由 `reference_library.html` 统一管理。参考文献写操作必须使用认证编辑服务，`--preview` 只读服务对上传 POST 返回 405 是预期行为；页面写操作要求登录与 CSRF；上传控件支持一次选择多个文件，接口使用同名 `file` 多值字段并返回逐文件结果，列表和搜索结果显示大小及页数/工作表数/幻灯片数，服务端上传请求、图片、附件和反馈附件上限统一为 100 MB，前端必须展示服务端具体错误；构建生成的 `docs/lib/reference-data.js` 是 `file://` 离线页面的参考文献清单快照，构建后新增文件需重新构建；PDF 使用浏览器本地预览，DOCX/XLSX/PPTX 使用 `docs/lib/reference-office.bundle.js` 中的本地 vue-office bundle，运行时不得请求 CDN。独立参考文献页面必须提供登录状态、登录/退出和反馈快捷入口；站内入口跳转不应被编辑器的未保存提示拦截。
+参考文献库：`docs/pdf/`、`docs/word/`、`docs/excel/`、`docs/ppt/` 由 `reference_library.html` 统一管理。参考文献写操作必须使用认证编辑服务，`--preview` 只读服务对上传 POST 返回 405 是预期行为；页面写操作要求登录与 CSRF；上传控件支持一次选择多个文件，接口使用同名 `file` 多值字段并返回逐文件结果，列表和搜索结果显示大小及页数/工作表数/幻灯片数，服务端上传请求、图片、附件和反馈附件上限统一为 100 MB，前端必须展示服务端具体错误；构建生成的 `docs/lib/reference-data.js` 是 `file://` 离线页面的参考文献清单快照，构建后新增文件需重新构建；PDF 使用浏览器本地预览，DOCX/XLSX/PPTX 点击后在新标签页由 `reference_preview.html` 加载 `docs/lib/reference-office.bundle.js` 中的本地 vue-office bundle，运行时不得请求 CDN。独立参考文献页面必须提供登录状态、登录/退出和反馈快捷入口；站内入口跳转不应被编辑器的未保存提示拦截。
 
 > 面向在本仓库工作的 AI 助手（opencode / Claude Code / Codex 等）；人类维护者亦可参考。
 

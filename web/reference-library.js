@@ -9,9 +9,6 @@
   var stats = document.querySelector('[data-stats]');
   var title = document.querySelector('[data-title]');
   var crumb = document.querySelector('[data-breadcrumb]');
-  var preview = document.querySelector('[data-preview]');
-  var previewBody = document.querySelector('[data-preview-body]');
-  var previewTitle = document.querySelector('[data-preview-title]');
   var authInfo = document.querySelector('[data-auth-info]');
   var authForm = document.querySelector('[data-auth-form]');
   var authUsername = document.querySelector('[data-auth-username]');
@@ -81,12 +78,12 @@
     list.innerHTML = items.map(function (item) {
       var folder = item.kind === 'folder';
       var sourceKind = item.referenceKind || state.kind;
-      var href = folder ? 'html/reference_library.html?kind=' + encodeURIComponent(sourceKind) + '&path=' + encodeURIComponent(item.path) : sourceKind + '/' + item.path.split('/').map(encodeURIComponent).join('/');
+      var office = !folder && item.ext !== '.pdf';
+      var href = folder ? 'html/reference_library.html?kind=' + encodeURIComponent(sourceKind) + '&path=' + encodeURIComponent(item.path) : office ? 'html/reference_preview.html?kind=' + encodeURIComponent(sourceKind) + '&path=' + encodeURIComponent(item.path) : sourceKind + '/' + item.path.split('/').map(encodeURIComponent).join('/');
       var sourceAttr = ' data-reference-kind="' + esc(sourceKind) + '"';
-      var previewAttr = folder || item.ext === '.pdf' ? '' : ' data-preview-file="' + esc(item.path) + '"' + sourceAttr;
-      var newTabAttr = item.ext === '.pdf' ? ' target="_blank" rel="noopener"' : '';
+      var newTabAttr = folder ? '' : ' target="_blank" rel="noopener"';
       var actions = offlineMode ? '' : '<button type="button" data-rename="' + esc(item.path) + '"' + sourceAttr + '>重命名</button><button type="button" class="danger" data-delete="' + esc(item.path) + '"' + sourceAttr + '>删除</button>';
-      return '<div class="item"><div class="name"><span class="icon ' + (folder ? '' : 'file') + '">' + (folder ? '▰' : '▤') + '</span><a href="' + esc(href) + '"' + previewAttr + newTabAttr + '>' + esc(item.name) + '</a></div><div class="muted">' + (searching ? esc(sourceKind.toUpperCase()) + ' · ' : '') + typeLabel(item.ext, folder) + '<br>' + sizeLabel(item.size) + ' · ' + pageLabel(item, folder) + '</div><div class="muted">' + timeLabel(item.mtime) + '</div><div class="actions-cell">' + actions + '</div></div>';
+      return '<div class="item"><div class="name"><span class="icon ' + (folder ? '' : 'file') + '">' + (folder ? '▰' : '▤') + '</span><a href="' + esc(href) + '"' + newTabAttr + '>' + esc(item.name) + '</a></div><div class="muted">' + (searching ? esc(sourceKind.toUpperCase()) + ' · ' : '') + typeLabel(item.ext, folder) + '<br>' + sizeLabel(item.size) + ' · ' + pageLabel(item, folder) + '</div><div class="muted">' + timeLabel(item.mtime) + '</div><div class="actions-cell">' + actions + '</div></div>';
     }).join('') || '<div class="empty"><strong>' + (searching ? '没有找到匹配的文件' : '这个文件夹还没有资料') + '</strong><span>' + (searching ? '请尝试文件名中的其他关键词。' : '可以上传文件，或先新建一个子文件夹。') + '</span></div>';
     stats.textContent = searching ? '找到 ' + items.length + ' 个文件 · 已按 PDF、Word、Excel、PPT 汇总' : items.length + ' 个项目 · 文件夹可继续展开，文件点击后在新窗口预览或下载';
   }
@@ -176,23 +173,9 @@
   });
   document.addEventListener('click', function (event) {
     var node = event.target;
-    if (node.hasAttribute('data-preview-file')) { event.preventDefault(); openPreview(node.getAttribute('data-preview-file'), node.textContent, node.getAttribute('data-reference-kind') || state.kind); }
     if (node.hasAttribute('data-rename')) { var name = window.prompt('输入新名称'); if (name) mutate('__references/rename', { kind: node.getAttribute('data-reference-kind') || state.kind, path: node.getAttribute('data-rename'), name: name }); }
     if (node.hasAttribute('data-delete') && window.confirm('删除后会进入回收站，确认继续？')) { mutate('__references/delete', { kind: node.getAttribute('data-reference-kind') || state.kind, path: node.getAttribute('data-delete') }); }
   });
-  document.querySelector('[data-preview-close]').addEventListener('click', function () { preview.hidden = true; previewBody.innerHTML = ''; });
-  preview.addEventListener('click', function (event) { if (event.target === preview) { preview.hidden = true; previewBody.innerHTML = ''; } });
-  function openPreview(filePath, name, sourceKind) {
-    var ext = filePath.split('.').pop().toLowerCase();
-    sourceKind = sourceKind || state.kind;
-    var url = sourceKind + '/' + filePath.split('/').map(encodeURIComponent).join('/');
-    previewTitle.textContent = name || filePath; preview.hidden = false; previewBody.innerHTML = '';
-    if (ext === 'pdf') { var frame = document.createElement('iframe'); frame.src = url; frame.style.cssText = 'border:0;height:100%;width:100%'; previewBody.appendChild(frame); return; }
-    function fallback() { previewBody.innerHTML = '<div class="preview-message">当前浏览器无法直接预览该 Office 文件。<br><a href="' + esc(url) + '" target="_blank" rel="noopener">打开或下载原文件</a></div>'; }
-    if (!window.Md2webOffice || !window.Md2webOffice.mount) { fallback(); return; }
-    var host = document.createElement('div'); previewBody.appendChild(host);
-    window.Md2webOffice.mount(host, { type: ext, src: url, onError: fallback });
-  }
   renderAuth();
   if (window.SiteAuth) { SiteAuth.refresh().then(function () { renderAuth(); load(); }); } else { load(); }
 }());
