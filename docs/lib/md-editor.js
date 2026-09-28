@@ -31,6 +31,7 @@
     find: { open: false, replace: false, query: '', replacement: '', caseSensitive: false, wholeWord: false, regex: false, matches: [], index: -1 },
     findTimer: 0,
     pendingDrafts: 0,
+    allowInternalNavigation: false,
     publishedOnServer: false
   };
 
@@ -2673,6 +2674,10 @@
   }
 
   window.addEventListener('beforeunload', function (event) {
+    if (state.allowInternalNavigation) {
+      state.allowInternalNavigation = false;
+      return undefined;
+    }
     if (!state.pendingDrafts && !hasUnsavedEditorWork()) {
       return undefined;
     }
@@ -2683,6 +2688,26 @@
     event.returnValue = message;
     return message;
   });
+
+  // 站内入口（例如“所有文档”、仓库入口和反馈页）是明确的用户导航动作，
+  // 不应被全站草稿提醒拦截；编辑器内真正的刷新、关闭标签页仍继续保护。
+  document.addEventListener('click', function (event) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey
+        || event.shiftKey || event.altKey) {
+      return;
+    }
+    var link = event.target && event.target.closest ? event.target.closest('a[href]') : null;
+    if (!link || link.target === '_blank' || link.hasAttribute('download')) {
+      return;
+    }
+    try {
+      var target = new URL(link.href, window.location.href);
+      if (target.origin === window.location.origin) {
+        state.allowInternalNavigation = true;
+        window.setTimeout(function () { state.allowInternalNavigation = false; }, 1500);
+      }
+    } catch (error) { /* 无效链接交给浏览器处理 */ }
+  }, true);
 
   document.addEventListener('siteauth:change', function () {
     refreshPendingDrafts();

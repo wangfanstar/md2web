@@ -12,9 +12,20 @@
   var preview = document.querySelector('[data-preview]');
   var previewBody = document.querySelector('[data-preview-body]');
   var previewTitle = document.querySelector('[data-preview-title]');
+  var authInfo = document.querySelector('[data-auth-info]');
+  var authLogin = document.querySelector('[data-auth-login]');
+  var authLogout = document.querySelector('[data-auth-logout]');
 
   function esc(value) { return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
   function setStatus(message, error) { status.textContent = message || ''; status.className = 'status' + (error ? ' error' : ''); }
+  function renderAuth(event) {
+    var snapshot = event && event.detail ? event.detail : (window.SiteAuth && SiteAuth.snapshot ? SiteAuth.snapshot() : {});
+    var user = snapshot.user;
+    authInfo.textContent = user ? '已登录：' + (user.displayName || user.username) : '未登录 · 浏览公开资料，登录后可管理文件';
+    authInfo.classList.toggle('is-user', !!user);
+    authLogin.hidden = !!user;
+    authLogout.hidden = !user;
+  }
   function api(url, options) {
     var headers = Object.assign({ 'Content-Type': 'application/json' }, (options && options.headers) || {});
     if (window.SiteAuth && SiteAuth.csrfToken()) { headers['X-CSRF-Token'] = SiteAuth.csrfToken(); }
@@ -57,6 +68,9 @@
   document.querySelectorAll('[data-kind-nav]').forEach(function (node) { node.addEventListener('click', function () { state.kind = node.getAttribute('data-kind-nav'); state.path = ''; updateUrl(); load(); }); });
   document.querySelector('[data-root]').addEventListener('click', function () { state.path = ''; updateUrl(); load(); });
   document.querySelector('[data-up]').addEventListener('click', load);
+  authLogin.addEventListener('click', function () { SiteAuth.openLogin(); });
+  authLogout.addEventListener('click', function () { SiteAuth.logout().then(function () { renderAuth(); }); });
+  document.addEventListener('siteauth:change', renderAuth);
   document.querySelector('[data-mkdir]').addEventListener('click', function () { var name = window.prompt('输入新文件夹名称'); if (name) mutate('__references/mkdir', { kind: state.kind, parent: state.path, name: name }); });
   document.querySelector('[data-upload]').addEventListener('click', function () { document.querySelector('[data-file]').click(); });
   document.querySelector('[data-file]').addEventListener('change', function () {
@@ -82,5 +96,6 @@
     var host = document.createElement('div'); previewBody.appendChild(host);
     window.Md2webOffice.mount(host, { type: ext, src: url, onError: function () { previewBody.innerHTML = '<div class="preview-message">该文件无法在本地预览，请检查文件是否损坏，然后下载原文件。</div>'; } });
   }
-  load();
+  renderAuth();
+  if (window.SiteAuth) { SiteAuth.refresh().then(function () { renderAuth(); load(); }); } else { load(); }
 }());
