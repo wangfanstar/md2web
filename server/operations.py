@@ -660,7 +660,7 @@ def sync_all(conn, svn_client, config, md_dir, credential=None, now=None, logger
     moment = now or time.time()
     results = []
     for binding in config.get("repositories") or []:
-        if binding.get("source_mode", "svn") == "local":
+        if binding.get("source_mode", "svn") != "svn":
             continue
         interval = sync_interval_of(binding, config)
         row = _binding_row(conn, binding)
@@ -1101,6 +1101,17 @@ def repo_health(conn, svn_client, config, md_dir, binding, credential=None):
         "detail": "",
         "hints": [],
     }
+    if (binding.get("source_mode") or "svn") == "symlink":
+        info = folder_sources.describe(local_path)
+        if info.get("linkExists"):
+            result.update(status="软链接（只读）",
+                          detail="内容来自链接目标：%s" % info.get("linkTarget"),
+                          hints=["在目标目录直接修改内容后重新构建站点"])
+        else:
+            result.update(status="链接失效", level="error",
+                          detail="链接目标不存在或不可访问：%s" % (binding.get("link_target") or ""),
+                          hints=["检查目标目录（网络共享/磁盘）", "在配置页移除后重新创建链接"])
+        return result
     if not url:
         result.update(status="未配置 SVN 地址", level="error",
                       detail="该文件夹还没有填写 SVN 地址，无法同步或提交",
@@ -1268,6 +1279,8 @@ def recreate_site_workcopy(conn, svn_client, config, root, credential=None, mess
 
 def repair_repo(conn, svn_client, config, md_dir, binding, credential=None):
     """修复：网站备份工作副本 cleanup（修不好就移入回收站）+ 强制重新拉取该仓库内容。"""
+    if (binding.get("source_mode") or "svn") != "svn":
+        raise OperationError(400, "该文件夹不是 SVN 库（本地文件夹/软链接），不支持该操作")
     notes = repair_site_workcopy(svn_client, config)
     result = provision_repository(conn, svn_client, config, md_dir, binding, credential, force=True)
     notes.append("已重新拉取 %s（r%s，覆盖 %d 个文件）" % (binding["mount"], result.get("revision"),
@@ -1277,6 +1290,8 @@ def repair_repo(conn, svn_client, config, md_dir, binding, credential=None):
 
 def recreate_repo(conn, svn_client, config, md_dir, binding, credential=None):
     """删除重建：本地目录移入 data/trash，重新绑定仓库身份后强制重新拉取。"""
+    if (binding.get("source_mode") or "svn") != "svn":
+        raise OperationError(400, "该文件夹不是 SVN 库（本地文件夹/软链接），不支持该操作")
     mount = binding["mount"]
     sub = mount[3:] if mount.startswith("md/") else mount
     local_path = Path(md_dir) / Path(*[part for part in sub.split("/") if part])
@@ -1309,6 +1324,8 @@ def provision_repository(conn, svn_client, config, md_dir, binding, credential=N
     force=True（修复/删除重建）时忽略「远端版本未变化就不拉取」的短路，强制重新导出；
     rebind=True（仅删除重建）时允许仓库 UUID/地址变化并更新绑定。
     """
+    if (binding.get("source_mode") or "svn") != "svn":
+        raise OperationError(400, "该文件夹不是 SVN 库（本地文件夹/软链接），不支持该操作")
     mount = binding["mount"]
     parts = mount.split("/")
     if len(parts) < 2 or parts[0] != "md":

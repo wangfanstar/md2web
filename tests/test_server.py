@@ -2062,6 +2062,48 @@ class SvnOperationTests(ServerTestBase):
                                             now=time.time() + 1000)
         self.assertEqual(result, [])
 
+    def test_sync_all_skips_symlink_source_without_calling_svn(self):
+        link = {"id": "link", "mount": "md/链接", "source_mode": "symlink",
+                "link_target": str(self.tmp / "shared"), "url": "",
+                "read_only": True, "allow_commit": False, "credential_group": "default",
+                "sync_interval": 1}
+        self.config["repositories"] = [link]
+
+        class NeverSvn:
+            def info(self, *args, **kwargs):
+                raise AssertionError("symlink source must not call svn")
+
+        self.assertEqual(server_operations.sync_all(self.conn, NeverSvn(), self.config,
+                                                    self.md_dir, now=time.time() + 1000), [])
+
+    def test_repo_health_reports_symlink_without_svn(self):
+        external = self.tmp / "shared"
+        external.mkdir()
+        try:
+            server_folder_sources.manage_link(self.md_dir, "md/链接", str(external), "create")
+        except (OSError, ValueError):
+            self.skipTest('link unavailable')
+        binding = {"id": "link", "mount": "md/链接", "source_mode": "symlink",
+                   "link_target": str(external.resolve()), "url": "",
+                   "read_only": True, "allow_commit": False, "credential_group": "default",
+                   "sync_interval": None}
+        report = server_operations.repo_health(self.conn, None, self.config, self.md_dir, binding)
+        self.assertEqual(report["status"], "软链接（只读）")
+        self.assertEqual(report["level"], "ok")
+
+    def test_repair_and_provision_reject_symlink(self):
+        binding = {"id": "link", "mount": "md/链接", "source_mode": "symlink",
+                   "link_target": str(self.tmp / "shared"), "url": "",
+                   "read_only": True, "allow_commit": False, "credential_group": "default",
+                   "sync_interval": None}
+        for call in (lambda: server_operations.provision_repository(
+                        self.conn, None, self.config, self.md_dir, binding),
+                     lambda: server_operations.repair_repo(
+                        self.conn, None, self.config, self.md_dir, binding)):
+            with self.assertRaises(server_operations.OperationError) as caught:
+                call()
+            self.assertEqual(caught.exception.status, 400)
+
     def test_local_import_and_publish_keep_content_in_sqlite(self):
         local_root = self.md_dir / "本地"
         local_root.mkdir(parents=True, exist_ok=True)
@@ -3136,6 +3178,33 @@ class LocalPublishTests(ServerTestBase):
 
     def published_hash(self, path):
         return self.client.get("/__md/document?path=" + path).get_json()["document"]["published"]["hash"]
+
+    def test_symlink_folder_rejects_all_writes(self):
+        target = self.tmp / "外部资料"
+        target.mkdir()
+        (target / "a.md").write_text("# A\n", encoding="utf-8")
+        try:
+            server_folder_sources.manage_link(self.docs / "md", "md/软链接", str(target), "create")
+        except (OSError, ValueError):
+            self.skipTest('link unavailable')
+        headers = {"X-CSRF-Token": self.csrf()}
+        path = "md/软链接/a.md"
+        response = self.client.post("/__md/publish",
+                                    json={"path": path, "content": "# B\n", "baseHash": ""},
+                                    headers=headers)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["code"], "symlink_readonly")
+        response = self.client.put("/__md/draft",
+                                   json={"path": path, "content": "# B\n", "expectedVersion": 0},
+                                   headers=headers)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["code"], "symlink_readonly")
+        response = self.client.post("/__md/create",
+                                    json={"parent": "md/软链接", "name": "新文档", "kind": "document"},
+                                    headers=headers)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["code"], "symlink_readonly")
+        self.assertEqual((target / "a.md").read_text(encoding="utf-8"), "# A\n")
 
     def test_publish_unbound_document_writes_file(self):
         headers = {"X-CSRF-Token": self.csrf()}

@@ -515,10 +515,10 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             bindings = [binding]
         # 本地模式仓库不做 SVN 检查：直接返回本地来源状态
         local = [item for item in bindings if item.get("source_mode") == "local"]
-        svn = [item for item in bindings if item.get("source_mode") != "local"]
+        remote = [item for item in bindings if item.get("source_mode") != "local"]
         reports = []
-        if svn or not repo_id:
-            reports = auth_service.repo_health_reports(md_dir(), svn, credential,
+        if remote or not repo_id:
+            reports = auth_service.repo_health_reports(md_dir(), remote, credential,
                                                        include_site_backup=not repo_id)
         reports.extend({
             "id": item["id"],
@@ -956,6 +956,12 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
     def md_dir():
         return docs_root / "md"
 
+    def symlink_write_guard(path):
+        """软链接目录（含未配置、靠物理路径识别的链接）一律拒绝写入。"""
+        if path and folder_sources.has_link_ancestor(md_dir(), path):
+            return json_error(403, "symlink_readonly", "软链接目录只读，请在目标目录直接修改")
+        return None
+
     def require_csrf_header(session):
         return require_csrf(session)
 
@@ -981,6 +987,9 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         if csrf_error:
             return csrf_error
         payload = request.get_json(silent=True) or {}
+        guard = symlink_write_guard(payload.get("path"))
+        if guard is not None:
+            return guard
         binding = server_config.match_repository(config, payload.get("path") or "")
         try:
             result = drafts.save_draft(
@@ -1007,6 +1016,9 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         if csrf_error:
             return csrf_error
         payload = request.get_json(silent=True) or {}
+        guard = symlink_write_guard(payload.get("path"))
+        if guard is not None:
+            return guard
         try:
             result = server_documents.save_document_image(
                 md_dir(), payload.get("path"), payload.get("type"), payload.get("data"),
@@ -1025,6 +1037,9 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         if csrf_error:
             return csrf_error
         payload = request.get_json(silent=True) or {}
+        guard = symlink_write_guard(payload.get("path"))
+        if guard is not None:
+            return guard
         try:
             result = server_documents.save_document_attachment(
                 md_dir(), payload.get("path"), payload.get("name"), payload.get("data"),
@@ -1128,6 +1143,9 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             return csrf_error
         payload = request.get_json(silent=True) or {}
         path = payload.get("path") or ""
+        guard = symlink_write_guard(path)
+        if guard is not None:
+            return guard
         binding = server_config.match_repository(config, path)
         if binding is not None:
             guard = repo_write_guard(binding)
