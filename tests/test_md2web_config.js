@@ -11,17 +11,17 @@ function page(items, repositories = []) {
     const attrs = { 'data-pair': 'repo-' + index, 'data-name': item.name || '',
       'data-mount': item.mount || '', 'data-saved-id': item.id || '' };
     const fields = {};
-    for (const key of ['id', 'mount', 'url', 'syncIntervalSeconds']) {
+    for (const key of ['id', 'mount', 'url', 'syncIntervalSeconds', 'linkTarget']) {
       fields[key] = { value: String(item[key] ?? ''), focus() { this.focused = true; } };
     }
-    fields.svnEnabled = { checked: item.svn !== false };
+    fields.sourceMode = { value: item.sourceMode || (item.svn === false ? 'local' : 'svn') };
     fields.allowCommit = { checked: item.allow !== false };
     const display = { textContent: '' };
     const cells = { '[data-repo-id-auto]': display, '[data-entry-cell]': {}, '[data-mode-cell]': {},
       '[data-health-badge]': {}, '[data-folder-group]': { value: '默认', setAttribute() {} } };
     const select = (selector, summary) => {
       const match = selector.match(/^\[data-repo="([^"]+)"\]$/);
-      if (match) return (['mount', 'svnEnabled'].includes(match[1]) === summary) ? fields[match[1]] : null;
+      if (match) return (['mount', 'sourceMode'].includes(match[1]) === summary) ? fields[match[1]] : null;
       return cells[selector] || null;
     };
     const summary = { getAttribute: key => attrs[key] || null, setAttribute: (key, val) => { attrs[key] = val; },
@@ -126,4 +126,34 @@ test('repository detail keeps ID hidden and exposes only SVN address and interva
   assert.match(html, /data-repo="id"/);
   assert.match(html, /SVN 地址/);
   assert.match(html, /更新频率（秒）/);
+});
+
+test('symlink repository keeps linkTarget and drops SVN fields', () => {
+  const p = page([{ id: 'shared', mount: 'md/共享', sourceMode: 'symlink',
+    url: 'https://svn.example.com/r', linkTarget: 'D:/share' }]);
+  const repo = p.readRepos()[0];
+  assert.equal(repo.sourceMode, 'symlink');
+  assert.equal(repo.linkTarget, 'D:/share');
+  assert.equal(repo.url, '');
+  assert.equal(repo.allowCommit, false);
+  assert.equal(repo.readOnly, true);
+  assert.equal(repo.syncIntervalSeconds, undefined);
+});
+
+test('symlink without a target is rejected before saving', () => {
+  const problem = page([]).validateRepos([{ id: 'shared', mount: 'md/共享',
+    sourceMode: 'symlink', url: '', linkTarget: '', readOnly: true, allowCommit: false }]);
+  assert.match(problem, /目标目录/);
+});
+
+test('symlink detail renders link management buttons and a disabled permission box', () => {
+  const p = page([]);
+  const html = p.repoRow({ id: 'shared', mount: 'md/共享', sourceMode: 'symlink',
+    linkTarget: 'D:/share', linkExists: true }, { name: '共享', path: 'md/共享' }, 0);
+  assert.match(html, /data-action="link-check"/);
+  assert.match(html, /data-action="link-create"/);
+  assert.match(html, /data-action="link-remove"/);
+  assert.match(html, /data-source-field="symlink"/);
+  assert.match(html, /软链接只读/);
+  assert.match(html, /data-repo="allowCommit" disabled/);
 });
