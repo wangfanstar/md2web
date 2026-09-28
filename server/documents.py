@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 MD_MAX_BODY = 8 * 1024 * 1024
-IMAGE_MAX_BYTES = 8 * 1024 * 1024
+IMAGE_MAX_BYTES = 100 * 1024 * 1024
 IMAGE_TYPES = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
@@ -31,7 +31,7 @@ ATTACHMENT_DIR_NAME = "附件"
 # 反馈截图与附件：站点页面在 docs/html/ 下，资产集中存放
 FEEDBACK_IMAGE_REL = "html/images"
 FEEDBACK_UPLOAD_REL = "html/uploads"
-ATTACHMENT_MAX_BYTES = 32 * 1024 * 1024
+ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024
 ATTACHMENT_NAME_MAX = 120
 ATTACHMENT_UNSAFE = re.compile(r'[\\/:*?"<>|#%\[\]{}()\x00-\x1f]+')
 # 可执行/可脚本化文件会被同源静态分发，禁止作为附件上传

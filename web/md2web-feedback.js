@@ -99,8 +99,8 @@
 
   // ---------- 截图 / 附件上传 ----------
 
-  var FEEDBACK_IMAGE_MAX = 8 * 1024 * 1024;
-  var FEEDBACK_FILE_MAX = 32 * 1024 * 1024;
+  var FEEDBACK_IMAGE_MAX = 100 * 1024 * 1024;
+  var FEEDBACK_FILE_MAX = 100 * 1024 * 1024;
 
   function uploaderMarkup() {
     return [

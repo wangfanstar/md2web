@@ -1092,7 +1092,7 @@
   // ---------- 撤销 / 恢复 ----------
 
   var HISTORY_LIMIT = 200;
-  var ATTACHMENT_MAX_BYTES = 32 * 1024 * 1024;
+  var ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024;
 
   function historyReset(value) {
     state.history = [value];

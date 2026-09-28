@@ -1172,7 +1172,7 @@ class AdminConfigTests(ServerTestBase):
         else:
             self.assertFalse(self.app.config["JSON_AS_ASCII"])
             self.assertFalse(self.app.config["JSON_SORT_KEYS"])
-        self.assertEqual(self.app.config["MAX_CONTENT_LENGTH"], 2 * 1024 * 1024)
+        self.assertEqual(self.app.config["MAX_CONTENT_LENGTH"], 100 * 1024 * 1024)
 
     def test_admin_login_rejects_wrong_password(self):
         response = self.client.post("/__auth/login", json={"username": "admin", "password": "nope", "mode": "admin"})
