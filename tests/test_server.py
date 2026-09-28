@@ -1017,6 +1017,14 @@ class AppTests(ServerTestBase):
         self.assertTrue((self.docs / "pdf" / "sample.pdf").is_file())
         self.assertTrue((self.docs / "pdf" / "sample-2.pdf").is_file())
 
+    def test_reference_pdf_upload_has_no_request_size_limit(self):
+        csrf = self.login()
+        response = self.client.post("/__references/upload", data={
+            "kind": "pdf", "path": "", "file": (io.BytesIO(b"%PDF-1.4\n" + b"x" * (2 * 1024 * 1024)), "large.pdf"),
+        }, headers={"X-CSRF-Token": csrf})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertTrue((self.docs / "pdf" / "large.pdf").is_file())
+
     def test_anonymous_session_endpoint(self):
         response = self.client.get("/__auth/session")
         payload = response.get_json()

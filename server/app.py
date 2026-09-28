@@ -11,7 +11,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from flask import Flask, jsonify, make_response, request, send_from_directory
+from flask import Flask, Request, jsonify, make_response, request, send_from_directory
 
 from . import config as server_config
 from . import database, documents as server_documents, drafts, operations, entries, recycle, references
@@ -29,9 +29,20 @@ FEATURES = {"editDraft": True, "svnCommit": False, "localPublish": True}
 MAX_BODY = 2 * 1024 * 1024
 
 
+class Md2webRequest(Request):
+    """参考文献文件由文件系统和登录权限控制，不受 JSON 接口大小限制。"""
+
+    @property
+    def max_content_length(self):
+        if self.path == "/__references/upload":
+            return None
+        return super(Md2webRequest, self).max_content_length
+
+
 def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
     docs_root = Path(docs_dir).resolve()
     app = Flask(__name__, static_folder=None)
+    app.request_class = Md2webRequest
     app.config["MAX_CONTENT_LENGTH"] = MAX_BODY
     if hasattr(app, "json"):
         app.json.ensure_ascii = False
