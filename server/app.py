@@ -854,6 +854,33 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 pass
         return jsonify({"ok": True, "group": group})
 
+    @app.post("/__admin/folder-link")
+    def manage_folder_link():
+        """检查/创建/移除 md 下一级文件夹的软链接（管理员 + CSRF）。"""
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True) or {}
+        action = str(payload.get("action") or "").strip().lower()
+        try:
+            result = folder_sources.manage_link(
+                md_dir(), payload.get("mount"), payload.get("target"), action)
+        except folder_sources.FolderLinkError as error:
+            return json_error(400, error.code, str(error))
+        except ValueError as error:
+            return json_error(400, "link_error", str(error))
+        except OSError as error:
+            return json_error(500, "link_error", "链接操作失败：%s" % error)
+        if action in ("create", "remove") and on_config_changed is not None:
+            try:
+                on_config_changed()
+            except Exception:
+                pass
+        return jsonify({"ok": True, "link": result})
+
     @app.post("/__admin/provision")
     def admin_provision():
         """创建 docs/md 下的仓库目录并从 SVN 拉取（配置页「创建并拉取」）。"""

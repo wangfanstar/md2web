@@ -1373,6 +1373,105 @@ class AdminConfigTests(ServerTestBase):
         self.assertEqual(right.status_code, 200)
 
 
+class FolderLinkApiTests(ServerTestBase):
+    """/__admin/folder-link：检查/创建/移除软链接（管理员 + CSRF）。"""
+
+    def setUp(self):
+        super().setUp()
+        self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
+        server_database.migrate(self.conn)
+        server_database.ensure_admin(self.conn)
+        self.config = server_config.load_config(self.write_config(), self.docs)
+        self.auth = server_auth.AuthService(self.conn, FakeSvn(), self.config)
+        self.auth.on_startup()
+        from server.app import create_app
+        self.app = create_app(self.config, self.conn, self.auth, self.docs)
+        self.client = self.app.test_client()
+        self.client.post("/__auth/login", json={"username": "admin", "password": "admin"})
+
+    def tearDown(self):
+        self.conn.close()
+        super().tearDown()
+
+    def csrf(self):
+        return self.client.get("/__auth/session").get_json()["csrfToken"]
+
+    def test_manage_link_requires_admin_and_csrf(self):
+        target = self.tmp / "shared"
+        target.mkdir()
+        anonymous_client = self.app.test_client()
+        anonymous = anonymous_client.post(
+            "/__admin/folder-link",
+            json={"mount": "md/共享", "action": "create", "target": str(target)})
+        self.assertEqual(anonymous.status_code, 401)
+        response = self.client.post("/__admin/folder-link",
+                                    json={"mount": "md/共享", "action": "create", "target": str(target)})
+        self.assertEqual(response.status_code, 403, "登录但无 CSRF 也必须拒绝")
+        self.assertEqual(response.get_json()["code"], "csrf_failed")
+
+    def test_create_check_and_remove_link(self):
+        target = self.tmp / "shared"
+        target.mkdir()
+        (target / "a.md").write_text("# A\n", encoding="utf-8")
+        headers = {"X-CSRF-Token": self.csrf()}
+        created = self.client.post("/__admin/folder-link",
+                                   json={"mount": "md/共享", "action": "create", "target": str(target)},
+                                   headers=headers)
+        self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
+        link = created.get_json()["link"]
+        self.assertEqual(link["sourceMode"], "symlink")
+        self.assertTrue(link["linkExists"])
+        checked = self.client.post("/__admin/folder-link",
+                                   json={"mount": "md/共享", "action": "check"},
+                                   headers=headers)
+        self.assertEqual(checked.get_json()["link"]["linkTarget"], str(target.resolve()))
+        removed = self.client.post("/__admin/folder-link",
+                                   json={"mount": "md/共享", "action": "remove"},
+                                   headers=headers)
+        self.assertEqual(removed.get_json()["link"]["sourceMode"], "local")
+        self.assertTrue(target.is_dir(), "移除链接不能删除目标目录")
+
+    def test_manage_link_rejects_unsafe_targets_and_non_empty_directory(self):
+        headers = {"X-CSRF-Token": self.csrf()}
+        (self.tmp / "shared").mkdir()
+        response = self.client.post("/__admin/folder-link",
+                                    json={"mount": "md/共享", "action": "create",
+                                          "target": str(self.docs / "md")},
+                                    headers=headers)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["code"], "link_target_invalid")
+        busy = self.docs / "md" / "非空"
+        busy.mkdir()
+        (busy / "keep.md").write_text("# K\n", encoding="utf-8")
+        response = self.client.post("/__admin/folder-link",
+                                    json={"mount": "md/非空", "action": "create",
+                                          "target": str(self.tmp / "shared")},
+                                    headers=headers)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["code"], "link_not_empty")
+        (self.docs / "md" / "普通").mkdir()
+        response = self.client.post("/__admin/folder-link",
+                                    json={"mount": "md/普通", "action": "remove"},
+                                    headers=headers)
+        self.assertEqual(response.get_json()["code"], "not_a_link")
+
+    def test_broken_link_check_reports_missing(self):
+        headers = {"X-CSRF-Token": self.csrf()}
+        target = self.tmp / "gone"
+        target.mkdir()
+        try:
+            server_folder_sources.manage_link(self.docs / "md", "md/失效", str(target), "create")
+        except (OSError, ValueError):
+            self.skipTest('link unavailable')
+        shutil.rmtree(str(target))
+        response = self.client.post("/__admin/folder-link",
+                                    json={"mount": "md/失效", "action": "check"},
+                                    headers=headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["link"]["sourceMode"], "symlink")
+        self.assertFalse(response.get_json()["link"]["linkExists"])
+
+
 class ConfigFileTests(ServerTestBase):
     def test_default_config_bootstraps_loadable_file(self):
         path = self.tmp / "config" / "server.local.json"
