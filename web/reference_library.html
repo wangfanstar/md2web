@@ -20,6 +20,7 @@
     .kind-dot { width:9px; height:9px; border-radius:50%; background:#ef8354; box-shadow:0 0 0 4px rgba(239,131,84,.12); }
     [data-kind-nav="word"] .kind-dot { background:#4f8cff; box-shadow:0 0 0 4px rgba(79,140,255,.12); }
     [data-kind-nav="excel"] .kind-dot { background:#55b987; box-shadow:0 0 0 4px rgba(85,185,135,.12); }
+    [data-kind-nav="ppt"] .kind-dot { background:#e6a23c; box-shadow:0 0 0 4px rgba(230,162,60,.12); }
     .side-links { border-top:1px solid rgba(220,231,247,.12); margin-top:30px; padding:20px 10px 0; display:grid; gap:12px; }
     .side-links a { color:#9fb2cc; font-size:12px; text-decoration:none; } .side-links a:hover { color:#fff; }
     .main { min-width:0; padding:34px clamp(20px,4vw,58px) 60px; }
@@ -42,6 +43,14 @@
     .status { color:#b45309; font-size:12px; margin-top:12px; min-height:18px; } .status.error { color:#b91c1c; }
     @media (max-width:800px) { .shell { display:block; } .side { padding:15px 16px; } .brand { margin-bottom:15px; } .kind-nav { display:flex; overflow:auto; } .kind-nav button { min-width:110px; } .side-label,.side-links { display:none; } .main { padding:24px 15px 40px; } .topline { display:block; } .actions { justify-content:flex-start; margin-top:16px; } .list-head { display:none; } .item { grid-template-columns:1fr; gap:8px; padding:13px 15px; } .item > .muted { padding-left:45px; } .actions-cell { justify-content:flex-start; padding-left:45px; } }
     @media (prefers-reduced-motion:reduce) { .item { transition:none; } }
+    .preview { background:rgba(10,22,40,.72); inset:0; padding:5vh 5vw; position:fixed; z-index:30; }
+    .preview[hidden] { display:none; }
+    .preview-panel { background:#fff; border-radius:12px; display:flex; flex-direction:column; height:90vh; overflow:hidden; }
+    .preview-head { align-items:center; border-bottom:1px solid var(--line); display:flex; gap:12px; justify-content:space-between; padding:12px 16px; }
+    .preview-title { font-size:14px; font-weight:650; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .preview-body { flex:1; min-height:0; overflow:auto; position:relative; }
+    .preview-body > div { height:100%; min-height:100%; }
+    .preview-message { color:var(--muted); padding:40px; text-align:center; }
   </style>
 </head>
 <body>
@@ -53,6 +62,7 @@
         <button type="button" data-kind-nav="pdf"><span class="kind-dot"></span><span>PDF 标准</span></button>
         <button type="button" data-kind-nav="word"><span class="kind-dot"></span><span>Word 文档</span></button>
         <button type="button" data-kind-nav="excel"><span class="kind-dot"></span><span>Excel 表格</span></button>
+        <button type="button" data-kind-nav="ppt"><span class="kind-dot"></span><span>PPT 演示</span></button>
       </nav>
       <div class="side-links"><a href="index.html">返回总览</a><a href="html/index_all.html">全部文档</a><a href="html/md2web_recycle.html">回收站</a></div>
     </aside>
@@ -62,6 +72,7 @@
       <section class="list-card"><div class="list-head"><span>名称</span><span>类型</span><span>修改时间</span><span></span></div><div data-list></div></section>
     </main>
   </div>
-  <script src="lib/auth.js"></script><script src="lib/reference-library.js"></script>
+  <div class="preview" data-preview hidden><div class="preview-panel"><div class="preview-head"><span class="preview-title" data-preview-title></span><button type="button" data-preview-close>关闭</button></div><div class="preview-body" data-preview-body></div></div></div>
+  <script src="lib/auth.js"></script><script src="lib/reference-office.bundle.js"></script><script src="lib/reference-library.js"></script>
 </body>
 </html>

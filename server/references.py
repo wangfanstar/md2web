@@ -1,11 +1,11 @@
-"""参考文献目录的安全文件操作（PDF、Word、Excel）。"""
+"""参考文献目录的安全文件操作（PDF、Word、Excel、PPT）。"""
 import hashlib
 import json
 import shutil
 import time
 from pathlib import Path
 
-KINDS = {"pdf": (".pdf",), "word": (".doc", ".docx"), "excel": (".xls", ".xlsx")}
+KINDS = {"pdf": (".pdf",), "word": (".doc", ".docx"), "excel": (".xls", ".xlsx"), "ppt": (".ppt", ".pptx")}
 
 
 class ReferenceError(Exception):

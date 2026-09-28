@@ -36,3 +36,6 @@
 - docsify 的 MIT 许可要求保留版权与许可声明：本项目在构建时会把版权/许可横幅
   （`docsify v4.13.1 | MIT License | https://github.com/docsifyjs/docsify`）写入
   `docs/lib/docsify.min.js` 文件头部，并在生成的 `docs/index.html` 中保留注释说明。
+## vue-office 本地预览 bundle
+
+`docs/lib/reference-office.bundle.js` 为本地构建的 vue-office 预览包，包含 Vue 3、@vue-office/docx、@vue-office/excel、@vue-office/pdf、@vue-office/pptx 及其打包依赖。各组件按其上游 MIT 许可发布；版本与来源见构建时使用的 npm 包元数据。该 bundle 仅用于离线文档预览，不运行外部网络请求。
