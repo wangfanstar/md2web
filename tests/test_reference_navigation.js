@@ -32,3 +32,9 @@ test('reference page keeps login fields beside the login action', () => {
   assert.match(html, /<form[^>]*data-auth-form[^>]*>[\s\S]*data-auth-username[\s\S]*data-auth-password[\s\S]*data-auth-login[\s\S]*<\/form>/);
   assert.match(script, /SiteAuth\.login\(username, password\)/);
 });
+
+test('PDF file links open in a new browser tab', () => {
+  const script = fs.readFileSync(path.join(__dirname, '..', 'web', 'reference-library.js'), 'utf8');
+  assert.match(script, /item\.ext === '\.pdf' \? ' target="_blank" rel="noopener"'/);
+  assert.match(script, /folder \|\| item\.ext === '\.pdf' \? '' : ' data-preview-file=/);
+});

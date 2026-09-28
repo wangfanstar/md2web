@@ -83,8 +83,10 @@
       var sourceKind = item.referenceKind || state.kind;
       var href = folder ? 'html/reference_library.html?kind=' + encodeURIComponent(sourceKind) + '&path=' + encodeURIComponent(item.path) : sourceKind + '/' + item.path.split('/').map(encodeURIComponent).join('/');
       var sourceAttr = ' data-reference-kind="' + esc(sourceKind) + '"';
+      var previewAttr = folder || item.ext === '.pdf' ? '' : ' data-preview-file="' + esc(item.path) + '"' + sourceAttr;
+      var newTabAttr = item.ext === '.pdf' ? ' target="_blank" rel="noopener"' : '';
       var actions = offlineMode ? '' : '<button type="button" data-rename="' + esc(item.path) + '"' + sourceAttr + '>重命名</button><button type="button" class="danger" data-delete="' + esc(item.path) + '"' + sourceAttr + '>删除</button>';
-      return '<div class="item"><div class="name"><span class="icon ' + (folder ? '' : 'file') + '">' + (folder ? '▰' : '▤') + '</span><a href="' + esc(href) + '"' + (folder ? '' : ' data-preview-file="' + esc(item.path) + '"' + sourceAttr) + '>' + esc(item.name) + '</a></div><div class="muted">' + (searching ? esc(sourceKind.toUpperCase()) + ' · ' : '') + typeLabel(item.ext, folder) + '<br>' + sizeLabel(item.size) + ' · ' + pageLabel(item, folder) + '</div><div class="muted">' + timeLabel(item.mtime) + '</div><div class="actions-cell">' + actions + '</div></div>';
+      return '<div class="item"><div class="name"><span class="icon ' + (folder ? '' : 'file') + '">' + (folder ? '▰' : '▤') + '</span><a href="' + esc(href) + '"' + previewAttr + newTabAttr + '>' + esc(item.name) + '</a></div><div class="muted">' + (searching ? esc(sourceKind.toUpperCase()) + ' · ' : '') + typeLabel(item.ext, folder) + '<br>' + sizeLabel(item.size) + ' · ' + pageLabel(item, folder) + '</div><div class="muted">' + timeLabel(item.mtime) + '</div><div class="actions-cell">' + actions + '</div></div>';
     }).join('') || '<div class="empty"><strong>' + (searching ? '没有找到匹配的文件' : '这个文件夹还没有资料') + '</strong><span>' + (searching ? '请尝试文件名中的其他关键词。' : '可以上传文件，或先新建一个子文件夹。') + '</span></div>';
     stats.textContent = searching ? '找到 ' + items.length + ' 个文件 · 已按 PDF、Word、Excel、PPT 汇总' : items.length + ' 个项目 · 文件夹可继续展开，文件点击后在新窗口预览或下载';
   }
