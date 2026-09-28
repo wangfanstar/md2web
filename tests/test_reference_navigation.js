@@ -17,3 +17,10 @@ test('reference folder link resolves beneath html despite the page base tag', ()
   assert.equal(target.pathname, '/html/reference_library.html');
   assert.equal(target.searchParams.get('path'), '标准/子目录');
 });
+
+test('reference page keeps login fields beside the login action', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'web', 'reference_library.html'), 'utf8');
+  const script = fs.readFileSync(path.join(__dirname, '..', 'web', 'reference-library.js'), 'utf8');
+  assert.match(html, /<form[^>]*data-auth-form[^>]*>[\s\S]*data-auth-username[\s\S]*data-auth-password[\s\S]*data-auth-login[\s\S]*<\/form>/);
+  assert.match(script, /SiteAuth\.login\(username, password\)/);
+});

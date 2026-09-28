@@ -1002,6 +1002,21 @@ class AppTests(ServerTestBase):
         self.assertTrue(payload["ok"])
         return payload["csrfToken"]
 
+    def test_reference_pdf_upload_route_accepts_post(self):
+        anonymous = self.client.post("/__references/upload")
+        self.assertEqual(anonymous.status_code, 401)
+        csrf = self.login()
+        response = self.client.post("/__references/upload", data={
+            "kind": "pdf", "path": "", "file": [
+                (io.BytesIO(b"%PDF-1.4\n"), "sample.pdf"),
+                (io.BytesIO(b"%PDF-1.4\n"), "sample-2.pdf"),
+            ],
+        }, headers={"X-CSRF-Token": csrf})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual([result["path"] for result in response.get_json()["results"]], ["sample.pdf", "sample-2.pdf"])
+        self.assertTrue((self.docs / "pdf" / "sample.pdf").is_file())
+        self.assertTrue((self.docs / "pdf" / "sample-2.pdf").is_file())
+
     def test_anonymous_session_endpoint(self):
         response = self.client.get("/__auth/session")
         payload = response.get_json()

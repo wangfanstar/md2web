@@ -13,6 +13,9 @@
   var previewBody = document.querySelector('[data-preview-body]');
   var previewTitle = document.querySelector('[data-preview-title]');
   var authInfo = document.querySelector('[data-auth-info]');
+  var authForm = document.querySelector('[data-auth-form]');
+  var authUsername = document.querySelector('[data-auth-username]');
+  var authPassword = document.querySelector('[data-auth-password]');
   var authLogin = document.querySelector('[data-auth-login]');
   var authLogout = document.querySelector('[data-auth-logout]');
 
@@ -23,8 +26,14 @@
     var user = snapshot.user;
     authInfo.textContent = user ? '已登录：' + (user.displayName || user.username) : '未登录 · 浏览公开资料，登录后可管理文件';
     authInfo.classList.toggle('is-user', !!user);
+    authUsername.hidden = !!user;
+    authPassword.hidden = !!user;
     authLogin.hidden = !!user;
     authLogout.hidden = !user;
+  }
+  function promptLogin() {
+    setStatus('请先登录后再管理参考文献。', true);
+    if (authUsername && !authUsername.hidden) { authUsername.focus(); }
   }
   function api(url, options) {
     var headers = Object.assign({ 'Content-Type': 'application/json' }, (options && options.headers) || {});
@@ -56,8 +65,7 @@
   }
   function mutate(url, body) {
     if (window.SiteAuth && !SiteAuth.isAuthenticated()) {
-      setStatus('请先登录后再管理参考文献。', true);
-      SiteAuth.openLogin();
+      promptLogin();
       return Promise.resolve();
     }
     return api(url, { method: 'POST', body: JSON.stringify(body) }).then(function () { setStatus('操作完成'); load(); }).catch(function (error) {
@@ -68,7 +76,21 @@
   document.querySelectorAll('[data-kind-nav]').forEach(function (node) { node.addEventListener('click', function () { state.kind = node.getAttribute('data-kind-nav'); state.path = ''; updateUrl(); load(); }); });
   document.querySelector('[data-root]').addEventListener('click', function () { state.path = ''; updateUrl(); load(); });
   document.querySelector('[data-up]').addEventListener('click', load);
-  authLogin.addEventListener('click', function () { SiteAuth.openLogin(); });
+  authForm.addEventListener('submit', function (event) {
+    event.preventDefault();
+    var username = authUsername.value.trim();
+    var password = authPassword.value;
+    if (!username || !password) { setStatus('请输入 SVN 用户名和密码。', true); return; }
+    authLogin.disabled = true;
+    setStatus('正在登录…');
+    SiteAuth.login(username, password).then(function () {
+      authPassword.value = '';
+      setStatus('登录成功');
+      load();
+    }).catch(function (error) {
+      setStatus(error && error.message ? error.message : '登录失败', true);
+    }).then(function () { authLogin.disabled = false; });
+  });
   authLogout.addEventListener('click', function () { SiteAuth.logout().then(function () { renderAuth(); }); });
   document.addEventListener('siteauth:change', renderAuth);
   document.querySelector('[data-mkdir]').addEventListener('click', function () { var name = window.prompt('输入新文件夹名称'); if (name) mutate('__references/mkdir', { kind: state.kind, parent: state.path, name: name }); });
@@ -78,8 +100,7 @@
     var files = Array.prototype.slice.call(input.files || []);
     if (!files.length) return;
     if (window.SiteAuth && !SiteAuth.isAuthenticated()) {
-      setStatus('请先登录后再上传文件。', true);
-      SiteAuth.openLogin();
+      promptLogin();
       input.value = '';
       return;
     }

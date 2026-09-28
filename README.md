@@ -109,7 +109,7 @@ docs/md/
 
 图片无需登记，放在文档旁边或任意位置，用相对路径引用即可；文档仅支持 UTF-8 编码。
 
-参考文献放在 `docs/pdf/`、`docs/word/`、`docs/excel/` 和 `docs/ppt/`，首页“参考文献库”统一进入管理页。服务模式下登录后可新建文件夹、批量上传多个文件、重命名和删除；PDF 使用浏览器本地阅读器，DOCX/XLSX/PPTX 使用随站点分发的 vue-office 本地 bundle 预览，运行时不请求网络。上传失败时页面会显示服务端返回的具体原因。
+参考文献放在 `docs/pdf/`、`docs/word/`、`docs/excel/` 和 `docs/ppt/`，首页“参考文献库”统一进入管理页。请使用认证编辑服务（`python serve.py --config config/server.local.json`），只读预览模式会按设计拒绝上传 POST。服务模式下登录后可新建文件夹、批量上传多个文件、重命名和删除；PDF 使用浏览器本地阅读器，DOCX/XLSX/PPTX 使用随站点分发的 vue-office 本地 bundle 预览，运行时不请求网络。上传失败时页面会显示服务端返回的具体原因。
 
 ### 2. 构建与预览
 
