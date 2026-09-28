@@ -23,11 +23,11 @@
   }
   function typeLabel(ext, isFolder) { return isFolder ? '文件夹' : ({ '.pdf': 'PDF', '.doc': 'Word', '.docx': 'Word', '.xls': 'Excel', '.xlsx': 'Excel' }[ext] || '文件'); }
   function timeLabel(value) { if (!value) return '—'; var date = new Date(Number(value) * 1000); return isNaN(date.getTime()) ? '—' : date.toLocaleDateString(); }
-  function updateUrl() { history.replaceState(null, '', 'reference_library.html?kind=' + encodeURIComponent(state.kind) + (state.path ? '&path=' + encodeURIComponent(state.path) : '')); }
+  function updateUrl() { history.replaceState(null, '', new URL('html/reference_library.html?kind=' + encodeURIComponent(state.kind) + (state.path ? '&path=' + encodeURIComponent(state.path) : ''), document.baseURI)); }
   function render(items) {
     list.innerHTML = items.map(function (item) {
       var folder = item.kind === 'folder';
-      var href = folder ? '?kind=' + encodeURIComponent(state.kind) + '&path=' + encodeURIComponent(item.path) : '../' + state.kind + '/' + item.path.split('/').map(encodeURIComponent).join('/');
+      var href = folder ? 'html/reference_library.html?kind=' + encodeURIComponent(state.kind) + '&path=' + encodeURIComponent(item.path) : state.kind + '/' + item.path.split('/').map(encodeURIComponent).join('/');
       return '<div class="item"><div class="name"><span class="icon ' + (folder ? '' : 'file') + '">' + (folder ? '▰' : '▤') + '</span><a href="' + esc(href) + '"' + (folder ? '' : ' target="_blank" rel="noopener"') + '>' + esc(item.name) + '</a></div><div class="muted">' + typeLabel(item.ext, folder) + '</div><div class="muted">' + timeLabel(item.mtime) + '</div><div class="actions-cell"><button type="button" data-rename="' + esc(item.path) + '">重命名</button><button type="button" class="danger" data-delete="' + esc(item.path) + '">删除</button></div></div>';
     }).join('') || '<div class="empty"><strong>这个文件夹还没有资料</strong><span>可以上传文件，或先新建一个子文件夹。</span></div>';
     stats.textContent = items.length + ' 个项目 · 文件夹可继续展开，文件点击后在新窗口预览或下载';

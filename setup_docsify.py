@@ -1700,7 +1700,7 @@ def generate_reference_pages():
         for folder in sorted([p for p in root.iterdir() if p.is_dir() and p.name != "回收站"], key=lambda p: p.name.lower()):
             safe = re.sub(r"[^0-9A-Za-z一-鿿_-]+", "_", folder.name).strip("_") or "folder"
             page = HTML_DIR / ("index_%s_%s.html" % (kind, safe))
-            href = "reference_library.html?kind=%s&path=%s" % (kind, urllib.parse.quote(folder.name, safe=""))
+            href = "html/reference_library.html?kind=%s&path=%s" % (kind, urllib.parse.quote(folder.name, safe=""))
             page.write_text('<!doctype html><html><head><meta charset="utf-8"><base href="../"><meta http-equiv="refresh" content="0;url=%s"></head><body>正在打开参考文献…</body></html>' % href, encoding="utf-8")
 
 
