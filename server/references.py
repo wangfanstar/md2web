@@ -1,11 +1,14 @@
 """参考文献目录的安全文件操作（PDF、Word、Excel、PPT）。"""
 import hashlib
 import json
+import re
 import shutil
 import time
+import zipfile
 from pathlib import Path
 
 KINDS = {"pdf": (".pdf",), "word": (".doc", ".docx"), "excel": (".xls", ".xlsx"), "ppt": (".ppt", ".pptx")}
+OFFICE_META_TAGS = {"word": "Pages", "excel": "Worksheets", "ppt": "Slides"}
 
 
 class ReferenceError(Exception):
@@ -37,6 +40,35 @@ def check_name(name):
     return name
 
 
+def file_metadata(path, kind):
+    """读取可可靠获得的页数/工作表数/幻灯片数；旧二进制格式返回未知。"""
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        try:
+            data = path.read_bytes()
+            return len(re.findall(rb"/Type\s*/Page(?:\s|/|>)", data)), "页"
+        except OSError:
+            return None, "页"
+    if suffix not in (".docx", ".xlsx", ".pptx"):
+        return None, {"word": "页", "excel": "工作表", "ppt": "幻灯片"}.get(kind, "页")
+    tag = OFFICE_META_TAGS[kind]
+    try:
+        with zipfile.ZipFile(str(path)) as archive:
+            text = archive.read("docProps/app.xml").decode("utf-8", "ignore")
+        match = re.search(r"<(?:[A-Za-z0-9_.-]+:)?%s>\s*(\d+)\s*</" % tag, text)
+        return (int(match.group(1)) if match else None), {"word": "页", "excel": "工作表", "ppt": "幻灯片"}[kind]
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+        return None, {"word": "页", "excel": "工作表", "ppt": "幻灯片"}[kind]
+
+
+def item_info(path, root, kind, item_kind="file"):
+    stat = path.stat()
+    pages, page_unit = file_metadata(path, kind) if item_kind == "file" else (None, "")
+    return {"name": path.name, "path": path.relative_to(root).as_posix(), "kind": item_kind,
+            "size": stat.st_size, "mtime": int(stat.st_mtime), "ext": path.suffix.lower(),
+            "pages": pages, "pageUnit": page_unit}
+
+
 def tree(docs_dir, kind):
     root = root_for(docs_dir, kind)
     result = []
@@ -52,12 +84,9 @@ def listing(docs_dir, kind, rel=""):
         raise ReferenceError(404, "文件夹不存在")
     rows = []
     for path in sorted(folder.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
-        if path.name == "回收站":
+        if path.name == "回收站" or path.name.startswith("."):
             continue
-        stat = path.stat()
-        rows.append({"name": path.name, "path": path.relative_to(root).as_posix(),
-                     "kind": "folder" if path.is_dir() else "file", "size": stat.st_size,
-                     "mtime": int(stat.st_mtime), "ext": path.suffix.lower()})
+        rows.append(item_info(path, root, kind, "folder" if path.is_dir() else "file"))
     return {"kind": kind, "path": rel, "items": rows}
 
 
@@ -71,14 +100,13 @@ def search(docs_dir, query, kind="all"):
     for current_kind in kinds:
         root = root_for(docs_dir, current_kind)
         for path in root.rglob("*"):
-            if not path.is_file() or "回收站" in path.parts:
+            if not path.is_file() or path.name.startswith(".") or "回收站" in path.parts:
                 continue
             if text not in path.name.casefold():
                 continue
-            stat = path.stat()
-            results.append({"kind": current_kind, "path": path.relative_to(root).as_posix(),
-                            "name": path.name, "size": stat.st_size,
-                            "mtime": int(stat.st_mtime), "ext": path.suffix.lower()})
+            item = item_info(path, root, current_kind)
+            item["kind"] = current_kind
+            results.append(item)
     kind_order = {name: index for index, name in enumerate(KINDS.keys())}
     return sorted(results, key=lambda item: (kind_order.get(item["kind"], 99), item["name"].casefold(), item["path"].casefold()))
 

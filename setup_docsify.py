@@ -12,6 +12,7 @@ import urllib.parse
 import urllib.request
 from urllib.parse import quote
 from pathlib import Path
+from server import references as reference_tools
 
 ROOT = Path(__file__).parent
 DOCS_DIR = ROOT / "docs"
@@ -1689,13 +1690,28 @@ def generate_feedback_page():
 
 def generate_reference_pages():
     """生成统一的 PDF、Word、Excel 参考文献管理页及其入口别名。"""
+    reference_data = {}
+    for kind in ("pdf", "word", "excel", "ppt"):
+        root = DOCS_DIR / kind
+        root.mkdir(parents=True, exist_ok=True)
+        items = []
+        for path in sorted(root.rglob("*"), key=lambda p: str(p).lower()):
+            if path.name.startswith(".") or path.name == "回收站" or "回收站" in path.parts:
+                continue
+            if path.is_dir():
+                items.append(reference_tools.item_info(path, root, kind, "folder"))
+            elif path.is_file():
+                items.append(reference_tools.item_info(path, root, kind, "file"))
+        reference_data[kind] = items
+    (LIB_DIR / "reference-data.js").write_text(
+        "window.__MD2WEB_REFERENCE_DATA__ = " + json.dumps(reference_data, ensure_ascii=False).replace("</", "<\\/") + ";\n",
+        encoding="utf-8"
+    )
     generate_standalone_page("reference_library.html", "reference-library.js", "参考文献")
     office_bundle = ROOT / "web" / "reference-office.bundle.js"
     if office_bundle.is_file():
         (LIB_DIR / office_bundle.name).write_bytes(office_bundle.read_bytes())
     for kind in ("pdf", "word", "excel", "ppt"):
-        root = DOCS_DIR / kind
-        root.mkdir(parents=True, exist_ok=True)
         for folder in sorted([p for p in root.iterdir() if p.is_dir() and p.name != "回收站"], key=lambda p: p.name.lower()):
             safe = re.sub(r"[^0-9A-Za-z一-鿿_-]+", "_", folder.name).strip("_") or "folder"
             page = HTML_DIR / ("index_%s_%s.html" % (kind, safe))

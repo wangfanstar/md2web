@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import unittest
+import zipfile
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
@@ -1028,6 +1029,21 @@ class AppTests(ServerTestBase):
         self.assertEqual([(item["kind"], item["name"]) for item in response.get_json()["results"]], [
             ("pdf", "接口规范.pdf"), ("word", "接口规范.docx")
         ])
+
+    def test_reference_listing_includes_size_and_page_metadata(self):
+        (self.docs / "pdf").mkdir(parents=True, exist_ok=True)
+        (self.docs / "word").mkdir(parents=True, exist_ok=True)
+        pdf = self.docs / "pdf" / "标准.pdf"
+        pdf.write_bytes(b"/Type /Page >>\n/Type /Page >>\n")
+        word = self.docs / "word" / "说明.docx"
+        with zipfile.ZipFile(str(word), "w") as archive:
+            archive.writestr("docProps/app.xml", "<Properties><Pages>7</Pages></Properties>")
+        response = self.client.get("/__references/list?kind=pdf")
+        pdf_item = next(item for item in response.get_json()["listing"]["items"] if item["name"] == "标准.pdf")
+        self.assertEqual((pdf_item["size"], pdf_item["pages"], pdf_item["pageUnit"]), (30, 2, "页"))
+        response = self.client.get("/__references/list?kind=word")
+        word_item = next(item for item in response.get_json()["listing"]["items"] if item["name"] == "说明.docx")
+        self.assertEqual((word_item["pages"], word_item["pageUnit"]), (7, "页"))
 
     def test_reference_pdf_upload_has_no_request_size_limit(self):
         csrf = self.login()
