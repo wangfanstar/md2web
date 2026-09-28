@@ -64,13 +64,12 @@ def scan_markdown(md_dir) -> list:
     仅收集小写 .md 扩展名：docsify 按大小写敏感匹配扩展名，
     .MD 等变体虽可收集但页面会 404，因此打印警告并跳过。
     """
-    root = Path(md_dir)
+    root = Path(os.path.abspath(str(md_dir)))
     if not root.is_dir():
         raise BuildError(
             f"源文档目录不存在: {display_path(root)}，请创建该目录并放入 .md 文档"
         )
     files = []
-    root = Path(md_dir)
     for candidate in folder_sources.walk_paths(root):
         path = Path(candidate)
         if not path.is_file():
@@ -811,7 +810,7 @@ def scan_directories(md_dir):
 
     空文件夹也要出现在左侧导航里，方便在新建的子文件夹中继续新建文档。
     """
-    root = Path(md_dir)
+    root = Path(os.path.abspath(str(md_dir)))
     directories = []
     if not root.is_dir():
         return directories

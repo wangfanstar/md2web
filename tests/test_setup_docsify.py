@@ -104,6 +104,21 @@ class ScanTests(TempDirTestCase):
             with self.assertRaises(self.module.BuildError):
                 self.module.scan_markdown(self.md)
 
+    def test_scan_accepts_relative_directory(self):
+        """直接运行 setup_docsify.py 时 MD_DIR 可能是相对路径，扫描结果必须一致。"""
+        self.write_doc("a.md", "# A")
+        self.write_doc("sub/b.md", "# B")
+        previous = os.getcwd()
+        os.chdir(str(self.tmp))
+        try:
+            with redirect_stdout(io.StringIO()):
+                files = self.module.scan_markdown("docs/md")
+                directories = self.module.scan_directories("docs/md")
+        finally:
+            os.chdir(previous)
+        self.assertEqual(files, ["a.md", "sub/b.md"])
+        self.assertEqual(directories, ["sub"])
+
     def test_build_doc_tree_and_render(self):
         tree = self.module.build_doc_tree(
             ["指南/入门.md", "指南/进阶.md", "FAQ.md"]
