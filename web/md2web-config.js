@@ -131,6 +131,25 @@
     return lines.join('<br>');
   }
 
+  function linkStatusText(item, folder) {
+    var sourceMode = item.sourceMode || (item.id ? 'svn' : 'local');
+    if (sourceMode !== 'symlink') {
+      return '';
+    }
+    if (!item.linkTarget) {
+      return '尚未填写目标目录：填写后保存，再点「创建链接」。';
+    }
+    var exists = item.linkExists !== undefined ? item.linkExists
+      : (folder && folder.linkExists !== undefined ? folder.linkExists : null);
+    if (exists === false) {
+      return '链接失效：目标目录不存在或不可访问（' + item.linkTarget + '）。';
+    }
+    if (exists === true) {
+      return '已连接：' + item.linkTarget + '（只读）';
+    }
+    return '目标：' + item.linkTarget;
+  }
+
   function repoRow(repo, folder, index) {
     var item = repo || {};
     var disabled = state.editable ? '' : ' disabled';
@@ -139,10 +158,18 @@
       ? '' : String(item.syncIntervalSeconds);
     var mount = (folder && folder.path) || item.mount || '';
     var manual = !folder;
-    var svnEnabled = item.sourceMode ? item.sourceMode === 'svn' : !!item.id;
+    var sourceMode = item.sourceMode || (item.id ? 'svn' : 'local');
+    var svnEnabled = sourceMode === 'svn';
     var credential = credentialInfo(item.id);
     // 入口页命名：已配置仓库用仓库 ID；未配置文件夹用文件夹名（与构建生成规则一致）
     var linkKey = item.id || (folder && folder.name) || '';
+    if (folder) {
+      if (!item.linkTarget) { item.linkTarget = folder.linkTarget || ''; }
+      if (item.linkExists === undefined) { item.linkExists = folder.linkExists; }
+      if (item.sourceMode === undefined && folder.sourceMode) { item.sourceMode = folder.sourceMode; }
+      sourceMode = item.sourceMode || (item.id ? 'svn' : 'local');
+      svnEnabled = sourceMode === 'svn';
+    }
     var allow = !(item.allowCommit === false || item.readOnly);
     return [
       '<tr data-repo-row data-pair="' + pair + '" data-mount="' + escapeHtml(mount) + '"'
@@ -163,19 +190,27 @@
       '<td><span class="repo-health" data-health-badge>' + initialBadge(item, svnEnabled) + '</span>'
         + '<br><span class="hint" data-mode-cell>'
         + (!svnEnabled && (item.id || autoRepoId(folder, item))
-          ? '本地模式：' + escapeHtml(item.id || autoRepoId(folder, item)) : '') + '</span>'
+          ? (sourceMode === 'symlink' ? '软链接：' : '本地模式：') + escapeHtml(item.id || autoRepoId(folder, item)) : '') + '</span>'
         + (allow ? '' : '<br><span class="repo-readonly">只读：由服务器自动更新</span>') + '</td>',
-      '<td><label class="flag"><input type="checkbox" data-repo="svnEnabled"'
-        + (svnEnabled ? ' checked' : '') + '>启用 SVN</label></td>',
+      '<td><label class="repo-source-label"><span>来源类型</span><select data-repo="sourceMode"' + disabled + '>'
+        + '<option value="svn"' + (sourceMode === 'svn' ? ' selected' : '') + '>SVN 库</option>'
+        + '<option value="symlink"' + (sourceMode === 'symlink' ? ' selected' : '') + '>软链接（只读）</option>'
+        + '<option value="local"' + (sourceMode === 'local' ? ' selected' : '') + '>本地文件夹</option></select></label></td>',
       '</tr>',
-      '<tr data-pair-detail="' + pair + '"' + (svnEnabled ? '' : ' hidden') + '>',
+      '<tr data-pair-detail="' + pair + '"' + (sourceMode === 'local' ? ' hidden' : '') + '>',
       '<td colspan="7"><div class="repo-detail">',
       '<input type="hidden" data-repo="id" value="' + escapeHtml(item.id || '') + '">',
-      '<label class="repo-field repo-field-url"><span>SVN 地址</span><input type="text" data-repo="url" value="' + escapeHtml(item.url)
+      '<label class="repo-field repo-field-url" data-source-field="svn"' + (svnEnabled ? '' : ' hidden')
+        + '><span>SVN 地址</span><input type="text" data-repo="url" value="' + escapeHtml(item.url)
         + '" placeholder="https://svn.example.com/svn/xxx/trunk/docs/"' + disabled + '></label>',
-      '<label class="repo-field repo-field-interval"><span>更新频率（秒）</span><input type="number" min="0" step="30" data-repo="syncIntervalSeconds" value="'
+      '<label class="repo-field repo-field-link-target" data-source-field="symlink"'
+        + (sourceMode === 'symlink' ? '' : ' hidden')
+        + '><span>软链接目标目录</span><input type="text" data-repo="linkTarget" value="' + escapeHtml(item.linkTarget || '')
+        + '" placeholder="D:/共享文档/项目资料"' + disabled + '></label>',
+      '<label class="repo-field repo-field-interval" data-source-field="svn"' + (svnEnabled ? '' : ' hidden')
+        + '><span>更新频率（秒）</span><input type="number" min="0" step="30" data-repo="syncIntervalSeconds" value="'
         + escapeHtml(interval) + '" placeholder="默认"' + disabled + '></label>',
-      '<div class="repo-credential">',
+      '<div class="repo-credential" data-source-field="svn"' + (svnEnabled ? '' : ' hidden') + '>',
       '<label class="repo-field"><span>同步账号</span><input type="text" data-repo="credUsername" placeholder="SVN 用户名" autocomplete="off" value="'
         + escapeHtml(credential.username) + '"' + disabled + '></label>',
       '<label class="repo-field"><span>密码</span><input type="password" data-repo="credPassword" placeholder="保存时填写，不回显" autocomplete="new-password"'
@@ -186,22 +221,30 @@
         + escapeHtml(credential.status) + '</span>',
       '</div>',
       '</div>',
+      '<div class="repo-link-box" data-source-field="symlink"' + (sourceMode === 'symlink' ? '' : ' hidden') + '>',
+      '<button type="button" data-action="link-check"' + disabled + '>检查连接</button>',
+      '<button type="button" data-action="link-create"' + disabled + '>创建链接</button>',
+      '<button type="button" data-action="link-remove"' + disabled + '>移除链接</button>',
+      '<span class="hint" data-link-status>' + linkStatusText(item, folder) + '</span>',
+      '</div>',
       '<div class="repo-flags">',
-      '<label class="flag" title="' + (svnEnabled
+      '<label class="flag" title="' + (sourceMode === 'svn'
         ? '勾选后允许登录用户把草稿合入 SVN 库；取消勾选则网页只读，内容由服务器定时同步更新'
+        : sourceMode === 'symlink' ? '软链接默认只读，网页不会修改目标目录'
         : '勾选后允许登录用户在线编辑并发布到本地库；取消勾选则网页只读，内容由服务器自动更新') + '">'
         + '<input type="checkbox" data-repo="allowCommit"'
-        + (allow ? ' checked' : '') + disabled + '>'
-        + (svnEnabled ? '允许合入 SVN 库' : '允许在线修改') + '</label>',
+        + (allow && sourceMode !== 'symlink' ? ' checked' : '')
+        + (sourceMode === 'symlink' ? ' disabled' : disabled) + '>'
+        + (sourceMode === 'svn' ? '允许合入 SVN 库' : sourceMode === 'symlink' ? '软链接只读' : '允许在线修改') + '</label>',
       '<span class="hint perm-hint" data-perm-hint>'
-        + (allow ? '' : '未勾选：网页为只读，内容由服务器自动更新') + '</span>',
+        + (sourceMode !== 'symlink' && !allow ? '未勾选：网页为只读，内容由服务器自动更新' : '') + '</span>',
       '</div>',
       '</div>',
       '<div class="actions">'
-        + '<button type="button" data-action="health"' + disabled + '>检查</button>'
-        + '<button type="button" data-action="repair"' + disabled + '>修复</button>'
-        + '<button type="button" data-action="recreate"' + disabled + '>删除重建</button>'
-        + '<button type="button" data-action="provision"' + disabled + '>创建并拉取</button>'
+        + '<button type="button" data-source-field="svn"' + (svnEnabled ? '' : ' hidden') + ' data-action="health"' + disabled + '>检查</button>'
+        + '<button type="button" data-source-field="svn"' + (svnEnabled ? '' : ' hidden') + ' data-action="repair"' + disabled + '>修复</button>'
+        + '<button type="button" data-source-field="svn"' + (svnEnabled ? '' : ' hidden') + ' data-action="recreate"' + disabled + '>删除重建</button>'
+        + '<button type="button" data-source-field="svn"' + (svnEnabled ? '' : ' hidden') + ' data-action="provision"' + disabled + '>创建并拉取</button>'
         + '<button type="button" class="danger" data-action="remove-repo"' + disabled + '>移除映射</button>'
         + '</div></td></tr>'
     ].join('');
@@ -272,7 +315,7 @@
       return;
     }
     var id = pairField(entry, 'id') || entry.summary.getAttribute('data-name') || '';
-    var toggle = entry.summary.querySelector('[data-repo="svnEnabled"]');
+    var toggle = entry.summary.querySelector('[data-repo="sourceMode"]');
     var linkCell = entry.summary.querySelector('[data-entry-cell]');
     if (linkCell) {
       linkCell.innerHTML = id
@@ -283,7 +326,7 @@
     var repoId = pairField(entry, 'id');
     var modeCell = entry.summary.querySelector('[data-mode-cell]');
     if (modeCell) {
-      modeCell.textContent = repoId && toggle && !toggle.checked ? '本地模式：' + repoId : '';
+        modeCell.textContent = repoId && toggle && toggle.value !== 'svn' ? (toggle.value === 'symlink' ? '软链接：' : '本地模式：') + repoId : '';
     }
   }
 
@@ -295,10 +338,12 @@
     existing.forEach(function (item) { if (item.id) { usedIds[item.id] = true; } });
     return all('[data-repo-row]').map(function (row) {
       var entry = pairOf(row);
-      var toggle = row.querySelector('[data-repo="svnEnabled"]');
-      var svnEnabled = !!(toggle && toggle.checked);
+      var sourceField = row.querySelector('[data-repo="sourceMode"]');
+      var sourceMode = sourceField ? sourceField.value : 'local';
+      var svnEnabled = sourceMode === 'svn';
       var interval = pairField(entry, 'syncIntervalSeconds');
-      var allow = !!(entry && entry.detail.querySelector('[data-repo="allowCommit"]').checked);
+      var allow = sourceMode !== 'symlink'
+        && !!(entry && entry.detail.querySelector('[data-repo="allowCommit"]').checked);
       var mount = pairField(entry, 'mount') || row.getAttribute('data-mount') || '';
       if (!mount) {
         mount = row.getAttribute('data-mount') || '';
@@ -325,8 +370,9 @@
         id: repoId,
         mount: mount,
         group: folderGroup(mount) || '默认',
-        sourceMode: svnEnabled ? 'svn' : 'local',
+        sourceMode: sourceMode,
         url: svnEnabled ? pairField(entry, 'url') : '',
+        linkTarget: sourceMode === 'symlink' ? pairField(entry, 'linkTarget') : '',
         // 单一权限开关：勾选=允许（合入 SVN / 在线修改），未勾选=只读（服务器自动更新）
         readOnly: !allow,
         allowCommit: allow
@@ -356,6 +402,9 @@
       if (repo.sourceMode === 'svn' && !repo.url) {
         return '仓库 ' + repo.id + ' 勾选了 SVN 但缺少地址：请填写 SVN 地址，或取消勾选使用本地模式。';
       }
+      if (repo.sourceMode === 'symlink' && !repo.linkTarget) {
+        return '仓库 ' + repo.id + ' 选择了软链接但缺少目标目录：请填写目标目录。';
+      }
     }
     return '';
   }
@@ -367,7 +416,7 @@
     });
     return repos.filter(function (repo) {
       var old = previous[repo.id];
-      return old && old.sourceMode !== 'local' && repo.sourceMode === 'local';
+      return old && old.sourceMode !== repo.sourceMode && repo.sourceMode !== 'svn';
     });
   }
 
@@ -888,7 +937,7 @@
       return;
     }
     var switched = switchedToLocal(repos);
-    if (switched.length && !window.confirm('以下仓库将改为本地模式（清空 SVN 地址，不再从 SVN 自动同步）：'
+    if (switched.length && !window.confirm('以下仓库将不再从 SVN 同步（地址会被清空）：'
         + switched.map(function (repo) { return repo.id; }).join('、') + '。确定继续？')) {
       return;
     }
@@ -906,7 +955,8 @@
     payload.repositories = repos.map(function (repo) {
       var item = {
         id: repo.id, mount: repo.mount, group: repo.group,
-        sourceMode: repo.sourceMode, url: repo.url
+        sourceMode: repo.sourceMode, url: repo.url,
+        linkTarget: repo.sourceMode === 'symlink' ? (repo.linkTarget || '') : ''
       };
       if (repo.sourceMode === 'svn' && repo.syncIntervalSeconds !== undefined
           && repo.syncIntervalSeconds !== null) {
@@ -1094,18 +1144,20 @@
     });
   }
 
-  function syncPermLabel(detail, svnEnabled) {
+  function syncPermLabel(detail, sourceMode) {
     if (!detail) {
       return;
     }
     var label = detail.querySelector('.repo-flags .flag');
-    var text = svnEnabled ? '允许合入 SVN 库' : '允许在线修改';
+    var text = sourceMode === 'svn' ? '允许合入 SVN 库'
+      : sourceMode === 'symlink' ? '软链接只读' : '允许在线修改';
     if (label && label.lastChild && label.lastChild.nodeType === 3) {
       label.lastChild.nodeValue = text;
     }
     if (label) {
-      label.setAttribute('title', svnEnabled
+      label.setAttribute('title', sourceMode === 'svn'
         ? '勾选后允许登录用户把草稿合入 SVN 库；取消勾选则网页只读，内容由服务器定时同步更新'
+        : sourceMode === 'symlink' ? '软链接默认只读，网页不会修改目标目录'
         : '勾选后允许登录用户在线编辑并发布到本地库；取消勾选则网页只读，内容由服务器自动更新');
     }
   }
@@ -1121,11 +1173,11 @@
       }
       return;
     }
-    var svnToggle = target.closest ? target.closest('[data-repo="svnEnabled"]') : null;
+    var svnToggle = target.closest ? target.closest('[data-repo="sourceMode"]') : null;
     if (svnToggle) {
       var pair = svnToggle.closest('[data-repo-row]');
       var detail = document.querySelector('[data-pair-detail="' + (pair ? pair.getAttribute('data-pair') : '') + '"]');
-      syncPermLabel(detail, !!svnToggle.checked);
+      syncPermLabel(detail, svnToggle.value);
     }
   });
 
@@ -1152,9 +1204,9 @@
         if (urlInput) {
           urlInput.value = '';
         }
-        var toggle = entry.summary ? entry.summary.querySelector('[data-repo="svnEnabled"]') : null;
+        var toggle = entry.summary ? entry.summary.querySelector('[data-repo="sourceMode"]') : null;
         if (toggle) {
-          toggle.checked = false;
+          toggle.value = 'local';
         }
         entry.detail.hidden = true;
         if (entry.summary) {
@@ -1181,6 +1233,46 @@
       checkHealth('site-backup', false);
     } else if (action === 'repair-site' || action === 'recreate-site') {
       repairRepo('site-backup', action === 'recreate-site');
+    } else if (action === 'link-check' || action === 'link-create' || action === 'link-remove') {
+      var linkEntry = pairOf(target);
+      var linkMount = pairField(linkEntry, 'mount')
+        || (linkEntry && linkEntry.summary ? linkEntry.summary.getAttribute('data-mount') : '');
+      var linkTarget = pairField(linkEntry, 'linkTarget');
+      var linkAction = action === 'link-check' ? 'check' : (action === 'link-create' ? 'create' : 'remove');
+      if (linkAction !== 'check' && !linkMount) {
+        setStatus('请先填写文件夹并通过保存生成仓库 ID。', true);
+        return;
+      }
+      if (linkAction === 'create' && !linkTarget) {
+        setStatus('请先填写软链接目标目录。', true);
+        return;
+      }
+      setStatus('正在' + (linkAction === 'check' ? '检查连接' : (linkAction === 'create' ? '创建链接' : '移除链接')) + '…');
+      api('__admin/folder-link', { method: 'POST', body: JSON.stringify({
+        mount: linkMount, action: linkAction, target: linkTarget
+      }) }).then(function (payload) {
+        var link = payload.link || {};
+        var statusBox = linkEntry && linkEntry.detail ? linkEntry.detail.querySelector('[data-link-status]') : null;
+        if (statusBox) {
+          statusBox.textContent = link.sourceMode === 'symlink'
+            ? (link.linkExists ? '已连接：' + link.linkTarget + '（只读）' : '链接失效：' + (link.linkTarget || linkTarget))
+            : '未建立链接';
+        }
+        if (link.sourceMode === 'symlink') {
+          var select = linkEntry.summary.querySelector('[data-repo="sourceMode"]');
+          if (select && select.value !== 'symlink') {
+            select.value = 'symlink';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          var targetInput = linkEntry.detail ? linkEntry.detail.querySelector('[data-repo="linkTarget"]') : null;
+          if (targetInput && link.linkTarget) { targetInput.value = link.linkTarget; }
+        }
+        setStatus(linkAction === 'create' ? '链接已创建（只读来源）。保存配置后总览页会显示「↗ 软链接」标记。'
+          : linkAction === 'remove' ? '链接已移除；目标目录未被删除。' : '连接检查完成。');
+        if (linkAction !== 'check') { refreshFolders(); }
+      }).catch(function (error) {
+        setStatus('链接操作失败：' + error.message, true);
+      });
     } else if (action === 'health' || action === 'repair' || action === 'recreate') {
       var targetId = pairField(pairOf(target), 'id');
       if (!targetId) {
@@ -1215,23 +1307,34 @@
       return;
     }
     var name = target.getAttribute('data-repo');
-    if (name !== 'svnEnabled' && name !== 'id') {
+    if (name !== 'sourceMode' && name !== 'id') {
       return;
     }
     var entry = pairOf(target);
     if (!entry || !entry.detail) {
       return;
     }
-    if (name === 'svnEnabled') {
-      entry.detail.hidden = !target.checked;
-      if (target.checked) {
-        var idInput = entry.detail.querySelector('[data-repo="id"]');
-        var urlInput = entry.detail.querySelector('[data-repo="url"]');
-        if (urlInput && !urlInput.value.trim()) {
-          urlInput.focus();
-        }
+    if (name === 'sourceMode') {
+      entry.detail.hidden = target.value === 'local';
+      var detail = entry.detail;
+      all('[data-source-field]', detail).forEach(function (field) {
+        field.hidden = field.getAttribute('data-source-field') !== target.value;
+      });
+      var allowInput = detail.querySelector('[data-repo="allowCommit"]');
+      if (allowInput) {
+        allowInput.disabled = target.value === 'symlink' || !state.editable;
+        if (target.value === 'symlink') { allowInput.checked = false; }
+      }
+      syncPermLabel(detail, target.value);
+      if (target.value === 'svn') {
+        var urlInput = detail.querySelector('[data-repo="url"]');
+        if (urlInput && !urlInput.value.trim()) { urlInput.focus(); }
+      } else if (target.value === 'symlink') {
+        var targetInput = detail.querySelector('[data-repo="linkTarget"]');
+        if (targetInput && !targetInput.value.trim()) { targetInput.focus(); }
+        setStatus('软链接只读：填写目标目录并保存后，可点「创建链接」建立引用。');
       } else if (pairField(entry, 'id')) {
-        setStatus('取消勾选后该仓库将按本地模式（SQLite 主库）保存，SVN 地址会被清空。');
+        setStatus('本地模式不连接 SVN，SVN 地址会被清空。');
       }
       updateSummary(entry);
       return;

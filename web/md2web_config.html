@@ -109,6 +109,12 @@
     .repo-detail .repo-flags .flag { font-weight: 600; }
     .repo-detail .repo-flags .perm-hint { color: #b45309; font-size: 11.5px; }
     .repo-detail .repo-flags .perm-hint:empty { display: none; }
+    /* 来源类型：明细按类型显隐（hidden 必须覆盖 grid 显示） */
+    .repo-detail [data-source-field][hidden] { display: none !important; }
+    .repo-detail .repo-field-link-target { grid-column: span 7; order: 1; }
+    .repo-detail .repo-link-box { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; grid-column: span 12; order: 4; }
+    .repo-detail .repo-link-box .hint { margin-left: 2px; }
+    .repo-source-label select { min-width: 118px; }
     /* 同步凭据：行内输入（不再是浏览器弹窗） */
     .repo-detail .repo-credential {
       align-items: flex-end;
@@ -161,7 +167,7 @@
       <table>
         <thead>
           <tr>
-            <th>md 下文件夹</th><th>仓库入口页</th><th>分组</th><th>最新更新</th><th>仓库大小</th><th>状态</th><th>启用 SVN</th>
+            <th>md 下文件夹</th><th>仓库入口页</th><th>分组</th><th>最新更新</th><th>仓库大小</th><th>状态</th><th>来源类型</th>
           </tr>
         </thead>
         <tbody data-repo-rows></tbody>
@@ -186,6 +192,7 @@
           <li><b>✖ 仓库身份变化</b>（远端库被重建，UUID 不一致）或修复仍失败：点「删除重建」——本地目录（含未提交修改）移入 <code>data/trash</code> 后重新绑定仓库身份并完整拉取。</li>
           <li><b>⚠ 存在冲突</b>：有文档正在编辑（草稿），同步时已跳过；在编辑器中查看「远端差异」并合并后提交。</li>
           <li>「创建并拉取」在目录不存在时自动创建 <code>docs/md/&lt;文件夹&gt;</code> 并从 SVN 导出内容。</li>
+          <li>「来源类型」分三种：<b>SVN 库</b>（地址/频率/账号）、<b>软链接</b>（填写目标目录，可检查/创建/移除链接，默认且强制只读，网页不会修改目标目录）、<b>本地文件夹</b>（无需地址与同步配置）。未配置的文件夹按实际目录自动识别。</li>
           <li>「更新频率（秒）」留空使用全局默认（设置 → SVN 与仓库），填 0 表示不自动同步。</li>
           <li>不勾选「配置 SVN」的仓库按<b>本地模式</b>（SQLite 主库）保存，不做 SVN 检查；「移除配置」清空该文件夹的仓库 ID 与地址。</li>
         </ul>
