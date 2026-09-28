@@ -41,6 +41,11 @@
     .muted { color:var(--muted); font-size:12px; } .actions-cell { display:flex; gap:5px; justify-content:flex-end; } .actions-cell button { font-size:12px; padding:5px 8px; } .danger { color:#b84242; }
     .empty { color:var(--muted); padding:48px 20px; text-align:center; } .empty strong { color:var(--ink); display:block; font-size:15px; margin-bottom:6px; }
     .status { color:#b45309; font-size:12px; margin-top:12px; min-height:18px; } .status.error { color:#b91c1c; }
+    .search-bar { align-items:center; background:var(--panel); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow); display:flex; gap:9px; margin-bottom:17px; padding:10px 13px; }
+    .search-icon { color:#718096; font-size:18px; line-height:1; }
+    .search-bar input { background:transparent; border:0; color:var(--ink); flex:1; font:inherit; font-size:14px; min-width:0; outline:0; padding:5px 0; }
+    .search-bar input::placeholder { color:#9aa8b8; }
+    .search-clear { color:#718096; padding:4px 8px; }
     .account-bar { align-items:center; background:rgba(255,255,255,.96); border:1px solid var(--line); border-radius:10px; display:flex; gap:10px; justify-content:flex-end; margin-bottom:16px; padding:8px 12px; position:sticky; top:12px; z-index:12; }
     .account-info { color:var(--muted); font-size:12px; margin-right:auto; } .account-info.is-user { color:#216e4e; font-weight:600; }
     .account-form { align-items:center; display:flex; gap:7px; }
@@ -76,11 +81,12 @@
     <main class="main">
       <div class="account-bar"><span class="account-info" data-auth-info>正在读取登录状态…</span><form class="account-form" data-auth-form><input type="text" data-auth-username autocomplete="username" placeholder="SVN 用户名" aria-label="SVN 用户名"><input type="password" data-auth-password autocomplete="current-password" placeholder="密码" aria-label="密码"><button type="submit" class="primary" data-auth-login>登录</button><button type="button" data-auth-logout hidden>退出</button></form><a href="html/md2web_feedback.html">问题反馈</a></div>
       <div class="topline"><div><h1 data-title>PDF 标准</h1><p class="sub">按文件夹整理标准、规范与项目资料</p></div><div class="actions"><button type="button" data-up>刷新</button><button type="button" class="primary" data-upload>上传文件</button><button type="button" data-mkdir>新建文件夹</button><input type="file" data-file multiple hidden></div></div>
+      <form class="search-bar" data-search-form role="search"><span class="search-icon" aria-hidden="true">⌕</span><input type="search" data-search placeholder="搜索 PDF、Word、Excel、PPT 文件名…" autocomplete="off" aria-label="搜索参考文献文件名"><button type="reset" class="search-clear" data-search-clear hidden>清除</button></form>
       <section class="crumb-card"><div class="crumb-row"><span class="crumb-home" data-root>全部资料</span><span class="crumb-sep">/</span><strong class="crumb-current" data-breadcrumb>根目录</strong></div><div class="stats" data-stats>正在读取…</div><div class="status" data-status></div></section>
       <section class="list-card"><div class="list-head"><span>名称</span><span>类型</span><span>修改时间</span><span></span></div><div data-list></div></section>
     </main>
   </div>
   <div class="preview" data-preview hidden><div class="preview-panel"><div class="preview-head"><span class="preview-title" data-preview-title></span><button type="button" data-preview-close>关闭</button></div><div class="preview-body" data-preview-body></div></div></div>
-  <script src="lib/auth.js?v=119d9241e0"></script><script src="lib/reference-office.bundle.js?v=4cef03b016"></script><script src="lib/reference-library.js?v=8b2fb11b79"></script>
+  <script src="lib/auth.js?v=119d9241e0"></script><script src="lib/reference-office.bundle.js?v=4cef03b016"></script><script src="lib/reference-library.js?v=9886445285"></script>
 </body>
 </html>

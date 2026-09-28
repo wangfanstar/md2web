@@ -61,6 +61,28 @@ def listing(docs_dir, kind, rel=""):
     return {"kind": kind, "path": rel, "items": rows}
 
 
+def search(docs_dir, query, kind="all"):
+    """按文件名搜索参考文献，支持全部资料类型或指定类型。"""
+    text = str(query or "").strip().casefold()
+    if not text:
+        return []
+    kinds = tuple(KINDS.keys()) if kind in ("", "all", None) else (kind,)
+    results = []
+    for current_kind in kinds:
+        root = root_for(docs_dir, current_kind)
+        for path in root.rglob("*"):
+            if not path.is_file() or "回收站" in path.parts:
+                continue
+            if text not in path.name.casefold():
+                continue
+            stat = path.stat()
+            results.append({"kind": current_kind, "path": path.relative_to(root).as_posix(),
+                            "name": path.name, "size": stat.st_size,
+                            "mtime": int(stat.st_mtime), "ext": path.suffix.lower()})
+    kind_order = {name: index for index, name in enumerate(KINDS.keys())}
+    return sorted(results, key=lambda item: (kind_order.get(item["kind"], 99), item["name"].casefold(), item["path"].casefold()))
+
+
 def mkdir(docs_dir, kind, parent, name):
     root, folder, _ = safe_path(docs_dir, kind, parent)
     target = folder / check_name(name)

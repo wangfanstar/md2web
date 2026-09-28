@@ -1392,6 +1392,15 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         except references.ReferenceError as error:
             return json_error(error.status, "reference_error", error.message)
 
+    @app.get("/__references/search")
+    def reference_search():
+        try:
+            kind = request.args.get("kind") or "all"
+            query = request.args.get("q") or ""
+            return jsonify({"ok": True, "results": references.search(docs_root, query, kind)})
+        except references.ReferenceError as error:
+            return json_error(error.status, "reference_error", error.message)
+
     @app.get("/__references/trash")
     def reference_trash():
         session, rejected = require_session()

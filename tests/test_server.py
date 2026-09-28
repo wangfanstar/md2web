@@ -1017,6 +1017,18 @@ class AppTests(ServerTestBase):
         self.assertTrue((self.docs / "pdf" / "sample.pdf").is_file())
         self.assertTrue((self.docs / "pdf" / "sample-2.pdf").is_file())
 
+    def test_reference_search_finds_file_names_across_types(self):
+        (self.docs / "pdf").mkdir(parents=True, exist_ok=True)
+        (self.docs / "word").mkdir(parents=True, exist_ok=True)
+        (self.docs / "pdf" / "接口规范.pdf").write_bytes(b"pdf")
+        (self.docs / "word" / "接口规范.docx").write_bytes(b"docx")
+        (self.docs / "pdf" / "其他标准.pdf").write_bytes(b"pdf")
+        response = self.client.get("/__references/search?q=%E6%8E%A5%E5%8F%A3")
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual([(item["kind"], item["name"]) for item in response.get_json()["results"]], [
+            ("pdf", "接口规范.pdf"), ("word", "接口规范.docx")
+        ])
+
     def test_reference_pdf_upload_has_no_request_size_limit(self):
         csrf = self.login()
         response = self.client.post("/__references/upload", data={
