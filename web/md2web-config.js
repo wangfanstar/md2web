@@ -345,7 +345,10 @@
       var svnEnabled = sourceMode === 'svn';
       var interval = pairField(entry, 'syncIntervalSeconds');
       var allow = !!(entry && entry.detail.querySelector('[data-repo="allowCommit"]').checked);
-      var mount = pairField(entry, 'mount') || row.getAttribute('data-mount') || '';
+      // 新建仓库的 mount 输入在摘要行，已有文件夹的 mount 隐藏输入在明细行。
+      var mountField = row.querySelector('[data-repo="mount"]');
+      var mount = (mountField ? mountField.value.trim() : '') || pairField(entry, 'mount')
+        || row.getAttribute('data-mount') || '';
       if (!mount) {
         mount = row.getAttribute('data-mount') || '';
       }
