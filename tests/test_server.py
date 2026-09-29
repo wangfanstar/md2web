@@ -388,6 +388,14 @@ class ConfigTests(ServerTestBase):
             with self.assertRaises(server_config.ConfigError, msg=database):
                 server_config.load_config(path, self.docs)
 
+    def test_save_config_creates_new_repository_mount_directory(self):
+        path = self.write_config({"repositories": []})
+        payload = server_config.config_to_json(server_config.load_config(path, self.docs))
+        payload["repositories"] = [{"id": "new-repo", "mount": "md/new-repo",
+                                     "sourceMode": "local", "url": ""}]
+        server_config.save_config(path, payload, self.docs)
+        self.assertTrue((self.docs / "new-repo").is_dir())
+
     def test_duplicate_mount_and_id_rejected(self):
         base = {
             "id": "hardware",

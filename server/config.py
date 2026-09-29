@@ -238,6 +238,19 @@ def load_config(path, docs_dir, allow_incomplete=False):
             "sync_interval": sync_interval,
         })
 
+    # 配置页新建仓库后，入口页需要立即能打开空文件夹视图。
+    # SVN/本地模式先创建挂载目录；软链接必须由链接管理接口创建，不能先创建同名普通目录。
+    docs_root = Path(docs_dir).resolve()
+    for repo in repositories:
+        if repo["source_mode"] == "symlink":
+            continue
+        mount_parts = repo["mount"].split("/")[1:]
+        if mount_parts:
+            try:
+                (docs_root.joinpath(*mount_parts)).mkdir(parents=True, exist_ok=True)
+            except OSError as error:
+                raise ConfigError("无法创建仓库目录 %s: %s" % (repo["mount"], error))
+
     ai_raw = raw.get("ai") or {}
     ai = {
         "provider": str(ai_raw.get("provider") or DEFAULT_AI["provider"]).strip() or DEFAULT_AI["provider"],
