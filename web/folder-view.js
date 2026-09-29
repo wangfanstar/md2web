@@ -93,6 +93,23 @@
     return repo ? 'html/index_' + repo.id + '.html' : 'html/index_all.html';
   }
 
+  function emptyStateHtml(folderPath, readOnly) {
+    if (readOnly) {
+      return '<div class="folder-view-empty" data-folder-empty>'
+        + '<p class="folder-view-empty-title">该文件夹还没有文档</p>'
+        + '<p class="folder-view-empty-hint">当前仓库为只读：请在服务器目录或 SVN 库中添加文档后同步。</p>'
+        + '</div>';
+    }
+    var path = escapeHtml(folderPath || '');
+    return '<div class="folder-view-empty" data-folder-empty>'
+      + '<p class="folder-view-empty-title">该文件夹还没有文档</p>'
+      + '<p class="folder-view-empty-hint">点下面的按钮直接创建第一篇文档；创建成功后会自动打开编辑器。</p>'
+      + '<div class="folder-view-empty-actions">'
+      + '<button type="button" data-folder-action="new-document" data-path="' + path + '">新建文档</button>'
+      + '<button type="button" data-folder-action="new-folder" data-path="' + path + '">新建文件夹</button>'
+      + '</div></div>';
+  }
+
   function renderFolderView(folder) {
     var article = document.querySelector('.markdown-section');
     if (!article) {
@@ -117,7 +134,11 @@
     var sections = groupDocuments(folder.documents || []);
     var singleFolder = sections.length <= 1 && (!sections.length || sections[0].folder === folder.path);
     var documentsHtml;
-    if (singleFolder) {
+    if (singleFolder && !(folder.documents || []).length && !(folder.folders || []).length) {
+      // 空文件夹（如刚新建的仓库）：直接给出「新建文档」入口，而不是空白或 404
+      var emptyReadOnly = !!config.repoReadOnly || config.repoAllowCommit === false;
+      documentsHtml = '<h2>文档</h2>' + emptyStateHtml(folder.path, emptyReadOnly);
+    } else if (singleFolder) {
       documentsHtml = '<h2>文档</h2>' + documentTable(sections.length ? sections[0].documents : []);
     } else {
       documentsHtml = '<h2>文档</h2>' + sections.map(function (section) {
@@ -360,13 +381,43 @@
     });
   }
 
+  function openCreatedDocument(path) {
+    var route = String(path || '').replace(/\.md$/i, '');
+    if (!route) {
+      return;
+    }
+    function currentHashRoute() {
+      var value = String(window.location.hash || '').replace(/^#\/?/, '');
+      try {
+        value = decodeURIComponent(value);
+      } catch (error) { /* 保留原值 */ }
+      return value.replace(/\.md$/i, '');
+    }
+    window.location.hash = '#/' + route;
+    window.setTimeout(function () {
+      if (currentHashRoute() === route && window.MdEditor && window.MdEditor.open) {
+        window.MdEditor.open();
+      } else {
+        window.location.reload();
+      }
+    }, 600);
+  }
+
   function runAction(action, path, isFolder) {
     var parent = isFolder ? (path || currentRoute()) : folderPathOf(path || currentRoute());
     if (action === 'new-document') {
+      if (!requireLogin()) return;
       var docName = window.prompt('新建文档名称（不含 .md）', '新文档');
       if (!docName) return;
       mutate('__md/create', { parent: parent, kind: 'document', name: docName })
-        .then(function (payload) { reloadSoon(operationNotice('已创建文档：' + docName, payload.result)); })
+        .then(function (payload) {
+          var created = (payload.result && payload.result.path) || '';
+          if (created) {
+            openCreatedDocument(created);
+          } else {
+            reloadSoon(operationNotice('已创建文档：' + docName, payload.result));
+          }
+        })
         .catch(function (error) { window.alert('创建失败：' + error.message); });
       return;
     }
@@ -516,6 +567,13 @@
       openTrash(trash.getAttribute('data-mount') || 'md');
       return;
     }
+    var direct = event.target.closest
+      ? event.target.closest('[data-folder-action="new-document"], [data-folder-action="new-folder"]')
+      : null;
+    if (direct) {
+      runAction(direct.getAttribute('data-folder-action'), direct.getAttribute('data-path'), true);
+      return;
+    }
     if (menu && !menu.contains(event.target)) {
       closeMenu();
     }
@@ -534,6 +592,6 @@
   }
   window.addEventListener('hashchange', function () { window.setTimeout(loadFolderView, 120); });
   window.FolderView = { isFolderRoute: isFolderRoute, reload: loadFolderView, pathFromElement: pathFromElement,
-                        groupDocuments: groupDocuments };
+                        groupDocuments: groupDocuments, emptyStateHtml: emptyStateHtml };
   window.setTimeout(loadFolderView, 200);
 }());

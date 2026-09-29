@@ -719,6 +719,24 @@ def repo_page_name(repo_id):
     return "index_" + safe + ".html"
 
 
+def repo_home_name(repo_id):
+    """空仓库的入口页占位首页：html/_home_<仓库名>.md（避免 docsify 404）。"""
+    return "_home_" + repo_page_name(repo_id)[len("index_"):-len(".html")] + ".md"
+
+
+def write_empty_repo_home(repo):
+    """为空仓库生成占位首页，folder-view 可用时会被「新建文档」空状态替换。"""
+    name = repo_home_name(repo["id"])
+    text = (
+        "# " + str(repo["id"]) + "\n\n"
+        "该文件夹还没有文档。\n\n"
+        "- 进入本入口页后，点正文中的「新建文档」即可创建第一篇文档；\n"
+        "- 若页面提示目录尚未创建，请在仓库配置页保存一次（会自动创建目录）后重建站点。\n"
+    )
+    (HTML_DIR / name).write_text(text, encoding="utf-8")
+    return HTML_PREFIX + name
+
+
 def load_all_repos():
     """仓库列表 = 配置的仓库 + 未配置文件夹的自动入口页（本地模式默认页）。"""
     repos = load_repositories()
@@ -1619,6 +1637,14 @@ def cleanup_repo_artifacts(repos):
                 removed.append(path.name)
             except OSError:
                 pass
+    keep_homes = {repo_home_name(repo["id"]) for repo in repos}
+    for path in sorted(HTML_DIR.glob("_home_*.md")):
+        if path.name not in keep_homes:
+            try:
+                path.unlink()
+                removed.append(path.name)
+            except OSError:
+                pass
     if removed:
         print(f"  [清理] 已删除 {len(removed)} 个不再使用的仓库产物：{', '.join(removed[:6])}")
 
@@ -1850,8 +1876,12 @@ def main(argv=None):
                                   search_index_path=HTML_DIR / "search-index.json",
                                   sidebar=HTML_PREFIX + sidebar,
                                   include_readme=False)
-            homepage = f"md/{sub}/README.md" if (MD_DIR / sub / "README.md").is_file() else (
-                f"md/{repo_files[0]}" if repo_files else None)
+            if (MD_DIR / sub / "README.md").is_file():
+                homepage = f"md/{sub}/README.md"
+            elif repo_files:
+                homepage = f"md/{repo_files[0]}"
+            else:
+                homepage = write_empty_repo_home(repo)
             generate_index_html(args.title, path=HTML_DIR / page, page_name=page,
                                 site_name=f"{repo['id']} · {args.title}",
                                 sidebar=sidebar, search_index=search_index, offline_data=offline_data,

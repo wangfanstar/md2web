@@ -989,6 +989,29 @@ class MultiRepoTests(TempDirTestCase):
         self.assertEqual(self.module.repo_page_name("a/b c"), "index_a-b-c.html")
         self.assertEqual(self.module.mount_subpath("md/硬件设计"), "硬件设计")
 
+    def test_repo_home_name_and_empty_repo_placeholder(self):
+        self.assertEqual(self.module.repo_home_name("空白库"), "_home_空白库.md")
+        self.module.HTML_DIR.mkdir(parents=True, exist_ok=True)
+        repo = {"id": "空白库", "mount": "md/空白库", "url": "", "source_mode": "local",
+                "link_target": "", "link_exists": False, "group": "默认",
+                "read_only": False, "allow_commit": True, "sync_interval": None, "auto": True}
+        homepage = self.module.write_empty_repo_home(repo)
+        self.assertEqual(homepage, "html/" + self.module.repo_home_name("空白库"))
+        text = (self.docs / "html" / self.module.repo_home_name("空白库")).read_text(encoding="utf-8")
+        self.assertIn("该文件夹还没有文档", text)
+        self.assertIn("新建文档", text)
+
+    def test_cleanup_removes_stale_empty_repo_homepages(self):
+        html = self.docs / "html"
+        html.mkdir(parents=True, exist_ok=True)
+        stale = html / "_home_旧库.md"
+        stale.write_text("# 旧", encoding="utf-8")
+        repo = {"id": "空白库", "mount": "md/空白库", "group": "默认",
+                "read_only": False, "allow_commit": True, "sync_interval": None, "auto": True}
+        with redirect_stdout(io.StringIO()):
+            self.module.cleanup_repo_artifacts([repo])
+        self.assertFalse(stale.exists())
+
     def test_auto_folder_repos_cover_unconfigured_folders(self):
         self.write_doc("硬件设计/时钟树设计.md", "# A")
         self.write_doc("验证指南/仿真环境搭建.md", "# B")
@@ -1295,14 +1318,19 @@ class HtmlLayoutTests(unittest.TestCase):
                       "全局侧栏的一级分组名应链接到仓库入口页")
         self.assertIn('href="html/index_all.html" data-folder="md">**所有文档**</a>', sidebar,
                       "侧栏标题应为「所有文档」并链接到合并视图（data-folder 指向 md）")
-        repo_sidebar = next((ROOT / "docs" / "html").glob("_sidebar_*.md"))
-        repo_sidebar_text = repo_sidebar.read_text(encoding="utf-8")
-        self.assertIn("所有文档", repo_sidebar_text, "各仓库侧栏标题同样应为「所有文档」")
-        # 仓库侧栏的一级分组名指回本仓库入口页：进入文档后点分组名可返回仓库首页
-        repo_sidebar_id = repo_sidebar.name[len("_sidebar_"):-len(".md")]
-        self.assertIn('<a class="sidebar-group-link" href="html/index_' + repo_sidebar_id + '.html"'
-                      ' data-folder="md/' + repo_sidebar_id + '">',
-                      repo_sidebar_text, "仓库侧栏的一级分组名应链接回本仓库入口页并带 data-folder")
+        repo_sidebars = sorted((ROOT / "docs" / "html").glob("_sidebar_*.md"))
+        self.assertTrue(repo_sidebars, "应生成各仓库侧栏")
+        # 空仓库侧栏没有目录分组；至少应有一个非空仓库侧栏的分组名指回本仓库入口页
+        matched = False
+        for repo_sidebar in repo_sidebars:
+            repo_sidebar_text = repo_sidebar.read_text(encoding="utf-8")
+            repo_sidebar_id = repo_sidebar.name[len("_sidebar_"):-len(".md")]
+            if ('<a class="sidebar-group-link" href="html/index_' + repo_sidebar_id + '.html"'
+                    ' data-folder="md/' + repo_sidebar_id + '">') in repo_sidebar_text:
+                matched = True
+                self.assertIn("所有文档", repo_sidebar_text, "各仓库侧栏标题同样应为「所有文档」")
+                break
+        self.assertTrue(matched, "至少一个仓库侧栏的一级分组名应链接回本仓库入口页并带 data-folder")
         source = (ROOT / "setup_docsify.py").read_text(encoding="utf-8")
         self.assertIn("top_link=HTML_PREFIX + page", source,
                       "各仓库侧栏生成时应指向自己的入口页")
@@ -1947,6 +1975,17 @@ class EndToEndTests(TempDirTestCase):
                 self.module.main([])
         self.assertFalse((self.docs / "html" / "index_硬件设计.html").exists())
         self.assertFalse((self.docs / "html" / "_sidebar_硬件设计.md").exists())
+
+    def test_full_build_empty_folder_gets_placeholder_homepage(self):
+        self.write_doc("使用说明/a.md", "# A")
+        (self.md / "空白库").mkdir()
+        self.seed_assets()
+        with mock.patch.object(self.module, "load_repositories", lambda: []):
+            with redirect_stdout(io.StringIO()):
+                self.module.main([])
+        page = (self.docs / "html" / "index_空白库.html").read_text(encoding="utf-8")
+        self.assertIn('homepage: "html/_home_空白库.md"', page)
+        self.assertTrue((self.docs / "html" / "_home_空白库.md").is_file())
 
     def test_index_only_skips_site_files(self):
         self.write_doc("a.md", "# A")

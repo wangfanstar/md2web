@@ -100,6 +100,22 @@ test('menu buttons keep working through data-path', () => {
   assert.equal(view.pathFromElement(node), 'md/软件工具链/编译工具链');
 });
 
+test('empty folder state exposes direct create buttons', () => {
+  const view = loadFolderView();
+  const html = view.emptyStateHtml('md/test');
+  assert.match(html, /该文件夹还没有文档/);
+  assert.match(html, /data-folder-action="new-document"/);
+  assert.match(html, /data-folder-action="new-folder"/);
+  assert.match(html, /data-path="md\/test"/);
+});
+
+test('empty folder state hides create buttons for read-only repositories', () => {
+  const view = loadFolderView();
+  const html = view.emptyStateHtml('md/test', true);
+  assert.doesNotMatch(html, /data-folder-action="new-document"/);
+  assert.match(html, /只读/);
+});
+
 test('groupDocuments groups documents by parent folder in path order', () => {
   const view = loadFolderView();
   const sections = view.groupDocuments([
