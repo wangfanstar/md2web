@@ -128,9 +128,9 @@ test('repository detail keeps ID hidden and exposes only SVN address and interva
   assert.match(html, /更新频率（秒）/);
 });
 
-test('symlink repository keeps linkTarget and drops SVN fields', () => {
+test('symlink repository defaults to read-only and keeps linkTarget', () => {
   const p = page([{ id: 'shared', mount: 'md/共享', sourceMode: 'symlink',
-    url: 'https://svn.example.com/r', linkTarget: 'D:/share' }]);
+    url: 'https://svn.example.com/r', linkTarget: 'D:/share', allow: false }]);
   const repo = p.readRepos()[0];
   assert.equal(repo.sourceMode, 'symlink');
   assert.equal(repo.linkTarget, 'D:/share');
@@ -140,13 +140,22 @@ test('symlink repository keeps linkTarget and drops SVN fields', () => {
   assert.equal(repo.syncIntervalSeconds, undefined);
 });
 
+test('symlink repository can opt into read-write mode', () => {
+  const p = page([{ id: 'shared', mount: 'md/共享', sourceMode: 'symlink',
+    linkTarget: 'D:/share', allow: true }]);
+  const repo = p.readRepos()[0];
+  assert.equal(repo.sourceMode, 'symlink');
+  assert.equal(repo.allowCommit, true);
+  assert.equal(repo.readOnly, false);
+});
+
 test('symlink without a target is rejected before saving', () => {
   const problem = page([]).validateRepos([{ id: 'shared', mount: 'md/共享',
     sourceMode: 'symlink', url: '', linkTarget: '', readOnly: true, allowCommit: false }]);
   assert.match(problem, /目标目录/);
 });
 
-test('symlink detail renders link management buttons and a disabled permission box', () => {
+test('symlink detail renders link management buttons and a writable option', () => {
   const p = page([]);
   const html = p.repoRow({ id: 'shared', mount: 'md/共享', sourceMode: 'symlink',
     linkTarget: 'D:/share', linkExists: true }, { name: '共享', path: 'md/共享' }, 0);
@@ -154,6 +163,7 @@ test('symlink detail renders link management buttons and a disabled permission b
   assert.match(html, /data-action="link-create"/);
   assert.match(html, /data-action="link-remove"/);
   assert.match(html, /data-source-field="symlink"/);
-  assert.match(html, /软链接只读/);
-  assert.match(html, /data-repo="allowCommit" disabled/);
+  assert.match(html, /允许在线修改/);
+  assert.match(html, /直接写入目标目录/);
+  assert.doesNotMatch(html, /data-repo="allowCommit" disabled/);
 });

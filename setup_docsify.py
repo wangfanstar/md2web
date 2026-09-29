@@ -27,6 +27,8 @@ HTML_BASE = "../"
 # docsify 取 md/侧栏文件的基准：从 html/ 回到 docs/
 DOCSIFY_BASE_PATH = "../"
 HTML_PREFIX = "html/"
+# 站点默认标题（可用 --title 覆盖）
+DEFAULT_TITLE = "GT文档知识库"
 
 
 class BuildError(Exception):
@@ -38,7 +40,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="将 docs/md 下的 Markdown 转成离线可用的 Docsify 文档站。"
     )
-    parser.add_argument("--title", default="文档中心", help="站点标题，默认「文档中心」")
+    parser.add_argument("--title", default=DEFAULT_TITLE, help="站点标题，默认「%s」" % DEFAULT_TITLE)
     parser.add_argument("--offline", action="store_true", help="严格离线构建：依赖缺失时提示，不尝试网络下载")
     parser.add_argument(
         "--index-only",
@@ -861,7 +863,7 @@ def build_page_index(route_path: str, content: str, depth: int, page_title: str 
     fence_char = ""
     fence_length = 0
     default_title = route_path.split("/")[-1].replace(".md", "") or "Home Page"
-    page_title = page_title or ("文档中心" if route_path == "/" else default_title)
+    page_title = page_title or (DEFAULT_TITLE if route_path == "/" else default_title)
     current_title = default_title
     current_slug = route_path
     current_body = []
@@ -932,7 +934,7 @@ def build_page_index(route_path: str, content: str, depth: int, page_title: str 
     return index
 
 
-def generate_search_index(md_files, title="文档中心", depth=SEARCH_DEPTH, path=None, repos=None, include_readme=True, site=None):
+def generate_search_index(md_files, title=DEFAULT_TITLE, depth=SEARCH_DEPTH, path=None, repos=None, include_readme=True, site=None):
     """在构建时生成 search-index.json，避免浏览器 localStorage 配额限制。"""
     index = {}
     readme = HTML_DIR / "README.md"
@@ -1073,7 +1075,7 @@ def generate_sidebar(md_files, path=None, heading="目录", link_first_level=Fal
     print(f"  [生成] _sidebar.md ({len(lines) - 1} 项)")
 
 
-def generate_readme(md_files, title="文档中心", path=None, repos=None):
+def generate_readme(md_files, title=DEFAULT_TITLE, path=None, repos=None):
     """生成 README.md 作为首页索引"""
     folders = {str(parent) for rel in md_files for parent in Path(rel).parents if str(parent) != "."}
     lines = [f"# {html.escape(title)}", "", '<div class="workspace-home">',
@@ -1163,7 +1165,7 @@ def version_asset_urls(html_text):
     return re.sub(r'(src="|href=")(lib/[^"?]+\.(?:js|css))(")', replace, html_text)
 
 
-def generate_index_html(title="文档中心", path=None, page_name="index.html", site_name=None,
+def generate_index_html(title=DEFAULT_TITLE, path=None, page_name="index.html", site_name=None,
                          sidebar="_sidebar.md", search_index="search-index.json",
                          offline_data="lib/offline-data.js", homepage=None,
                          read_only=False, allow_commit=True, repo=None, repos=None,
@@ -1618,7 +1620,7 @@ def cleanup_repo_artifacts(repos):
         print(f"  [清理] 已删除 {len(removed)} 个不再使用的仓库产物：{', '.join(removed[:6])}")
 
 
-def generate_master_index_html(repos, title="文档中心", all_page="index_all.html", config_page="md2web_config.html"):
+def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.html", config_page="md2web_config.html"):
     """生成总览首页 index.html：按仓库分组列出各仓库入口页，并提供跨仓库搜索。"""
     groups = {}
     for repo in repos:
@@ -1645,6 +1647,8 @@ def generate_master_index_html(repos, title="文档中心", all_page="index_all.
                 note = "→ " + (repo.get("link_target") or "目标目录未配置")
                 if not repo.get("link_exists", True):
                     note += "（链接失效，请检查目标目录）"
+                elif not repo.get("read_only") and repo.get("allow_commit", True):
+                    note += "（可读写）"
             elif source_mode == "svn":
                 note = repo.get("url") or "（未填写 SVN 地址）"
             else:

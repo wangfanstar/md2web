@@ -220,6 +220,11 @@ def load_config(path, docs_dir, allow_incomplete=False):
                 raise ConfigError(f"repositories[{index}].syncIntervalSeconds 必须是有限的非负数")
         if source_mode == "symlink":
             sync_interval = None
+            allow_commit = bool(item.get("allowCommit", False))
+            read_only = bool(item.get("readOnly", False)) or not allow_commit
+        else:
+            allow_commit = bool(item.get("allowCommit", True))
+            read_only = bool(item.get("readOnly", False))
         repositories.append({
             "id": repo_id,
             "mount": mount,
@@ -228,8 +233,8 @@ def load_config(path, docs_dir, allow_incomplete=False):
             "url": repo_url,
             "credential_group": str(item.get("credential_group") or credential_group).strip() or credential_group,
             "group": str(item.get("group") or "").strip() or str(item.get("credential_group") or credential_group).strip() or "默认",
-            "read_only": True if source_mode == "symlink" else bool(item.get("readOnly", False)),
-            "allow_commit": False if source_mode == "symlink" else bool(item.get("allowCommit", True)),
+            "read_only": read_only,
+            "allow_commit": allow_commit,
             "sync_interval": sync_interval,
         })
 

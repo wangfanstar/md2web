@@ -58,7 +58,7 @@ class TempDirTestCase(unittest.TestCase):
 class CLITests(TempDirTestCase):
     def test_parse_args_defaults(self):
         args = self.module.parse_args([])
-        self.assertEqual(args.title, "文档中心")
+        self.assertEqual(args.title, self.module.DEFAULT_TITLE)
         self.assertFalse(args.index_only)
 
     def test_parse_args_custom(self):
@@ -1884,14 +1884,14 @@ class EndToEndTests(TempDirTestCase):
         self.assertTrue((self.docs / "html" / "search-index.json").exists())
         self.assertTrue((self.md / "a.md").exists())
         self.assertIn(
-            "<title>文档中心</title>",
+            "<title>GT文档知识库</title>",
             (self.docs / "index.html").read_text(encoding="utf-8"),
         )
         index = json.loads(
             (self.docs / "html" / "search-index.json").read_text(encoding="utf-8")
         )
         self.assertTrue(
-            any(entry["pageTitle"] == "文档中心" for entry in index["/"].values())
+            any(entry["pageTitle"] == "GT文档知识库" for entry in index["/"].values())
         )
 
     def test_full_build_custom_title(self):

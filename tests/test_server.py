@@ -455,13 +455,12 @@ class ConfigTests(ServerTestBase):
         self.assertNotIn("https://svn.example.invalid/svn/accounts/auth-check/", json.dumps(public))
         self.assertEqual(public["repositories"][0]["id"], "hardware")
 
-    def test_symlink_repository_resolves_target_and_forces_read_only(self):
+    def test_symlink_repository_resolves_target_and_defaults_read_only(self):
         target = self.tmp / "shared" / "hw"
         target.mkdir(parents=True)
         path = self.write_config({"repositories": [{
             "id": "hw", "mount": "md/硬件设计", "sourceMode": "symlink",
-            "linkTarget": str(target), "url": "",
-            "readOnly": False, "allowCommit": True, "syncIntervalSeconds": 30,
+            "linkTarget": str(target), "url": "", "syncIntervalSeconds": 30,
         }]})
         config = server_config.load_config(path, self.docs)
         repo = config["repositories"][0]
@@ -470,6 +469,18 @@ class ConfigTests(ServerTestBase):
         self.assertTrue(repo["read_only"])
         self.assertFalse(repo["allow_commit"])
         self.assertIsNone(repo["sync_interval"])
+
+    def test_symlink_repository_can_enable_writable_mode(self):
+        target = self.tmp / "shared"
+        target.mkdir()
+        path = self.write_config({"repositories": [{
+            "id": "hw", "mount": "md/硬件设计", "sourceMode": "symlink",
+            "linkTarget": str(target), "allowCommit": True,
+        }]})
+        config = server_config.load_config(path, self.docs)
+        repo = config["repositories"][0]
+        self.assertFalse(repo["read_only"])
+        self.assertTrue(repo["allow_commit"])
 
     def test_symlink_repository_resolves_relative_target_and_allows_offline_target(self):
         (self.tmp / "config" / "shared").mkdir(parents=True)
@@ -3206,6 +3217,34 @@ class LocalPublishTests(ServerTestBase):
         self.assertEqual(response.get_json()["code"], "symlink_readonly")
         self.assertEqual((target / "a.md").read_text(encoding="utf-8"), "# A\n")
 
+    def test_writable_symlink_folder_allows_publish_and_create(self):
+        target = self.tmp / "可写外部"
+        target.mkdir()
+        (target / "a.md").write_text("# A\n", encoding="utf-8")
+        try:
+            server_folder_sources.manage_link(self.docs / "md", "md/可写链接", str(target), "create")
+        except (OSError, ValueError):
+            self.skipTest('link unavailable')
+        self.config["repositories"].append({
+            "id": "writable-link", "mount": "md/可写链接", "source_mode": "symlink",
+            "link_target": str(target.resolve()), "url": "", "read_only": False,
+            "allow_commit": True, "credential_group": "default", "group": "默认",
+            "sync_interval": None,
+        })
+        headers = {"X-CSRF-Token": self.csrf()}
+        path = "md/可写链接/a.md"
+        base_hash = self.published_hash(path)
+        response = self.client.post("/__md/publish",
+                                    json={"path": path, "content": "# B\n", "baseHash": base_hash},
+                                    headers=headers)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual((target / "a.md").read_text(encoding="utf-8"), "# B\n")
+        response = self.client.post("/__md/create",
+                                    json={"parent": "md/可写链接", "name": "新文档", "kind": "document"},
+                                    headers=headers)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertTrue((target / "新文档.md").is_file())
+
     def test_publish_unbound_document_writes_file(self):
         headers = {"X-CSRF-Token": self.csrf()}
         path = "md/其他/文档.md"
@@ -3609,6 +3648,27 @@ class FolderMetadataTests(ServerTestBase):
         self.assertTrue(item["linkExists"])
         self.assertEqual(item["mdFiles"], 1)
         self.assertGreater(item["sizeBytes"], 0)
+        listing = self.client.get("/__folder?path=md/外部资料&recursive=1")
+        self.assertEqual(listing.status_code, 200, listing.get_data(as_text=True))
+        names = [entry["name"] for entry in listing.get_json()["folder"]["documents"]]
+        self.assertIn("link.md", names)
+
+    def test_document_meta_reports_svn_commit_and_file_time(self):
+        meta = self.client.get("/__doc-meta?path=md/本地笔记/note.md").get_json()["meta"]
+        self.assertEqual(meta["source"], "file")
+        self.assertTrue(meta["updatedAt"].endswith("Z"))
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO operations (id, actor_id, binding_id, kind, state, reviewed_manifest,"
+                " message, created_at, finished_at, svn_revision) VALUES ('op-meta', 1, NULL,"
+                " 'svn_commit', 'published', ?, 'm', '2026-09-20T01:00:00Z',"
+                " '2026-09-20T01:00:05Z', 7)",
+                (json.dumps({"path": "md/硬件设计/doc.md"}),))
+        meta = self.client.get("/__doc-meta?path=md/硬件设计/doc.md").get_json()["meta"]
+        self.assertEqual(meta["source"], "svn")
+        self.assertEqual(meta["updatedAt"], "2026-09-20T01:00:05Z")
+        self.assertEqual(meta["revision"], 7)
+        self.assertEqual(self.client.get("/__doc-meta?path=etc/passwd").status_code, 400)
 
     def test_health_reports_local_mode_without_svn_check(self):
         headers = {"X-CSRF-Token": self.csrf()}

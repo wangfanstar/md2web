@@ -77,11 +77,13 @@ def normalize_md_path(raw):
 
 
 def resolve_md_file(md_dir, raw):
+    """解析受管文档路径（词法路径，不解析软链接；软链接读写由 symlink 守卫控制）。"""
     rel = normalize_md_path(raw)
-    root = Path(md_dir).resolve()
-    candidate = (root / rel.split("/", 1)[1]).resolve()
-    if candidate != root and root not in candidate.parents:
-        raise MdSaveError(400, "path 越界，超出 docs/md 目录")
+    root = Path(os.path.abspath(str(md_dir)))
+    candidate = root / rel.split("/", 1)[1]
+    absolute = Path(os.path.abspath(str(candidate)))
+    if absolute != root and root not in absolute.parents:
+        raise MdSaveError(400, "路径越界：仅支持 docs/md 目录")
     return candidate
 
 

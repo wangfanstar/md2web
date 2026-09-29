@@ -732,17 +732,32 @@ def remote_diff(conn, svn_client, config, md_dir, binding, document_path, creden
     }
 
 
+def _lexical_relative(md_dir, path):
+    """路径相对 md 根的 posix 路径（词法，不解析软链接）。"""
+    root = Path(os.path.abspath(str(md_dir)))
+    absolute = Path(os.path.abspath(str(path)))
+    try:
+        return absolute.relative_to(root).as_posix()
+    except ValueError:
+        raise OperationError(400, "路径越界")
+
+
 def _managed_path(md_dir, relative, expect_md=False):
-    """把 md/<相对路径> 解析为受管路径；越界/非法抛 OperationError。"""
+    """把 md/<相对路径> 解析为受管路径；越界/非法抛 OperationError。
+
+    使用词法路径（不解析软链接）：软链接目录的读写由 symlink 守卫按配置控制，
+    且文件夹列表/文档操作需要能穿过链接定位目标文件。
+    """
     value = str(relative or "").strip().replace("\\", "/").strip("/")
     parts = [part for part in value.split("/") if part not in ("", ".")]
     if not parts or parts[0] != "md":
         raise OperationError(400, "仅支持 docs/md 下的路径")
     if any(part == ".." or part.startswith(".") for part in parts):
         raise OperationError(400, "路径不合法")
-    root = Path(md_dir).resolve()
-    target = (root.parent / Path(*parts)).resolve()
-    if target != root and root not in target.parents:
+    root = Path(os.path.abspath(str(md_dir)))
+    target = root.parent / Path(*parts)
+    absolute = Path(os.path.abspath(str(target)))
+    if absolute != root and root not in absolute.parents:
         raise OperationError(400, "路径越界")
     if expect_md and target.suffix.lower() != ".md":
         raise OperationError(400, "文档必须是 .md 文件")
@@ -823,7 +838,7 @@ def folder_listing(md_dir, relative, recursive=False, config=None):
     target = _managed_path(md_dir, relative)
     if not target.is_dir():
         raise OperationError(404, "文件夹不存在")
-    root = Path(md_dir).resolve()
+    root = Path(os.path.abspath(str(md_dir)))
     group_of = lambda path: _folder_group(config, path)
 
     def folder_path_of(path):
@@ -835,11 +850,11 @@ def folder_listing(md_dir, relative, recursive=False, config=None):
         if entry.name.startswith(".") or entry.name == "回收站":
             continue
         if entry.is_dir():
-            folder_path = "md/" + entry.resolve().relative_to(root).as_posix()
+            folder_path = "md/" + _lexical_relative(md_dir, entry)
             folders.append({"name": entry.name, "path": folder_path, "group": group_of(folder_path)})
         elif entry.suffix.lower() == ".md":
             stat = entry.stat()
-            document_path = "md/" + entry.resolve().relative_to(root).as_posix()
+            document_path = "md/" + _lexical_relative(md_dir, entry)
             folder_path = folder_path_of(document_path)
             documents.append({
                 "name": entry.name,
@@ -849,7 +864,7 @@ def folder_listing(md_dir, relative, recursive=False, config=None):
                 "size": int(stat.st_size),
                 "mtime": int(stat.st_mtime),
             })
-    target_path = "md/" + target.resolve().relative_to(root).as_posix()
+    target_path = "md/" + _lexical_relative(md_dir, target)
     all_folders = []
     if recursive:
         all_folders.append({"name": target.name, "path": target_path, "group": group_of(target_path)})
@@ -874,13 +889,12 @@ def create_entry(md_dir, parent, kind, name):
     if not directory.is_dir():
         raise OperationError(404, "文件夹不存在")
     safe = _safe_name(name)
-    root = Path(md_dir).resolve()
     if kind == "folder":
         target = directory / safe
         if target.exists():
             raise OperationError(409, "同名文件夹已存在")
         target.mkdir(parents=True)
-        return {"path": "md/" + target.resolve().relative_to(root).as_posix(), "kind": "folder"}
+        return {"path": "md/" + _lexical_relative(md_dir, target), "kind": "folder"}
     if kind != "document":
         raise OperationError(400, "kind 只能是 document 或 folder")
     filename = safe if safe.lower().endswith(".md") else safe + ".md"
@@ -888,7 +902,7 @@ def create_entry(md_dir, parent, kind, name):
     if target.exists():
         raise OperationError(409, "同名文档已存在")
     target.write_text("# " + Path(filename).stem + "\n\n", encoding="utf-8")
-    return {"path": "md/" + target.resolve().relative_to(root).as_posix(), "kind": "document"}
+    return {"path": "md/" + _lexical_relative(md_dir, target), "kind": "document"}
 
 
 def rename_entry(md_dir, relative, name):
@@ -905,7 +919,7 @@ def rename_entry(md_dir, relative, name):
     if new_path.exists():
         raise OperationError(409, "同名目标已存在")
     target.rename(new_path)
-    return {"path": "md/" + new_path.resolve().relative_to(Path(md_dir).resolve()).as_posix(),
+    return {"path": "md/" + _lexical_relative(md_dir, new_path),
             "oldPath": str(relative)}
 
 
@@ -932,7 +946,7 @@ def move_document_assets(md_dir, relative, parent, move=None, copy=None):
     返回 {"moved": [...], "copied": [...], "conflicts": [...]}（引用相对路径）。
     """
     empty = {"moved": [], "copied": [], "conflicts": []}
-    base = Path(md_dir).resolve()
+    base = Path(os.path.abspath(str(md_dir)))
     source = _managed_path(md_dir, relative)
     directory = _managed_path(md_dir, parent)
     try:
@@ -942,7 +956,7 @@ def move_document_assets(md_dir, relative, parent, move=None, copy=None):
     refs = _referenced_assets(base, relative, content)
     if not refs:
         return empty
-    folder_rel = "md/" + source.parent.resolve().relative_to(base).as_posix()
+    folder_rel = "md/" + _lexical_relative(md_dir, source.parent)
     others_refs = set()
     for item in sorted(source.parent.glob("*.md")):
         if item.name == source.name:
@@ -980,8 +994,7 @@ def move_entry(md_dir, relative, parent):
     """把文档移动到另一个文件夹（保持文件名），并随移引用的 images/附件。"""
     source = _managed_path(md_dir, relative)
     directory = _managed_path(md_dir, parent)
-    base = Path(md_dir).resolve()
-    source_path = "md/" + source.resolve().relative_to(base).as_posix()
+    source_path = "md/" + _lexical_relative(md_dir, source)
     if not source.is_file() or source.suffix.lower() != ".md":
         raise OperationError(400, "只允许移动 Markdown 文档")
     if not directory.is_dir():
@@ -994,7 +1007,7 @@ def move_entry(md_dir, relative, parent):
     assets = move_document_assets(md_dir, relative, parent)
     shutil.move(str(source), str(destination))
     return {
-        "path": "md/" + destination.resolve().relative_to(base).as_posix(),
+        "path": "md/" + _lexical_relative(md_dir, destination),
         "from": source_path,
         "kind": "document",
         "assets": assets,
@@ -1103,8 +1116,9 @@ def repo_health(conn, svn_client, config, md_dir, binding, credential=None):
     }
     if (binding.get("source_mode") or "svn") == "symlink":
         info = folder_sources.describe(local_path)
+        mode = "只读" if (binding.get("read_only") or not binding.get("allow_commit", True)) else "可读写"
         if info.get("linkExists"):
-            result.update(status="软链接（只读）",
+            result.update(status="软链接（%s）" % mode,
                           detail="内容来自链接目标：%s" % info.get("linkTarget"),
                           hints=["在目标目录直接修改内容后重新构建站点"])
         else:

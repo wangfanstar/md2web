@@ -7,7 +7,10 @@
 
 import hmac
 import json
+import shutil
+import tempfile
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -418,6 +421,64 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         except operations.OperationError as error:
             return json_error(error.status, "folder_error", error.message)
         return jsonify({"ok": True, "folder": listing})
+
+    document_meta_cache = {}
+
+    def file_updated_at(path):
+        try:
+            stamp = path.stat().st_mtime
+        except OSError:
+            return None
+        return datetime.fromtimestamp(stamp, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def svn_document_meta(binding, path, target):
+        """SVN 库文档的最后提交时间：优先网页提交记录，其次 svn log（带 10 分钟缓存）。"""
+        cached = document_meta_cache.get(path)
+        if cached and cached[0] > time.time():
+            return cached[1]
+        record = database.document_last_update(conn, path)
+        if record is not None:
+            meta = {"path": path, "updatedAt": record.get("lastAt"), "source": "svn",
+                    "revision": record.get("lastRevision")}
+        else:
+            meta = {"path": path, "updatedAt": None, "source": "svn", "revision": None}
+            config_dir = tempfile.mkdtemp(prefix="md2web-meta-")
+            try:
+                relative = path[len(binding["mount"]):].lstrip("/")
+                url = binding["url"].rstrip("/") + "/" + relative
+                credential = auth_service.repo_sync_credential(binding, None) or (None, None)
+                entries = auth_service.svn.log(url, limit=1, config_dir=config_dir,
+                                               username=credential[0], password=credential[1])
+                if entries:
+                    meta["updatedAt"] = entries[0].get("date") or None
+                    meta["revision"] = entries[0].get("revision")
+            except Exception:
+                meta["updatedAt"] = None
+            finally:
+                shutil.rmtree(config_dir, ignore_errors=True)
+            if not meta["updatedAt"]:
+                meta["updatedAt"] = file_updated_at(target)
+                meta["source"] = "file"
+        document_meta_cache[path] = (time.time() + 600, meta)
+        return meta
+
+    @app.get("/__doc-meta")
+    def document_meta():
+        """文档最后更新日期（公开只读）：SVN 库显示 SVN 上的时间，其余显示文件时间。"""
+        path = str(request.args.get("path") or "").strip()
+        if not path.startswith("md/"):
+            return json_error(400, "invalid_path", "仅支持 md/ 下的文档")
+        try:
+            target = server_documents.resolve_md_file(md_dir(), path)
+        except MdSaveError as error:
+            return json_error(error.status, "meta_error", error.message)
+        binding = server_config.match_repository(config, path)
+        if binding is not None and (binding.get("source_mode") or "svn") == "svn":
+            meta = svn_document_meta(binding, path, target)
+        else:
+            meta = {"path": path, "updatedAt": file_updated_at(target),
+                    "source": "file", "revision": None}
+        return jsonify({"ok": True, "meta": meta})
 
     @app.get("/__trash")
     def trash_info():
@@ -957,10 +1018,14 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         return docs_root / "md"
 
     def symlink_write_guard(path):
-        """软链接目录（含未配置、靠物理路径识别的链接）一律拒绝写入。"""
-        if path and folder_sources.has_link_ancestor(md_dir(), path):
-            return json_error(403, "symlink_readonly", "软链接目录只读，请在目标目录直接修改")
-        return None
+        """软链接目录：只读（默认）拒绝写入；配置为可读写时放行。"""
+        if not path or not folder_sources.has_link_ancestor(md_dir(), path):
+            return None
+        binding = server_config.match_repository(config, path)
+        if (binding is not None and (binding.get("source_mode") or "") == "symlink"
+                and not binding.get("read_only") and binding.get("allow_commit", True)):
+            return None
+        return json_error(403, "symlink_readonly", "软链接目录只读，请在目标目录直接修改")
 
     def require_csrf_header(session):
         return require_csrf(session)

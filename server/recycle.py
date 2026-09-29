@@ -1,5 +1,6 @@
 """按仓库保存可恢复的文档删除记录。"""
 import json
+import os
 import shutil
 import time
 import uuid
@@ -11,8 +12,13 @@ NAME = "回收站"
 META = "meta.json"
 
 
+def _md_root(md_dir):
+    """md 根的词法路径（不解析软链接，允许可读写软链接下的回收站操作）。"""
+    return Path(os.path.abspath(str(md_dir)))
+
+
 def root_for(md_dir, mount):
-    root = Path(md_dir).resolve()
+    root = _md_root(md_dir)
     parts = str(mount or "md").split("/")
     if parts and parts[0] == "md":
         root = root.joinpath(*parts[1:])
@@ -65,7 +71,7 @@ def move_to_trash(md_dir, relative, mount, entry_id=None):
     target = operations._managed_path(md_dir, relative)
     if not target.exists() or target.name == NAME or str(relative).rstrip("/").endswith("/" + NAME):
         raise operations.OperationError(404, "目标不存在或不能删除回收站")
-    if target.resolve() == Path(md_dir).resolve():
+    if target.resolve() == _md_root(md_dir):
         raise operations.OperationError(400, "不能删除 docs/md 根目录")
     root = root_for(md_dir, mount)
     root.mkdir(parents=True, exist_ok=True)
@@ -80,7 +86,7 @@ def move_to_trash(md_dir, relative, mount, entry_id=None):
         content = documents.read_md_text(target)
         for asset in _asset_paths(md_dir, original, content):
             try:
-                asset_rel = asset.relative_to(Path(md_dir).resolve()).as_posix()
+                asset_rel = asset.relative_to(_md_root(md_dir)).as_posix()
             except ValueError:
                 continue
             asset_target = payload / "assets" / asset_rel
@@ -110,7 +116,7 @@ def restore(md_dir, mount, entry_id):
     shutil.move(str(payload), str(target))
     for asset_rel in meta.get("assets") or []:
         saved = entry / "payload" / "assets" / asset_rel
-        destination = Path(md_dir).resolve() / asset_rel
+        destination = _md_root(md_dir) / asset_rel
         if saved.exists() and not destination.exists():
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(saved), str(destination))

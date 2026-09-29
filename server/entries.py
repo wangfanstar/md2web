@@ -62,9 +62,14 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
         raise operations.OperationError(400, '操作 ID 不合法')
     request_data = {key: payload.get(key) for key in ('parent', 'path', 'name', 'kind', 'mount', 'entryId')}
     for raw in (payload.get('parent'), payload.get('path')):
-        if raw and folder_sources.has_link_ancestor(md_dir, raw):
-            raise operations.OperationError(403, '软链接目录只读，请在目标目录直接修改',
-                                            code='symlink_readonly')
+        if not raw or not folder_sources.has_link_ancestor(md_dir, raw):
+            continue
+        binding = match_repository(config, raw)
+        if (binding is not None and (binding.get('source_mode') or '') == 'symlink'
+                and not binding.get('read_only') and binding.get('allow_commit', True)):
+            continue
+        raise operations.OperationError(403, '软链接目录只读，请在目标目录直接修改',
+                                        code='symlink_readonly')
     with db_lock:
         previous = operations.get_operation(conn, request_id)
         if previous:

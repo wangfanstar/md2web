@@ -768,6 +768,24 @@ def document_update_counts(conn):
     return stats
 
 
+def document_last_update(conn, path):
+    """某个文档最近一次已发布提交（时间与版本），无记录返回 None。"""
+    rows = conn.execute(
+        "SELECT reviewed_manifest, finished_at, created_at, svn_revision FROM operations"
+        " WHERE state = 'published' AND reviewed_manifest IS NOT NULL ORDER BY created_at DESC",
+    ).fetchall()
+    for row in rows:
+        try:
+            manifest = json.loads(row["reviewed_manifest"] or "{}")
+        except ValueError:
+            continue
+        if manifest.get("path") != path:
+            continue
+        return {"lastAt": row["finished_at"] or row["created_at"],
+                "lastRevision": row["svn_revision"]}
+    return None
+
+
 def audit_events(conn, limit=200):
     rows = conn.execute(
         "SELECT a.action, a.resource, a.result, a.created_at, a.client_ip, a.operation_id,"
