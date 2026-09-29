@@ -332,6 +332,32 @@
     }
   }
 
+  function normalizeMount(value) {
+    var mount = String(value || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    return mount && mount !== 'md' && mount.indexOf('md/') !== 0 ? 'md/' + mount : mount;
+  }
+
+  // 分组键必须规范为 md/...：包含未生成仓库映射的行，跳过已移除的行
+  function collectFolderGroups() {
+    var groups = {};
+    all('[data-repo-row]').forEach(function (row) {
+      if (row.getAttribute('data-repo-removed') === '1') {
+        return;
+      }
+      var entry = pairOf(row);
+      var mountField = row.querySelector('[data-repo="mount"]');
+      var mount = normalizeMount((mountField ? mountField.value.trim() : '')
+        || pairField(entry, 'mount') || row.getAttribute('data-mount') || '');
+      if (!mount || mount === 'md' || mount.indexOf('md/') !== 0) {
+        return;
+      }
+      var groupInput = row.querySelector('[data-folder-group]');
+      groups[mount] = (groupInput ? groupInput.value.trim() : '') || '默认';
+    });
+    return groups;
+  }
+
+
   function readRepos() {
     var usedIds = Object.create(null);
     usedIds['site-backup'] = true;
@@ -352,6 +378,8 @@
       if (!mount) {
         mount = row.getAttribute('data-mount') || '';
       }
+      mount = normalizeMount(mount);
+      var groupInput = row.querySelector('[data-folder-group]');
       // 仓库 ID 一律由系统生成：既有仓库沿用保存的 ID，新文件夹按名称生成（本地/SVN 一致）
       var repoId = pairField(entry, 'id');
       if (row.getAttribute('data-repo-removed') === '1') {
@@ -373,7 +401,7 @@
       var repo = {
         id: repoId,
         mount: mount,
-        group: folderGroup(mount) || '默认',
+        group: groupInput ? (groupInput.value.trim() || '默认') : (folderGroup(mount) || '默认'),
         sourceMode: sourceMode,
         url: svnEnabled ? pairField(entry, 'url') : '',
         linkTarget: sourceMode === 'symlink' ? pairField(entry, 'linkTarget') : '',
@@ -947,15 +975,7 @@
     }
     var payload = JSON.parse(JSON.stringify(state.config));
     payload.siteBackup = readSiteBackup();
-    var folderGroups = {};
-    all('[data-folder-group]').forEach(function (input) {
-      var mount = input.getAttribute('data-folder-group');
-      var value = input.value.trim();
-      if (mount) {
-        folderGroups[mount] = value || '默认';
-      }
-    });
-    payload.folderGroups = folderGroups;
+    payload.folderGroups = collectFolderGroups();
     payload.repositories = repos.map(function (repo) {
       var item = {
         id: repo.id, mount: repo.mount, group: repo.group,
