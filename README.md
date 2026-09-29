@@ -110,7 +110,7 @@ docs/md/
 
 图片无需登记，放在文档旁边或任意位置，用相对路径引用即可；文档仅支持 UTF-8 编码。
 
-参考文献放在 `docs/pdf/`、`docs/word/`、`docs/excel/` 和 `docs/ppt/`，首页“参考文献库”统一进入管理页。请使用认证编辑服务（`python serve.py --config config/server.local.json`），只读预览模式会按设计拒绝上传 POST。服务模式下登录后可新建文件夹、批量上传多个文件、重命名和删除；列表和搜索结果显示文件大小及可读取的页数、工作表数或幻灯片数；服务端上传请求、图片、附件和反馈附件上限统一为 100 MB。构建生成的参考文献清单支持直接用 `file://` 打开页面浏览，PDF 使用浏览器本地阅读器，DOCX/XLSX/PPTX 点击后在新标签页使用随站点分发的 vue-office 本地 bundle 预览，运行时不请求网络。上传失败时页面会显示服务端返回的具体原因。
+参考文献放在 `docs/pdf/`、`docs/word/`、`docs/excel/` 和 `docs/ppt/`，首页“参考文献库”统一进入管理页；参考文献删除后统一进入 `docs/reference-trash/`，恢复时按条目元数据还原原资料类型和路径。请使用认证编辑服务（`python serve.py --config config/server.local.json`），只读预览模式会按设计拒绝上传 POST。服务模式下登录后可新建文件夹、批量上传多个文件、重命名和删除；列表和搜索结果显示文件大小及可读取的页数、工作表数或幻灯片数；服务端上传请求、图片、附件和反馈附件上限统一为 100 MB。构建生成的参考文献清单支持直接用 `file://` 打开页面浏览，PDF 使用浏览器本地阅读器，DOCX/XLSX/PPTX 点击后在新标签页使用随站点分发的 vue-office 本地 bundle 预览，运行时不请求网络。上传失败时页面会显示服务端返回的具体原因。
 
 ### 2. 构建与预览
 
@@ -207,3 +207,4 @@ marked 12.0.2、DOMPurify 3.1.6、KaTeX 0.16.11 等组件。
 - **Linux 上查找服务进程**：启动后进程名为 `md2web-serve`，可用 `pgrep -af md2web` 或 `ps -o pid,comm,args -C md2web-serve` 查看；停止服务用 `kill $(cat data/serve.pid)`（pidfile 记录本实例）
 - **认证服务启动报 `malformed database schema`**：本机 SQLite 版本较旧（如 RHEL7 自带 3.7.17）无法解析数据库里由新版本写入的索引；服务启动时会自动移除这类索引（原文件留 `*.repair-*.bak`），若仍不可用则把库备份为 `*.corrupt-*.bak` 后重建（本地草稿丢失、管理员密码恢复为默认 `admin/admin`）
 - **`data/` 数据库跨平台共用**：程序只写入 SQLite 3.7.17（RHEL7）能解析的对象，启动时也会清理历史遗留的不兼容索引，因此 Windows 上生成的 `data/` 可以直接拷到旧版 Linux 继续使用；反之亦然
+

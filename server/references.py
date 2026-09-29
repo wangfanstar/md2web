@@ -145,8 +145,9 @@ def move(docs_dir, kind, rel, parent):
     return target.relative_to(root).as_posix()
 
 
-def trash_root(docs_dir, kind):
-    path = Path(docs_dir) / "reference-trash" / kind
+def trash_root(docs_dir, kind=None):
+    """所有参考文献类型共用一个回收站目录，类型写入条目元数据。"""
+    path = Path(docs_dir) / "reference-trash"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -159,33 +160,37 @@ def delete(docs_dir, kind, rel):
     dest = trash_root(docs_dir, kind) / entry
     dest.mkdir(parents=True)
     shutil.move(str(source), str(dest / source.name))
-    (dest / "meta.json").write_text(json.dumps({"id": entry, "path": rel,
+    (dest / "meta.json").write_text(json.dumps({"id": entry, "path": rel, "kindType": kind,
         "name": source.name, "kind": "folder" if source.is_dir() else "file",
         "deletedAt": int(time.time())}, ensure_ascii=False), encoding="utf-8")
     return {"id": entry, "path": rel}
 
 
-def trash_listing(docs_dir, kind):
-    root = trash_root(docs_dir, kind); result = []
+def trash_listing(docs_dir, kind="all"):
+    root = trash_root(docs_dir); result = []
     for entry in sorted(root.iterdir(), key=lambda p: p.name):
         meta = entry / "meta.json"
         if meta.is_file():
-            try: result.append(json.loads(meta.read_text(encoding="utf-8")))
+            try:
+                data = json.loads(meta.read_text(encoding="utf-8"))
+                if kind in (None, "", "all") or data.get("kindType") == kind:
+                    result.append(data)
             except (ValueError, OSError): pass
     return result
 
 
 def restore(docs_dir, kind, entry_id):
-    root = trash_root(docs_dir, kind); entry = root / str(entry_id); meta = entry / "meta.json"
+    root = trash_root(docs_dir); entry = root / str(entry_id); meta = entry / "meta.json"
     if not meta.is_file(): raise ReferenceError(404, "回收站条目不存在")
-    data = json.loads(meta.read_text(encoding="utf-8")); _, target, _ = safe_path(docs_dir, kind, data["path"])
+    data = json.loads(meta.read_text(encoding="utf-8")); original_kind = data.get("kindType") or kind
+    _, target, _ = safe_path(docs_dir, original_kind, data["path"])
     if target.exists(): raise ReferenceError(409, "原位置已存在文件")
     target.parent.mkdir(parents=True, exist_ok=True); payload = next(p for p in entry.iterdir() if p.name != "meta.json")
     shutil.move(str(payload), str(target)); shutil.rmtree(str(entry)); return data["path"]
 
 
-def purge(docs_dir, kind, entry_id=None):
-    root = trash_root(docs_dir, kind); entries = [root / str(entry_id)] if entry_id else list(root.iterdir()); count = 0
+def purge(docs_dir, kind="all", entry_id=None):
+    root = trash_root(docs_dir); entries = [root / str(entry_id)] if entry_id else list(root.iterdir()); count = 0
     for entry in entries:
         if entry.is_dir(): shutil.rmtree(str(entry)); count += 1
     return count
