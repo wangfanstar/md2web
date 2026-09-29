@@ -1075,6 +1075,50 @@ body.folder-view-active .docs-page-toc {
   margin: 6px 0 16px;
 }
 
+/* 空文件夹（如刚新建的仓库）：直接给出「新建文档」入口 */
+.folder-view-empty {
+  background: var(--docs-surface, #fff);
+  border: 1px dashed var(--docs-border, #d5dee8);
+  border-radius: 10px;
+  margin: 10px 0 16px;
+  padding: 26px 18px;
+  text-align: center;
+}
+.folder-view-empty-title {
+  color: var(--docs-ink, #1f2a37);
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+.folder-view-empty-hint {
+  color: var(--docs-muted, #57606a);
+  font-size: 12.5px;
+  margin: 0 0 14px;
+}
+.folder-view-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+.folder-view-empty-actions button {
+  background: var(--docs-accent, #1f6feb);
+  border: 1px solid var(--docs-accent, #1f6feb);
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 18px;
+}
+.folder-view-empty-actions button + button {
+  background: var(--docs-surface, #fff);
+  color: var(--docs-accent, #1f6feb);
+}
+.folder-view-empty-actions button:hover {
+  filter: brightness(0.96);
+}
+
 /* 文档按文件夹分组：标题显示文件夹相对路径 + 配置分组 */
 .folder-view-group {
   align-items: center;
