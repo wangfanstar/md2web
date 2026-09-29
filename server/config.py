@@ -44,6 +44,9 @@ def _clean_mount(value):
         raise ConfigError(f"repository.mount 不能包含 .. : {value}")
     if any(part.startswith(".") for part in parts):
         raise ConfigError(f"repository.mount 不能包含隐藏目录: {value}")
+    # 兼容旧配置/用户只填文件夹名：统一规范为 md/... （folderGroups 键同样要求 md/ 前缀）
+    if parts[0] != "md":
+        parts.insert(0, "md")
     return "/".join(parts)
 
 
@@ -91,8 +94,12 @@ def _resolve_link_target(base, value, docs_dir):
     return str(resolved)
 
 
-def load_config(path, docs_dir, allow_incomplete=False):
-    """读取并校验配置；路径相对配置文件目录解析。"""
+def load_config(path, docs_dir, allow_incomplete=False, create_mounts=False):
+    """读取并校验配置；路径相对配置文件目录解析。
+
+    create_mounts=True 时（仅保存配置走这里）为配置的本地/SVN 仓库创建空挂载目录，
+    让配置页新建仓库后入口页立即可打开；读取/启动不产生建目录副作用。
+    """
     config_path = Path(path)
     if not config_path.is_file():
         if allow_incomplete:
@@ -239,17 +246,18 @@ def load_config(path, docs_dir, allow_incomplete=False):
         })
 
     # 配置页新建仓库后，入口页需要立即能打开空文件夹视图。
-    # SVN/本地模式先创建挂载目录；软链接必须由链接管理接口创建，不能先创建同名普通目录。
-    docs_root = Path(docs_dir).resolve()
-    for repo in repositories:
-        if repo["source_mode"] == "symlink":
-            continue
-        mount_parts = repo["mount"].split("/")[1:]
-        if mount_parts:
-            try:
-                (docs_root.joinpath(*mount_parts)).mkdir(parents=True, exist_ok=True)
-            except OSError as error:
-                raise ConfigError("无法创建仓库目录 %s: %s" % (repo["mount"], error))
+    # 目录固定建在 docs/md/<mount 去掉 md/ 前缀>；软链接必须由链接管理接口创建，不能先创建同名普通目录。
+    if create_mounts:
+        md_root = Path(docs_dir).resolve() / "md"
+        for repo in repositories:
+            if repo["source_mode"] == "symlink":
+                continue
+            mount_parts = [part for part in repo["mount"].split("/")[1:] if part]
+            if mount_parts:
+                try:
+                    (md_root.joinpath(*mount_parts)).mkdir(parents=True, exist_ok=True)
+                except OSError as error:
+                    raise ConfigError("无法创建仓库目录 %s: %s" % (repo["mount"], error))
 
     ai_raw = raw.get("ai") or {}
     ai = {
@@ -375,7 +383,7 @@ def save_config(path, payload, docs_dir):
     try:
         with handle:
             handle.write(text)
-        loaded = load_config(tmp_path, docs_dir, allow_incomplete=True)
+        loaded = load_config(tmp_path, docs_dir, allow_incomplete=True, create_mounts=True)
         os.replace(tmp_path, config_path)
     except Exception:
         if tmp_path.exists():

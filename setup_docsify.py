@@ -653,6 +653,9 @@ def load_repositories():
                 continue
             repo_id = str(item.get("id") or "").strip()
             mount = str(item.get("mount") or "").strip().strip("/")
+            # 与 server/config.py 一致：只填文件夹名时规范为 md/<文件夹>
+            if mount and mount != "md" and not mount.startswith("md/"):
+                mount = "md/" + mount
             if not repo_id or not mount:
                 continue
             repos.append({

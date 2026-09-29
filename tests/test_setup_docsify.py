@@ -1553,6 +1553,20 @@ class FolderGroupTests(TempDirTestCase):
         groups = {repo["id"]: repo["group"] for repo in repos}
         self.assertEqual(groups.get("未配置目录"), "自定义组")
 
+    def test_load_repositories_normalizes_mount_without_md_prefix(self):
+        (self.tmp / "config").mkdir(parents=True, exist_ok=True)
+        config_path = self.tmp / "config" / "server.local.json"
+        config_path.write_text(json.dumps({
+            "repositories": [{"id": "test", "mount": "test", "sourceMode": "local"}],
+        }, ensure_ascii=False), encoding="utf-8")
+        original = self.module.ROOT
+        self.module.ROOT = self.tmp
+        try:
+            repos = self.module.load_repositories()
+        finally:
+            self.module.ROOT = original
+        self.assertEqual([repo["mount"] for repo in repos], ["md/test"])
+
 
 class AssetVersionTests(TempDirTestCase):
     """index.html 里的本地 lib 资源要带内容版本号，避免浏览器缓存旧脚本（修复放大丢字等问题）。"""

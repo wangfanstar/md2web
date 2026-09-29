@@ -394,7 +394,14 @@ class ConfigTests(ServerTestBase):
         payload["repositories"] = [{"id": "new-repo", "mount": "md/new-repo",
                                      "sourceMode": "local", "url": ""}]
         server_config.save_config(path, payload, self.docs)
-        self.assertTrue((self.docs / "new-repo").is_dir())
+        self.assertTrue((self.docs / "md" / "new-repo").is_dir())
+
+    def test_mount_without_md_prefix_is_normalized(self):
+        path = self.write_config({"repositories": [
+            {"id": "test", "mount": "test", "sourceMode": "local", "url": ""},
+        ]})
+        config = server_config.load_config(path, self.docs)
+        self.assertEqual(config["repositories"][0]["mount"], "md/test")
 
     def test_duplicate_mount_and_id_rejected(self):
         base = {

@@ -40,7 +40,7 @@ function page(items, repositories = []) {
   const context = vm.createContext({ document, window: { location: { protocol: 'http:' }, confirm: () => true }, console });
   const source = fs.readFileSync(path.join(__dirname, '../web/md2web-config.js'), 'utf8');
   vm.runInContext(source.replace('  showPanels();\r\n  loadConfig();\r\n}());',
-    '  globalThis.subject = { state, readRepos, pairField, repoRow, validateRepos, updateSummary };\r\n}());'), context);
+    '  globalThis.subject = { state, readRepos, pairField, repoRow, validateRepos, updateSummary, collectFolderGroups };\r\n}());'), context);
   const subject = context.subject;
   subject.state.config = { repositories };
   subject.state.editable = true;
@@ -75,6 +75,21 @@ test('removing a mapping does not recreate it when saving', () => {
   const p = page([{ id: 'old-id', name: 'folder', mount: 'md/folder' }]);
   p.click('remove-repo');
   assert.equal(p.readRepos().length, 0);
+});
+
+test('bare mount names are normalized to the md/ prefix', () => {
+  const repo = page([{ name: 'test', mount: 'test' }]).readRepos()[0];
+  assert.equal(repo.mount, 'md/test');
+  assert.equal(repo.id, 'test');
+});
+
+test('folder groups normalize mount names and skip removed rows', () => {
+  const p = page([{ name: 'test', mount: 'test' }]);
+  const groups = p.collectFolderGroups();
+  assert.equal(Object.keys(groups).length, 1);
+  assert.equal(groups['md/test'], '默认');
+  p.click('remove-repo');
+  assert.equal(Object.keys(p.collectFolderGroups()).length, 0);
 });
 
 test('SVN intervals reject negative and nonfinite values, blank and zero remain valid', () => {
