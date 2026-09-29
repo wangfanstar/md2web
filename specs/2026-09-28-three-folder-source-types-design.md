@@ -13,7 +13,7 @@
 | 类型 | 配置方式 | 读取 | 写入 | 首页标记 |
 |---|---|---|---|---|
 | SVN 库 | SVN 地址、更新频率、同步账号、允许合入；ID 自动生成 | 定时同步导出到 `docs/md` | 草稿 + 提交 SVN（或只读） | 蓝色 `SVN 库` |
-| 软链接 | 目标目录、检查连接、创建/移除链接 | 直接读链接目标 | **默认且强制只读** | 紫色 `↗ 软链接` |
+| 软链接 | 目标目录、检查连接、创建/移除链接、只读/可读写 | 直接读链接目标 | 默认只读；勾选「允许在线修改」后直接写入目标目录 | 紫色 `↗ 软链接` |
 | 本地文件夹 | 分组、允许在线编辑；无需地址与同步配置 | 本地文件 | 在线编辑一步保存 | 灰绿色 `本地文件夹` |
 
 设计原则：
@@ -21,7 +21,7 @@
 1. **配置权威**：已配置的 `sourceMode` 决定类型；目录内容（是否含 `.svn`）不参与判定。
 2. **探测补充**：未配置的一级文件夹按实际目录探测——目录链接（symlink 或 Windows 联接）识别为 `symlink` 并记录目标，其余为 `local`。软链接既可在配置页显式管理，也自动识别。
 3. **软链接只建立引用**：不复制文件；移除链接只删链接、不删除目标目录；已有非空目录禁止直接替换成链接。
-4. **硬只读**：软链接在服务端强制 `read_only=true`、`allow_commit=false`，所有写接口统一拒绝；“以后允许编辑”不在本次范围。
+4. **默认只读，可选可读写**：软链接未给 `allowCommit` 时服务端按 `read_only=true`、`allow_commit=false` 处理，所有写接口统一拒绝；管理员显式勾选「允许在线修改」后为可读写，保存/新建/移动/删除会直接写入目标目录，配置页与文档给出明确提示。
 5. **失败要早、要清楚**：失效链接、目标越界、非空目录替换等都在对应操作处返回明确中文错误。
 6. 构建绝不修改 `docs/md`；完全不依赖 CDN；仓库 ID 与入口页地址保持兼容。
 
@@ -57,7 +57,7 @@
 - `sourceMode` 仅接受 `local`、`svn`、`symlink`。
 - `svn`：必须为 http/https `url`；`linkTarget` 忽略并清空。
 - `local`：`url` 必须为空；`linkTarget` 忽略并清空。
-- `symlink`：必须提供 `linkTarget`；`url` 必须为空；`syncIntervalSeconds` 忽略；`read_only` 与 `allow_commit` 服务端强制 `true` / `false`。
+- `symlink`：必须提供 `linkTarget`；`url` 必须为空；`syncIntervalSeconds` 忽略；**默认只读**（未给 `allowCommit` 时为 `read_only=true`/`allow_commit=false`），`allowCommit=true` 时 `read_only=false`（网页直接写入目标目录）。
 - `linkTarget` 解析：相对路径按**配置文件所在目录**解析（与 `storage.*` 一致），内存与写回均使用解析后的绝对路径；解析后不得位于 `docs/` 内、不得包含 `docs/md` 根目录（防递归）；**加载时不要求目标在线**（网络共享暂时掉线不能阻塞服务启动），目标是否存在由探测/健康检查报告。
 - 兼容：旧配置没有 `sourceMode` 时行为不变；`config_to_json` 与 `public_config` 都输出 `sourceMode`、`linkTarget`，避免保存/下发给前端时丢字段。
 
@@ -68,7 +68,7 @@
 | 类型 | 明细字段 | 操作按钮 |
 |---|---|---|
 | SVN 库 | SVN 地址、更新频率、同步账号/密码/保存凭据 | 检查健康、立即同步、创建并拉取（维持现状） |
-| 软链接 | 目标目录输入框；连接状态（已连接 / 链接失效 / 未创建 / 目标不是链接）；“软链接只读，网页不会修改目标目录”说明，允许修改复选框禁用且不勾选 | **检查连接 / 创建链接 / 移除链接** |
+| 软链接 | 目标目录输入框；连接状态（已连接 / 链接失效 / 未创建 / 目标不是链接）；“默认只读；勾选「允许在线修改」后网页会直接写入目标目录”说明，默认不勾选 | **检查连接 / 创建链接 / 移除链接** |
 | 本地文件夹 | 仅公共行的分组 + “允许在线修改” | 无 |
 
 交互规则：
@@ -117,18 +117,19 @@
 
 ## 7. 写入保护
 
-服务端统一拒绝软链接下的一切写入（含未配置、靠探测识别的链接）：
+默认只读的软链接（含未配置、靠探测识别的链接）在服务端统一拒绝写入；配置 `allowCommit=true` 的可读写软链接放行，写操作直接作用于目标目录：
 
-| 接口 | 行为 |
-|---|---|
-| `PUT /__md/draft` | 403 `symlink_readonly` |
-| `POST /__md/publish` | 403 `symlink_readonly` |
-| `POST /__md/image`、`/__md/attachment` | 403 `symlink_readonly` |
-| `POST /__md/create|rename|move|delete|restore`（`server/entries.py`） | 403 `symlink_readonly` |
-| `/__svn/*` | 配置过的 symlink 由强制 `read_only` 拒绝；未配置软链接无绑定，天然不进入 SVN 流程 |
+| 接口 | 只读软链接 | 可读写软链接 |
+|---|---|---|
+| `PUT /__md/draft` | 403 `symlink_readonly` | 允许 |
+| `POST /__md/publish` | 403 `symlink_readonly` | 允许（直接写目标文件） |
+| `POST /__md/image`、`/__md/attachment` | 403 `symlink_readonly` | 允许 |
+| `POST /__md/create|rename|move|delete|restore`（`server/entries.py`） | 403 `symlink_readonly` | 允许 |
+| `/__svn/*` | 配置过的 symlink 由 `read_only` 拒绝；未配置软链接无绑定，天然不进入 SVN 流程 | 同左（可读写软链接也不进入 SVN 流程） |
 
 - 错误文案：“软链接目录只读，请在目标目录直接修改”。
-- 判定入口：`folder_sources.has_link_ancestor(md_dir, path)`；配置过的 symlink 同时受 `read_only` 兜底。
+- 判定入口：`folder_sources.has_link_ancestor(md_dir, path)` + `match_repository` 的 `read_only`/`allow_commit`（`symlink_write_guard`、`entries.mutate`）。
+- 受管路径解析（`operations._managed_path`、`documents.resolve_md_file`、`recycle`）使用词法路径，保证可读写软链接下的列表/新建/移动/发布不被误判“路径越界”。
 - 前端：入口页沿用 `repoReadOnly`；编辑器保存失败时展示服务端具体原因。
 
 ## 8. 首页与入口页标记
@@ -183,7 +184,6 @@ Node：
 
 ## 13. 明确不做（Out of scope）
 
-- 软链接下允许网页编辑（含“明确提示后允许”的开关）；后续如需单独立项。
 - 嵌套链接/多级软链接的递归跟随；只支持 `docs/md` 一级链接。
 - 远端挂载（NFS/SMB 自动挂载）、链接目标跨平台路径映射。
 - 真实 SVN 服务的端到端连通验证（沿用现有假 CLI 测试与既有部署流程）。
