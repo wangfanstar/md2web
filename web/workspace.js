@@ -368,7 +368,9 @@
     if (!section) return;
     var route = currentRoute();
     var box = section.querySelector(':scope > .workspace-doc-updated');
-    if (!route || !/\.md$/i.test(route)) {
+    // docsify 路由会去掉 .md 后缀（如 md/使用说明/快速开始），接口侧会补回扩展名
+    var isDocument = route && route.indexOf('md/') === 0 && route.charAt(route.length - 1) !== '/';
+    if (!isDocument) {
       if (box && box.parentNode) box.parentNode.removeChild(box);
       return;
     }
