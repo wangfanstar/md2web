@@ -469,6 +469,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         if not path.startswith("md/"):
             return json_error(400, "invalid_path", "仅支持 md/ 下的文档")
         try:
+            path = server_documents.normalize_md_path(path)
             target = server_documents.resolve_md_file(md_dir(), path)
         except MdSaveError as error:
             return json_error(error.status, "meta_error", error.message)

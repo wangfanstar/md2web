@@ -3668,6 +3668,9 @@ class FolderMetadataTests(ServerTestBase):
         self.assertEqual(meta["source"], "svn")
         self.assertEqual(meta["updatedAt"], "2026-09-20T01:00:05Z")
         self.assertEqual(meta["revision"], 7)
+        routed = self.client.get("/__doc-meta?path=md/硬件设计/doc").get_json()["meta"]
+        self.assertEqual(routed["path"], "md/硬件设计/doc.md")
+        self.assertEqual(routed["updatedAt"], "2026-09-20T01:00:05Z")
         self.assertEqual(self.client.get("/__doc-meta?path=etc/passwd").status_code, 400)
 
     def test_health_reports_local_mode_without_svn_check(self):
