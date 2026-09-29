@@ -362,8 +362,41 @@
     });
   }
 
+  // 文档正文顶部显示最后更新日期：SVN 库用 SVN 上的时间，其余用文件时间（需认证服务）
+  function addUpdatedMeta() {
+    var section = document.querySelector('.markdown-section');
+    if (!section) return;
+    var route = currentRoute();
+    var box = section.querySelector(':scope > .workspace-doc-updated');
+    if (!route || !/\.md$/i.test(route)) {
+      if (box && box.parentNode) box.parentNode.removeChild(box);
+      return;
+    }
+    if (box && box.getAttribute('data-route') === route) return;
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'workspace-doc-updated';
+      var crumb = section.querySelector(':scope > .workspace-breadcrumb');
+      section.insertBefore(box, crumb ? crumb.nextSibling : section.firstChild);
+    }
+    box.setAttribute('data-route', route);
+    box.textContent = '最后更新：读取中…';
+    if (!window.fetch) { box.textContent = ''; return; }
+    fetch('__doc-meta?path=' + encodeURIComponent(route), { credentials: 'same-origin' })
+      .then(function (response) { return response.ok ? response.json() : null; })
+      .then(function (payload) {
+        var meta = payload && payload.meta;
+        if (!meta || box.getAttribute('data-route') !== route) return;
+        var date = String(meta.updatedAt || '').slice(0, 10);
+        box.textContent = date
+          ? '最后更新：' + date + (meta.source === 'svn' ? '（SVN 库）' : '（本地文件）')
+          : '';
+      })
+      .catch(function () { box.textContent = ''; });
+  }
+
   // 侧栏始终显示全部文档（index_all 合并视图进入文档后也不再过滤，便于跨仓库跳转）
-  function enhance() { decorateTree(); addBreadcrumb(); addCodeButtons(); resolveRelativeImages(); }
+  function enhance() { decorateTree(); addBreadcrumb(); addUpdatedMeta(); addCodeButtons(); resolveRelativeImages(); }
   function schedule() { clearTimeout(state.timer); state.timer = setTimeout(enhance, 40); }
 
   // 页面带 <base href="../"> 时，纯 hash 链接（#/md/...、#id）会被浏览器解析到站点根，

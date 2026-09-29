@@ -226,18 +226,20 @@
       '<button type="button" data-action="link-create"' + disabled + '>创建链接</button>',
       '<button type="button" data-action="link-remove"' + disabled + '>移除链接</button>',
       '<span class="hint" data-link-status>' + linkStatusText(item, folder) + '</span>',
+      '<span class="hint">软链接默认只读；勾选「允许在线修改」后网页会直接写入目标目录。</span>',
       '</div>',
       '<div class="repo-flags">',
       '<label class="flag" title="' + (sourceMode === 'svn'
         ? '勾选后允许登录用户把草稿合入 SVN 库；取消勾选则网页只读，内容由服务器定时同步更新'
-        : sourceMode === 'symlink' ? '软链接默认只读，网页不会修改目标目录'
+        : sourceMode === 'symlink' ? '默认只读；勾选后网页的保存/新建/移动/删除会直接写入软链接目标目录，请谨慎开启'
         : '勾选后允许登录用户在线编辑并发布到本地库；取消勾选则网页只读，内容由服务器自动更新') + '">'
         + '<input type="checkbox" data-repo="allowCommit"'
-        + (allow && sourceMode !== 'symlink' ? ' checked' : '')
-        + (sourceMode === 'symlink' ? ' disabled' : disabled) + '>'
-        + (sourceMode === 'svn' ? '允许合入 SVN 库' : sourceMode === 'symlink' ? '软链接只读' : '允许在线修改') + '</label>',
+        + (allow ? ' checked' : '') + disabled + '>'
+        + (sourceMode === 'svn' ? '允许合入 SVN 库' : '允许在线修改') + '</label>',
       '<span class="hint perm-hint" data-perm-hint>'
-        + (sourceMode !== 'symlink' && !allow ? '未勾选：网页为只读，内容由服务器自动更新' : '') + '</span>',
+        + (allow ? ''
+          : (sourceMode === 'symlink' ? '未勾选：软链接只读，网页不会修改目标目录'
+          : '未勾选：网页为只读，内容由服务器自动更新')) + '</span>',
       '</div>',
       '</div>',
       '<div class="actions">'
@@ -342,8 +344,7 @@
       var sourceMode = sourceField ? sourceField.value : 'local';
       var svnEnabled = sourceMode === 'svn';
       var interval = pairField(entry, 'syncIntervalSeconds');
-      var allow = sourceMode !== 'symlink'
-        && !!(entry && entry.detail.querySelector('[data-repo="allowCommit"]').checked);
+      var allow = !!(entry && entry.detail.querySelector('[data-repo="allowCommit"]').checked);
       var mount = pairField(entry, 'mount') || row.getAttribute('data-mount') || '';
       if (!mount) {
         mount = row.getAttribute('data-mount') || '';
@@ -1149,15 +1150,14 @@
       return;
     }
     var label = detail.querySelector('.repo-flags .flag');
-    var text = sourceMode === 'svn' ? '允许合入 SVN 库'
-      : sourceMode === 'symlink' ? '软链接只读' : '允许在线修改';
+    var text = sourceMode === 'svn' ? '允许合入 SVN 库' : '允许在线修改';
     if (label && label.lastChild && label.lastChild.nodeType === 3) {
       label.lastChild.nodeValue = text;
     }
     if (label) {
       label.setAttribute('title', sourceMode === 'svn'
         ? '勾选后允许登录用户把草稿合入 SVN 库；取消勾选则网页只读，内容由服务器定时同步更新'
-        : sourceMode === 'symlink' ? '软链接默认只读，网页不会修改目标目录'
+        : sourceMode === 'symlink' ? '默认只读；勾选后网页的保存/新建/移动/删除会直接写入软链接目标目录，请谨慎开启'
         : '勾选后允许登录用户在线编辑并发布到本地库；取消勾选则网页只读，内容由服务器自动更新');
     }
   }
@@ -1169,7 +1169,7 @@
       var host = allow.closest('.repo-flags');
       var hint = host ? host.querySelector('[data-perm-hint]') : null;
       if (hint) {
-        hint.textContent = allow.checked ? '' : '未勾选：网页为只读，内容由服务器自动更新';
+        hint.textContent = allow.checked ? '' : '未勾选：网页为只读（软链接不会修改目标目录）';
       }
       return;
     }
@@ -1322,8 +1322,7 @@
       });
       var allowInput = detail.querySelector('[data-repo="allowCommit"]');
       if (allowInput) {
-        allowInput.disabled = target.value === 'symlink' || !state.editable;
-        if (target.value === 'symlink') { allowInput.checked = false; }
+        allowInput.disabled = !state.editable;
       }
       syncPermLabel(detail, target.value);
       if (target.value === 'svn') {

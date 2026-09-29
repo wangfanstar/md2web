@@ -79,6 +79,8 @@ body { color: var(--workspace-ink); background: #f7f9fb; }
 .workspace-breadcrumb a:hover { color: var(--workspace-accent); }
 .workspace-breadcrumb [aria-current="page"] { color: var(--workspace-ink); font-weight: 600; }
 .workspace-breadcrumb-sep { color: #b2bdc9; }
+.workspace-doc-updated { color: var(--workspace-muted); font-size: 12px; margin: -6px 0 10px; }
+.workspace-doc-updated:empty { display: none; }
 .workspace-page-actions {
   background: var(--docs-page-bg, #f7f9fb);
   border-bottom: 0;
