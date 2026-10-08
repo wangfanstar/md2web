@@ -1500,6 +1500,33 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 results.append({"binding": binding["id"], "ok": False, "error": error.message})
         return jsonify({"ok": True, "results": results})
 
+    reference_web_lock = threading.Lock()
+
+    @app.get("/__reference-web/list")
+    def reference_web_list():
+        from setup_docsify import scan_reference_web
+        try:
+            return jsonify({"ok": True, "items": scan_reference_web(docs_root)})
+        except OSError as error:
+            return json_error(500, "reference_web_error", "读取参考网页失败：" + str(error))
+
+    @app.post("/__reference-web/refresh")
+    def reference_web_refresh():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        rejected = require_csrf(session)
+        if rejected:
+            return rejected
+        from setup_docsify import scan_reference_web, generate_reference_web, BuildError
+        try:
+            with reference_web_lock:
+                items = scan_reference_web(docs_root)
+                generate_reference_web(items, docs_root)
+            return jsonify({"ok": True, "items": items, "saved": True})
+        except (OSError, BuildError) as error:
+            return json_error(500, "reference_web_error", "更新参考网页索引失败：" + str(error))
+
     @app.get("/__references/list")
     def reference_list():
         try:

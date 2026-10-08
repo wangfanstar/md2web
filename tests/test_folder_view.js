@@ -5,7 +5,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 // 只加载 folder-view.js 的纯函数（右键菜单用它解析目标路径）。
-function loadFolderView() {
+function loadFolderView(overrides = {}) {
   const source = fs.readFileSync(path.join(__dirname, '..', 'web', 'folder-view.js'), 'utf8');
   const window = {
     $docsify: { repoList: [] },
@@ -22,11 +22,60 @@ function loadFolderView() {
   const context = vm.createContext({
     window, document, console, Promise,
     setTimeout, clearTimeout, setInterval, clearInterval,
-    fetch: () => Promise.reject(new Error('not used'))
+    fetch: () => Promise.reject(new Error('not used')),
+    ...overrides
   });
   vm.runInContext(source, context, { filename: 'folder-view.js' });
-  return window.FolderView;
+  return (overrides.window || window).FolderView;
 }
+
+test('create request refreshes session and uses the latest CSRF token', async () => {
+  let refreshed = false;
+  const requests = [];
+  const window = {
+    $docsify: {}, location: { protocol: 'http:' }, addEventListener() {}, setTimeout() {},
+    SiteAuth: {
+      refresh: async () => { refreshed = true; },
+      isAuthenticated: () => true,
+      csrfToken: () => refreshed ? 'new-token' : 'old-token'
+    }
+  };
+  const view = loadFolderView({ window, fetch: async (url, options) => {
+    requests.push({ url, options });
+    return { ok: true, json: async () => ({ ok: true, result: { path: 'md/test/a.md' } }) };
+  } });
+  const result = await view.createEntry('md/test', 'document', ' a.MD ');
+  assert.equal(result.path, 'md/test/a.md');
+  assert.equal(requests[0].options.headers['X-CSRF-Token'], 'new-token');
+  assert.equal(JSON.parse(requests[0].options.body).name, 'a.md');
+});
+
+test('create rejects invalid names before sending a write request', async () => {
+  const view = loadFolderView();
+  await assert.rejects(view.createEntry('md/test', 'document', '../a'), /名称/);
+});
+
+test('create surfaces server errors without hiding the reason', async () => {
+  const window = {
+    $docsify: {}, location: { protocol: 'http:' }, addEventListener() {}, setTimeout() {},
+    SiteAuth: { isAuthenticated: () => true, csrfToken: () => 'token' }
+  };
+  const view = loadFolderView({ window, fetch: async () => ({
+    ok: false, status: 409, json: async () => ({ ok: false, error: '同名目标已存在', code: 'entry_error' })
+  }) });
+  await assert.rejects(view.createEntry('md/test', 'document', 'a'), /同名目标已存在/);
+});
+
+test('expired login opens the login dialog without attempting a write', async () => {
+  let opened = false;
+  const window = {
+    $docsify: {}, location: { protocol: 'http:' }, addEventListener() {}, setTimeout() {},
+    SiteAuth: { isAuthenticated: () => false, openLogin: () => { opened = true; } }
+  };
+  const view = loadFolderView({ window });
+  await assert.rejects(view.createEntry('md/test', 'document', 'a'), /名称已保留/);
+  assert.equal(opened, true);
+});
 
 function fakeLink(href) {
   return { getAttribute: (name) => (name === 'href' ? href : null) };

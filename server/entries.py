@@ -110,7 +110,10 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
     dest_parent = None
     dest_path = None
     kind = payload.get('kind') or 'document'
+    initialize_mount = False
     if action in ('create', 'rename'):
+        if action == 'create' and kind not in ('folder', 'document'):
+            raise operations.OperationError(400, '新建类型只能是 document（文档）或 folder（文件夹）')
         name = operations._safe_name(payload.get('name'))
         if any(char in name for char in '#%[]') or name.endswith('.') or name.endswith(' '):
             raise operations.OperationError(400, '名称不能包含 # % [ ] 或以点/空格结尾')
@@ -120,8 +123,16 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
         destination = (target if action == 'create' else target.parent) / name
         if destination.exists():
             raise operations.OperationError(409, '同名目标已存在')
-        if action == 'create' and (not target.is_dir() or kind not in ('folder', 'document')):
-            raise operations.OperationError(400, '请选择有效目录及文档/文件夹类型')
+        if action == 'create' and not target.is_dir():
+            # 旧配置或迁移后的新本地仓库可能只有配置、尚无实体目录。
+            # 仅在用户主动创建内容时补齐该仓库根目录，不补建任意路径或软链接。
+            initialize_mount = bool(binding and path == binding['mount']
+                                    and binding.get('source_mode') == 'local'
+                                    and not target.exists()
+                                    and not folder_sources.has_link_ancestor(md_dir, path))
+            if not initialize_mount:
+                raise operations.OperationError(404, '目标文件夹不存在或不是目录：%s。请返回仓库首页选择目录；'
+                                                 'SVN 仓库请先创建并拉取，软链接请先检查连接。' % path)
     elif action == 'move':
         dest_parent, dest_path = canonical(md_dir, payload.get('parent') or '')
         if not dest_parent.is_dir():
@@ -293,6 +304,12 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
         if action not in ('create', 'restore', 'trash-empty') and signature(target) != baseline:
             raise operations.OperationError(409, '本地内容在操作期间变化，请核对后再同步')
         if action == 'create':
+            if initialize_mount:
+                try:
+                    target.mkdir(parents=True, exist_ok=True)
+                except OSError as error:
+                    raise operations.OperationError(500, '无法创建仓库目录 %s，请检查服务器目录写权限：%s'
+                                                     % (path, error))
             result = operations.create_entry(md_dir, path, kind, destination.name)
         elif action == 'rename':
             result = operations.rename_entry(md_dir, path, destination.name)

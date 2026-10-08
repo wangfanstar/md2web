@@ -2673,6 +2673,22 @@ class FolderOpsTests(ServerTestBase):
     def csrf(self):
         return self.client.get("/__auth/session").get_json()["csrfToken"]
 
+    def test_reference_web_refresh_scans_and_persists_links(self):
+        folder = self.docs / 'html' / 'ref'
+        folder.mkdir(parents=True)
+        source = folder / 'new.html'
+        source.write_text('<title>New page</title><p>searchable content</p>', encoding='utf-8')
+        self.assertEqual(self.app.test_client().post('/__reference-web/refresh').status_code, 401)
+        self.assertEqual(self.client.post('/__reference-web/refresh').status_code, 403)
+        response = self.client.post('/__reference-web/refresh', headers={'X-CSRF-Token': self.csrf()})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()['items'][0]['path'], 'new.html')
+        self.assertIn('href="html/ref/new.html"', (folder / 'index_html.html').read_text(encoding='utf-8'))
+        source.unlink()
+        response = self.client.post('/__reference-web/refresh', headers={'X-CSRF-Token': self.csrf()})
+        self.assertEqual(response.get_json()['items'], [])
+        self.assertNotIn('href="html/ref/new.html"', (folder / 'index_html.html').read_text(encoding='utf-8'))
+
     def test_folders_endpoint_only_lists_first_level(self):
         nested = self.docs / "md" / "硬件设计" / "接口"
         nested.mkdir(parents=True, exist_ok=True)
@@ -3142,6 +3158,64 @@ class FolderOpsTests(ServerTestBase):
                         {"parent": "README.md", "kind": "folder", "name": "a"}):
             response = self.client.post("/__md/create", json=payload, headers=headers)
             self.assertEqual(response.status_code, 400, payload)
+
+    def test_create_initializes_missing_configured_local_root(self):
+        self.config['repositories'].append({
+            'id': 'test', 'mount': 'md/test', 'source_mode': 'local', 'url': '',
+            'read_only': False, 'allow_commit': True})
+        headers = {'X-CSRF-Token': self.csrf()}
+        for kind, name in (('document', 'first'), ('folder', 'notes')):
+            target = self.docs / 'md' / 'test'
+            if target.exists():
+                shutil.rmtree(str(target))
+            payload = {'parent': 'md/test', 'kind': kind, 'name': name}
+            response = self.client.post('/__md/create', json=payload, headers=headers)
+            self.assertEqual(response.status_code, 200, response.get_json())
+            created = target / (name + '.md' if kind == 'document' else name)
+            self.assertTrue(created.exists())
+            if kind == 'document':
+                opened = self.client.get('/__md/document?path=md/test/first')
+                self.assertEqual(opened.status_code, 200, opened.get_json())
+
+    def test_missing_root_create_keeps_validation_and_permissions(self):
+        repo = {'id': 'test', 'mount': 'md/test', 'source_mode': 'local', 'url': '',
+                'read_only': False, 'allow_commit': True}
+        self.config['repositories'].append(repo)
+        headers = {'X-CSRF-Token': self.csrf()}
+        for kind, name in (('invalid', 'first'), ('document', '../first')):
+            response = self.client.post('/__md/create', json={
+                'parent': 'md/test', 'kind': kind, 'name': name}, headers=headers)
+            self.assertEqual(response.status_code, 400, response.get_json())
+            self.assertFalse((self.docs / 'md' / 'test').exists())
+        repo['read_only'] = True
+        response = self.client.post('/__md/create', json={
+            'parent': 'md/test', 'kind': 'document', 'name': 'first'}, headers=headers)
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse((self.docs / 'md' / 'test').exists())
+
+    def test_create_missing_unconfigured_or_nested_directory_reports_path(self):
+        self.config['repositories'].append({
+            'id': 'test', 'mount': 'md/test', 'source_mode': 'local', 'url': '',
+            'read_only': False, 'allow_commit': True})
+        headers = {'X-CSRF-Token': self.csrf()}
+        for parent in ('md/unconfigured', 'md/test/missing'):
+            response = self.client.post('/__md/create', json={
+                'parent': parent, 'kind': 'document', 'name': 'first'}, headers=headers)
+            self.assertEqual(response.status_code, 404, response.get_json())
+            self.assertIn(parent, response.get_json()['error'])
+        self.assertFalse((self.docs / 'md' / 'test').exists())
+
+    def test_create_does_not_replace_missing_svn_or_symlink_mount(self):
+        repo = {'id': 'test', 'mount': 'md/test', 'url': '',
+                'read_only': False, 'allow_commit': True}
+        self.config['repositories'].append(repo)
+        headers = {'X-CSRF-Token': self.csrf()}
+        for mode in ('svn', 'symlink'):
+            repo['source_mode'] = mode
+            response = self.client.post('/__md/create', json={
+                'parent': 'md/test', 'kind': 'document', 'name': 'first'}, headers=headers)
+            self.assertEqual(response.status_code, 404, response.get_json())
+            self.assertFalse((self.docs / 'md' / 'test').exists())
 
     def test_operations_require_login(self):
         anonymous = self.app.test_client()

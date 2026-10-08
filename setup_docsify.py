@@ -13,6 +13,7 @@ import urllib.parse
 import urllib.request
 from urllib.parse import quote
 from pathlib import Path
+from html.parser import HTMLParser
 from server import folder_sources
 from server import references as reference_tools
 
@@ -733,6 +734,14 @@ def write_empty_repo_home(repo):
         "- 进入本入口页后，点正文中的「新建文档」即可创建第一篇文档；\n"
         "- 若页面提示目录尚未创建，请在仓库配置页保存一次（会自动创建目录）后重建站点。\n"
     )
+    if not repo.get("read_only") and repo.get("allow_commit", True):
+        mount = html.escape(str(repo["mount"]), quote=True)
+        text += ('\n<p>登录认证编辑服务后可继续创建内容：</p>\n'
+                 '<div class="folder-view-empty-actions">'
+                 '<button type="button" data-folder-action="new-document" data-path="' + mount
+                 + '">新建文档</button> '
+                 '<button type="button" data-folder-action="new-folder" data-path="' + mount
+                 + '">新建文件夹</button></div>\n')
     (HTML_DIR / name).write_text(text, encoding="utf-8")
     return HTML_PREFIX + name
 
@@ -984,11 +993,14 @@ def generate_search_index(md_files, title=DEFAULT_TITLE, depth=SEARCH_DEPTH, pat
     print(f"  [生成] {index_path.name} ({len(index)} 页, {size_mb:.1f} MB)")
 
 
-def generate_offline_data(md_files, path=None, search_index_path=None, sidebar="_sidebar.md", include_readme=True):
+def generate_offline_data(md_files, path=None, search_index_path=None, sidebar="_sidebar.md", include_readme=True,
+                          homepage=None):
     """内嵌 Markdown 和搜索索引，使 file:// 直接打开时绕过 XHR/fetch 限制。"""
     LIB_DIR.mkdir(parents=True, exist_ok=True)
     content = {}
     names = ([HTML_PREFIX + "README.md"] if include_readme else []) + [sidebar]
+    if homepage:
+        names.append(homepage)
     for name in names:
         item = DOCS_DIR / name
         if item.exists():
@@ -1173,11 +1185,11 @@ def generate_readme(md_files, title=DEFAULT_TITLE, path=None, repos=None):
     print("  [生成] README.md (首页索引)")
 
 
-def version_asset_urls(html_text):
+def version_asset_urls(html_text, docs_dir=None):
     """给本地 lib/*.js|css 引用加内容版本号（?v=<sha1 前 10 位>），避免浏览器缓存旧脚本。"""
     def replace(match):
         prefix, path, suffix = match.group(1), match.group(2), match.group(3)
-        candidate = DOCS_DIR / path
+        candidate = (Path(docs_dir) if docs_dir else DOCS_DIR) / path
         if not candidate.is_file():
             return match.group(0)
         digest = hashlib.sha1(candidate.read_bytes()).hexdigest()[:10]
@@ -1649,7 +1661,89 @@ def cleanup_repo_artifacts(repos):
         print(f"  [清理] 已删除 {len(removed)} 个不再使用的仓库产物：{', '.join(removed[:6])}")
 
 
-def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.html", config_page="md2web_config.html"):
+class ReferenceWebParser(HTMLParser):
+    """只提取参考网页标题和可搜索文本，不执行网页脚本。"""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.title_parts = []
+        self.text_parts = []
+        self.in_title = False
+        self.ignored = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ('script', 'style', 'template', 'noscript'):
+            self.ignored.append(tag)
+        if tag == 'title':
+            self.in_title = True
+
+    def handle_endtag(self, tag):
+        if self.ignored and tag == self.ignored[-1]:
+            self.ignored.pop()
+        if tag == 'title':
+            self.in_title = False
+
+    def handle_data(self, data):
+        if not self.ignored:
+            if self.in_title:
+                self.title_parts.append(data)
+            else:
+                self.text_parts.append(data)
+
+
+def scan_reference_web(docs_dir=None):
+    """递归索引用户放入 html/ref 的网页，跳过生成的索引页及链接目录。"""
+    root = (Path(docs_dir) / 'html' if docs_dir else HTML_DIR) / 'ref'
+    items = []
+    if not root.is_dir() or folder_sources.is_directory_link(root):
+        return items
+    for directory, dirs, files in os.walk(str(root), followlinks=False):
+        dirs[:] = sorted(name for name in dirs if not name.startswith('.')
+                         and name != '回收站' and not folder_sources.is_directory_link(Path(directory) / name))
+        for name in sorted(files):
+            path = Path(directory) / name
+            relative = path.relative_to(root).as_posix()
+            if (name.startswith('.') or path.suffix.lower() not in ('.html', '.htm')
+                    or relative.lower() == 'index_html.html' or path.is_symlink()):
+                continue
+            raw = path.read_bytes()
+            try:
+                source = raw.decode('utf-8-sig')
+            except UnicodeDecodeError:
+                source = raw.decode('gb18030', errors='replace')
+            parser = ReferenceWebParser()
+            parser.feed(source)
+            title = ' '.join(' '.join(parser.title_parts).split()) or path.stem
+            text = ' '.join(' '.join(parser.text_parts).split())
+            items.append({'title': title, 'path': relative,
+                          'url': 'html/ref/' + quote(relative, safe='/'),
+                          'text': text, 'size': len(raw)})
+    return sorted(items, key=lambda item: item['path'].lower())
+
+
+def generate_reference_web(items=None, docs_dir=None):
+    """生成可在 file:// 下直接搜索的参考网页索引，不改动参考网页原文件。"""
+    items = scan_reference_web(docs_dir) if items is None else items
+    root = (Path(docs_dir) / 'html' if docs_dir else HTML_DIR) / 'ref'
+    lib = Path(docs_dir) / 'lib' if docs_dir else LIB_DIR
+    if folder_sources.is_directory_link(root) or folder_sources.is_directory_link(lib):
+        raise BuildError('参考网页索引目录不能是软链接')
+    root.mkdir(parents=True, exist_ok=True)
+    lib.mkdir(parents=True, exist_ok=True)
+    for name in ('reference-web.js', 'reference-web.css'):
+        (lib / name).write_bytes((ROOT / 'web' / name).read_bytes())
+    data = json.dumps(items, ensure_ascii=False).replace('<', '\\u003c')
+    (lib / 'reference-web-data.js').write_text(
+        'window.__REFERENCE_WEB_DATA__ = ' + data + ';\n', encoding='utf-8')
+    page = (ROOT / 'web' / 'reference-web.html').read_text(encoding='utf-8')
+    links = ''.join('<a class="web-result" href="' + html.escape(item['url'], quote=True)
+                    + '" target="_blank" rel="noopener"><h2>' + html.escape(item['title'])
+                    + '</h2><p class="web-path">' + html.escape(item['path']) + '</p></a>' for item in items)
+    page = page.replace('<!-- REFERENCE_WEB_LINKS -->', links)
+    (root / 'index_html.html').write_text(version_asset_urls(page, docs_dir), encoding='utf-8')
+
+
+def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.html", config_page="md2web_config.html",
+                               reference_web=None):
     """生成总览首页 index.html：按仓库分组列出各仓库入口页，并提供跨仓库搜索。"""
     groups = {}
     for repo in repos:
@@ -1697,6 +1791,13 @@ def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.h
     for kind in ("pdf", "word", "excel", "ppt"):
         (DOCS_DIR / kind).mkdir(parents=True, exist_ok=True)
     reference_cards.append('<a class="card" href="' + HTML_PREFIX + 'reference_library.html"><strong>参考文献库</strong><span>PDF、Word、Excel、PPT 统一管理与预览</span></a>')
+    webpages = scan_reference_web() if reference_web is None else reference_web
+    web_cards = ['<a class="card" href="html/ref/index_html.html"><strong>参考网页索引与搜索</strong>'
+                 '<span>共 %d 个网页 · 搜索标题、文件名和正文</span></a>' % len(webpages)]
+    for item in webpages:
+        web_cards.append('<a class="card" href="' + html.escape(item['url'], quote=True)
+                         + '" target="_blank" rel="noopener"><strong>' + html.escape(item['title'])
+                         + '</strong><span>' + html.escape(item['path']) + '</span></a>')
     page = f"""<!DOCTYPE html>
 <!-- 站点基于 docsify 4.13.1（MIT，https://github.com/docsifyjs/docsify）构建；
      第三方组件与许可见 THIRD-PARTY-NOTICES.md -->
@@ -1733,6 +1834,8 @@ def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.h
     {''.join(sections)}
     <h2>参考文献</h2>
     {''.join(reference_cards)}
+    <h2>参考网页</h2>
+    <div class="cards">{''.join(web_cards)}</div>
   </div>
   <script>window.__MD2WEB_REPOS__ = {json.dumps(repos, ensure_ascii=False)};</script>
   <script>{MASTER_SCRIPT}</script>
@@ -1835,7 +1938,8 @@ def main(argv=None):
                 generate_offline_data(repo_files, path=LIB_DIR / f"offline-data_{repo['id']}.js",
                                       search_index_path=HTML_DIR / "search-index.json",
                                       sidebar=HTML_PREFIX + sidebar,
-                                      include_readme=False)
+                                      include_readme=False,
+                                      homepage=(HTML_PREFIX + repo_home_name(repo["id"])) if not repo_files else None)
             print("\n=== 索引刷新完成 ===")
             return
 
@@ -1872,16 +1976,17 @@ def main(argv=None):
             generate_sidebar(repo_files, path=HTML_DIR / sidebar, heading=repo["id"],
                              top_link=HTML_PREFIX + page,
                              dir_paths=dirs_for_mount(md_dirs, repo["mount"]))
+            empty_home = write_empty_repo_home(repo) if not repo_files else None
             generate_offline_data(repo_files, path=LIB_DIR / f"offline-data_{repo['id']}.js",
                                   search_index_path=HTML_DIR / "search-index.json",
                                   sidebar=HTML_PREFIX + sidebar,
-                                  include_readme=False)
+                                  include_readme=False, homepage=empty_home)
             if (MD_DIR / sub / "README.md").is_file():
                 homepage = f"md/{sub}/README.md"
             elif repo_files:
                 homepage = f"md/{repo_files[0]}"
             else:
-                homepage = write_empty_repo_home(repo)
+                homepage = empty_home
             generate_index_html(args.title, path=HTML_DIR / page, page_name=page,
                                 site_name=f"{repo['id']} · {args.title}",
                                 sidebar=sidebar, search_index=search_index, offline_data=offline_data,
@@ -1889,7 +1994,9 @@ def main(argv=None):
                                 allow_commit=repo.get("allow_commit", True), repo=repo,
                                 repos=repos, route_sidebar=True,
                                 home_link=HTML_PREFIX + "index_all.html")
-        generate_master_index_html(repos, args.title)
+        reference_web = scan_reference_web()
+        generate_reference_web(reference_web)
+        generate_master_index_html(repos, args.title, reference_web=reference_web)
         generate_config_page()
         generate_feedback_page()
         generate_standalone_page("md2web_recycle.html", "md2web-recycle.js", "回收站")

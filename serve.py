@@ -450,6 +450,13 @@ class PreviewHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         rel = urllib.parse.unquote(urllib.parse.urlparse(self.path).path).lstrip("/")
+        if rel == "__reference-web/list":
+            from setup_docsify import scan_reference_web
+            try:
+                self._send_json(200, {"ok": True, "items": scan_reference_web(self._directory or Path.cwd())})
+            except OSError as error:
+                self._send_json(500, {"ok": False, "error": str(error)})
+            return
         if rel and is_blocked_static_path(rel):
             self.send_error(404, "Not Found")
             return

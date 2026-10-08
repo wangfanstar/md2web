@@ -1284,13 +1284,25 @@ body.folder-view-active .docs-page-toc {
   margin-top: 12px;
 }
 
-.folder-move-field select {
+.folder-move-field select,
+.folder-move-field input {
   border: 1px solid var(--docs-border, #d5dee8);
   border-radius: 6px;
   font: inherit;
   font-size: 13px;
   padding: 6px 8px;
   width: 100%;
+}
+
+.folder-create-status {
+  color: var(--docs-text, #24292f);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.folder-move-actions button:disabled {
+  cursor: wait;
+  opacity: .6;
 }
 
 .folder-move-hint,

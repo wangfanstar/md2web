@@ -55,6 +55,40 @@ class TempDirTestCase(unittest.TestCase):
             return self.module.scan_markdown(self.md)
 
 
+class ReferenceWebTests(TempDirTestCase):
+    def test_reference_web_indexes_content_and_preserves_sources(self):
+        folder = self.docs / 'html' / 'ref'
+        (folder / '子目录').mkdir(parents=True)
+        source = folder / '子目录' / '参考 #1.html'
+        original = '<html><head><title>接口说明</title><style>hiddenStyle</style></head><body><h1>协议</h1><p>串口通信</p><script>hiddenScript</script></body></html>'
+        source.write_text(original, encoding='utf-8')
+        (folder / 'index_html.html').write_text('old generated index', encoding='utf-8')
+        (folder / '.private.html').write_text('private', encoding='utf-8')
+        items = self.module.scan_reference_web()
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['title'], '接口说明')
+        self.assertIn('串口通信', items[0]['text'])
+        self.assertNotIn('hiddenScript', items[0]['text'])
+        self.assertNotIn('hiddenStyle', items[0]['text'])
+        self.assertIn('%231.html', items[0]['url'])
+        self.module.generate_reference_web(items)
+        self.module.generate_master_index_html([], reference_web=items)
+        self.assertEqual(source.read_text(encoding='utf-8'), original)
+        page = (folder / 'index_html.html').read_text(encoding='utf-8')
+        self.assertIn('<base href="../../">', page)
+        snapshot = (self.docs / 'lib' / 'reference-web-data.js').read_text(encoding='utf-8')
+        self.assertIn('串口通信', snapshot)
+        overview = (self.docs / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('参考网页', overview)
+        self.assertIn('html/ref/index_html.html', overview)
+        self.assertIn(items[0]['url'], overview)
+
+    def test_empty_reference_web_generates_index(self):
+        self.module.generate_reference_web()
+        self.assertTrue((self.docs / 'html' / 'ref' / 'index_html.html').is_file())
+        self.assertEqual(self.module.scan_reference_web(), [])
+
+
 class CLITests(TempDirTestCase):
     def test_parse_args_defaults(self):
         args = self.module.parse_args([])
@@ -778,6 +812,13 @@ class ServeTests(unittest.TestCase):
             try:
                 with opener.open(f"http://127.0.0.1:{port}/md/a.md") as response:
                     self.assertEqual(response.status, 200)
+                ref = tmp / 'html' / 'ref'
+                ref.mkdir(parents=True)
+                (ref / 'page.html').write_text('<title>Reference</title>', encoding='utf-8')
+                with opener.open(f"http://127.0.0.1:{port}/__reference-web/list") as response:
+                    listing = json.loads(response.read().decode('utf-8'))
+                self.assertEqual(listing['items'][0]['path'], 'page.html')
+                self.assertFalse((ref / 'index_html.html').exists())
                 with self.assertRaises(urllib.error.HTTPError) as ctx:
                     opener.open(f"http://127.0.0.1:{port}/.svn/entries")
                 self.assertEqual(ctx.exception.code, 404)
@@ -1986,6 +2027,17 @@ class EndToEndTests(TempDirTestCase):
         page = (self.docs / "html" / "index_空白库.html").read_text(encoding="utf-8")
         self.assertIn('homepage: "html/_home_空白库.md"', page)
         self.assertTrue((self.docs / "html" / "_home_空白库.md").is_file())
+        snapshot = (self.docs / "lib" / "offline-data_空白库.js").read_text(encoding="utf-8")
+        self.assertIn("html/_home_空白库.md", snapshot)
+        home = (self.docs / "html" / "_home_空白库.md").read_text(encoding="utf-8")
+        self.assertIn('data-folder-action="new-document"', home)
+        self.assertIn('data-folder-action="new-folder"', home)
+        self.assertIn('data-path="md/空白库"', home)
+        with mock.patch.object(self.module, "load_repositories", lambda: []):
+            with redirect_stdout(io.StringIO()):
+                self.module.main(["--index-only"])
+        snapshot = (self.docs / "lib" / "offline-data_空白库.js").read_text(encoding="utf-8")
+        self.assertIn("html/_home_空白库.md", snapshot)
 
     def test_index_only_skips_site_files(self):
         self.write_doc("a.md", "# A")

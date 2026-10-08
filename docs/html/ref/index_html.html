@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <base href="../../">
+  <title>参考网页 · 索引与搜索</title>
+  <link rel="stylesheet" href="lib/reference-web.css?v=8af1d2e124">
+  <link rel="stylesheet" href="lib/auth.css?v=8000d31cec">
+</head>
+<body>
+  <main class="reference-web">
+    <nav><a href="index.html">← 返回知识库</a><a href="html/md2web_feedback.html">反馈</a></nav>
+    <header><p class="eyebrow">HTML REFERENCE</p><h1>参考网页</h1>
+      <p>浏览保存的网页，按标题、文件名或正文快速查找。</p></header>
+    <form role="search" id="reference-web-search">
+      <label for="web-query">搜索参考网页</label>
+      <div class="search-row"><input id="web-query" type="search" placeholder="输入关键词，多个词用空格分隔" autocomplete="off">
+        <button type="reset">清空</button></div>
+    </form>
+    <div class="update-actions"><button type="button" id="web-refresh">更新索引</button>
+      <button type="button" id="web-download" hidden>下载更新后的索引页</button></div>
+    <input type="file" id="web-folder" webkitdirectory multiple hidden>
+    <p id="web-update-status" role="status" aria-live="polite"></p>
+    <p id="web-count" role="status" aria-live="polite"></p>
+    <div id="web-results" class="web-results"></div>
+    <p id="web-empty" hidden>还没有参考网页。将 HTML 文件放入 <code>docs/html/ref/</code> 后点击“更新索引”。</p>
+    <footer>支持子文件夹内的 .html / .htm 文件。点击“更新索引”扫描新增、修改和删除的网页。<br>服务模式下登录后会保存索引；离线打开时选择 ref 文件夹，可下载更新后的索引页。点击结果会在新标签页打开原网页。</footer>
+    <noscript>请启用 JavaScript 使用搜索，也可返回知识库总览查看网页列表。</noscript>
+  </main>
+  <script src="lib/reference-web-data.js?v=44ed29677b"></script>
+  <script src="lib/reference-web.js?v=f52011cd2d"></script>
+  <script src="lib/auth.js?v=da8fd7f61e"></script>
+</body>
+</html>

@@ -403,30 +403,114 @@
     }, 600);
   }
 
+  function createEntry(parent, kind, name) {
+    return Promise.resolve().then(function () {
+      name = String(name || '').trim();
+      if (!name || /^[.]/.test(name) || /[\\/:*?"<>|#%\[\]\x00-\x1f]/.test(name) || /[.]$/.test(name)) {
+        throw new Error('名称不能为空，不能以点开头或结尾，也不能包含 / \\ : * ? " < > | # % [ ]。');
+      }
+      if (kind === 'document') name = name.replace(/\.md$/i, '') + '.md';
+      if (window.location.protocol === 'file:') {
+        throw new Error('请通过认证编辑服务打开本页后创建文档（默认地址 http://localhost:8882）。');
+      }
+      return window.SiteAuth && window.SiteAuth.refresh ? window.SiteAuth.refresh() : null;
+    }).then(function () {
+      if (!requireLogin()) throw new Error('请先完成登录，再点创建；填写的名称已保留。');
+      return mutate('__md/create', { parent: parent, kind: kind, name: name });
+    }).then(function (payload) { return payload.result || {}; });
+  }
+
+  function openCreateDialog(parent, kind) {
+    if (document.querySelector('[data-create-dialog]')) return;
+    parent = String(parent || (config.repoInfo || {}).mount || 'md').replace(/\/+$/, '');
+    var isDocument = kind === 'document';
+    var label = isDocument ? '文档' : '文件夹';
+    var previousFocus = document.activeElement;
+    var dialog = document.createElement('div');
+    dialog.className = 'folder-move-dialog';
+    dialog.setAttribute('data-create-dialog', '');
+    dialog.innerHTML = '<form class="folder-move-card" role="dialog" aria-modal="true" aria-labelledby="folder-create-title">'
+      + '<div class="folder-move-head"><strong id="folder-create-title">新建' + label + '</strong></div>'
+      + '<p class="folder-move-hint">保存位置：<code>' + escapeHtml(parent) + '</code></p>'
+      + '<label class="folder-move-field">' + label + '名称<input data-create-name required autocomplete="off" value="新' + label + '"></label>'
+      + '<p class="folder-move-note">' + (isDocument ? '自动添加 .md 后缀，创建后直接进入编辑器。' : '创建后自动进入该文件夹，可继续新建文档。') + '</p>'
+      + '<p class="folder-create-status" role="status" aria-live="polite" data-create-status></p>'
+      + '<div class="folder-move-actions"><button type="button" data-create-cancel>取消</button>'
+      + '<button type="submit" data-create-submit>' + (isDocument ? '创建并编辑' : '创建并进入') + '</button></div></form>';
+    document.body.appendChild(dialog);
+    var input = dialog.querySelector('[data-create-name]');
+    var status = dialog.querySelector('[data-create-status]');
+    var submit = dialog.querySelector('[data-create-submit]');
+    var busy = false;
+    function close() {
+      if (busy) return;
+      dialog.remove();
+      if (previousFocus && previousFocus.focus) previousFocus.focus();
+    }
+    dialog.addEventListener('click', function (event) {
+      if (event.target === dialog || event.target.closest('[data-create-cancel]')) close();
+    });
+    dialog.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') { event.stopPropagation(); close(); }
+      if (event.key === 'Tab') {
+        var cancel = dialog.querySelector('[data-create-cancel]');
+        var last = busy ? cancel : submit;
+        if (event.shiftKey && document.activeElement === input) { event.preventDefault(); last.focus(); }
+        if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); input.focus(); }
+      }
+    });
+    dialog.querySelector('form').addEventListener('submit', function (event) {
+      event.preventDefault();
+      if (busy) return;
+      busy = true;
+      submit.disabled = true;
+      input.readOnly = true;
+      status.textContent = '正在创建，请稍候…';
+      createEntry(parent, kind, input.value).then(function (result) {
+        busy = false;
+        close();
+        if (isDocument && result.path) openCreatedDocument(result.path);
+        else if (result.path) {
+          window.location.hash = '#/' + result.path + '/';
+          loadFolderView();
+        }
+      }).catch(function (error) {
+        busy = false;
+        submit.disabled = false;
+        input.readOnly = false;
+        status.textContent = '创建失败：' + error.message;
+        input.focus();
+      });
+    });
+    input.focus();
+    input.select();
+    // 默认名称避开已有条目，连续创建时无需手工给“新文档”改名。
+    var defaultName = input.value;
+    api('__folder?path=' + encodeURIComponent(parent)).then(function (payload) {
+      if (busy || input.value !== defaultName) return;
+      var folder = payload.folder || {};
+      var names = (folder.documents || []).concat(folder.folders || []).map(function (item) {
+        return String(item.name || '').toLowerCase();
+      });
+      var candidate = defaultName;
+      var suffix = isDocument ? '.md' : '';
+      var number = 2;
+      while (names.indexOf((candidate + suffix).toLowerCase()) !== -1) {
+        candidate = defaultName + ' ' + number++;
+      }
+      input.value = candidate;
+      if (document.activeElement === input) input.select();
+    }).catch(function () { /* 目录请求失败时保留名称，由创建接口显示具体错误。 */ });
+  }
+
   function runAction(action, path, isFolder) {
     var parent = isFolder ? (path || currentRoute()) : folderPathOf(path || currentRoute());
     if (action === 'new-document') {
-      if (!requireLogin()) return;
-      var docName = window.prompt('新建文档名称（不含 .md）', '新文档');
-      if (!docName) return;
-      mutate('__md/create', { parent: parent, kind: 'document', name: docName })
-        .then(function (payload) {
-          var created = (payload.result && payload.result.path) || '';
-          if (created) {
-            openCreatedDocument(created);
-          } else {
-            reloadSoon(operationNotice('已创建文档：' + docName, payload.result));
-          }
-        })
-        .catch(function (error) { window.alert('创建失败：' + error.message); });
+      openCreateDialog(parent, 'document');
       return;
     }
     if (action === 'new-folder') {
-      var folderName = window.prompt('新建文件夹名称', '新文件夹');
-      if (!folderName) return;
-      mutate('__md/create', { parent: parent, kind: 'folder', name: folderName })
-        .then(function (payload) { reloadSoon(operationNotice('已创建文件夹：' + folderName, payload.result)); })
-        .catch(function (error) { window.alert('创建失败：' + error.message); });
+      openCreateDialog(parent, 'folder');
       return;
     }
     if (action === 'move') {
@@ -592,6 +676,6 @@
   }
   window.addEventListener('hashchange', function () { window.setTimeout(loadFolderView, 120); });
   window.FolderView = { isFolderRoute: isFolderRoute, reload: loadFolderView, pathFromElement: pathFromElement,
-                        groupDocuments: groupDocuments, emptyStateHtml: emptyStateHtml };
+                        groupDocuments: groupDocuments, emptyStateHtml: emptyStateHtml, createEntry: createEntry };
   window.setTimeout(loadFolderView, 200);
 }());
