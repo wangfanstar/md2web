@@ -18,11 +18,21 @@ import time
 import uuid
 import hashlib
 from pathlib import Path
+from contextlib import contextmanager
 
 from . import database, documents, folder_sources
 from .drafts import unified_diff as documents_diff
 from .svn import SvnError
 from .content_lock import serialized
+
+
+@contextmanager
+def _db_guard(lock):
+    if lock is None:
+        yield
+    else:
+        with lock:
+            yield
 
 ACTIVE_STATES = ("prepared", "running")
 DONE_STATES = ("svn_committed", "published")
@@ -348,12 +358,13 @@ def _binding_row(conn, binding):
     return _row_dict(row)
 
 
-def ensure_binding(conn, binding, svn_client, config, credential=None, rebind=False):
+def ensure_binding(conn, binding, svn_client, config, credential=None, rebind=False, db_lock=None):
     """读取远端仓库身份并登记/核对绑定（UUID、根 URL、目标 URL）。
 
     rebind=True（仅「删除重建」）时不阻止身份变化：把绑定更新为远端实际身份并重置已发布版本。
     """
-    row = _binding_row(conn, binding)
+    with _db_guard(db_lock):
+        row = _binding_row(conn, binding)
     config_version = str(config.get("path", ""))
     username, password = credential or (None, None)
     config_dir = tempfile.mkdtemp(prefix="md2web-svn-bind-")
@@ -368,7 +379,7 @@ def ensure_binding(conn, binding, svn_client, config, credential=None, rebind=Fa
     finally:
         shutil.rmtree(config_dir, ignore_errors=True)
     if row is None:
-        with conn:
+        with _db_guard(db_lock), conn:
             cursor = conn.execute(
                 "INSERT INTO repo_bindings (repository_id, mount_path, repository_uuid, root_url, target_url,"
                 " credential_group, config_version, last_checked_at, created_at, updated_at)"
@@ -377,7 +388,8 @@ def ensure_binding(conn, binding, svn_client, config, credential=None, rebind=Fa
                  info.get("url", binding["url"]), binding["credential_group"], config_version,
                  database.now_iso(), database.now_iso(), database.now_iso()),
             )
-        row = _row_dict(conn.execute("SELECT * FROM repo_bindings WHERE id = ?", (cursor.lastrowid,)).fetchone())
+        with _db_guard(db_lock):
+            row = _row_dict(conn.execute("SELECT * FROM repo_bindings WHERE id = ?", (cursor.lastrowid,)).fetchone())
         return row
     if row["repository_uuid"] and info.get("uuid") and row["repository_uuid"] != info["uuid"]:
         if not rebind:
@@ -394,14 +406,15 @@ def ensure_binding(conn, binding, svn_client, config, credential=None, rebind=Fa
                 expected=row["target_url"], actual=info.get("url"),
             )
     reset = ", published_revision = 0, sync_error = NULL" if rebind else ""
-    with conn:
+    with _db_guard(db_lock), conn:
         conn.execute(
             "UPDATE repo_bindings SET repository_uuid = ?, root_url = ?, target_url = ?, config_version = ?"
             + reset + ", last_checked_at = ?, updated_at = ? WHERE id = ?",
             (info.get("uuid", ""), info.get("root_url", ""), info.get("url", binding["url"]),
              config_version, database.now_iso(), database.now_iso(), row["id"]),
         )
-    row = _row_dict(conn.execute("SELECT * FROM repo_bindings WHERE id = ?", (row["id"],)).fetchone())
+    with _db_guard(db_lock):
+        row = _row_dict(conn.execute("SELECT * FROM repo_bindings WHERE id = ?", (row["id"],)).fetchone())
     return row
 
 
@@ -655,7 +668,7 @@ def _parse_iso(value):
 
 
 def sync_all(conn, svn_client, config, md_dir, credential=None, now=None, logger=None,
-             credential_of=None):
+             credential_of=None, force=False, db_lock=None):
     """按各仓库的同步频率拉取远端更新；返回每个仓库的结果汇总。"""
     moment = now or time.time()
     results = []
@@ -663,9 +676,10 @@ def sync_all(conn, svn_client, config, md_dir, credential=None, now=None, logger
         if binding.get("source_mode", "svn") != "svn":
             continue
         interval = sync_interval_of(binding, config)
-        row = _binding_row(conn, binding)
+        with _db_guard(db_lock):
+            row = _binding_row(conn, binding)
         row_dict = _row_dict(row)
-        if not sync_due(row_dict, interval, moment):
+        if not force and not sync_due(row_dict, interval, moment):
             continue
         per_repo = credential
         if credential_of is not None:
@@ -676,7 +690,7 @@ def sync_all(conn, svn_client, config, md_dir, credential=None, now=None, logger
             if found:
                 per_repo = found
         try:
-            result = sync_binding(conn, svn_client, config, md_dir, binding, per_repo)
+            result = sync_binding(conn, svn_client, config, md_dir, binding, per_repo, db_lock=db_lock)
             result["binding"] = binding["mount"]
             results.append(result)
             if logger is not None and (result.get("updated") or result.get("conflicts")):
@@ -1360,15 +1374,18 @@ def provision_repository(conn, svn_client, config, md_dir, binding, credential=N
 
 
 @serialized
-def sync_binding(conn, svn_client, config, md_dir, binding, credential=None, force=False):
+def sync_binding(conn, svn_client, config, md_dir, binding, credential=None, force=False, db_lock=None):
     """把绑定仓库的远端内容同步到 docs/md（导出快照后只覆盖受管 Markdown）。
 
     force=True 时即使远端版本 ≤ 已发布版本也重新导出（修复/删除重建场景）。
     """
     from .entries import pending
-    if pending(conn, binding['mount']):
-        raise OperationError(409, '仓库有待核对的文档操作，请先检查 SVN 日志和本地文件')
-    row = _binding_row(conn, binding) or ensure_binding(conn, binding, svn_client, config, credential)
+    with _db_guard(db_lock):
+        if pending(conn, binding['mount']):
+            raise OperationError(409, '仓库有待核对的文档操作，请先检查 SVN 日志和本地文件')
+        row = _binding_row(conn, binding)
+    if row is None:
+        row = ensure_binding(conn, binding, svn_client, config, credential, db_lock=db_lock)
     username, password = credential or (None, None)
     config_dir = tempfile.mkdtemp(prefix="md2web-svn-sync-")
     staging = Path(tempfile.mkdtemp(prefix="md2web-svn-export-"))
@@ -1376,68 +1393,71 @@ def sync_binding(conn, svn_client, config, md_dir, binding, credential=None, for
         info = svn_client.info(binding["url"], config_dir, username=username, password=password)
         remote_revision = int(info.get("revision") or 0)
         published = int(row["published_revision"] or 0) if row else 0
-        if remote_revision and remote_revision <= published and not force and (not row or row["sync_error"] != "conflicts"):
-            # 远端版本未变时仍检查活动草稿；上次同步留下的冲突必须持续到草稿解决。
-            draft_paths = active_draft_paths(conn)
-            pending_conflicts = [path for path in draft_paths
-                                 if path == binding["mount"] or path.startswith(binding["mount"] + "/")]
-            if pending_conflicts:
-                with conn:
-                    conn.execute("UPDATE repo_bindings SET last_checked_at = ?, sync_error = 'conflicts' WHERE id = ?",
-                                 (database.now_iso(), row["id"]))
-                return {"updated": False, "revision": remote_revision, "files": [],
-                        "conflicts": sorted(pending_conflicts)}
-            if row:
-                with conn:
-                    conn.execute("UPDATE repo_bindings SET last_checked_at = ?, sync_error = NULL WHERE id = ?",
-                                 (database.now_iso(), row["id"]))
-            return {"updated": False, "revision": remote_revision, "files": [], "conflicts": []}
+        with _db_guard(db_lock):
+            if remote_revision and remote_revision <= published and not force and (not row or row["sync_error"] != "conflicts"):
+                # 远端版本未变时仍检查活动草稿；上次同步留下的冲突必须持续到草稿解决。
+                draft_paths = active_draft_paths(conn)
+                pending_conflicts = [path for path in draft_paths
+                                     if path == binding["mount"] or path.startswith(binding["mount"] + "/")]
+                if pending_conflicts:
+                    with conn:
+                        conn.execute("UPDATE repo_bindings SET last_checked_at = ?, sync_error = 'conflicts' WHERE id = ?",
+                                     (database.now_iso(), row["id"]))
+                    return {"updated": False, "revision": remote_revision, "files": [],
+                            "conflicts": sorted(pending_conflicts)}
+                if row:
+                    with conn:
+                        conn.execute("UPDATE repo_bindings SET last_checked_at = ?, sync_error = NULL WHERE id = ?",
+                                     (database.now_iso(), row["id"]))
+                return {"updated": False, "revision": remote_revision, "files": [], "conflicts": []}
         svn_client.export(binding["url"], staging, revision=remote_revision, force=True,
                           config_dir=config_dir, username=username, password=password)
-        mount_dir = Path(md_dir) / Path(*binding["mount"].split("/")[1:])
-        draft_paths = active_draft_paths(conn)
-        files = []
-        conflicts = []
-        for source in sorted(staging.rglob("*.md")):
-            relative = source.relative_to(staging)
-            target = mount_dir / relative
-            document_path = binding["mount"] + "/" + str(relative).replace("\\", "/")
-            if document_path in draft_paths:
-                # 有人正在编辑（存在活动草稿）：不覆盖本地文件，提示合并
-                conflicts.append(document_path)
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            text = source.read_text(encoding="utf-8")
-            handle = tempfile.NamedTemporaryFile(
-                mode="w", encoding="utf-8", newline="", delete=False,
-                dir=str(target.parent), prefix="." + target.name + ".", suffix=".tmp",
-            )
-            tmp_path = Path(handle.name)
-            try:
-                with handle:
-                    handle.write(text)
-                os.replace(tmp_path, target)
-            finally:
-                if tmp_path.exists():
-                    try:
-                        tmp_path.unlink()
-                    except OSError:
-                        pass
-            files.append(str(relative).replace("\\", "/"))
-        with conn:
-            conn.execute(
-                "UPDATE repo_bindings SET published_revision = ?, last_checked_at = ?,"
-                " sync_error = ?, updated_at = ? WHERE id = ?",
-                (remote_revision, database.now_iso(), "conflicts" if conflicts else None,
-                 database.now_iso(), row["id"]),
-            )
-            database.audit(conn, "operation_sync", "ok", resource=binding["mount"])
-        return {"updated": True, "revision": remote_revision, "files": files, "conflicts": conflicts}
-    except SvnError as error:
-        if row:
+        with _db_guard(db_lock):
+            mount_dir = Path(md_dir) / Path(*binding["mount"].split("/")[1:])
+            draft_paths = active_draft_paths(conn)
+            files = []
+            conflicts = []
+            for source in sorted(staging.rglob("*.md")):
+                relative = source.relative_to(staging)
+                target = mount_dir / relative
+                document_path = binding["mount"] + "/" + str(relative).replace("\\", "/")
+                if document_path in draft_paths:
+                    # 有人正在编辑（存在活动草稿）：不覆盖本地文件，提示合并
+                    conflicts.append(document_path)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                text = source.read_text(encoding="utf-8")
+                handle = tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", newline="", delete=False,
+                    dir=str(target.parent), prefix="." + target.name + ".", suffix=".tmp",
+                )
+                tmp_path = Path(handle.name)
+                try:
+                    with handle:
+                        handle.write(text)
+                    os.replace(tmp_path, target)
+                finally:
+                    if tmp_path.exists():
+                        try:
+                            tmp_path.unlink()
+                        except OSError:
+                            pass
+                files.append(str(relative).replace("\\", "/"))
             with conn:
-                conn.execute("UPDATE repo_bindings SET sync_error = ?, last_checked_at = ? WHERE id = ?",
-                             (error.code, database.now_iso(), row["id"]))
+                conn.execute(
+                    "UPDATE repo_bindings SET published_revision = ?, last_checked_at = ?,"
+                    " sync_error = ?, updated_at = ? WHERE id = ?",
+                    (remote_revision, database.now_iso(), "conflicts" if conflicts else None,
+                     database.now_iso(), row["id"]),
+                )
+                database.audit(conn, "operation_sync", "ok", resource=binding["mount"])
+            return {"updated": True, "revision": remote_revision, "files": files, "conflicts": conflicts}
+    except SvnError as error:
+        with _db_guard(db_lock):
+            if row:
+                with conn:
+                    conn.execute("UPDATE repo_bindings SET sync_error = ?, last_checked_at = ? WHERE id = ?",
+                                 (error.code, database.now_iso(), row["id"]))
         raise OperationError(502, f"同步失败（{error.code}）：保留现有站点内容")
     finally:
         shutil.rmtree(config_dir, ignore_errors=True)

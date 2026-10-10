@@ -43,6 +43,7 @@ def parse_args(argv=None):
     )
     parser.add_argument("--title", default=DEFAULT_TITLE, help="站点标题，默认「%s」" % DEFAULT_TITLE)
     parser.add_argument("--offline", action="store_true", help="严格离线构建：依赖缺失时提示，不尝试网络下载")
+    parser.add_argument("--allow-empty", action="store_true", help="仓库管理重建时允许没有文档，生成空站点入口")
     parser.add_argument(
         "--index-only",
         "--refresh-index-only",
@@ -61,7 +62,7 @@ def display_path(path: Path) -> str:
         return str(path)
 
 
-def scan_markdown(md_dir) -> list:
+def scan_markdown(md_dir, allow_empty=False) -> list:
     """递归收集 docs/md 下的 .md 相对路径（posix），跳过隐藏路径。
 
     仅收集小写 .md 扩展名：docsify 按大小写敏感匹配扩展名，
@@ -86,7 +87,7 @@ def scan_markdown(md_dir) -> list:
         elif path.suffix.lower() == ".md":
             print(f"  [警告] 跳过非小写扩展名文档: {display_path(path)}（请重命名为 .md）")
     files.sort()
-    if not files:
+    if not files and not allow_empty:
         raise BuildError(
             f"源文档目录中没有 .md 文件: {display_path(root)}，请放入文档后重试"
         )
@@ -1916,7 +1917,7 @@ def main(argv=None):
     print(f"站点标题: {args.title}\n")
 
     try:
-        md_files = scan_markdown(MD_DIR)
+        md_files = scan_markdown(MD_DIR, allow_empty=args.allow_empty)
         for rel in md_files:
             read_markdown(MD_DIR / rel)
     except (BuildError, OSError, UnicodeDecodeError) as error:

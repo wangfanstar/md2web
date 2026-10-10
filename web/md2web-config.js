@@ -178,7 +178,9 @@
         ? '<input type="text" data-repo="mount" value="' + escapeHtml(item.mount || '') + '" placeholder="md/文件夹名"' + disabled + '>'
         : '<code>' + escapeHtml((folder && folder.name) || mount.replace(/^md\//, ''))
           + '</code><input type="hidden" data-repo="mount" value="' + escapeHtml(mount) + '">')
-        + '</td>',
+        + (item.id || folder ? ' <button type="button" class="danger" data-action="delete-repo" data-repo-id="'
+          + escapeHtml(item.id || '') + '" data-repo-mount="' + escapeHtml(mount) + '"'
+          + disabled + '>删除仓库</button>' : '') + '</td>',
       '<td data-entry-cell>' + (linkKey
         ? '<a class="entry-link" href="' + escapeHtml(entryPage(linkKey)) + '" target="_blank"'
           + ' rel="noopener" title="打开该文件夹的入口页">' + escapeHtml(entryPage(linkKey)) + '</a>'
@@ -916,6 +918,7 @@
           renderDefaultCredentialPanel();
           showPanels();
           checkHealth(null, true);
+          if (window.location.hash === '#repository-trash') loadRepoTrash();
           return state.config;
         });
       });
@@ -1154,18 +1157,56 @@
     });
   }
 
-  function syncNow() {
+  function syncNow(button) {
+    if (button) button.disabled = true;
     setStatus('正在同步所有仓库…');
     api('__admin/sync', { method: 'POST', body: JSON.stringify({}) }).then(function (payload) {
       var results = payload.results || [];
       setStatus(results.length
         ? '同步完成：' + results.map(function (item) {
-          return item.binding + ' → ' + (item.error ? ('失败（' + item.error + '）') : ('r' + item.revision));
+          return item.binding + ' → ' + (item.error ? ('失败（' + item.error + '）') : ('r' + item.revision
+            + (item.conflicts && item.conflicts.length ? '，草稿冲突 ' + item.conflicts.length + ' 个' : '')));
         }).join('；')
-        : '没有到期的仓库。');
+        : '本地目录已刷新。');
+      if (!payload.rebuilt) setStatus('同步已执行，但页面重建失败，请检查服务端日志后重试。', true);
+      return loadFolders().then(renderRepos);
     }).catch(function (error) {
       setStatus('同步失败：' + error.message, true);
-    });
+    }).then(function () { if (button) button.disabled = false; });
+  }
+
+  function loadRepoTrash() {
+    if (!state.editable) { setStatus('请先登录管理员账号后查看仓库回收站。', true); return; }
+    var panel = query('[data-repo-trash]');
+    panel.hidden = false;
+    api('__admin/repo-trash').then(function (payload) {
+      query('[data-repo-trash-list]').innerHTML = (payload.entries || []).map(function (item) {
+        return '<p><strong>' + escapeHtml(item.id) + '</strong> · <code>' + escapeHtml(item.mount)
+          + '</code> · ' + escapeHtml(item.deletedAt) + ' <button type="button" data-action="restore-repo" data-entry-id="'
+          + escapeHtml(item.entryId) + '">恢复仓库</button></p>';
+      }).join('') || '<p>暂无已删除的仓库。</p>';
+      panel.scrollIntoView({ block: 'nearest' });
+    }).catch(function (error) { setStatus('读取仓库回收站失败：' + error.message, true); });
+  }
+
+  function changeRepository(action, button) {
+    var id = button.getAttribute(action === 'delete' ? 'data-repo-id' : 'data-entry-id');
+    var prompt = action === 'delete'
+      ? '删除仓库 ' + (id || button.getAttribute('data-repo-mount')) + '？\n将移除配置并把本地资料移入仓库回收站，可恢复。SVN 远端和软链接目标不会删除。\n当前未保存的配置修改将丢弃。'
+      : '恢复该仓库的配置和本地资料？当前未保存的配置修改将丢弃。';
+    if (!window.confirm(prompt)) return;
+    button.disabled = true;
+    setStatus(action === 'delete' ? '正在删除仓库并重建页面…' : '正在恢复仓库并重建页面…');
+    api('__admin/repo-' + action, { method: 'POST', body: JSON.stringify(action === 'delete'
+      ? { id: id, mount: button.getAttribute('data-repo-mount') } : { entryId: id }) })
+      .then(function (payload) {
+        return loadConfig().then(function () {
+          setStatus((action === 'delete' ? '仓库已移入回收站。' : '仓库已恢复。')
+            + (payload.rebuilt ? '总览和合并视图已更新。' : '页面重建未完成，请点击手动同步重试。'), !payload.rebuilt);
+          if (action === 'restore') loadRepoTrash();
+        });
+      }).catch(function (error) { setStatus('操作失败：' + error.message, true); })
+      .then(function () { button.disabled = false; });
   }
 
   function syncPermLabel(detail, sourceMode) {
@@ -1216,6 +1257,10 @@
       var body = query('[data-repo-rows]');
       var nextIndex = all('[data-repo-row]').length;
       body.insertAdjacentHTML('beforeend', repoRow({ group: '默认', allowCommit: true }, null, nextIndex));
+    } else if (action === 'delete-repo' || action === 'restore-repo') {
+      changeRepository(action === 'delete-repo' ? 'delete' : 'restore', target);
+    } else if (action === 'repo-trash') {
+      loadRepoTrash();
     } else if (action === 'remove-repo') {
       var entry = pairOf(target);
       if (entry && entry.detail && window.confirm('移除该文件夹的仓库配置（保存后生效）？')) {
@@ -1320,7 +1365,7 @@
     } else if (action === 'save') {
       save();
     } else if (action === 'sync') {
-      syncNow();
+      syncNow(target);
     }
   });
 

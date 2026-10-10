@@ -158,6 +158,17 @@ test('empty folder state exposes direct create buttons', () => {
   assert.match(html, /data-path="md\/test"/);
 });
 
+test('combined view exposes manual repository sync and configuration management', () => {
+  const view = loadFolderView({ window: {
+    $docsify: { repoInfo: { all: true } }, location: { hash: '#/' }, addEventListener() {}, setTimeout() {}
+  } });
+  const html = view.repositoryActionsHtml();
+  assert.match(html, /data-repository-sync/);
+  assert.match(html, /md2web_config.html#repositories/);
+  assert.match(html, /md2web_config.html#repository-trash/);
+  assert.equal(loadFolderView().repositoryActionsHtml(), '');
+});
+
 test('empty folder state hides create buttons for read-only repositories', () => {
   const view = loadFolderView();
   const html = view.emptyStateHtml('md/test', true);

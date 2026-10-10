@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from . import database, documents, operations, passwords
 from .secrets import decrypt, encrypt
 from .svn import SvnError
+from .content_lock import serialized
 
 RATE_LIMIT_MAX = 5
 RATE_LIMIT_WINDOW = 300.0
@@ -442,18 +443,19 @@ class AuthService:
             return None
         return (user.strip(), password)
 
-    def sync_repositories(self, md_dir, logger=None):
+    @serialized
+    def sync_repositories(self, md_dir, logger=None, force=False):
         """按各仓库频率拉取远端更新（跳过有活动草稿的文档并报告冲突）。
 
         凭据优先使用仓库自己配置的同步账号（数据库加密保存），其次默认同步凭据，
         最后回退到环境变量 sync.credential_name。
         """
         fallback = self.sync_credential()
-        with self._db_lock:
-            return operations.sync_all(
-                self.conn, self.svn, self.config, md_dir, credential=fallback, logger=logger,
-                credential_of=lambda binding: self.repo_credential(binding.get("id")) or self.default_credential(),
-            )
+        return operations.sync_all(
+            self.conn, self.svn, self.config, md_dir, credential=fallback, logger=logger,
+            credential_of=lambda binding: self.repo_credential(binding.get("id")) or self.default_credential(),
+            force=force, db_lock=self._db_lock,
+        )
 
     def backup_site_data(self, root, logger=None):
         """把网站数据合入到配置的 SVN 库（凭据优先仓库配置，其次默认凭据/环境变量）。"""

@@ -207,9 +207,12 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 
 ## 完成前检查清单
 
+- 仓库删除/恢复由 `server/repositories.py` 和管理员接口 `POST /__admin/repo-delete|repo-restore` 管理，需登录管理员与 CSRF；本地目录（软链接仅链接本身）移入 `docs/md/.repository-trash/<id>/`，配置写入失败回滚目录移动，恢复不覆盖已有路径，活动草稿/未完成提交禁止删除。`GET /__admin/repo-trash` 供配置页恢复列表使用，隐藏回收站不进入构建或静态分发。
+- `index_all.html` 的“手动同步并刷新仓库”调用 `/__admin/sync`，忽略定时同步频率（含 0），保留草稿冲突检查，然后重建入口、导航和索引；自动同步仍按频率运行。网络同步不持数据库锁。
+- 仓库管理重建使用 `setup_docsify.py --allow-empty`，允许删除最后一个仓库后生成空站点；普通构建仍拒绝空源目录，任何模式都拒绝源目录缺失。
+
 1. **用 Python 3.6.8 跑** `python -m unittest discover -s tests` 全绿（含 `tests/test_server.py`：配置、数据库、SVN 假 CLI、登录会话、静态白名单）；不再跑 3.12
 2. `node --test tests/test_search.js`、`node --test tests/test_packetdiag.js`、`node --test tests/test_ai_retrieval.js`、`node --test tests/test_text_find.js`、`node --test tests/test_folder_view.js` 全绿
 3. `node --check web/custom-search.js`、`web/workspace.js`、`web/mermaid-init.js`、`web/media-viewer.js`、`web/packetdiag.js`、`web/packetdiag-init.js`、`web/page-export.js`、`web/md-editor.js`、`web/text-find.js`、`web/math-init.js`、`web/prism-init.js`、`web/auth.js`、`web/sanitize.js` 通过
 4. **用 3.6.8 跑** `python setup_docsify.py` 后 `git status` 无意外生成物差异（构建幂等）
 5. `docs/md` 内容逐字节未变
-

@@ -2074,6 +2074,29 @@ class SvnOperationTests(ServerTestBase):
         for repo in self.config["repositories"]:
             repo["sync_interval"] = 3600
 
+    def test_manual_sync_ignores_disabled_schedule(self):
+        for repo in self.config['repositories']:
+            repo['sync_interval'] = 0
+        with mock.patch.object(server_operations, 'sync_binding', return_value={'updated': False}) as sync:
+            results = server_operations.sync_all(self.conn, self.svn, self.config, self.md_dir,
+                                                 ('alice', 'good'), force=True)
+        self.assertEqual(sync.call_count, len(self.config['repositories']))
+        self.assertEqual(len(results), len(self.config['repositories']))
+
+    def test_sync_network_does_not_hold_database_lock(self):
+        lock = __import__('threading').RLock()
+        info, export = self.svn.info, self.svn.export
+        def checked_info(*args, **kwargs):
+            self.assertFalse(lock._is_owned())
+            return info(*args, **kwargs)
+        def checked_export(*args, **kwargs):
+            self.assertFalse(lock._is_owned())
+            return export(*args, **kwargs)
+        with mock.patch.object(self.svn, 'info', side_effect=checked_info), \
+                mock.patch.object(self.svn, 'export', side_effect=checked_export):
+            server_operations.sync_binding(self.conn, self.svn, self.config, self.md_dir,
+                                           self.config['repositories'][0], ('alice', 'good'), db_lock=lock)
+
     def test_sync_all_skips_local_source_without_calling_svn(self):
         local_root = self.md_dir / "本地"
         local_root.mkdir(parents=True, exist_ok=True)
@@ -2672,6 +2695,92 @@ class FolderOpsTests(ServerTestBase):
 
     def csrf(self):
         return self.client.get("/__auth/session").get_json()["csrfToken"]
+
+    def test_delete_repository_archives_and_restores_config_and_documents(self):
+        headers = {'X-CSRF-Token': self.csrf()}
+        repo = self.config['repositories'][0]
+        mount = repo['mount']
+        target = self.docs / mount
+        self.assertEqual(self.app.test_client().post('/__admin/repo-delete', json={'id': repo['id']}).status_code, 401)
+        self.assertEqual(self.client.post('/__admin/repo-delete', json={'id': repo['id']}).status_code, 403)
+        deleted = self.client.post('/__admin/repo-delete', json={'id': repo['id']}, headers=headers)
+        self.assertEqual(deleted.status_code, 200, deleted.get_json())
+        self.assertFalse(target.exists())
+        self.assertFalse(any(item['id'] == repo['id'] for item in self.config['repositories']))
+        entry = deleted.get_json()['result']['entryId']
+        restored = self.client.post('/__admin/repo-restore', json={'entryId': entry}, headers=headers)
+        self.assertEqual(restored.status_code, 200, restored.get_json())
+        self.assertTrue(target.is_dir())
+        self.assertTrue(any(item['id'] == repo['id'] for item in self.config['repositories']))
+
+    def test_manual_admin_sync_rebuilds_even_without_svn_changes(self):
+        with mock.patch.object(self.auth, 'sync_repositories', return_value=[]) as sync:
+            response = self.client.post('/__admin/sync', json={}, headers={'X-CSRF-Token': self.csrf()})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(sync.call_args[1]['force'])
+        self.assertTrue(response.get_json()['rebuilt'])
+
+    def test_repository_delete_rolls_back_when_config_save_fails(self):
+        repo = self.config['repositories'][0]
+        before = (self.docs / repo['mount'] / '时钟树设计.md').read_bytes()
+        with mock.patch('server.repositories.settings.save_config', side_effect=server_config.ConfigError('failed')):
+            response = self.client.post('/__admin/repo-delete', json={'id': repo['id']},
+                                        headers={'X-CSRF-Token': self.csrf()})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual((self.docs / repo['mount'] / '时钟树设计.md').read_bytes(), before)
+        self.assertEqual(self.client.get('/__admin/repo-trash').get_json()['entries'], [])
+
+    def test_repository_delete_rejects_active_draft(self):
+        repo = self.config['repositories'][0]
+        headers = {'X-CSRF-Token': self.csrf()}
+        draft = self.client.put('/__md/draft', json={'path': repo['mount'] + '/时钟树设计.md',
+                                'content': '# draft', 'expectedVersion': 0}, headers=headers)
+        self.assertEqual(draft.status_code, 200, draft.get_json())
+        response = self.client.post('/__admin/repo-delete', json={'id': repo['id']}, headers=headers)
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue((self.docs / repo['mount']).is_dir())
+
+    def test_delete_and_restore_unconfigured_folder(self):
+        target = self.docs / 'md' / 'loose'
+        target.mkdir()
+        (target / 'a.md').write_text('# kept', encoding='utf-8')
+        headers = {'X-CSRF-Token': self.csrf()}
+        deleted = self.client.post('/__admin/repo-delete', json={'mount': 'md/loose'}, headers=headers)
+        self.assertEqual(deleted.status_code, 200, deleted.get_json())
+        self.assertFalse(target.exists())
+        restored = self.client.post('/__admin/repo-restore',
+                                    json={'entryId': deleted.get_json()['result']['entryId']}, headers=headers)
+        self.assertEqual(restored.status_code, 200, restored.get_json())
+        self.assertEqual((target / 'a.md').read_text(encoding='utf-8'), '# kept')
+        self.assertFalse(any(repo['mount'] == 'md/loose' for repo in self.config['repositories']))
+
+    def test_restore_repository_refuses_existing_folder(self):
+        repo = self.config['repositories'][0]
+        headers = {'X-CSRF-Token': self.csrf()}
+        deleted = self.client.post('/__admin/repo-delete', json={'id': repo['id']}, headers=headers).get_json()
+        (self.docs / repo['mount']).mkdir()
+        restored = self.client.post('/__admin/repo-restore', json={'entryId': deleted['result']['entryId']}, headers=headers)
+        self.assertEqual(restored.status_code, 409)
+
+    def test_repository_delete_and_restore_link_keeps_target(self):
+        external = self.tmp / 'external-repo'
+        external.mkdir()
+        (external / 'a.md').write_text('# original', encoding='utf-8')
+        try:
+            server_folder_sources.manage_link(self.docs / 'md', 'md/linked', str(external), 'create')
+        except (OSError, server_folder_sources.FolderLinkError) as error:
+            self.skipTest(str(error))
+        self.config['repositories'].append(dict(self.config['repositories'][0], id='linked',
+            mount='md/linked', source_mode='symlink', url='', link_target=str(external)))
+        headers = {'X-CSRF-Token': self.csrf()}
+        deleted = self.client.post('/__admin/repo-delete', json={'id': 'linked'}, headers=headers)
+        self.assertEqual(deleted.status_code, 200, deleted.get_json())
+        self.assertEqual((external / 'a.md').read_text(encoding='utf-8'), '# original')
+        self.assertFalse(os.path.lexists(str(self.docs / 'md' / 'linked')))
+        restored = self.client.post('/__admin/repo-restore',
+            json={'entryId': deleted.get_json()['result']['entryId']}, headers=headers)
+        self.assertEqual(restored.status_code, 200, restored.get_json())
+        self.assertEqual((self.docs / 'md' / 'linked' / 'a.md').read_text(encoding='utf-8'), '# original')
 
     def test_reference_web_refresh_scans_and_persists_links(self):
         folder = self.docs / 'html' / 'ref'

@@ -5,7 +5,5 @@
   - <a class="sidebar-group-link" href="html/index_硬件设计.html" data-folder="md/硬件设计">**硬件设计**</a>
     - [寄存器手册](/md/硬件设计/寄存器手册.md)
     - [时钟树设计](/md/硬件设计/时钟树设计.md)
-  - <a class="sidebar-group-link" href="html/index_软件工具链.html" data-folder="md/软件工具链">**软件工具链**</a>
-    - [编译工具链](/md/软件工具链/编译工具链.md)
   - <a class="sidebar-group-link" href="html/index_验证指南.html" data-folder="md/验证指南">**验证指南**</a>
     - [仿真环境搭建](/md/验证指南/仿真环境搭建.md)

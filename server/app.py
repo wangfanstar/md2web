@@ -22,6 +22,8 @@ from .auth import AuthError
 from .config import authenticated_config, config_to_json, public_config, save_config
 from .documents import MdSaveError
 from .paths import is_blocked_static_path
+from . import repositories
+from .content_lock import serialized
 
 
 def server_documents_error():
@@ -198,6 +200,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         return jsonify({"ok": True, "config": public_config_json()})
 
     @app.put("/__config")
+    @serialized
     def write_config():
         session, rejected = require_admin()
         if rejected:
@@ -974,17 +977,69 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 pass
         return jsonify({"ok": True, "result": result})
 
+    def rebuild_repository_pages():
+        if on_config_changed is None:
+            return False
+        try:
+            return on_config_changed() is not False
+        except Exception:
+            app.logger.exception('仓库页面重建失败')
+            return False
+
+    @app.get('/__admin/repo-trash')
+    def repository_trash():
+        _, rejected = require_admin()
+        if rejected:
+            return rejected
+        try:
+            return jsonify({'ok': True, 'entries': repositories.listing(md_dir())})
+        except (OSError, operations.OperationError) as error:
+            return json_error(500, 'repo_trash_error', str(error))
+
+    def mutate_repository(action):
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        rejected = require_csrf(session)
+        if rejected:
+            return rejected
+        payload = request.get_json(silent=True) or {}
+        try:
+            if action == 'delete':
+                result = repositories.delete(config, conn, auth_service._db_lock, md_dir(), payload.get('id'), payload.get('mount'))
+            else:
+                result = repositories.restore(config, md_dir(), payload.get('entryId'))
+            auth_service.on_config_changed()
+            with auth_service._db_lock, conn:
+                database.audit(conn, 'repository_' + action, 'ok', actor_id=session['user']['id'],
+                               resource=result['mount'])
+        except operations.OperationError as error:
+            return json_error(error.status, 'repo_' + action + '_error', error.message)
+        except (OSError, server_config.ConfigError, folder_sources.FolderLinkError) as error:
+            return json_error(400, 'repo_' + action + '_error', str(error))
+        rebuilt = rebuild_repository_pages()
+        return jsonify({'ok': True, 'result': result, 'config': public_config_json(), 'rebuilt': rebuilt})
+
+    @app.post('/__admin/repo-delete')
+    def delete_repository():
+        return mutate_repository('delete')
+
+    @app.post('/__admin/repo-restore')
+    def restore_repository():
+        return mutate_repository('restore')
+
     @app.post("/__admin/sync")
     def admin_sync():
-        """管理员立即按频率同步所有配置了 SVN 的仓库（返回每个仓库的结果）。"""
+        """管理员手动同步忽略定时频率，并重建本地目录和仓库入口。"""
         session, rejected = require_admin()
         if rejected:
             return rejected
         csrf_error = require_csrf(session)
         if csrf_error:
             return csrf_error
-        results = auth_service.sync_repositories(md_dir())
-        return jsonify({"ok": True, "results": results})
+        results = auth_service.sync_repositories(md_dir(), force=True)
+        rebuilt = rebuild_repository_pages()
+        return jsonify({"ok": True, "results": results, "rebuilt": rebuilt})
 
     @app.post("/__admin/password")
     def change_password():

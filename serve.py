@@ -258,16 +258,17 @@ def needs_rebuild(directory):
     return newest_mtime > index_path.stat().st_mtime
 
 
-def rebuild():
+def rebuild(allow_empty=False):
     """调用 setup_docsify.py 重新构建；失败时提示并继续使用现有产物。"""
     print("检测到 docs/md 有更新，正在重新构建...")
     result = subprocess.run(
-        [sys.executable, str(ROOT / "setup_docsify.py")], cwd=str(ROOT)
+        [sys.executable, str(ROOT / "setup_docsify.py")] + (["--allow-empty"] if allow_empty else []), cwd=str(ROOT)
     )
     if result.returncode != 0:
         print("警告: 重新构建失败，将使用现有产物预览。")
     else:
         print("重建完成，请刷新浏览器页面。")
+    return result.returncode == 0
 
 
 def rebuild_if_needed(directory):
@@ -733,10 +734,12 @@ def run_authenticated_service(args, directory):
             return
         with rebuild_lock:
             try:
-                rebuild()
+                if rebuild(allow_empty=True) is False:
+                    return False
                 print("配置已变更：站点已按新的仓库映射重建（含各仓库入口页与总览页）")
             except Exception as error:
                 print(f"警告: 配置变更后重建失败: {error}")
+                return False
 
     app = create_app(config, conn, auth_service, docs_dir, on_config_changed=rebuild_sites)
 

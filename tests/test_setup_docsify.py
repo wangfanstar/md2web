@@ -1277,9 +1277,13 @@ class FolderViewTests(unittest.TestCase):
         self.assertIn("customToc", page, "页面仍应启用右侧本文目录")
 
     def test_repository_entry_uses_the_same_folder_operation_view(self):
-        page = (ROOT / "docs" / "html" / "index_硬件设计.html").read_text(encoding="utf-8")
-        self.assertIn("folderView: true", page)
-        self.assertIn('repoInfo: {"id": "硬件设计"', page)
+        module = load_module('setup_docsify', 'setup_docsify.py')
+        repos = module.load_all_repos()
+        self.assertTrue(repos)
+        for repo in repos:
+            page = (ROOT / 'docs' / 'html' / module.repo_page_name(repo['id'])).read_text(encoding='utf-8')
+            self.assertIn('folderView: true', page)
+            self.assertIn('repoInfo: {"id": ' + json.dumps(repo['id'], ensure_ascii=False), page)
 
 
 class HtmlLayoutTests(unittest.TestCase):
@@ -2066,6 +2070,14 @@ class EndToEndTests(TempDirTestCase):
             with self.assertRaises(SystemExit) as ctx:
                 self.module.main([])
         self.assertEqual(ctx.exception.code, 1)
+
+    def test_repository_management_build_allows_empty_site(self):
+        self.seed_assets()
+        with mock.patch.object(self.module, 'load_repositories', return_value=[]):
+            with redirect_stdout(io.StringIO()):
+                self.module.main(['--offline', '--allow-empty'])
+        self.assertTrue((self.docs / 'html' / 'index_all.html').is_file())
+        self.assertTrue((self.docs / 'html' / 'md2web_config.html').is_file())
 
     def test_dependency_failure_exits(self):
         self.write_doc("a.md", "# A")

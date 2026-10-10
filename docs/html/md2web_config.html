@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <base href="../">
   <title>md2web 仓库配置</title>
-  <link rel="stylesheet" href="lib/auth.css?v=6ba0d5f4eb">
+  <link rel="stylesheet" href="lib/auth.css?v=8000d31cec">
   <style>
     :root { color-scheme: light; }
     body { background: #f7f9fb; color: #1f2a37; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 26px 18px 60px; }
@@ -162,7 +162,7 @@
       <p class="hint">默认管理员账号 <code>admin / admin</code>（仅用于本页与站点设置，合入 SVN 时需要另外的 SVN 账号）。</p>
     </section>
 
-    <section class="panel" data-config-main hidden>
+    <section class="panel" id="repositories" data-config-main hidden>
       <h2>仓库列表</h2>
       <table>
         <thead>
@@ -178,6 +178,7 @@
         <button type="button" data-action="add-repo">+ 添加仓库</button>
         <button class="primary" type="button" data-action="save">保存配置并重建站点</button>
         <button type="button" data-action="sync">立即同步 SVN 库</button>
+        <button type="button" data-action="repo-trash">仓库回收站</button>
         <a href="index.html"><button type="button">返回总览</button></a>
         <a href="html/md2web_feedback.html"><button type="button">读者反馈</button></a>
       </div>
@@ -268,14 +269,19 @@
         「验证并切换为该账号」验证通过后用该账号重新登录本页（SVN 账号不是管理员，页面会变为只读，可再用管理员账号切回）。</p>
     </section>
 
+    <section class="panel" data-repo-trash hidden>
+      <h2>仓库回收站</h2>
+      <p class="hint">恢复时一并还原仓库配置和本地资料。SVN 远端内容及软链接目标始终保留。</p>
+      <div data-repo-trash-list></div>
+    </section>
     <section class="panel" data-config-file hidden>
       <h2>当前为离线浏览（file://）</h2>
       <p class="hint">仓库配置需要认证服务：请用 <code>python serve.py</code> 启动后访问
         <code>http://localhost:8882/html/md2web_config.html</code>。</p>
     </section>
   </div>
-  <script src="lib/auth.js?v=119d9241e0"></script>
-  <script src="lib/md2web-config.js?v=9bd39e35a1"></script>
+  <script src="lib/auth.js?v=da8fd7f61e"></script>
+  <script src="lib/md2web-config.js?v=349bc919a2"></script>
   <script src="lib/md2web-feedback.js?v=d905adefde"></script>
 </body>
 </html>

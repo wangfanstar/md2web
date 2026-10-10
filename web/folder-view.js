@@ -151,14 +151,19 @@
       }).join('');
     }
     var folders = (folder.folders || []).map(function (item) {
+      var repository = repos.filter(function (repo) { return repo.mount === item.path; })[0];
       return '<li><a href="#/' + escapeHtml(item.path) + '/">' + escapeHtml(item.name) + '/</a>'
         + '<button type="button" data-folder-action="menu" data-path="' + escapeHtml(item.path)
-        + '" aria-label="操作 ' + escapeHtml(item.name) + '">操作</button></li>';
+        + '" aria-label="操作 ' + escapeHtml(item.name) + '">操作</button>'
+        + (config.repoInfo && config.repoInfo.all && repository
+          ? ' <button type="button" data-repository-delete="' + escapeHtml(repository.id)
+            + '" data-repository-mount="' + escapeHtml(item.path) + '">删除仓库</button>' : '') + '</li>';
     }).join('');
     var trashMount = (config.repoInfo && config.repoInfo.all) ? 'md' : ((config.repoInfo && config.repoInfo.mount) || folder.path);
     article.innerHTML = [
       '<div class="folder-view" data-folder-view>',
       '<h1>' + escapeHtml(folder.name || '') + '</h1>',
+      repositoryActionsHtml(),
       '<div class="folder-view-actions"><button type="button" data-folder-action="menu" data-path="' + escapeHtml(folder.path)
         + '">新建文档或文件夹</button><button type="button" data-folder-action="trash" data-mount="' + escapeHtml(trashMount)
         + '">回收站</button></div>',
@@ -171,6 +176,54 @@
         + '正文按文件夹分组显示（标题里是文件夹路径与分组）。</p>',
       '</div>'
     ].join('');
+    var notice = article.querySelector('[data-repository-status]');
+    if (notice) {
+      try {
+        notice.textContent = sessionStorage.getItem('md2web:repository-notice') || '';
+        sessionStorage.removeItem('md2web:repository-notice');
+      } catch (error) { /* 禁用浏览器存储时不显示跨刷新提示。 */ }
+    }
+  }
+
+  function repositoryActionsHtml() {
+    if (!(config.repoInfo && config.repoInfo.all)) return '';
+    return '<div class="folder-view-actions">'
+      + '<button type="button" data-repository-sync>手动同步并刷新仓库</button>'
+      + '<a href="html/md2web_config.html#repositories">新增 / 修改 / 管理仓库</a>'
+      + '<a href="html/md2web_config.html#repository-trash">仓库回收站</a></div>'
+      + '<p data-repository-status role="status" aria-live="polite"></p>';
+  }
+
+  function manageRepository(button, deleting) {
+    if (!requireLogin()) return;
+    if (!window.SiteAuth.isAdmin()) {
+      window.alert('仓库同步和删除需要管理员账号，请切换账号后重试。');
+      return;
+    }
+    var id = button.getAttribute('data-repository-delete');
+    if (deleting && !window.confirm('删除仓库 ' + id + '？配置和本地资料将移入仓库回收站，可恢复；SVN 远端和软链接目标不会删除。')) return;
+    button.disabled = true;
+    var status = document.querySelector('[data-repository-status]');
+    if (status) status.textContent = deleting ? '正在删除仓库…' : '正在同步并重建仓库导航和索引…';
+    api(deleting ? '__admin/repo-delete' : '__admin/sync', {
+      method: 'POST', body: JSON.stringify(deleting ? { id: id, mount: button.getAttribute('data-repository-mount') } : {})
+    }).then(function (payload) {
+      var message = deleting ? '仓库已移入回收站。' : '仓库目录和索引已刷新。';
+      (payload.results || []).forEach(function (item) {
+        message += ' ' + item.binding + '：' + (item.error || ('r' + item.revision
+          + ((item.conflicts || []).length ? '，草稿冲突 ' + item.conflicts.length + ' 个（未覆盖）' : '，同步完成'))) + '；';
+      });
+      if (!payload.rebuilt) {
+        if (status) status.textContent = message + ' 页面重建未完成，请检查服务端日志后重试。';
+        button.disabled = false;
+        return;
+      }
+      try { sessionStorage.setItem('md2web:repository-notice', message); } catch (error) { window.alert(message); }
+      window.location.reload();
+    }).catch(function (error) {
+      button.disabled = false;
+      if (status) status.textContent = '操作失败：' + error.message;
+    });
   }
 
   function isFolderRoute(route) {
@@ -639,6 +692,11 @@
     openMenu(event.clientX, event.clientY, path, isFolder);
   });
   document.addEventListener('click', function (event) {
+    var repositoryButton = event.target.closest ? event.target.closest('[data-repository-sync], [data-repository-delete]') : null;
+    if (repositoryButton) {
+      manageRepository(repositoryButton, repositoryButton.hasAttribute('data-repository-delete'));
+      return;
+    }
     var trigger = event.target.closest ? event.target.closest('[data-folder-action="menu"]') : null;
     if (trigger) {
       var path = trigger.getAttribute('data-path');
@@ -676,6 +734,7 @@
   }
   window.addEventListener('hashchange', function () { window.setTimeout(loadFolderView, 120); });
   window.FolderView = { isFolderRoute: isFolderRoute, reload: loadFolderView, pathFromElement: pathFromElement,
-                        groupDocuments: groupDocuments, emptyStateHtml: emptyStateHtml, createEntry: createEntry };
+                        groupDocuments: groupDocuments, emptyStateHtml: emptyStateHtml, createEntry: createEntry,
+                        repositoryActionsHtml: repositoryActionsHtml };
   window.setTimeout(loadFolderView, 200);
 }());
