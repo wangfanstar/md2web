@@ -3,7 +3,14 @@
 #   ./start_linux.sh                 后台启动（默认），日志写入 data/serve.log
 #   ./start_linux.sh --foreground    前台运行（Ctrl+C 停止）
 #   ./start_linux.sh --stop          停止后台实例（按 pidfile）
-#   ./start_linux.sh --restart       强制重启：先停本实例，再结束占用端口的进程后重新启动
+#   ./start_linux.sh --restart       强制重启：先更新代码（git pull --ff-only），
+#                                    再停本实例并结束占用端口的进程后重新启动
+#   ./start_linux.sh --update        启动前更新代码（git pull --ff-only）
+#   ./start_linux.sh --no-update     跳过代码更新（等价 MD2WEB_NO_UPDATE=1）
+#   ./start_linux.sh --rebuild       强制重新构建站点（setup_docsify.py）
+#   MD2WEB_GIT_PROXY=http://127.0.0.1:7890 ./start_linux.sh --restart   网络受限时走代理更新
+#   MD2WEB_GIT_TIMEOUT=120           git 操作超时秒数（默认 60，避免网络黑洞卡住启动）
+#   MD2WEB_UPDATE_ONLY=1 ./start_linux.sh --update   只更新代码，不启动服务
 #   端口被其它进程占用时：显示占用进程信息（PID/用户/命令），
 #   确认后强制结束；10 秒无操作自动强制结束；回答 n 取消启动
 #   ./start_linux.sh --status        查看运行状态（pid / 进程名 / 端口）
@@ -42,6 +49,15 @@ else
   done
 fi
 
+# 代码更新相关开关
+DO_UPDATE=0    # --update：启动前更新代码
+DO_REBUILD=0   # --rebuild：强制重建站点
+NO_UPDATE=0    # --no-update 或 MD2WEB_NO_UPDATE=1：跳过更新
+WANT_UPDATE=0  # --restart 默认更新代码
+case "${MD2WEB_NO_UPDATE:-0}" in
+  1|yes|true|on|YES|TRUE|ON) NO_UPDATE=1 ;;
+esac
+
 # 解析脚本自身的开关（其余参数原样透传给 serve.py）
 MODE="background"
 expect_value=0
@@ -63,6 +79,9 @@ while [ "$i" -lt "$n" ]; do
     --stop|stop) MODE="stop" ;;
     --restart|restart) MODE="restart" ;;
     --status|status) MODE="status" ;;
+    --update|update) DO_UPDATE=1 ;;
+    --no-update|no-update) NO_UPDATE=1 ;;
+    --rebuild|rebuild) DO_REBUILD=1 ;;
     --port|--pidfile|--bind|--config|--title|--svn-command)
       set -- "$@" "$arg"
       expect_value=1
@@ -254,6 +273,192 @@ read_pid() {
   fi
 }
 
+# git 统一走 timeout，避免网络黑洞让启动长时间挂起（没有 timeout 时直接执行）
+run_git() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${MD2WEB_GIT_TIMEOUT:-60}" git "$@"
+  else
+    git "$@"
+  fi
+}
+
+# 认证编辑依赖缺失检测 / 安装（离线包优先、非 root 优先用户级）
+has_auth_deps() {
+  "$PY" -c "import flask, waitress" >/dev/null 2>&1
+}
+
+# 按「离线包优先 → 联网」与「非 root 优先用户级」顺序安装 requirements
+pip_install_requirements() {
+  if [ "$(id -u 2>/dev/null || echo 0)" -eq 0 ]; then
+    first_flags=""
+    second_flags="--user"
+  else
+    first_flags="--user"
+    second_flags=""
+  fi
+  installed=0
+  if [ -d server/wheels ]; then
+    for flags in "$first_flags" "$second_flags"; do
+      # shellcheck disable=SC2086
+      if "$PY" -m pip install $flags --no-index --find-links server/wheels -r server/requirements.txt; then
+        installed=1
+        break
+      fi
+    done
+  fi
+  if [ "$installed" -ne 1 ]; then
+    for flags in "$first_flags" "$second_flags"; do
+      # shellcheck disable=SC2086
+      if "$PY" -m pip install $flags -r server/requirements.txt; then
+        installed=1
+        break
+      fi
+    done
+  fi
+  [ "$installed" -eq 1 ]
+}
+
+install_auth_deps() {
+  echo "[提示] 未安装认证编辑服务依赖，正在安装 ..."
+  if pip_install_requirements && has_auth_deps; then
+    return 0
+  fi
+  echo "[警告] 依赖仍不可用，将以只读预览模式启动（无法登录编辑）。" >&2
+  echo "        若提示 Permission denied：请改用有写权限的账号，或加 --user / sudo，例如：" >&2
+  echo "          $PY -m pip install --user --no-index --find-links server/wheels -r server/requirements.txt" >&2
+  echo "        老版本 pip 先升级：$PY -m pip install --user --upgrade 'pip<22'" >&2
+  return 1
+}
+
+SITE_REBUILT=0
+rebuild_site() {
+  if [ "$SITE_REBUILT" -eq 1 ]; then
+    return 0
+  fi
+  if [ ! -f setup_docsify.py ]; then
+    echo "[提示] 未找到 setup_docsify.py，跳过站点重建。" >&2
+    return 1
+  fi
+  echo "[提示] 正在重建站点（$PY setup_docsify.py）..."
+  if "$PY" setup_docsify.py; then
+    SITE_REBUILT=1
+    echo "[提示] 站点重建完成。"
+    return 0
+  fi
+  echo "[警告] 站点重建失败：继续使用现有生成物（页面可能不是最新）。" >&2
+  return 1
+}
+
+# 从远端更新代码：git pull --ff-only（可用 MD2WEB_GIT_PROXY 走代理）；
+# 更新到新提交后按需重建站点 / 补装依赖。返回 0=已最新或已更新，1=跳过或失败。
+update_code() {
+  if [ "$NO_UPDATE" -eq 1 ]; then
+    echo "[提示] 已跳过代码更新（--no-update / MD2WEB_NO_UPDATE=1）。"
+    return 1
+  fi
+  if ! command -v git >/dev/null 2>&1; then
+    echo "[警告] 未找到 git，跳过代码更新：继续使用当前工作区代码。" >&2
+    return 1
+  fi
+  if [ ! -e .git ]; then
+    echo "[提示] 当前目录不是 git 工作副本（无 .git），跳过代码更新。" >&2
+    echo "        若为拷贝/rsync 部署，请先在部署目录同步最新文件（或改用 git clone 部署）。" >&2
+    return 1
+  fi
+  old_head="$(git rev-parse HEAD 2>/dev/null || true)"
+  # 服务运行时会自动重建 docs/（生成物会变成与服务器配置一致），这些改动会阻止快进更新：
+  # 若本地改动全部在 docs/ 下，先还原为仓库版本；其它改动不动，交由用户处理。
+  reset_docs=0
+  dirty="$(git -c core.quotepath=false status --porcelain --untracked-files=no 2>/dev/null || true)"
+  if [ -n "$dirty" ]; then
+    only_docs=1
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      case "$(printf '%s' "$line" | cut -c4-)" in
+        docs/*) ;;
+        *) only_docs=0 ;;
+      esac
+    done <<EOF
+$dirty
+EOF
+    if [ "$only_docs" -eq 1 ]; then
+      echo "[提示] docs/ 下有本地生成物改动（服务运行时会自动重建），先还原为仓库版本再更新 ..."
+      if git checkout -- docs 2>/dev/null; then
+        reset_docs=1
+      else
+        echo "[警告] 还原 docs/ 失败，可能影响快进更新。" >&2
+      fi
+    else
+      echo "[警告] 工作区有 docs/ 之外的未提交改动：不自动还原，若快进失败请先 git stash 或提交。" >&2
+    fi
+  fi
+  proxy="${MD2WEB_GIT_PROXY:-}"
+  pull_status=0
+  if [ -n "$proxy" ]; then
+    echo "[提示] 正在更新代码（git pull --ff-only，代理 $proxy）..."
+    run_git -c "http.proxy=$proxy" -c "https.proxy=$proxy" pull --ff-only || pull_status=$?
+  else
+    echo "[提示] 正在更新代码（git pull --ff-only）..."
+    run_git pull --ff-only || pull_status=$?
+  fi
+  if [ "$pull_status" -ne 0 ]; then
+    echo "[警告] 代码更新失败：继续使用当前工作区代码（功能可能不是最新）。" >&2
+    dirty="$(git status --porcelain 2>/dev/null | head -n 5 || true)"
+    if [ -n "$dirty" ]; then
+      echo "        工作区有未提交改动，可能阻止了快进更新：" >&2
+      printf '%s\n' "$dirty" | sed 's/^/          /' >&2
+      echo "        可先 git stash（或提交/丢弃改动）后重试。" >&2
+    fi
+    echo "        网络受限（直连 github.com 被重置）时可设置代理后重试：" >&2
+    echo "          MD2WEB_GIT_PROXY=http://127.0.0.1:7890 ./start_linux.sh --restart" >&2
+    echo "        或先手动执行：git pull --ff-only" >&2
+    if [ "$reset_docs" -eq 1 ]; then
+      echo "[提示] 已还原 docs/ 生成物，先按本机配置重建站点 ..."
+      rebuild_site || true
+    fi
+    return 1
+  fi
+  new_head="$(git rev-parse HEAD 2>/dev/null || true)"
+  if [ -z "$new_head" ] || [ "$old_head" = "$new_head" ]; then
+    echo "[提示] 代码已是最新（HEAD $(printf '%.7s' "$new_head")）。"
+    if [ "$reset_docs" -eq 1 ]; then
+      echo "[提示] 已还原 docs/ 生成物，按本机配置重建站点 ..."
+      rebuild_site || true
+    fi
+    return 0
+  fi
+  echo "[提示] 代码已更新：$(printf '%.7s' "$old_head") → $(printf '%.7s' "$new_head")"
+  changed="$(git diff --name-only "$old_head" "$new_head" 2>/dev/null || true)"
+  # 依赖清单变化 → 重新安装（离线包优先）
+  case "$changed" in
+    *server/requirements.txt*)
+      echo "[提示] 依赖清单已变化，正在更新认证服务依赖 ..."
+      if pip_install_requirements && has_auth_deps; then
+        echo "[提示] 认证服务依赖已更新。"
+      else
+        install_auth_deps || true
+      fi
+      ;;
+  esac
+  # 生成物已随提交同步时无需重建；前端源码/构建脚本/源文档变化但生成物没变时需要重建
+  needs_rebuild=0
+  case "$changed" in
+    *web/*|*setup_docsify.py*|*docs/md/*) needs_rebuild=1 ;;
+  esac
+  case "$changed" in
+    *docs/lib/*|*docs/html/*) needs_rebuild=0 ;;
+  esac
+  if [ "$reset_docs" -eq 1 ]; then
+    needs_rebuild=1  # 还原过生成物：按本机配置重建，保证站点与服务器配置一致
+  fi
+  if [ "$needs_rebuild" -eq 1 ]; then
+    rebuild_site || true
+  else
+    echo "[提示] 生成物已随代码更新，无需重建站点。"
+  fi
+  return 0
+}
+
 # 启动前检查端口占用：打印占用进程信息并询问是否强制结束；
 # 10 秒无操作（或非交互式启动）自动强制结束；按 n 取消启动。
 confirm_port_conflict() {
@@ -358,6 +563,7 @@ case "$MODE" in
     validate_port "$target_port"
     echo "[提示] 检查端口 $target_port 占用情况..."
     kill_port_holder "$target_port" || true
+    WANT_UPDATE=1
     MODE="background"
     ;;
   stop)
@@ -406,6 +612,25 @@ if [ -z "$PY" ]; then
   exit 1
 fi
 
+# 代码更新：--restart 默认更新；--update 显式更新；--no-update / MD2WEB_NO_UPDATE=1 跳过。
+# 更新后再启动，保证重启拿到的就是仓库里的最新功能（前端生成物随提交同步）。
+if [ "$WANT_UPDATE" -eq 1 ] || [ "$DO_UPDATE" -eq 1 ]; then
+  update_code || true
+fi
+if [ "$DO_REBUILD" -eq 1 ]; then
+  rebuild_site || true
+fi
+
+# MD2WEB_UPDATE_ONLY=1：只更新代码（供部署脚本/测试调用），不启动服务
+if [ "$WANT_UPDATE" -eq 1 ] || [ "$DO_UPDATE" -eq 1 ]; then
+  case "${MD2WEB_UPDATE_ONLY:-0}" in
+    1|yes|true|on|YES|TRUE|ON)
+      echo "[提示] MD2WEB_UPDATE_ONLY=1：仅更新代码，不启动服务。"
+      exit 0
+      ;;
+  esac
+fi
+
 # 端口已被占用（非本项目实例）时：显示进程信息并确认，10 秒无操作自动强制结束
 case "$MODE" in
   background|foreground)
@@ -416,41 +641,8 @@ case "$MODE" in
 esac
 
 # 认证编辑依赖：缺失时自动安装
-if ! "$PY" -c "import flask, waitress" >/dev/null 2>&1; then
-  echo "[提示] 未安装认证编辑服务依赖，正在安装 ..."
-  # 非 root 时优先用户级安装（RHEL/CentOS 系统目录通常不可写）
-  if [ "$(id -u 2>/dev/null || echo 0)" -eq 0 ]; then
-    first_flags=""
-    second_flags="--user"
-  else
-    first_flags="--user"
-    second_flags=""
-  fi
-  installed=0
-  if [ -d server/wheels ]; then
-    for flags in "$first_flags" "$second_flags"; do
-      # shellcheck disable=SC2086
-      if "$PY" -m pip install $flags --no-index --find-links server/wheels -r server/requirements.txt; then
-        installed=1
-        break
-      fi
-    done
-  fi
-  if [ "$installed" -ne 1 ]; then
-    for flags in "$first_flags" "$second_flags"; do
-      # shellcheck disable=SC2086
-      if "$PY" -m pip install $flags -r server/requirements.txt; then
-        installed=1
-        break
-      fi
-    done
-  fi
-  if ! "$PY" -c "import flask, waitress" >/dev/null 2>&1; then
-    echo "[警告] 依赖仍不可用，将以只读预览模式启动（无法登录编辑）。" >&2
-    echo "        若提示 Permission denied：请改用有写权限的账号，或加 --user / sudo，例如：" >&2
-    echo "          $PY -m pip install --user --no-index --find-links server/wheels -r server/requirements.txt" >&2
-    echo "        老版本 pip 先升级：$PY -m pip install --user --upgrade 'pip<22'" >&2
-  fi
+if ! has_auth_deps; then
+  install_auth_deps || true
 fi
 
 # 默认监听所有网卡（局域网可访问）；仅本机使用请在命令行加 --bind 127.0.0.1

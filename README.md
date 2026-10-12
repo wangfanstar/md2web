@@ -125,7 +125,8 @@ python serve.py             # 打开 http://localhost:8882
 | 完整构建 | `python setup_docsify.py`（默认站点标题 `GT文档知识库`） |
 | 严格离线构建 | `python setup_docsify.py --offline`（缺依赖直接提示，绝不尝试下载） |
 | 自定义标题 | `python setup_docsify.py --title "我的文档"` |
-| 后台启动（Linux） | `./start_linux.sh` | 默认后台运行，日志 `data/serve.log`；端口被其它进程占用时会显示占用进程信息并询问是否强制结束（**单键 y/n 即可、无需回车**，10 秒无操作自动结束）；`--stop` 停止、`--restart` 强制重启（直接结束占用进程）、`--status` 查看状态、`--foreground` 前台运行 |
+| 后台启动（Linux） | `./start_linux.sh` | 默认后台运行，日志 `data/serve.log`；端口被其它进程占用时会显示占用进程信息并询问是否强制结束（**单键 y/n 即可、无需回车**，10 秒无操作自动结束）；`--stop` 停止、`--restart` 强制重启（**先 `git pull --ff-only` 更新代码**，再结束占用端口进程后启动）、`--status` 查看状态、`--foreground` 前台运行 |
+| 更新代码后启动（Linux） | `./start_linux.sh --update` | 启动前拉取最新代码；`--no-update`（或 `MD2WEB_NO_UPDATE=1`）跳过更新、`--rebuild` 强制重建站点、`MD2WEB_GIT_PROXY=http://127.0.0.1:7890` 走代理、`MD2WEB_UPDATE_ONLY=1` 只更新不启动（部署脚本用） |
 | 指定端口（Linux） | `./start_linux.sh --port 8891`（也可 `./start_linux.sh 8891`） | 端口留空时取配置 `server.port`，默认 8882；非数字或超出 1-65535 会直接报错 |
 | 仅刷新索引与离线数据 | `python setup_docsify.py --index-only` |
 | 预览 | `python serve.py`（`--port 8080`、`--bind 127.0.0.1`、`--no-browser`、`--no-build`） |
@@ -202,6 +203,7 @@ marked 12.0.2、DOMPurify 3.1.6、KaTeX 0.16.11 等组件。
 - **改了前端但界面没变**：构建会给 `lib/*.js|css` 加内容版本号，重新执行 `python setup_docsify.py` 后刷新即可；若仍异常请强制刷新（Ctrl+F5）或确认 `docs/html/index_all.html` 里的 `?v=` 已变化
 - **想彻底重建**：删除 `docs/` 中除 `md/` 外的生成文件后重新构建（依赖缺失时需要联网一次）
 - **启动报「端口 8882 已被占用」**：可能残留了未记录 pidfile 的旧实例；执行 `./start_linux.sh --restart` 会先停本实例、再结束占用该端口的进程后重新启动（其他用户的进程需 sudo，脚本会给出命令）
+- **Linux 重启后看不到刚推送的新功能**：`start_linux.sh` 只启动工作区代码，不会自动同步远端；`--restart` / `--update` 现在会先 `git pull --ff-only` 再启动。若更新失败（打印「代码更新失败」），常见原因是工作区有 `docs/` 之外的未提交改动、部署目录不是 git 工作副本，或直连 github.com 被重置——后者用 `MD2WEB_GIT_PROXY=http://127.0.0.1:7890 ./start_linux.sh --restart` 走代理，或先手动 `git pull --ff-only`；部署机若是 rsync/拷贝而非 `git clone`，请改用 git clone 部署或自行同步文件。`docs/` 下的生成物改动（服务自动重建产生）会先自动还原并在拉取后按本机配置重建，无需手工处理
 - **`./start_linux.sh: No such file or directory`**：多为脚本从 Windows 拷贝后带 CRLF（或缺少可执行位）。
   修复：`sed -i "s/\r$//" start_linux.sh && chmod +x start_linux.sh`（`git pull` 后一般已自动为 LF + 可执行）；
   也可直接 `sh start_linux.sh`（脚本会自动去 CR 后重执行）或 `python3 serve.py`

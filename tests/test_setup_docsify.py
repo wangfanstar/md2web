@@ -6,6 +6,7 @@ import io
 import json
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 import threading
@@ -27,6 +28,54 @@ def load_module(name, filename):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def find_posix_shell():
+    """返回可用的 POSIX shell（PATH 里的 sh/dash/bash，或 Git for Windows 自带的 sh.exe）。"""
+    for name in ("sh", "dash", "bash"):
+        found = shutil.which(name)
+        if found:
+            return found
+    candidates = []
+    git = shutil.which("git")
+    if git:
+        for parent in Path(git).resolve().parents:
+            candidates.append(parent / "usr" / "bin" / "sh.exe")
+            candidates.append(parent / "bin" / "sh.exe")
+            candidates.append(parent / "bin" / "bash.exe")
+    for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
+        if base:
+            candidates.append(Path(base) / "Git" / "usr" / "bin" / "sh.exe")
+            candidates.append(Path(base) / "Git" / "bin" / "bash.exe")
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def posix_shell_env(sh):
+    """Git for Windows 的 sh.exe 不会自带 coreutils：需把 MSYS 的 bin 目录放进 PATH。"""
+    env = dict(os.environ)
+    bins = [str(Path(sh).parent)]
+    for parent in Path(sh).resolve().parents:
+        for name in ("usr/bin", "mingw64/bin", "bin"):
+            candidate = parent / name
+            if (candidate / "dirname.exe").is_file():
+                bins.append(str(candidate))
+    env["PATH"] = os.pathsep.join(bins + [os.environ.get("PATH", "")])
+    return env
+
+
+def rmtree_safe(path):
+    """删除 git 工作副本：对象文件是只读的，Windows 上直接删会 PermissionError。"""
+    def onerror(func, target, exc_info):
+        try:
+            os.chmod(target, stat.S_IWRITE)
+            func(target)
+        except OSError:
+            pass
+
+    shutil.rmtree(str(path), onerror=onerror)
 
 
 class TempDirTestCase(unittest.TestCase):
@@ -970,6 +1019,206 @@ class LauncherScriptsTests(unittest.TestCase):
         self.assertIn("日志为空：$LOG_FILE", raw, "日志为空时应明确提示")
         self.assertIn("端口 $target_port 尚未监听", raw, "应区分“进程在但端口未监听”")
 
+    def test_start_linux_restart_updates_code(self):
+        """--restart 必须先拉取最新代码：否则重启后仍是旧代码（如「仓库删除」功能看不到）。"""
+        raw = (ROOT / "start_linux.sh").read_text(encoding="utf-8")
+        self.assertIn("git pull --ff-only", raw, "--restart 应先拉取最新代码")
+        self.assertIn("update_code", raw, "应有独立的代码更新逻辑")
+        self.assertIn("WANT_UPDATE=1", raw, "--restart 应默认触发代码更新")
+        self.assertIn("if [ \"$WANT_UPDATE\" -eq 1 ] || [ \"$DO_UPDATE\" -eq 1 ]", raw,
+                      "更新应在启动前执行")
+        # 更新相关开关（脚本自身消费，不透明给 serve.py）
+        for needle in ("--update|update)", "--no-update|no-update)", "--rebuild|rebuild)"):
+            self.assertIn(needle, raw, "start_linux.sh 缺少开关：" + needle)
+        # 可跳过更新 / 可走代理 / 超时保护 / 仅更新不启动
+        self.assertIn("--no-update", raw, "应支持跳过代码更新")
+        self.assertIn("MD2WEB_NO_UPDATE", raw, "应支持环境变量跳过更新")
+        self.assertIn("MD2WEB_GIT_PROXY", raw, "网络受限时应支持代理更新")
+        self.assertIn("MD2WEB_GIT_TIMEOUT", raw, "git 操作应带超时，避免启动挂起")
+        self.assertIn("MD2WEB_UPDATE_ONLY", raw, "应支持只更新代码不启动（部署/测试用）")
+        # 服务运行时会自动重建 docs/，这些生成物改动会让快进失败：应自动还原并重建
+        self.assertIn("git checkout -- docs", raw, "docs/ 下生成物的本地改动应先还原")
+        self.assertIn("core.quotepath=false", raw, "状态路径应带中文原样输出，便于前缀判断")
+        self.assertIn("reset_docs=1", raw)
+        self.assertIn("按本机配置重建站点", raw)
+        # 更新失败不能中断启动，且要给出可操作提示
+        self.assertIn("代码更新失败：继续使用当前工作区代码", raw)
+        self.assertIn("或先手动执行：git pull --ff-only", raw)
+        self.assertIn("rebuild_site", raw, "生成物未同步时应重建站点")
+
+    def test_start_linux_update_flags_are_script_only(self):
+        """--update/--no-update/--rebuild 是脚本开关，不能透传给 serve.py。"""
+        raw = (ROOT / "start_linux.sh").read_text(encoding="utf-8")
+        for flag in ("--update", "--no-update", "--rebuild"):
+            self.assertIn(flag + "|" + flag[2:] + ")", raw, "缺少开关分支：" + flag)
+            self.assertNotIn('set -- "$@" "%s"' % flag, raw,
+                             "脚本自身开关不应重新入队透传给 serve.py：" + flag)
+
+    def test_start_linux_shell_syntax(self):
+        """sh -n 语法校验（Git for Windows 的 usr/bin/sh.exe 也算）。"""
+        sh = find_posix_shell()
+        if not sh:
+            self.skipTest("未找到 POSIX sh")
+        result = subprocess.run([sh, "-n", str(ROOT / "start_linux.sh")],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                env=posix_shell_env(sh))
+        self.assertEqual(result.returncode, 0,
+                         "start_linux.sh 语法错误: " + result.stderr.decode("utf-8", "replace"))
+
+    def test_start_linux_update_pulls_latest_code(self):
+        """真实验证 --update：临时仓库里把远端新提交拉下来（restart 不再跑旧代码）。"""
+        sh = find_posix_shell()
+        if not sh or not shutil.which("git"):
+            self.skipTest("需要 POSIX sh 与 git")
+        tmp_path = Path(tempfile.mkdtemp(prefix="md2web-update-"))
+        try:
+            remote = tmp_path / "remote.git"
+            seed = tmp_path / "seed"
+            deploy = tmp_path / "deploy"
+            git = ["git", "-c", "user.email=test@example.com", "-c", "user.name=md2web",
+                   "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false"]
+
+            def run_git(args, cwd):
+                result = subprocess.run(git + args, cwd=str(cwd),
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.assertEqual(result.returncode, 0,
+                                 result.stderr.decode("utf-8", "replace"))
+                return result
+
+            run_git(["init", "--bare", str(remote)], tmp_path)
+            run_git(["clone", str(remote), str(seed)], tmp_path)
+            (seed / "VERSION.txt").write_text("v1\n", encoding="utf-8")
+            # 让 --update 走「生成物已随提交同步」分支：不需要真的构建
+            (seed / "docs" / "lib").mkdir(parents=True, exist_ok=True)
+            (seed / "docs" / "lib" / "app.js").write_text("v1\n", encoding="utf-8")
+            run_git(["add", "-A"], seed)
+            run_git(["commit", "-m", "v1"], seed)
+            run_git(["push", "origin", "HEAD"], seed)
+
+            run_git(["clone", str(remote), str(deploy)], tmp_path)
+            self.assertEqual((deploy / "VERSION.txt").read_text(encoding="utf-8"), "v1\n")
+
+            # 远端前进到 v2（模拟 Windows 端推送了新功能）
+            (seed / "VERSION.txt").write_text("v2\n", encoding="utf-8")
+            (seed / "docs" / "lib" / "app.js").write_text("v2\n", encoding="utf-8")
+            run_git(["add", "-A"], seed)
+            run_git(["commit", "-m", "v2"], seed)
+            run_git(["push", "origin", "HEAD"], seed)
+
+            shutil.copy2(ROOT / "start_linux.sh", deploy / "start_linux.sh")
+            env = posix_shell_env(sh)
+            env["MD2WEB_UPDATE_ONLY"] = "1"
+            env["PYTHON"] = sys.executable
+            result = subprocess.run([sh, "start_linux.sh", "--update"], cwd=str(deploy), env=env,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            output = (result.stdout + result.stderr).decode("utf-8", "replace")
+            self.assertEqual(result.returncode, 0, output)
+            self.assertIn("代码已更新", output)
+            self.assertEqual((deploy / "VERSION.txt").read_text(encoding="utf-8"), "v2\n",
+                             "restart 前必须先 git pull 到最新提交")
+            self.assertEqual((deploy / "docs" / "lib" / "app.js").read_text(encoding="utf-8"), "v2\n")
+        finally:
+            rmtree_safe(tmp_path)
+
+    def test_start_linux_update_restores_generated_docs(self):
+        """服务自动重建会让 docs/ 生成物变脏：--update 应先还原再快进，否则永远拉不下来。"""
+        sh = find_posix_shell()
+        if not sh or not shutil.which("git"):
+            self.skipTest("需要 POSIX sh 与 git")
+        tmp_path = Path(tempfile.mkdtemp(prefix="md2web-update-"))
+        try:
+            remote = tmp_path / "remote.git"
+            seed = tmp_path / "seed"
+            deploy = tmp_path / "deploy"
+            git = ["git", "-c", "user.email=test@example.com", "-c", "user.name=md2web",
+                   "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false"]
+
+            def run_git(args, cwd):
+                result = subprocess.run(git + args, cwd=str(cwd),
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.assertEqual(result.returncode, 0,
+                                 result.stderr.decode("utf-8", "replace"))
+                return result
+
+            run_git(["init", "--bare", str(remote)], tmp_path)
+            run_git(["clone", str(remote), str(seed)], tmp_path)
+            (seed / "VERSION.txt").write_text("v1\n", encoding="utf-8")
+            (seed / "docs" / "lib").mkdir(parents=True, exist_ok=True)
+            (seed / "docs" / "lib" / "app.js").write_text("v1\n", encoding="utf-8")
+            run_git(["add", "-A"], seed)
+            run_git(["commit", "-m", "v1"], seed)
+            run_git(["push", "origin", "HEAD"], seed)
+
+            run_git(["clone", str(remote), str(deploy)], tmp_path)
+            # 模拟服务器运行期间自动重建产生的生成物改动（会阻止 git pull --ff-only）
+            (deploy / "docs" / "lib" / "app.js").write_text("server-built\n", encoding="utf-8")
+
+            (seed / "VERSION.txt").write_text("v2\n", encoding="utf-8")
+            (seed / "docs" / "lib" / "app.js").write_text("v2\n", encoding="utf-8")
+            run_git(["add", "-A"], seed)
+            run_git(["commit", "-m", "v2"], seed)
+            run_git(["push", "origin", "HEAD"], seed)
+
+            shutil.copy2(ROOT / "start_linux.sh", deploy / "start_linux.sh")
+            env = posix_shell_env(sh)
+            env["MD2WEB_UPDATE_ONLY"] = "1"
+            env["PYTHON"] = sys.executable
+            result = subprocess.run([sh, "start_linux.sh", "--update"], cwd=str(deploy), env=env,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            output = (result.stdout + result.stderr).decode("utf-8", "replace")
+            self.assertEqual(result.returncode, 0, output)
+            self.assertIn("先还原为仓库版本", output)
+            self.assertIn("代码已更新", output)
+            self.assertEqual((deploy / "VERSION.txt").read_text(encoding="utf-8"), "v2\n")
+            self.assertEqual((deploy / "docs" / "lib" / "app.js").read_text(encoding="utf-8"), "v2\n",
+                             "生成物改动应被还原，快进更新不应失败")
+            status = subprocess.run(git + ["status", "--porcelain", "--untracked-files=no"],
+                                    cwd=str(deploy),
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertEqual(status.stdout.decode("utf-8", "replace").strip(), "",
+                             "更新后不应残留已跟踪文件的改动")
+        finally:
+            rmtree_safe(tmp_path)
+
+    def test_start_linux_update_skips_without_git_repo(self):
+        """非 git 工作区（拷贝/rsync 部署）应跳过更新并继续，而不是报错退出。"""
+        sh = find_posix_shell()
+        if not sh:
+            self.skipTest("未找到 POSIX sh")
+        tmp_path = Path(tempfile.mkdtemp(prefix="md2web-update-"))
+        try:
+            shutil.copy2(ROOT / "start_linux.sh", tmp_path / "start_linux.sh")
+            env = posix_shell_env(sh)
+            env["MD2WEB_UPDATE_ONLY"] = "1"
+            env["PYTHON"] = sys.executable
+            result = subprocess.run([sh, "start_linux.sh", "--update"], cwd=str(tmp_path), env=env,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            output = (result.stdout + result.stderr).decode("utf-8", "replace")
+            self.assertEqual(result.returncode, 0, output)
+            self.assertIn("不是 git 工作副本", output)
+        finally:
+            rmtree_safe(tmp_path)
+
+    def test_start_linux_no_update_flag_skips_pull(self):
+        """--no-update / MD2WEB_NO_UPDATE=1 时不触碰 git。"""
+        sh = find_posix_shell()
+        if not sh:
+            self.skipTest("未找到 POSIX sh")
+        tmp_path = Path(tempfile.mkdtemp(prefix="md2web-update-"))
+        try:
+            shutil.copy2(ROOT / "start_linux.sh", tmp_path / "start_linux.sh")
+            env = posix_shell_env(sh)
+            env["MD2WEB_UPDATE_ONLY"] = "1"
+            env["PYTHON"] = sys.executable
+            result = subprocess.run([sh, "start_linux.sh", "--update", "--no-update"],
+                                    cwd=str(tmp_path), env=env,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            output = (result.stdout + result.stderr).decode("utf-8", "replace")
+            self.assertEqual(result.returncode, 0, output)
+            self.assertIn("已跳过代码更新", output)
+        finally:
+            rmtree_safe(tmp_path)
+
     def test_launchers_default_to_lan_bind(self):
         linux = (ROOT / "start_linux.sh").read_text(encoding="utf-8")
         self.assertIn("--bind 0.0.0.0", linux, "start_linux.sh 默认应监听所有网卡")
@@ -1001,7 +1250,6 @@ class SourceDocumentsTests(unittest.TestCase):
         "docs/md/使用说明/绘图示例.md",
         "docs/md/硬件设计/时钟树设计.md",
         "docs/md/硬件设计/寄存器手册.md",
-        "docs/md/软件工具链/编译工具链.md",
         "docs/md/验证指南/仿真环境搭建.md",
     )
 
