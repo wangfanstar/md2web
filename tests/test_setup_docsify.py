@@ -485,6 +485,84 @@ class ServeTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_main_rebuilds_missing_homepage_before_starting(self):
+        serve = load_module("serve", "serve.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            docs = root / "docs"
+            (docs / "md").mkdir(parents=True)
+            (root / "setup_docsify.py").touch()
+            def build(**kwargs):
+                (docs / "index.html").write_text("<!doctype html><html>ready</html>")
+                return True
+            with mock.patch.object(serve, "ROOT", root), \
+                    mock.patch.object(serve, "rebuild", side_effect=build) as rebuild, \
+                    mock.patch.object(serve, "manage_instance"), \
+                    mock.patch.object(serve, "run_authenticated_service") as run, \
+                    redirect_stdout(io.StringIO()):
+                serve.main(["--dir", str(docs), "--pidfile", str(root / "serve.pid"), "--no-browser"])
+                self.assertTrue(rebuild.call_args[1]["allow_empty"])
+                run.assert_called_once()
+
+    def test_homepage_ready_requires_http_200_html(self):
+        serve = load_module("serve", "serve.py")
+        class Handler(http.server.BaseHTTPRequestHandler):
+            status = 503
+            def do_GET(self):
+                self.send_response(self.status)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(b"<!doctype html><html>ready</html>")
+            def log_message(self, *args):
+                pass
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.daemon = True
+        thread.start()
+        try:
+            port = server.server_address[1]
+            self.assertFalse(serve.homepage_ready("0.0.0.0", port))
+            Handler.status = 200
+            self.assertTrue(serve.homepage_ready("0.0.0.0", port))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def test_authenticated_restart_serves_homepage_over_http(self):
+        serve = load_module("serve", "serve.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            docs = root / "docs"
+            (docs / "md").mkdir(parents=True)
+            (docs / "index.html").write_text("<!doctype html><html>restart-home</html>")
+            # 独立端口/数据库，不停止开发者正在运行的服务。
+            import socket
+            with socket.socket() as sock:
+                sock.bind(("127.0.0.1", 0))
+                port = sock.getsockname()[1]
+            config = root / "config.json"
+            command = [sys.executable, "-u", str(ROOT / "serve.py"), "--dir", str(docs),
+                       "--config", str(config), "--pidfile", str(root / "serve.pid"),
+                       "--bind", "0.0.0.0", "--port", str(port), "--no-build", "--no-browser"]
+            for attempt in range(2):
+                with (root / "service.log").open("wb") as log:
+                    process = subprocess.Popen(command, stdout=log, stderr=log, cwd=str(ROOT))
+                    try:
+                        deadline = time.time() + 20
+                        while time.time() < deadline and process.poll() is None:
+                            if serve.homepage_ready("0.0.0.0", port):
+                                break
+                            time.sleep(0.1)
+                        self.assertTrue(serve.homepage_ready("0.0.0.0", port),
+                                        (root / "service.log").read_text(encoding="utf-8", errors="replace"))
+                        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                        with opener.open("http://127.0.0.1:%d/__auth/session" % port) as response:
+                            self.assertEqual(response.status, 200)
+                    finally:
+                        process.terminate()
+                        process.wait(timeout=10)
+
     def test_parse_args_no_build_flag(self):
         serve = load_module("serve", "serve.py")
         self.assertFalse(serve.parse_args([]).no_build)
@@ -1050,6 +1128,30 @@ class LauncherScriptsTests(unittest.TestCase):
         # 失败时给出诊断（进程/端口/日志）
         self.assertIn("日志为空：$LOG_FILE", raw, "日志为空时应明确提示")
         self.assertIn("端口 $target_port 尚未监听", raw, "应区分“进程在但端口未监听”")
+        self.assertIn('homepage_ready(sys.argv[1], int(sys.argv[2]))', raw)
+        self.assertNotIn('grep -q "认证编辑服务"', raw, "旧日志不能作为服务就绪的依据")
+        self.assertIn('>"$LOG_FILE" 2>&1 < /dev/null', raw)
+
+    def test_start_linux_port_uses_selected_config(self):
+        sh = find_posix_shell()
+        if not sh:
+            self.skipTest("没有 POSIX shell")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = root / "custom.json"
+            config.write_text('{"server": {"port": 19091}}')
+            raw = (ROOT / "start_linux.sh").read_text(encoding="utf-8")
+            prefix = raw[:raw.index('case "$MODE" in\n  restart)')]
+            script = root / "probe.sh"
+            script.write_bytes((prefix + '\nresolve_port "$@"\n').encode("utf-8"))
+            env = posix_shell_env(sh)
+            env["PYTHON"] = sys.executable
+            for args, expected in [(["--config", str(config)], b"19091"),
+                                   (["--config=" + str(config), "--port", "19092"], b"19092")]:
+                result = subprocess.run([sh, str(script)] + args, env=env,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), expected)
 
     def test_start_linux_restart_updates_code(self):
         """--restart 必须先拉取最新代码：否则重启后仍是旧代码（如「仓库删除」功能看不到）。"""

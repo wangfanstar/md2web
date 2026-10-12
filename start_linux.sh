@@ -127,11 +127,12 @@ resolve_port() {
     esac
     prev="$arg"
   done
-  if [ -z "$port" ] && [ -f config/server.local.json ] && [ -n "$PY" ]; then
-    port="$("$PY" - <<'PYEOF' 2>/dev/null || true
+  if [ -z "$port" ] && [ -f "$CONFIG_FILE" ] && [ -n "$PY" ]; then
+    port="$("$PY" - "$CONFIG_FILE" <<'PYEOF' 2>/dev/null || true
 import json
 from pathlib import Path
-path = Path("config/server.local.json")
+import sys
+path = Path(sys.argv[1])
 if path.is_file():
     try:
         print(json.loads(path.read_text(encoding="utf-8")).get("server", {}).get("port", ""))
@@ -676,6 +677,16 @@ done
 if [ "$has_bind" -eq 0 ]; then
   set -- "$@" --bind 0.0.0.0
 fi
+probe_bind="0.0.0.0"
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--bind" ]; then probe_bind="$arg"; fi
+  case "$arg" in --bind=*) probe_bind="${arg#--bind=}" ;; esac
+  prev="$arg"
+done
+
+# 将已解析的配置端口传给服务，依赖缺失回退只读预览时也保持同一访问地址。
+set -- "$@" --port "$target_port"
 
 if [ "$MODE" = "foreground" ]; then
   exec "$PY" serve.py "$@"
@@ -701,36 +712,37 @@ fi
 
 echo "[提示] 正在后台启动 md2web 服务（解释器 $PY）..."
 # -u：日志不缓冲，启动横幅立即写入，便于判断就绪与排障
-nohup "$PY" -u serve.py "$@" >>"$LOG_FILE" 2>&1 &
+if [ -f "$LOG_FILE" ]; then cp "$LOG_FILE" "$LOG_FILE.previous"; fi
+nohup "$PY" -u serve.py "$@" >"$LOG_FILE" 2>&1 < /dev/null &
 launcher_pid=$!
 
-# 等待服务就绪（最多约 20 秒）：pidfile 进程存活且端口已监听；
-# 没有 ss/lsof/fuser 时回退到日志关键字
+# 以本次进程存活且首页返回 HTTP 200 为准；首次构建允许更长初始化时间。
 ready=0
 waited=0
-while [ "$waited" -lt 20 ]; do
+while [ "$waited" -lt 120 ]; do
   sleep 1
   waited=$((waited + 1))
+  if ! is_alive "$launcher_pid"; then
+    break
+  fi
   pid="$(read_pid)"
   if [ -n "$pid" ] && is_alive "$pid"; then
-    if [ -n "$(port_holders "$target_port")" ]; then
-      ready=1
-      break
-    fi
-    if grep -q "认证编辑服务" "$LOG_FILE" 2>/dev/null || grep -q "预览目录" "$LOG_FILE" 2>/dev/null; then
+    if "$PY" -c 'import sys; from serve import homepage_ready; sys.exit(0 if homepage_ready(sys.argv[1], int(sys.argv[2])) else 1)' "$probe_bind" "$target_port"; then
       ready=1
       break
     fi
   fi
-  if ! is_alive "$launcher_pid"; then
-    break
+  if [ "$waited" -eq 20 ] || [ "$waited" -eq 60 ]; then
+    echo "[提示] 正在初始化，等待首页可访问；日志：$LOG_FILE"
   fi
 done
 
 pid="$(read_pid)"
 if [ "$ready" -eq 1 ] && [ -n "$pid" ] && is_alive "$pid"; then
-  echo "已启动（PID $pid，进程名 md2web-serve）"
+  echo "已启动（PID $pid，进程名 md2web-serve，index.html 已通过 HTTP 访问检查）"
   grep -E "认证编辑服务|预览目录|本机访问|局域网访问" "$LOG_FILE" 2>/dev/null | tail -n 4 || true
+  echo "访问首页请使用上述地址（包含 :$target_port 端口）或在地址后加 /index.html。"
+  echo "若本机可打开而其他电脑打不开，请检查服务器防火墙是否放行 $target_port/tcp。"
   echo "日志：$LOG_FILE"
   echo "停止：./start_linux.sh --stop    状态：./start_linux.sh --status"
   exit 0
@@ -739,7 +751,7 @@ fi
 echo "[错误] 服务未能在预期时间内就绪。" >&2
 if [ -n "$pid" ] && is_alive "$pid"; then
   if [ -n "$(port_holders "$target_port")" ]; then
-    echo "[提示] 进程 $pid 仍在运行且端口 $target_port 已监听：服务可能已启动，请刷新浏览器确认。" >&2
+    echo "[提示] 进程 $pid 仍在运行且端口 $target_port 已监听，但 index.html 尚未通过 HTTP 检查，请查看下面的本次启动日志。" >&2
   else
     echo "[提示] 进程 $pid 仍在运行，但端口 $target_port 尚未监听：仍在初始化或绑定失败。" >&2
     echo "       $(process_info "$pid")" >&2

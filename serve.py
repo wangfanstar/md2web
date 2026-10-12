@@ -586,6 +586,20 @@ def resolve_bind(cli_bind, config_bind=None):
     return value or "0.0.0.0"
 
 
+def homepage_ready(bind, port):
+    """直接请求首页，不使用代理或启动日志判断 HTTP 服务是否已就绪。"""
+    host = "127.0.0.1" if bind in ("", "0.0.0.0") else ("::1" if bind == "::" else bind)
+    if ":" in host and not host.startswith("["):
+        host = "[" + host + "]"
+    try:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open("http://%s:%s/index.html" % (host, port), timeout=1) as response:
+            body = response.read(1024).lower()
+            return response.getcode() == 200 and (b"<html" in body or b"<!doctype html" in body)
+    except (OSError, ValueError, urllib.error.URLError):
+        return False
+
+
 def _is_usable_ipv4(address):
     return bool(address) and not address.startswith("127.") and address != "0.0.0.0"
 
@@ -849,6 +863,12 @@ def main(argv=None):
                          + ".".join(str(v) for v in sys.version_info[:3]) + "）")
     args = parse_args(argv)
     directory = args.directory.expanduser().resolve()
+    if (not (directory / "index.html").is_file() and not args.no_build
+            and directory == (ROOT / "docs").resolve()
+            and (ROOT / "setup_docsify.py").is_file()):
+        print("首页缺失，正在自动重建站点...")
+        rebuild(allow_empty=True, config_path=None if args.preview else args.config,
+                reconcile=not args.preview)
     if not (directory / "index.html").exists():
         raise SystemExit(f"错误: {directory} 下没有 index.html，请先运行 python setup_docsify.py")
 
