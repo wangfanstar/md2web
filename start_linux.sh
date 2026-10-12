@@ -52,6 +52,7 @@ fi
 # 代码更新相关开关
 DO_UPDATE=0    # --update：启动前更新代码
 DO_REBUILD=0   # --rebuild：强制重建站点
+CONFIG_FILE="config/server.local.json"
 NO_UPDATE=0    # --no-update 或 MD2WEB_NO_UPDATE=1：跳过更新
 WANT_UPDATE=0  # --restart 默认更新代码
 case "${MD2WEB_NO_UPDATE:-0}" in
@@ -61,12 +62,14 @@ esac
 # 解析脚本自身的开关（其余参数原样透传给 serve.py）
 MODE="background"
 expect_value=0
+value_option=""
 n=$#
 i=0
 while [ "$i" -lt "$n" ]; do
   arg="$1"
   shift
   if [ "$expect_value" -eq 1 ]; then
+    if [ "$value_option" = "--config" ]; then CONFIG_FILE="$arg"; fi
     # 上一个参数需要取值（--port/--bind 等），原样保留
     set -- "$@" "$arg"
     expect_value=0
@@ -85,7 +88,9 @@ while [ "$i" -lt "$n" ]; do
     --port|--pidfile|--bind|--config|--title|--svn-command)
       set -- "$@" "$arg"
       expect_value=1
+      value_option="$arg"
       ;;
+    --config=*) CONFIG_FILE="${arg#--config=}"; set -- "$@" "$arg" ;;
     *)
       case "$arg" in
         ''|*[!0-9]*) set -- "$@" "$arg" ;;
@@ -340,7 +345,7 @@ rebuild_site() {
     return 1
   fi
   echo "[提示] 正在重建站点（$PY setup_docsify.py）..."
-  if "$PY" setup_docsify.py; then
+  if "$PY" setup_docsify.py --allow-empty --reconcile-config --config "$CONFIG_FILE"; then
     SITE_REBUILT=1
     echo "[提示] 站点重建完成。"
     return 0
@@ -367,7 +372,7 @@ update_code() {
   fi
   old_head="$(git rev-parse HEAD 2>/dev/null || true)"
   # 服务运行时会自动重建 docs/（生成物会变成与服务器配置一致），这些改动会阻止快进更新：
-  # 若本地改动全部在 docs/ 下，先还原为仓库版本；其它改动不动，交由用户处理。
+  # 仅允许还原生成物；docs/md 和参考网页等源资料的修改/删除必须保留。
   reset_docs=0
   dirty="$(git -c core.quotepath=false status --porcelain --untracked-files=no 2>/dev/null || true)"
   if [ -n "$dirty" ]; then
@@ -375,21 +380,37 @@ update_code() {
     while IFS= read -r line; do
       [ -n "$line" ] || continue
       case "$(printf '%s' "$line" | cut -c4-)" in
-        docs/*) ;;
+        docs/index.html|docs/lib/*|docs/html/ref/index_html.html) ;;
+        docs/html/images/*|docs/html/uploads/*|docs/html/ref/*) only_docs=0 ;;
+        docs/html/*) ;;
         *) only_docs=0 ;;
       esac
     done <<EOF
 $dirty
 EOF
     if [ "$only_docs" -eq 1 ]; then
-      echo "[提示] docs/ 下有本地生成物改动（服务运行时会自动重建），先还原为仓库版本再更新 ..."
-      if git checkout -- docs 2>/dev/null; then
+      echo "[提示] 本地改动仅涉及站点生成物，先还原生成物再更新代码 ..."
+      # 保留服务器原来的目录证据，避免更新生成物后丢失“已删除的 SVN 目录”信息。
+      mkdir -p data
+      if [ -f docs/lib/source-folders.json ]; then
+        cp docs/lib/source-folders.json data/source-folders-before-update.json
+      fi
+      if [ -f docs/html/search-index.json ]; then
+        cp docs/html/search-index.json data/search-index-before-update.json
+      fi
+      reset_failed=0
+      for generated_path in docs/index.html docs/lib docs/html; do
+        if git ls-files --error-unmatch "$generated_path" >/dev/null 2>&1; then
+          git checkout -- "$generated_path" 2>/dev/null || reset_failed=1
+        fi
+      done
+      if [ "$reset_failed" -eq 0 ]; then
         reset_docs=1
       else
         echo "[警告] 还原 docs/ 失败，可能影响快进更新。" >&2
       fi
     else
-      echo "[警告] 工作区有 docs/ 之外的未提交改动：不自动还原，若快进失败请先 git stash 或提交。" >&2
+      echo "[提示] 工作区有源资料或代码的修改/删除，保留这些改动；若快进失败请先提交或备份。" >&2
     fi
   fi
   proxy="${MD2WEB_GIT_PROXY:-}"

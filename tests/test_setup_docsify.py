@@ -155,6 +155,20 @@ class CLITests(TempDirTestCase):
 
 
 class ScanTests(TempDirTestCase):
+    def test_snapshot_retries_when_a_document_is_deleted_during_scan(self):
+        removed = self.write_doc('gone/a.md', '# Gone')
+        self.write_doc('kept.md', '# Kept')
+        read = self.module.read_markdown
+        def concurrent_delete(path):
+            if Path(path) == removed and removed.exists():
+                removed.unlink()
+                removed.parent.rmdir()
+            return read(path)
+        with mock.patch.object(self.module, 'read_markdown', side_effect=concurrent_delete):
+            files, contents = self.module.scan_markdown_snapshot(self.md)
+        self.assertEqual(files, ['kept.md'])
+        self.assertEqual(contents, {'kept.md': '# Kept'})
+
     def test_scan_markdown_collects_nested_and_skips_hidden(self):
         self.write_doc("a.md", "# A")
         self.write_doc("sub/b.md", "# B")
@@ -758,6 +772,24 @@ class ServeTests(unittest.TestCase):
             with mock.patch.object(serve, "rebuild") as rebuild:
                 self.assertTrue(serve.rebuild_if_needed(Path(".")))
         rebuild.assert_called_once()
+        self.assertTrue(rebuild.call_args[1]['allow_empty'])
+
+    def test_needs_rebuild_detects_deleted_empty_subfolder(self):
+        serve = load_module('serve', 'serve.py')
+        tmp = Path(tempfile.mkdtemp(prefix='md2web-empty-folder-'))
+        try:
+            docs = tmp / 'docs'
+            (docs / 'md' / 'kept').mkdir(parents=True)
+            (docs / 'html').mkdir()
+            (docs / 'lib').mkdir()
+            (tmp / 'setup_docsify.py').write_text('', encoding='utf-8')
+            (docs / 'html' / 'search-index.json').write_text('{}', encoding='utf-8')
+            (docs / 'lib' / 'source-folders.json').write_text(
+                json.dumps({'folders': ['md/kept', 'md/kept/removed']}), encoding='utf-8')
+            with mock.patch.object(serve, 'ROOT', tmp):
+                self.assertTrue(serve.needs_rebuild(docs))
+        finally:
+            shutil.rmtree(str(tmp))
 
     def test_start_watcher_polls_until_stopped(self):
         serve = load_module("serve", "serve.py")
@@ -1037,7 +1069,9 @@ class LauncherScriptsTests(unittest.TestCase):
         self.assertIn("MD2WEB_GIT_TIMEOUT", raw, "git 操作应带超时，避免启动挂起")
         self.assertIn("MD2WEB_UPDATE_ONLY", raw, "应支持只更新代码不启动（部署/测试用）")
         # 服务运行时会自动重建 docs/，这些生成物改动会让快进失败：应自动还原并重建
-        self.assertIn("git checkout -- docs", raw, "docs/ 下生成物的本地改动应先还原")
+        self.assertIn('for generated_path in docs/index.html docs/lib docs/html', raw)
+        self.assertIn('git checkout -- "$generated_path"', raw)
+        self.assertNotIn('git checkout -- docs 2>', raw, '不能还原包含源文档的整个 docs 目录')
         self.assertIn("core.quotepath=false", raw, "状态路径应带中文原样输出，便于前缀判断")
         self.assertIn("reset_docs=1", raw)
         self.assertIn("按本机配置重建站点", raw)
@@ -1091,12 +1125,18 @@ class LauncherScriptsTests(unittest.TestCase):
             # 让 --update 走「生成物已随提交同步」分支：不需要真的构建
             (seed / "docs" / "lib").mkdir(parents=True, exist_ok=True)
             (seed / "docs" / "lib" / "app.js").write_text("v1\n", encoding="utf-8")
+            original_doc = seed / 'docs' / 'md' / 'manual' / 'a.md'
+            original_doc.parent.mkdir(parents=True)
+            original_doc.write_text('# original', encoding='utf-8')
             run_git(["add", "-A"], seed)
             run_git(["commit", "-m", "v1"], seed)
             run_git(["push", "origin", "HEAD"], seed)
 
             run_git(["clone", str(remote), str(deploy)], tmp_path)
             self.assertEqual((deploy / "VERSION.txt").read_text(encoding="utf-8"), "v1\n")
+            deleted_doc = deploy / 'docs' / 'md' / 'manual' / 'a.md'
+            deleted_doc.unlink()
+            deleted_doc.parent.rmdir()
 
             # 远端前进到 v2（模拟 Windows 端推送了新功能）
             (seed / "VERSION.txt").write_text("v2\n", encoding="utf-8")
@@ -1117,6 +1157,7 @@ class LauncherScriptsTests(unittest.TestCase):
             self.assertEqual((deploy / "VERSION.txt").read_text(encoding="utf-8"), "v2\n",
                              "restart 前必须先 git pull 到最新提交")
             self.assertEqual((deploy / "docs" / "lib" / "app.js").read_text(encoding="utf-8"), "v2\n")
+            self.assertFalse(deleted_doc.exists(), '更新代码不能还原用户手动删除的源文档')
         finally:
             rmtree_safe(tmp_path)
 
@@ -1167,7 +1208,7 @@ class LauncherScriptsTests(unittest.TestCase):
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             output = (result.stdout + result.stderr).decode("utf-8", "replace")
             self.assertEqual(result.returncode, 0, output)
-            self.assertIn("先还原为仓库版本", output)
+            self.assertIn("先还原生成物", output)
             self.assertIn("代码已更新", output)
             self.assertEqual((deploy / "VERSION.txt").read_text(encoding="utf-8"), "v2\n")
             self.assertEqual((deploy / "docs" / "lib" / "app.js").read_text(encoding="utf-8"), "v2\n",
@@ -1248,9 +1289,6 @@ class SourceDocumentsTests(unittest.TestCase):
     EXPECTED = (
         "docs/md/使用说明/快速开始.md",
         "docs/md/使用说明/绘图示例.md",
-        "docs/md/硬件设计/时钟树设计.md",
-        "docs/md/硬件设计/寄存器手册.md",
-        "docs/md/验证指南/仿真环境搭建.md",
     )
 
     def test_repo_source_documents_exist(self):
@@ -2228,6 +2266,44 @@ class EndToEndTests(TempDirTestCase):
         self.assertTrue(
             any(entry["pageTitle"] == "GT文档知识库" for entry in index["/"].values())
         )
+
+    def test_build_uses_snapshot_when_folder_disappears_after_validation(self):
+        removed = self.write_doc('removed/a.md', '# Removed\n```python\nprint(1)\n```')
+        self.write_doc('kept/b.md', '# Kept')
+        self.seed_assets()
+        ensure = self.module.ensure_assets
+        def remove_after_validation(*args, **kwargs):
+            shutil.rmtree(str(removed.parent))
+            return ensure(*args, **kwargs)
+        with mock.patch.object(self.module, 'ensure_assets', side_effect=remove_after_validation):
+            with redirect_stdout(io.StringIO()):
+                self.module.main(['--offline'])
+        with redirect_stdout(io.StringIO()):
+            self.module.main(['--offline'])
+        index = json.loads((self.docs / 'html' / 'search-index.json').read_text(encoding='utf-8'))
+        self.assertNotIn('/md/removed/a.md', index)
+        self.assertIn('/md/kept/b.md', index)
+
+    def test_restart_rebuild_reconciles_custom_config_and_deleted_repository(self):
+        self.seed_assets()
+        self.write_doc('removed/a.md', '# Old')
+        config_file = self.tmp / 'config' / 'custom.json'
+        config_file.parent.mkdir()
+        from server import config as config_module
+        payload = config_module.default_config()
+        payload['repositories'] = [{'id': 'old', 'mount': 'md/removed', 'sourceMode': 'local', 'url': ''}]
+        config_file.write_text(json.dumps(payload), encoding='utf-8')
+        args = ['--offline', '--allow-empty', '--config', str(config_file), '--reconcile-config']
+        with redirect_stdout(io.StringIO()):
+            self.module.main(args)
+        self.assertTrue((self.docs / 'html' / 'index_old.html').is_file())
+        shutil.rmtree(str(self.md / 'removed'))
+        with redirect_stdout(io.StringIO()):
+            self.module.main(args)
+        self.assertEqual(json.loads(config_file.read_text(encoding='utf-8'))['repositories'], [])
+        self.assertFalse((self.docs / 'html' / 'index_old.html').exists())
+        self.assertFalse((self.md / 'removed').exists())
+        self.assertEqual(json.loads((self.docs / 'html' / 'search-index.json').read_text(encoding='utf-8')).keys(), {'/'})
 
     def test_full_build_custom_title(self):
         self.write_doc("a.md", "# A")

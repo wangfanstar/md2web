@@ -305,7 +305,7 @@ def ensure_secret_key(config, docs_dir):
     if not config.get("security", {}).get("generated"):
         return config
     try:
-        saved = save_config(config["path"], config_to_json(config), docs_dir)
+        saved = save_config(config["path"], config_to_json(config), docs_dir, create_mounts=False)
         saved["security"]["generated"] = False
         return saved
     except Exception as error:  # 配置只读等情况：本次运行仍可用，重启会重新生成
@@ -353,7 +353,7 @@ def config_to_json(config):
     return data
 
 
-def save_config(path, payload, docs_dir):
+def save_config(path, payload, docs_dir, create_mounts=True):
     """校验并原子写入配置文件，返回加载后的配置。
 
     载荷里没有 security.secretKey 时保留磁盘上的原值（网页端不应接触该密钥）。
@@ -383,7 +383,7 @@ def save_config(path, payload, docs_dir):
     try:
         with handle:
             handle.write(text)
-        loaded = load_config(tmp_path, docs_dir, allow_incomplete=True, create_mounts=True)
+        loaded = load_config(tmp_path, docs_dir, allow_incomplete=True, create_mounts=create_mounts)
         os.replace(tmp_path, config_path)
     except Exception:
         if tmp_path.exists():
@@ -394,6 +394,52 @@ def save_config(path, payload, docs_dir):
         raise
     loaded["path"] = config_path.resolve()
     return loaded
+
+
+def reconcile_deleted_folders(config, docs_dir):
+    """清理手动删除的目录映射；保留尚未拉取的 SVN 库和暂不可用的链接。"""
+    from . import folder_sources
+    docs = Path(docs_dir)
+    md = docs / 'md'
+    if not md.is_dir():
+        return {'changed': False, 'repositories': [], 'folderGroups': []}
+    list(md.iterdir())  # 根目录访问失败时不能误判为人为删除。
+    known = set()
+    for path, key in ((docs / 'lib' / 'source-folders.json', 'folders'),
+                      (docs / 'html' / 'search-index.json', None),
+                      (docs.parent / 'data' / 'source-folders-before-update.json', 'folders'),
+                      (docs.parent / 'data' / 'search-index-before-update.json', None)):
+        try:
+            data = json.loads(path.read_text(encoding='utf-8'))
+            if key:
+                known.update(item for item in data.get(key, []) if isinstance(item, str))
+            else:
+                known.update(route.lstrip('/') for route in data if route.startswith('/md/'))
+        except (OSError, ValueError, AttributeError):
+            pass
+    def missing(mount):
+        target = docs.joinpath(*mount.split('/'))
+        try:
+            target.lstat()
+            return False
+        except (FileNotFoundError, NotADirectoryError):
+            return not folder_sources.has_link_ancestor(md, mount)
+    removed = []
+    for repo in config.get('repositories', []):
+        mount = repo['mount']
+        existed = any(path == mount or path.startswith(mount + '/') for path in known)
+        if missing(mount) and (repo.get('source_mode') == 'local' or existed):
+            removed.append(mount)
+    groups = [mount for mount in config.get('folder_groups', {}) if missing(mount)]
+    if not removed and not groups:
+        return {'changed': False, 'repositories': [], 'folderGroups': []}
+    payload = config_to_json(config)
+    payload['repositories'] = [repo for repo in payload['repositories'] if repo['mount'] not in removed]
+    payload['folderGroups'] = {mount: group for mount, group in payload['folderGroups'].items() if mount not in groups}
+    loaded = save_config(config['path'], payload, docs_dir, create_mounts=False)
+    config.clear()
+    config.update(loaded)
+    return {'changed': True, 'repositories': removed, 'folderGroups': groups}
 
 
 def default_config():

@@ -396,6 +396,32 @@ class ConfigTests(ServerTestBase):
         server_config.save_config(path, payload, self.docs)
         self.assertTrue((self.docs / "md" / "new-repo").is_dir())
 
+    def test_reconcile_manual_folder_deletion_updates_config_without_recreating_mounts(self):
+        path = self.write_config({'repositories': [
+            {'id': 'local', 'mount': 'md/local', 'sourceMode': 'local', 'url': ''},
+            {'id': 'pending', 'mount': 'md/pending', 'url': 'https://svn.example.invalid/pending'}],
+            'folderGroups': {'md/local': 'old', 'md/kept/removed': 'old', 'md/kept': 'keep'}})
+        (self.docs / 'md' / 'kept').mkdir(parents=True)
+        config = server_config.load_config(path, self.docs)
+        report = server_config.reconcile_deleted_folders(config, self.docs)
+        self.assertTrue(report['changed'])
+        self.assertEqual([repo['id'] for repo in config['repositories']], ['pending'])
+        self.assertEqual(config['folder_groups'], {'md/kept': 'keep'})
+        self.assertFalse((self.docs / 'md' / 'pending').exists())
+        self.assertFalse((self.docs / 'md' / 'local').exists())
+        self.assertEqual(server_config.load_config(path, self.docs)['folder_groups'], {'md/kept': 'keep'})
+
+    def test_reconcile_removes_previously_indexed_svn_mount_but_keeps_unprovisioned_one(self):
+        path = self.write_config()
+        (self.docs / 'md').mkdir(parents=True, exist_ok=True)
+        (self.docs / 'html').mkdir()
+        (self.docs / 'html' / 'search-index.json').write_text(
+            json.dumps({'/md/硬件设计/old.md': {}}), encoding='utf-8')
+        config = server_config.load_config(path, self.docs)
+        report = server_config.reconcile_deleted_folders(config, self.docs)
+        self.assertEqual(report['repositories'], ['md/硬件设计'])
+        self.assertEqual([repo['id'] for repo in config['repositories']], ['verification'])
+
     def test_mount_without_md_prefix_is_normalized(self):
         path = self.write_config({"repositories": [
             {"id": "test", "mount": "test", "sourceMode": "local", "url": ""},

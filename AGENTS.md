@@ -211,6 +211,8 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 仓库删除/恢复由 `server/repositories.py` 和管理员接口 `POST /__admin/repo-delete|repo-restore` 管理，需登录管理员与 CSRF；本地目录（软链接仅链接本身）移入 `docs/md/.repository-trash/<id>/`，配置写入失败回滚目录移动，恢复不覆盖已有路径，活动草稿/未完成提交禁止删除。`GET /__admin/repo-trash` 供配置页恢复列表使用，隐藏回收站不进入构建或静态分发。
 - `index_all.html` 的“手动同步并刷新仓库”调用 `/__admin/sync`，忽略定时同步频率（含 0），保留草稿冲突检查，然后重建入口、导航和索引；自动同步仍按频率运行。网络同步不持数据库锁。
 - 仓库管理重建使用 `setup_docsify.py --allow-empty`，允许删除最后一个仓库后生成空站点；普通构建仍拒绝空源目录，任何模式都拒绝源目录缺失。
+- 启动/restart/自动监视重建使用 `--allow-empty --reconcile-config --config <实际配置文件>`；`server.config.reconcile_deleted_folders` 清理手动删除的本地仓库和旧索引/`docs/lib/source-folders.json` 证明存在过的 SVN 仓库、目录分组，保存配置时不得重建目录。未拉取的 SVN 库和仍存在的失效链接须保留。构建先抓取 Markdown 内容快照，后续语言扫描/索引/离线资源共用该快照，扫描中删除文件可重新扫描；非 UTF-8 和权限错误仍明确失败。
+- Linux 更新代码只还原确认属于生成物的改动；存在 `docs/md` 或参考网页等源资料修改/删除时不得执行整个 `docs/` 的 checkout。还原生成物前把旧目录/索引证据存入被忽略的 `data/*-before-update.json`，供启动清理配置使用。
 
 1. **用 Python 3.6.8 跑** `python -m unittest discover -s tests` 全绿（含 `tests/test_server.py`：配置、数据库、SVN 假 CLI、登录会话、静态白名单）；不再跑 3.12
 2. `node --test tests/test_search.js`、`node --test tests/test_packetdiag.js`、`node --test tests/test_ai_retrieval.js`、`node --test tests/test_text_find.js`、`node --test tests/test_folder_view.js` 全绿

@@ -16,11 +16,13 @@ from pathlib import Path
 from html.parser import HTMLParser
 from server import folder_sources
 from server import references as reference_tools
+from server import config as server_config
 
 ROOT = Path(__file__).parent
 DOCS_DIR = ROOT / "docs"
 LIB_DIR = DOCS_DIR / "lib"
 MD_DIR = DOCS_DIR / "md"
+CONFIG_PATH = None
 # 站点页面与数据统一放在 docs/html/，docs 根目录只保留总览 index.html
 HTML_DIR = DOCS_DIR / "html"
 # html/ 下页面用 <base href="../"> 让所有相对路径（含 API）都相对站点根解析
@@ -44,6 +46,8 @@ def parse_args(argv=None):
     parser.add_argument("--title", default=DEFAULT_TITLE, help="站点标题，默认「%s」" % DEFAULT_TITLE)
     parser.add_argument("--offline", action="store_true", help="严格离线构建：依赖缺失时提示，不尝试网络下载")
     parser.add_argument("--allow-empty", action="store_true", help="仓库管理重建时允许没有文档，生成空站点入口")
+    parser.add_argument('--config', help='按指定的认证服务配置生成仓库入口')
+    parser.add_argument('--reconcile-config', action='store_true', help='启动重建时清理手动删除的目录配置')
     parser.add_argument(
         "--index-only",
         "--refresh-index-only",
@@ -105,6 +109,18 @@ def read_markdown(path: Path) -> str:
 
 
 # ---- 离线资源（jsdelivr CDN）----
+def scan_markdown_snapshot(md_dir, allow_empty=False):
+    for attempt in range(3):
+        files = scan_markdown(md_dir, allow_empty=allow_empty)
+        try:
+            content = {rel: read_markdown(Path(md_dir) / rel) for rel in files}
+            return files, content
+        except BuildError as error:
+            if not isinstance(error.__cause__, (FileNotFoundError, NotADirectoryError)) or attempt == 2:
+                raise
+    raise BuildError('源目录持续变化，请稍后重新构建')
+
+
 ASSETS = {
     # Docsify 核心
     "docsify.min.js": "https://cdn.jsdelivr.net/npm/docsify@4.13.1/lib/docsify.min.js",
@@ -533,12 +549,12 @@ def extract_autoloader_maps():
         return dict(FALLBACK_PRISM_DEPS), dict(FALLBACK_PRISM_ALIASES)
 
 
-def collect_fence_languages(md_dir, md_files) -> set:
+def collect_fence_languages(md_dir, md_files, contents=None) -> set:
     """扫描 docs/md 下的 Markdown，收集代码围栏中出现的语言名。"""
     langs = set()
     fence_re = re.compile(r"^[ \t]*(?:`{3,}|~{3,})[ \t]*([A-Za-z0-9_+#.-]+)", re.M)
     for rel in md_files:
-        text = (Path(md_dir) / rel).read_text(encoding="utf-8", errors="ignore")
+        text = contents[rel] if contents is not None else (Path(md_dir) / rel).read_text(encoding="utf-8", errors="ignore")
         for match in fence_re.finditer(text):
             lang = match.group(1).lower()
             if lang in IGNORED_FENCE_LANGS or lang in PLAIN_FENCE_LANGS:
@@ -569,9 +585,9 @@ def resolve_prism_languages(fence_langs, deps, aliases):
     return resolved
 
 
-def ensure_prism_components(md_dir, md_files, offline=False) -> None:
+def ensure_prism_components(md_dir, md_files, offline=False, contents=None) -> None:
     """按文档实际用到的语言准备 Prism 组件，缺失才下载，失败仅警告。"""
-    fence_langs = collect_fence_languages(md_dir, md_files)
+    fence_langs = collect_fence_languages(md_dir, md_files, contents)
     if not fence_langs:
         print("  [跳过] 未发现代码块语言，无需语言组件")
         return
@@ -635,12 +651,16 @@ DOCSIFY_SLUG_STRIP_RE = re.compile(
 )
 
 
+def config_candidates():
+    return [CONFIG_PATH] if CONFIG_PATH else [ROOT / 'config' / 'server.local.json', ROOT / 'config' / 'server.example.json']
+
+
 def load_repositories():
     """读取 config/server.local.json 里的仓库映射（缺失时返回空列表）。
 
     返回 [{id, mount, url, group, read_only, allow_commit, sync_interval}]
     """
-    candidates = [ROOT / "config" / "server.local.json", ROOT / "config" / "server.example.json"]
+    candidates = config_candidates()
     for path in candidates:
         if not path.is_file():
             continue
@@ -772,7 +792,7 @@ def first_level_folders():
 
 def load_folder_groups():
     """读取 folderGroups（md/<文件夹> → 分组），供未配置 SVN 的文件夹也参与分组。"""
-    candidates = [ROOT / "config" / "server.local.json", ROOT / "config" / "server.example.json"]
+    candidates = config_candidates()
     for path in candidates:
         if not path.is_file():
             continue
@@ -965,7 +985,7 @@ def build_page_index(route_path: str, content: str, depth: int, page_title: str 
     return index
 
 
-def generate_search_index(md_files, title=DEFAULT_TITLE, depth=SEARCH_DEPTH, path=None, repos=None, include_readme=True, site=None):
+def generate_search_index(md_files, title=DEFAULT_TITLE, depth=SEARCH_DEPTH, path=None, repos=None, include_readme=True, site=None, contents=None):
     """在构建时生成 search-index.json，避免浏览器 localStorage 配额限制。"""
     index = {}
     readme = HTML_DIR / "README.md"
@@ -975,7 +995,7 @@ def generate_search_index(md_files, title=DEFAULT_TITLE, depth=SEARCH_DEPTH, pat
     for rel in md_files:
         route = f"/md/{rel}"
         index[route] = build_page_index(
-            route, read_markdown(MD_DIR / rel), depth, Path(rel).stem
+            route, contents[rel] if contents is not None else read_markdown(MD_DIR / rel), depth, Path(rel).stem
         )
         entry = index[route]
         if repos:
@@ -995,7 +1015,7 @@ def generate_search_index(md_files, title=DEFAULT_TITLE, depth=SEARCH_DEPTH, pat
 
 
 def generate_offline_data(md_files, path=None, search_index_path=None, sidebar="_sidebar.md", include_readme=True,
-                          homepage=None):
+                          homepage=None, contents=None):
     """内嵌 Markdown 和搜索索引，使 file:// 直接打开时绕过 XHR/fetch 限制。"""
     LIB_DIR.mkdir(parents=True, exist_ok=True)
     content = {}
@@ -1007,7 +1027,7 @@ def generate_offline_data(md_files, path=None, search_index_path=None, sidebar="
         if item.exists():
             content[name] = read_markdown(item)
     for rel in md_files:
-        content[f"md/{rel}"] = read_markdown(MD_DIR / rel)
+        content[f"md/{rel}"] = contents[rel] if contents is not None else read_markdown(MD_DIR / rel)
 
     search_index = {}
     index_path = Path(search_index_path) if search_index_path else (HTML_DIR / "search-index.json")
@@ -1909,7 +1929,9 @@ def generate_reference_pages():
 
 
 def main(argv=None):
+    global CONFIG_PATH
     args = parse_args(argv)
+    CONFIG_PATH = Path(args.config).resolve() if args.config else None
 
     print("=== Docsify 离线文档站 构建工具 ===\n")
     print(f"源文档目录: {display_path(MD_DIR)}")
@@ -1917,10 +1939,15 @@ def main(argv=None):
     print(f"站点标题: {args.title}\n")
 
     try:
-        md_files = scan_markdown(MD_DIR, allow_empty=args.allow_empty)
-        for rel in md_files:
-            read_markdown(MD_DIR / rel)
-    except (BuildError, OSError, UnicodeDecodeError) as error:
+        md_files, contents = scan_markdown_snapshot(MD_DIR, allow_empty=args.allow_empty)
+        if args.reconcile_config:
+            config_path = CONFIG_PATH or ROOT / 'config' / 'server.local.json'
+            if config_path.is_file():
+                config = server_config.load_config(config_path, DOCS_DIR, allow_incomplete=True)
+                report = server_config.reconcile_deleted_folders(config, DOCS_DIR)
+                if report['changed']:
+                    print('已清理删除目录的配置：' + '、'.join(report['repositories'] + report['folderGroups']))
+    except (BuildError, OSError, UnicodeDecodeError, server_config.ConfigError) as error:
         print(f"  错误: {error}")
         sys.exit(1)
 
@@ -1931,8 +1958,8 @@ def main(argv=None):
             print("=== 只刷新搜索索引与离线数据（不重新生成站点文件） ===\n")
             repos = load_all_repos()
             HTML_DIR.mkdir(parents=True, exist_ok=True)
-            generate_search_index(md_files, args.title, repos=repos)
-            generate_offline_data(md_files, sidebar=HTML_PREFIX + "_sidebar.md")
+            generate_search_index(md_files, args.title, repos=repos, contents=contents)
+            generate_offline_data(md_files, sidebar=HTML_PREFIX + "_sidebar.md", contents=contents)
             for repo in repos:
                 repo_files = files_for_mount(md_files, repo["mount"])
                 sidebar = f"_sidebar_{repo['id']}.md"
@@ -1940,7 +1967,8 @@ def main(argv=None):
                                       search_index_path=HTML_DIR / "search-index.json",
                                       sidebar=HTML_PREFIX + sidebar,
                                       include_readme=False,
-                                      homepage=(HTML_PREFIX + repo_home_name(repo["id"])) if not repo_files else None)
+                                      homepage=(HTML_PREFIX + repo_home_name(repo["id"])) if not repo_files else None,
+                                      contents=contents)
             print("\n=== 索引刷新完成 ===")
             return
 
@@ -1948,7 +1976,7 @@ def main(argv=None):
         ensure_assets(offline=args.offline)
         patch_docsify_file_router()
         patch_docsify_css()
-        ensure_prism_components(MD_DIR, md_files, offline=args.offline)
+        ensure_prism_components(MD_DIR, md_files, offline=args.offline, contents=contents)
         generate_custom_search_assets()
 
         print("2. 生成导航、首页、搜索索引...")
@@ -1958,8 +1986,8 @@ def main(argv=None):
         generate_sidebar(md_files, path=HTML_DIR / "_sidebar.md", link_first_level=True,
                          dir_paths=md_dirs)
         generate_readme(md_files, args.title, repos=repos, path=HTML_DIR / "README.md")
-        generate_search_index(md_files, args.title, repos=repos, path=HTML_DIR / "search-index.json")
-        generate_offline_data(md_files, sidebar=HTML_PREFIX + "_sidebar.md")
+        generate_search_index(md_files, args.title, repos=repos, path=HTML_DIR / "search-index.json", contents=contents)
+        generate_offline_data(md_files, sidebar=HTML_PREFIX + "_sidebar.md", contents=contents)
 
         print("3. 生成多仓库页面（每仓库一个入口 + 总览 + 配置页）...")
         cleanup_repo_artifacts(repos)
@@ -1981,7 +2009,7 @@ def main(argv=None):
             generate_offline_data(repo_files, path=LIB_DIR / f"offline-data_{repo['id']}.js",
                                   search_index_path=HTML_DIR / "search-index.json",
                                   sidebar=HTML_PREFIX + sidebar,
-                                  include_readme=False, homepage=empty_home)
+                                  include_readme=False, homepage=empty_home, contents=contents)
             if (MD_DIR / sub / "README.md").is_file():
                 homepage = f"md/{sub}/README.md"
             elif repo_files:
@@ -2002,6 +2030,8 @@ def main(argv=None):
         generate_feedback_page()
         generate_standalone_page("md2web_recycle.html", "md2web-recycle.js", "回收站")
         generate_reference_pages()
+        folders = ['md/' + path for path in scan_directories(MD_DIR)]
+        (LIB_DIR / 'source-folders.json').write_text(json.dumps({'folders': folders}, ensure_ascii=False), encoding='utf-8')
 
         print("\n=== 构建完成 ===")
         print("\n启动本地预览: python serve.py")

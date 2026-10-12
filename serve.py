@@ -25,6 +25,9 @@ import urllib.parse
 import urllib.request
 import webbrowser
 from pathlib import Path
+from server import folder_sources
+
+BUILD_LOCK = threading.RLock()
 
 from server.paths import is_blocked_static_path
 
@@ -219,7 +222,7 @@ def lan_ip():
         return None
 
 
-def needs_rebuild(directory):
+def needs_rebuild(directory, config_path=None):
     """判断默认 docs/ 目录是否需要重新构建。
 
     仅当脚本同级存在 setup_docsify.py、预览目录就是默认 docs/ 时生效。
@@ -238,15 +241,23 @@ def needs_rebuild(directory):
         return True
 
     current = set()
+    folders = set()
     newest_mtime = 0.0
-    for path in md_dir.rglob("*"):
+    for raw in folder_sources.walk_paths(md_dir):
+        path = Path(raw)
+        rel = path.relative_to(md_dir)
+        if path.is_dir() and not any(part in {'images', '附件', '回收站'} for part in rel.parts):
+            folders.add('md/' + rel.as_posix())
         if not path.is_file() or path.suffix.lower() != ".md":
             continue
         rel = path.relative_to(md_dir)
         if any(part.startswith(".") for part in rel.parts):
             continue
         current.add(f"/md/{rel.as_posix()}")
-        newest_mtime = max(newest_mtime, path.stat().st_mtime)
+        try:
+            newest_mtime = max(newest_mtime, path.stat().st_mtime)
+        except (FileNotFoundError, NotADirectoryError):
+            return True
 
     try:
         index = json.loads(index_path.read_text(encoding="utf-8"))
@@ -255,15 +266,31 @@ def needs_rebuild(directory):
     indexed = {key for key in index if key.startswith("/md/")}
     if current != indexed:
         return True
+    snapshot = docs_dir / 'lib' / 'source-folders.json'
+    if snapshot.exists():
+        try:
+            previous = json.loads(snapshot.read_text(encoding='utf-8'))
+            if folders != set(previous['folders']):
+                return True
+        except (OSError, ValueError, KeyError):
+            return True
+    if config_path and Path(config_path).is_file() and Path(config_path).stat().st_mtime > index_path.stat().st_mtime:
+        return True
     return newest_mtime > index_path.stat().st_mtime
 
 
-def rebuild(allow_empty=False):
+def rebuild(allow_empty=False, config_path=None, reconcile=False):
     """调用 setup_docsify.py 重新构建；失败时提示并继续使用现有产物。"""
     print("检测到 docs/md 有更新，正在重新构建...")
-    result = subprocess.run(
-        [sys.executable, str(ROOT / "setup_docsify.py")] + (["--allow-empty"] if allow_empty else []), cwd=str(ROOT)
-    )
+    command = [sys.executable, str(ROOT / 'setup_docsify.py')]
+    if allow_empty:
+        command.append('--allow-empty')
+    if config_path:
+        command.extend(['--config', str(config_path)])
+    if reconcile:
+        command.append('--reconcile-config')
+    with BUILD_LOCK:
+        result = subprocess.run(command, cwd=str(ROOT))
     if result.returncode != 0:
         print("警告: 重新构建失败，将使用现有产物预览。")
     else:
@@ -271,12 +298,13 @@ def rebuild(allow_empty=False):
     return result.returncode == 0
 
 
-def rebuild_if_needed(directory):
+def rebuild_if_needed(directory, config_path=None, before_build=None):
     """检测到 docs/md 变化时重建，返回是否执行了重建。"""
-    if not needs_rebuild(directory):
+    if not needs_rebuild(directory, config_path=config_path):
         return False
-    rebuild()
-    return True
+    if before_build:
+        before_build()
+    return rebuild(allow_empty=True, config_path=config_path, reconcile=bool(config_path)) is not False
 
 
 def site_backup_due(last_run, interval_seconds, now=None):
@@ -345,14 +373,17 @@ def start_document_recorder(auth_service, md_dir, interval=10.0):
     return stop_event
 
 
-def start_watcher(directory, interval=2.0):
+def start_watcher(directory, interval=2.0, config_path=None, before_build=None):
     """后台轮询 docs/md，有变化时自动重建；返回停止事件。"""
     stop_event = threading.Event()
 
     def run():
         while not stop_event.is_set():
             try:
-                rebuild_if_needed(directory)
+                if config_path or before_build:
+                    rebuild_if_needed(directory, config_path=config_path, before_build=before_build)
+                else:
+                    rebuild_if_needed(directory)
             except Exception as error:
                 print(f"警告: 自动重建检测失败: {error}")
             stop_event.wait(interval)
@@ -674,7 +705,8 @@ def run_authenticated_service(args, directory):
         from server import database
         from server.app import create_app
         from server.auth import AuthService
-        from server.config import ConfigError, default_config, ensure_secret_key, load_config, save_config
+        from server.config import ConfigError, default_config, ensure_secret_key, load_config, save_config, reconcile_deleted_folders
+        from server.content_lock import serialized
         from server.svn import SvnClient
         from waitress import serve as waitress_serve
     except (ModuleNotFoundError, ImportError) as error:
@@ -695,6 +727,9 @@ def run_authenticated_service(args, directory):
         print(f"已生成默认配置: {config_path}（SVN 认证路径与仓库映射可在网页「设置」中填写）")
     try:
         config = load_config(config_path, directory, allow_incomplete=True)
+        report = reconcile_deleted_folders(config, directory)
+        if report['changed']:
+            print('已清理手动删除目录的配置：' + '、'.join(report['repositories'] + report['folderGroups']))
         config = ensure_secret_key(config, directory)
     except ConfigError as error:
         raise SystemExit(f"错误: {error}")
@@ -728,13 +763,22 @@ def run_authenticated_service(args, directory):
     docs_dir = directory if (directory / "index.html").exists() else ROOT / "docs"
     rebuild_lock = threading.Lock()
 
+    @serialized
+    def reconcile_live_folders():
+        report = reconcile_deleted_folders(config, docs_dir)
+        if report['changed']:
+            auth_service.on_config_changed()
+            print('已清理手动删除目录的配置：' + '、'.join(report['repositories'] + report['folderGroups']))
+
+    @serialized
     def rebuild_sites():
         """配置变更后重建站点（多仓库入口页/总览页需要重新生成）。"""
         if not (ROOT / "setup_docsify.py").exists():
             return
         with rebuild_lock:
             try:
-                if rebuild(allow_empty=True) is False:
+                reconcile_live_folders()
+                if rebuild(allow_empty=True, config_path=config_path, reconcile=True) is False:
                     return False
                 print("配置已变更：站点已按新的仓库映射重建（含各仓库入口页与总览页）")
             except Exception as error:
@@ -746,8 +790,8 @@ def run_authenticated_service(args, directory):
     stop_watcher = None
     stop_recorder = None
     if not args.no_build and (ROOT / "setup_docsify.py").exists():
-        rebuild_if_needed(docs_dir)
-        stop_watcher = start_watcher(docs_dir)
+        rebuild_if_needed(docs_dir, config_path=config_path, before_build=reconcile_live_folders)
+        stop_watcher = start_watcher(docs_dir, config_path=config_path, before_build=reconcile_live_folders)
         print("已开启自动重建：docs/md 有变化时自动重建（每 2 秒检测）")
     try:
         stop_recorder = start_document_recorder(auth_service, docs_dir / "md")
