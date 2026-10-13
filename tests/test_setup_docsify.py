@@ -407,6 +407,17 @@ class AssetTests(TempDirTestCase):
 
 
 class ServeTests(unittest.TestCase):
+    def test_initialization_notice_waits_for_homepage(self):
+        serve = load_module("serve", "serve.py")
+        output = io.StringIO()
+        with mock.patch.object(serve, "homepage_ready", side_effect=[False, True]), redirect_stdout(output):
+            stop, thread = serve.start_readiness_notice("127.0.0.1", 8882, time.monotonic())
+            thread.join(timeout=4)
+            stop.set()
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(output.getvalue().count("[初始化完成]"), 1)
+        self.assertIn("index.html", output.getvalue())
+
     def test_server_serves_index(self):
         serve = load_module("serve", "serve.py")
         tmp = Path(tempfile.mkdtemp(prefix="md2web-serve-"))

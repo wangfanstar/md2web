@@ -600,6 +600,20 @@ def homepage_ready(bind, port):
         return False
 
 
+def start_readiness_notice(bind, port, started_at):
+    """在监听成功之后启动探测，首页真正响应时只输出一次完成日志。"""
+    stop = threading.Event()
+    def check():
+        while not stop.wait(0.5):
+            if homepage_ready(bind, port):
+                print("[初始化完成] %s 首页 index.html 已可访问，耗时 %.1f 秒。" %
+                      (time.strftime("%Y-%m-%d %H:%M:%S"), time.monotonic() - started_at), flush=True)
+                return
+    thread = threading.Thread(target=check, daemon=True)
+    thread.start()
+    return stop, thread
+
+
 def _is_usable_ipv4(address):
     return bool(address) and not address.startswith("127.") and address != "0.0.0.0"
 
@@ -722,7 +736,7 @@ def run_authenticated_service(args, directory):
         from server.config import ConfigError, default_config, ensure_secret_key, load_config, save_config, reconcile_deleted_folders
         from server.content_lock import serialized
         from server.svn import SvnClient
-        from waitress import serve as waitress_serve
+        from waitress import create_server as waitress_create_server
     except (ModuleNotFoundError, ImportError) as error:
         print("警告: 未安装认证编辑服务依赖（缺少 " + str(error.name) + "），已降级为只读预览。")
         print("  当前解释器: Python " + ".".join(str(v) for v in sys.version_info[:3]))
@@ -836,8 +850,14 @@ def run_authenticated_service(args, directory):
         timer = threading.Timer(0.5, webbrowser.open, args=(f"http://127.0.0.1:{port}",))
         timer.daemon = True
         timer.start()
+    http_server = None
+    stop_ready = None
     try:
-        waitress_serve(app, host=bind, port=port, threads=8)
+        print("[初始化中] 正在监听端口并检查首页，请等待“初始化完成”提示。", flush=True)
+        http_server = waitress_create_server(app, host=bind, port=port, threads=8)
+        stop_ready, _ = start_readiness_notice(bind, http_server.effective_port,
+                                              getattr(args, "started_at", time.monotonic()))
+        http_server.run()
     except KeyboardInterrupt:
         print("\n已停止")
     except OSError as error:
@@ -848,6 +868,10 @@ def run_authenticated_service(args, directory):
         else:
             print("错误: 无法在 " + bind + ":" + str(port) + " 启动服务: " + str(error))
     finally:
+        if stop_ready is not None:
+            stop_ready.set()
+        if http_server is not None:
+            http_server.close()
         if stop_watcher is not None:
             stop_watcher.set()
         if stop_recorder is not None:
@@ -862,6 +886,9 @@ def main(argv=None):
         raise SystemExit("错误: 需要 Python 3.6 及以上（当前 "
                          + ".".join(str(v) for v in sys.version_info[:3]) + "）")
     args = parse_args(argv)
+    args.started_at = time.monotonic()
+    print("[初始化开始] %s 正在准备配置、数据库及站点文件，完成前网页可能暂时无法访问，请稍候。" %
+          time.strftime("%Y-%m-%d %H:%M:%S"), flush=True)
     directory = args.directory.expanduser().resolve()
     if (not (directory / "index.html").is_file() and not args.no_build
             and directory == (ROOT / "docs").resolve()
@@ -902,11 +929,13 @@ def main(argv=None):
         timer = threading.Timer(0.5, webbrowser.open, args=(f"http://localhost:{port}",))
         timer.daemon = True
         timer.start()
+    stop_ready, _ = start_readiness_notice(bind, port, args.started_at)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n已停止")
     finally:
+        stop_ready.set()
         if stop_watcher is not None:
             stop_watcher.set()
         server.server_close()

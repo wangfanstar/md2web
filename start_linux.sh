@@ -635,6 +635,7 @@ if [ -z "$PY" ]; then
 fi
 
 # 代码更新：--restart 默认更新；--update 显式更新；--no-update / MD2WEB_NO_UPDATE=1 跳过。
+echo "[启动开始] $(date '+%Y-%m-%d %H:%M:%S') 正在准备启动，更新代码、安装依赖及构建可能需要几分钟，请等待初始化完成提示。"
 # 更新后再启动，保证重启拿到的就是仓库里的最新功能（前端生成物随提交同步）。
 if [ "$WANT_UPDATE" -eq 1 ] || [ "$DO_UPDATE" -eq 1 ]; then
   update_code || true
@@ -739,7 +740,7 @@ done
 
 pid="$(read_pid)"
 if [ "$ready" -eq 1 ] && [ -n "$pid" ] && is_alive "$pid"; then
-  echo "已启动（PID $pid，进程名 md2web-serve，index.html 已通过 HTTP 访问检查）"
+  echo "[初始化完成] $(date '+%Y-%m-%d %H:%M:%S') 已启动（PID $pid，进程名 md2web-serve，index.html 已通过 HTTP 访问检查）"
   grep -E "认证编辑服务|预览目录|本机访问|局域网访问" "$LOG_FILE" 2>/dev/null | tail -n 4 || true
   echo "访问首页请使用上述地址（包含 :$target_port 端口）或在地址后加 /index.html。"
   echo "若本机可打开而其他电脑打不开，请检查服务器防火墙是否放行 $target_port/tcp。"
