@@ -209,6 +209,8 @@
       return '';
     }
     var relative = clean.slice(best.mount.length).replace(/^\/+/, '');
+    // Docsify 阅读路由省略 .md，但 SVN 地址必须指向真实文件。
+    if (!/\.md$/i.test(relative)) relative += '.md';
     return best.url + '/' + relative.split('/').map(function (part) { return encodeURIComponent(part); }).join('/');
   }
 

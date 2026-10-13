@@ -30,3 +30,19 @@ test('SVN copy URL is empty for local repositories', () => {
   const api = loadWorkspace({}, [{ mount: 'md/硬件设计', url: '', sourceMode: 'local' }]);
   assert.equal(api.svnUrlForRoute('md/硬件设计/时钟树.md'), '');
 });
+
+test('SVN copy restores the md suffix omitted by Docsify and excludes section queries', () => {
+  const api = loadWorkspace({ mount: 'md/硬件设计', url: 'https://svn.example/docs/' });
+  for (const route of ['md/硬件设计/接口 说明.v2', '#/md/硬件设计/接口 说明.v2?id=章节', 'md/硬件设计/接口 说明.v2.md']) {
+    assert.equal(api.svnUrlForRoute(route), 'https://svn.example/docs/' + encodeURIComponent('接口 说明.v2.md'));
+  }
+});
+
+test('SVN copy retains longest repository mapping and does not invent a document at its root', () => {
+  const api = loadWorkspace({}, [
+    { mount: 'md/docs', url: 'https://svn.example/root/' },
+    { mount: 'md/docs/sub', url: 'https://svn.example/nested/' }
+  ]);
+  assert.equal(api.svnUrlForRoute('md/docs/sub/guide'), 'https://svn.example/nested/guide.md');
+  assert.equal(api.svnUrlForRoute('md/docs/sub'), '');
+});
