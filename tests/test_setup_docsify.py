@@ -2186,6 +2186,12 @@ class GenerationTests(TempDirTestCase):
         self.assertIn("[入门](/md/指南/入门.md)", sidebar)
         self.assertIn("[常见问题](/md/常见问题.md)", sidebar)
 
+    def test_sidebar_encodes_spaces_in_document_links(self):
+        files = ['指南 文档/接口 说明 (v2).md']
+        self.module.generate_sidebar(files)
+        sidebar = (self.module.HTML_DIR / '_sidebar.md').read_text(encoding='utf-8')
+        self.assertIn('[接口 说明 (v2)](/md/指南%20文档/接口%20说明%20%28v2%29.md)', sidebar)
+
     def test_readme_index(self):
         self.build_site()
         readme = (self.module.HTML_DIR / "README.md").read_text(encoding="utf-8")

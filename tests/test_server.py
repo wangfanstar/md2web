@@ -3289,6 +3289,17 @@ class FolderOpsTests(ServerTestBase):
         self.assertTrue(payload['rebuilt'])
         thread.assert_not_called()
 
+    def test_rename_document_with_spaces_can_be_read_and_renamed_again(self):
+        self.config['repositories'][0]['source_mode'] = 'local'
+        headers = {'X-CSRF-Token': self.csrf()}
+        original = 'md/硬件设计/时钟树设计.md'
+        for name in ('接口 说明 v1', '接口 说明 v2'):
+            response = self.client.post('/__md/rename', json={'path': original, 'name': name}, headers=headers)
+            self.assertEqual(response.status_code, 200, response.get_json())
+            original = response.get_json()['result']['path']
+            self.assertEqual(original, 'md/硬件设计/' + name + '.md')
+            self.assertEqual(self.client.get('/' + original.replace(' ', '%20')).status_code, 200)
+
     def test_create_folder_and_reject_bad_paths(self):
         for repository in self.config.get("repositories") or []:
             repository["source_mode"] = "local"

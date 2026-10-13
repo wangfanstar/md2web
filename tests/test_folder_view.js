@@ -224,7 +224,7 @@ test('folder links keep their exact directory path for rename', () => {
 });
 
 
-for (const active of ['old', 'other']) {
+for (const active of ['old', 'other', 'old name']) {
 test('sidebar rename preserves the entry page and reading route: ' + active, async () => {
   const events = {}, menuEvents = {}, requests = [], notices = [], urls = [];
   const menu = { style: {}, remove() {},
@@ -236,23 +236,23 @@ test('sidebar rename preserves the entry page and reading route: ' + active, asy
     body: { appendChild() {} } };
   const window = { $docsify: {}, location: { pathname: '/html/index_test.html', search: '?mode=read', hash: '#/md/test/' + active + '?id=section' },
     history: { replaceState: (state, title, url) => urls.push(url) }, innerWidth: 1000, innerHeight: 800,
-    addEventListener() {}, setTimeout() {}, prompt: () => 'new', alert: text => notices.push(text),
+    addEventListener() {}, setTimeout() {}, prompt: () => 'new name', alert: text => notices.push(text),
     SiteAuth: { isAuthenticated: () => true, csrfToken: () => 'csrf' } };
   loadFolderView({ window, document, fetch: async (url, options) => {
     requests.push({ url, payload: JSON.parse(options.body) });
-    return { ok: true, json: async () => ({ ok: true, rebuilt: true, result: { path: 'md/test/new.md' } }) };
+    return { ok: true, json: async () => ({ ok: true, rebuilt: true, result: { path: 'md/test/new name.md' } }) };
   } });
   events.contextmenu({ target: { getAttribute: () => null,
-    closest: selector => selector === 'a[href*="md/"]' ? fakeLink('#/md/test/old') : null },
+    closest: selector => selector === 'a[href*="md/"]' ? fakeLink('#/md/test/' + encodeURIComponent(active === 'other' ? 'old' : active)) : null },
     preventDefault() {}, clientX: 10, clientY: 10 });
   menuEvents.click({ target: { closest: () => ({ getAttribute: () => 'rename' }) } });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, '__md/rename');
-  assert.equal(requests[0].payload.path, 'md/test/old.md');
-  assert.equal(requests[0].payload.name, 'new');
+  assert.equal(requests[0].payload.path, 'md/test/' + (active === 'other' ? 'old' : active) + '.md');
+  assert.equal(requests[0].payload.name, 'new name');
   assert.ok(notices.some(text => text.includes('已重命名')));
-  if (active === 'old') assert.equal(urls[0], '/html/index_test.html?mode=read#/md/test/new.md?id=section');
+  if (active !== 'other') assert.equal(urls[0], '/html/index_test.html?mode=read#/md/test/new%20name.md?id=section');
   else assert.equal(urls.length, 0);
 });
 }

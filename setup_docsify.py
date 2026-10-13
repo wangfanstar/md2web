@@ -1065,6 +1065,12 @@ def build_doc_tree(rel_paths, dir_paths=()):
     return root
 
 
+def markdown_link_path(route):
+    """编码会破坏 Markdown 链接的路径字符，保留可读的中文与目录分隔符。"""
+    return re.sub(r'[\s()%?#\[\]<>"\\]',
+                  lambda match: urllib.parse.quote(match.group(0), safe=''), route)
+
+
 def render_doc_tree(node, route_prefix, indent, lines, link, preserve_folders=False, dir_link=None):
     """递归渲染；站点保留目录身份，默认保留旧调用的折叠行为。
 
@@ -1078,7 +1084,7 @@ def render_doc_tree(node, route_prefix, indent, lines, link, preserve_folders=Fa
             filename = child_files[0]
             lines.append(
                 f"{indent}- [{Path(filename).stem}]"
-                f"({link(route_prefix + '/' + name + '/' + filename)})"
+                f"({markdown_link_path(link(route_prefix + '/' + name + '/' + filename))})"
             )
             continue
         folder = (route_prefix + "/" + name).strip("/")
@@ -1098,7 +1104,7 @@ def render_doc_tree(node, route_prefix, indent, lines, link, preserve_folders=Fa
         render_doc_tree(child, route_prefix + "/" + name, indent + "  ", lines, link, preserve_folders)
     for filename in sorted(node["files"]):
         lines.append(
-            f"{indent}- [{html.escape(Path(filename).stem)}]({link(route_prefix + '/' + filename)})"
+            f"{indent}- [{html.escape(Path(filename).stem)}]({markdown_link_path(link(route_prefix + '/' + filename))})"
         )
 
 
