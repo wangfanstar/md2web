@@ -1164,7 +1164,10 @@ def repo_health(conn, svn_client, config, md_dir, binding, credential=None):
             result["revision"] = int(info.get("revision") or result["revision"])
         except SvnError as error:
             mapping = {
-                "auth_failed": ("认证失败", "SVN 账号或口令无效", ["设置该仓库的同步凭据（用户名/密码）", "确认 SVN 路径是否需要认证"]),
+                "auth_failed": ("认证失败" if username else "未提供同步凭据",
+                                "SVN 未接受账号 %s 的认证，请核对口令及该路径的访问权限" % username if username else "此次检查未取得可用的 SVN 账号密码",
+                                ["填写该仓库同步账号与密码并点击「保存凭据」", "确认账号有权访问当前 SVN 地址"]),
+                "permission_denied": ("无访问权限", "SVN 拒绝访问当前仓库路径", ["确认仓库 URL 正确", "请 SVN 管理员检查此账号对该路径的读取权限"]),
                 "unreachable": ("无法连接", "无法访问 SVN 服务器（网络或地址问题）", ["检查服务器地址与网络", "确认 VPN/防火墙"]),
                 "cert_error": ("证书错误", "SVN 服务器证书校验失败", ["在服务器上信任该证书或改用 https 正确证书"]),
                 "not_found_remote": ("路径不存在", "SVN 路径不存在或没有权限", ["确认仓库地址是否正确"]),

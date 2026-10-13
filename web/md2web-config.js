@@ -690,7 +690,8 @@
       setStatus('请填写 ' + label + ' 的同步账号与密码（保存后优先于默认凭据）。', true);
       return;
     }
-    api('__admin/repo-credential', {
+    setStatus('正在保存 ' + label + ' 的同步凭据并重新检查连接…');
+    return api('__admin/repo-credential', {
       method: 'POST',
       body: JSON.stringify({ id: repoId, username: username, password: password })
     }).then(function () {
@@ -699,7 +700,8 @@
         passwordInput.value = '';
       }
       updateCredentialStatus(entry);
-      setStatus('已保存 ' + label + ' 的同步凭据：' + username + '（优先于默认凭据）');
+      setStatus('已保存 ' + label + ' 的同步凭据：' + username + '，正在检查连接…');
+      return checkHealth(repoId, false);
     }).catch(function (error) {
       setStatus('保存同步凭据失败：' + error.message, true);
     });
@@ -1348,7 +1350,10 @@
         return;
       }
       if (action === 'health') {
-        checkHealth(targetId, false);
+        var healthEntry = pairOf(target);
+        var pendingPassword = healthEntry.detail.querySelector('[data-repo="credPassword"]');
+        if (pendingPassword && pendingPassword.value) saveRepoCredential(target);
+        else checkHealth(targetId, false);
       } else {
         repairRepo(targetId, action === 'recreate');
       }

@@ -27,6 +27,7 @@ DEFAULT_CREDENTIAL_ID = "__default__"
 ERROR_STATUS = {
     "invalid_request": 400,
     "auth_failed": 401,
+    "permission_denied": 403,
     "forbidden": 403,
     "disabled": 403,
     "not_configured": 503,

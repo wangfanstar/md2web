@@ -886,6 +886,10 @@ class DocumentsTests(ServerTestBase):
 
 
 class SvnTests(ServerTestBase):
+    def test_svn_permission_error_is_not_wrong_password(self):
+        self.assertEqual(server_svn.classify_error('svn: E170001: Authorization failed\nsvn: E175013: Access to repository forbidden'), 'permission_denied')
+        self.assertEqual(server_svn.classify_error('svn: E215004: No more credentials or we tried too many times'), 'auth_failed')
+
     def setUp(self):
         super().setUp()
         self.fake = self.tmp / "fake_svn.py"

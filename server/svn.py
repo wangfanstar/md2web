@@ -19,6 +19,7 @@ ERROR_MESSAGES = {
     "unsupported": "svn 客户端不支持该操作（请升级 svn 或改用受支持的参数）",
     "anonymous_allowed": "认证路径允许匿名访问，无法用于验证账号密码，请管理员改为强制认证路径",
     "auth_failed": "账号或密码错误",
+    "permission_denied": "SVN 拒绝访问该路径，请检查账号的仓库读取权限",
     "unreachable": "无法连接 SVN 服务",
     "cert_error": "SVN 服务证书校验失败",
     "timeout": "svn 命令超时",
@@ -47,6 +48,8 @@ class SvnError(Exception):
 
 def classify_error(stderr):
     text = str(stderr or "").lower()
+    if any(marker in text for marker in ('e175013', 'e220004', 'access to repository forbidden', 'access denied')):
+        return 'permission_denied'
     for marker in AUTH_FAILED_MARKERS:
         if marker in text:
             return "auth_failed"
