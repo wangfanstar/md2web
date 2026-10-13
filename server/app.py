@@ -538,7 +538,11 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             extra = dict(error.extra)
             code = extra.pop('code', 'entry_error')
             return json_error(error.status, code, error.message, **extra)
-        # 文件已成功持久化后立即响应；站点重建属于后台任务，不能阻塞编辑器保存确认。
+        # 重命名后页面立即刷新，必须等待导航重建，避免再次读到旧名称/路径。
+        if action == 'rename':
+            result['saved'] = True
+            return jsonify({'ok': True, 'result': result, 'rebuilt': rebuild_repository_pages()})
+        # 其他操作沿用后台重建。
         if on_config_changed is not None:
             def rebuild_after_publish():
                 try:

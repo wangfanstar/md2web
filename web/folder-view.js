@@ -579,7 +579,20 @@
         String(path || '').split('/').pop());
       if (!newName) return;
       mutate('__md/rename', { path: path, name: newName })
-        .then(function (payload) { reloadSoon(operationNotice('已重命名，请检查文档中的引用链接', payload.result)); })
+        .then(function (payload) {
+          var result = payload.result || {};
+          var route = currentRoute();
+          var oldPath = String(path).replace(/\.md$/i, '');
+          var normalizedRoute = route.replace(/\.md$/i, '');
+          if (result.path && (normalizedRoute === oldPath || (isFolder && route.indexOf(path + '/') === 0))) {
+            var nextPath = result.path + (isFolder ? route.slice(path.length) : '');
+            window.history.replaceState(null, '', '#/' + nextPath.split('/').map(encodeURIComponent).join('/'));
+          }
+          var message = payload.rebuilt === false
+            ? '文档已重命名，但导航重建失败，请稍后刷新或联系管理员检查服务日志。请勿重复重命名。'
+            : '已重命名并更新导航，请检查文档中的引用链接';
+          reloadSoon(operationNotice(message, result));
+        })
         .catch(function (error) { window.alert('重命名失败：' + error.message); });
       return;
     }

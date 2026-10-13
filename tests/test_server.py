@@ -3279,6 +3279,16 @@ class FolderOpsTests(ServerTestBase):
         self.assertFalse((self.docs / "md" / "硬件设计" / "接口说明.md").exists())
         self.assertTrue(Path(deleted["result"]["trash"]).is_dir())
 
+    def test_rename_rebuilds_navigation_before_response(self):
+        self.config['repositories'][0]['source_mode'] = 'local'
+        headers = {'X-CSRF-Token': self.csrf()}
+        with mock.patch('server.app.threading.Thread') as thread:
+            payload = self.client.post('/__md/rename',
+                json={'path': 'md/硬件设计/时钟树设计.md', 'name': '新名称'}, headers=headers).get_json()
+        self.assertTrue(payload['ok'], payload)
+        self.assertTrue(payload['rebuilt'])
+        thread.assert_not_called()
+
     def test_create_folder_and_reject_bad_paths(self):
         for repository in self.config.get("repositories") or []:
             repository["source_mode"] = "local"
