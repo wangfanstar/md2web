@@ -1302,7 +1302,11 @@ def generate_index_html(title=DEFAULT_TITLE, path=None, page_name="index.html", 
       subMaxLevel: 0,
       auto2top: true,
       noEmoji: true,
-      plugins: [function (hook) {{
+      plugins: [function (hook, vm) {{
+        window.MD2WEB_DOCSIFY = vm;
+        hook.doneEach(function () {{
+          if (window.MD2WEB_SYNC_SITE) window.MD2WEB_SYNC_SITE();
+        }});
         // Prism 无对应组件的语言（cuda/p4/asm 等）改用近似语法高亮，源 md 不受影响
         var langMap = {prism_lang_map_js};
         hook.beforeEach(function (content) {{

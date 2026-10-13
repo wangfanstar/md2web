@@ -4,7 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function loadSearch(pathname = '/html/index_all.html') {
+function loadSearch(pathname = '/html/index_all.html', overrides = {}) {
   const source = fs.readFileSync(path.join(__dirname, '..', 'web', 'custom-search.js'), 'utf8');
   const window = {
     __CUSTOM_SEARCH_TEST__: true,
@@ -13,9 +13,9 @@ function loadSearch(pathname = '/html/index_all.html') {
     addEventListener() {}
   };
   const document = { readyState: 'loading', addEventListener() {} };
-  const context = vm.createContext({ window, document, console, setTimeout, clearTimeout });
+  const context = vm.createContext({ window, document, console, setTimeout, clearTimeout, ...overrides });
   vm.runInContext(source, context, { filename: 'custom-search.js' });
-  return window.__CUSTOM_SEARCH_TEST_API__;
+  return (overrides.window || window).__CUSTOM_SEARCH_TEST_API__;
 }
 
 test('query parser supports phrases and exclusions', () => {
@@ -212,4 +212,44 @@ test('refreshing the search index retains entry pages for the current repository
     ['/md/硬件设计/a.md']
   );
   assert.equal(refreshed['/md/硬件设计/a.md'].site, 'html/index_硬件设计.html');
+});
+
+
+test('live refresh replaces renamed routes and reads the current repository sidebar', async () => {
+  const requests = [];
+  const latest = { '/md/repo/new.md': { title: 'new' } };
+  const api = loadSearch('/html/index_repo.html', {
+    window: {
+      __CUSTOM_SEARCH_TEST__: true,
+      location: { protocol: 'http:', pathname: '/html/index_repo.html', hash: '#/' },
+      $docsify: { alias: { '/_sidebar.md': 'html/_sidebar_repo.md' } },
+      addEventListener() {}
+    },
+    fetch: async (url, options) => {
+      requests.push(url);
+      assert.equal(options.cache, 'no-store');
+      return { ok: true, json: async () => latest, text: async () => '- [new](md/repo/new.md)' };
+    }
+  });
+  api.state.index = { '/md/repo/old.md': {} };
+  const result = await api.fetchLiveSnapshot();
+  assert.deepEqual(Object.keys(result.index), ['/md/repo/new.md']);
+  assert.equal(requests.length, 2);
+  assert.match(requests[1], /^html\/_sidebar_repo.md\?/);
+  assert.ok(requests.every(url => !url.includes('old.md')));
+});
+
+
+test('live sidebar renders the new filename and link without reloading the page', () => {
+  const rendered = [];
+  const api = loadSearch('/html/index_repo.html', { window: {
+    __CUSTOM_SEARCH_TEST__: true,
+    location: { protocol: 'http:', pathname: '/html/index_repo.html', hash: '#/' },
+    $docsify: {}, addEventListener() {},
+    MD2WEB_DOCSIFY: { _renderSidebar: text => rendered.push(text) }
+  } });
+  api.updateLiveSidebar({ sidebar: '- [old](md/repo/old.md)' });
+  api.updateLiveSidebar({ sidebar: '- [new](md/repo/new.md)' });
+  api.updateLiveSidebar({ sidebar: '- [new](md/repo/new.md)' });
+  assert.deepEqual(rendered, ['- [old](md/repo/old.md)', '- [new](md/repo/new.md)']);
 });

@@ -1205,6 +1205,46 @@
     syncRepoFilterUI();
   }
 
+  var liveSidebarText = null;
+  var liveSyncBusy = false;
+
+  function fetchLiveSnapshot() {
+    var aliases = (window.$docsify || {}).alias || {};
+    var sidebarPath = aliases['/_sidebar.md'] || 'html/_sidebar.md';
+    function read(path, json) {
+      return fetch(path + (path.indexOf('?') < 0 ? '?' : '&') + '_sync=' + Date.now(), { cache: 'no-store' })
+        .then(function (response) {
+          if (!response.ok) throw new Error('HTTP ' + response.status + ': ' + path);
+          return json ? response.json() : response.text();
+        });
+    }
+    return Promise.all([read(config.indexPath, true), read(sidebarPath.replace(/^\//, ''), false)])
+      .then(function (values) { return { index: values[0], sidebar: values[1] }; });
+  }
+
+  function updateLiveSidebar(snapshot) {
+    var vm = window.MD2WEB_DOCSIFY;
+    if (vm && snapshot.sidebar !== liveSidebarText) {
+      vm._renderSidebar(snapshot.sidebar);
+      liveSidebarText = snapshot.sidebar;
+    }
+  }
+
+  function syncLiveSnapshot() {
+    if (liveSyncBusy || document.hidden || window.location.protocol === 'file:') return;
+    liveSyncBusy = true;
+    return fetchLiveSnapshot().then(function (snapshot) {
+      updateLiveSidebar(snapshot);
+      if (JSON.stringify(snapshot.index) !== JSON.stringify(state.index)) applySearchIndex(snapshot.index);
+    }).catch(function () { /* 自动检查失败保留当前页面，手动更新时显示具体错误。 */ })
+      .then(function () { liveSyncBusy = false; });
+  }
+
+  window.MD2WEB_SYNC_SITE = function () {
+    liveSidebarText = null;
+    return syncLiveSnapshot();
+  };
+
   function refreshSearchIndex(sourceView) {
     var sidebarButton = state.sidebar && state.sidebar.refreshButton;
     var dialogButton = state.dialog && state.dialog.refreshButton;
@@ -1218,21 +1258,9 @@
     if (window.location.protocol === 'file:' && offlineData && offlineData.content) {
       promise = Promise.resolve(buildSearchIndex(offlineData.content, routes));
     } else {
-      var contents = {};
-      promise = Promise.all(routes.map(function (route) {
-        var resource = routeToResource(route);
-        return fetch(resource, { cache: 'no-cache' })
-          .then(function (response) {
-            if (!response.ok) {
-              throw new Error('HTTP ' + response.status + ': ' + resource);
-            }
-            return response.text();
-          })
-          .then(function (text) {
-            contents[resource] = text;
-          });
-      })).then(function () {
-        return buildSearchIndex(contents, routes);
+      promise = fetchLiveSnapshot().then(function (snapshot) {
+        updateLiveSidebar(snapshot);
+        return snapshot.index;
       });
     }
 
@@ -2814,12 +2842,19 @@
       bindGlobalShortcuts();
       observePageContent();
       loadIndex();
+      if (window.location.protocol !== 'file:') {
+        syncLiveSnapshot();
+        window.setInterval(syncLiveSnapshot, 3000);
+        window.addEventListener('focus', syncLiveSnapshot);
+      }
       renderAll();
     });
   }
 
   if (window.__CUSTOM_SEARCH_TEST__) {
     window.__CUSTOM_SEARCH_TEST_API__ = {
+      fetchLiveSnapshot: fetchLiveSnapshot,
+      updateLiveSidebar: updateLiveSidebar,
       parseQuery: parseQuery,
       buildSearchPage: buildSearchPage,
       flattenIndex: flattenIndex,
