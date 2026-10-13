@@ -87,7 +87,7 @@ test('document links resolve to the document path', () => {
     getAttribute: () => null,
     closest: (selector) => (selector === 'a[href*="md/"]' ? fakeLink('#/md/使用说明/快速开始') : null)
   };
-  assert.equal(view.pathFromElement(node), 'md/使用说明/快速开始');
+  assert.equal(view.pathFromElement(node), 'md/使用说明/快速开始.md');
 });
 
 test('group labels resolve through data-folder instead of the first child document', () => {
@@ -197,4 +197,58 @@ test('groupDocuments keeps documents without group info', () => {
   assert.equal(sections.length, 1);
   assert.equal(sections[0].group, '');
   assert.equal(sections[0].folder, 'md/其他');
+});
+
+
+test('sidebar document routes restore markdown suffix including encoded dotted filenames', () => {
+  const view = loadFolderView();
+  for (const href of ['#/md/test/spec.v2', '#/md/test/spec.v2.md', '#/md/test/spec.v2?id=title']) {
+    const node = { getAttribute: () => null, closest: selector =>
+      selector === 'a[href*="md/"]' ? fakeLink(href) : null };
+    assert.equal(view.pathFromElement(node), 'md/test/spec.v2.md');
+  }
+  const node = { getAttribute: () => null, closest: selector =>
+    selector === 'a[href*="md/"]' ? fakeLink('#/md/test/%E6%96%87%E6%A1%A3') : null };
+  assert.equal(view.pathFromElement(node), 'md/test/文档.md');
+});
+
+test('folder links keep their exact directory path for rename', () => {
+  const view = loadFolderView();
+  const node = { getAttribute: () => null, closest: selector =>
+    selector === 'a[href*="md/"]' ? fakeLink('#/md/test/folder/') : null };
+  assert.equal(view.pathFromElement(node), 'md/test/folder');
+  const group = { getAttribute: () => 'md/test/folder' };
+  const groupedNode = { getAttribute: () => null, closest: selector =>
+    selector === '[data-folder]' ? group : selector === 'a[href*="md/"]' ? fakeLink('#/md/test/folder') : null };
+  assert.equal(view.pathFromElement(groupedNode), 'md/test/folder');
+});
+
+
+test('sidebar context-menu rename sends the real markdown file path', async () => {
+  const events = {}, menuEvents = {}, requests = [], notices = [];
+  const menu = { style: {}, remove() {},
+    getBoundingClientRect: () => ({ width: 100, height: 100 }),
+    addEventListener: (type, callback) => { menuEvents[type] = callback; } };
+  const document = { readyState: 'loading',
+    addEventListener: (type, callback) => { events[type] = callback; },
+    createElement: () => menu,
+    body: { appendChild() {} } };
+  const window = { $docsify: {}, location: { hash: '#/md/test/old' },
+    history: { replaceState() {} }, innerWidth: 1000, innerHeight: 800,
+    addEventListener() {}, setTimeout() {}, prompt: () => 'new', alert: text => notices.push(text),
+    SiteAuth: { isAuthenticated: () => true, csrfToken: () => 'csrf' } };
+  loadFolderView({ window, document, fetch: async (url, options) => {
+    requests.push({ url, payload: JSON.parse(options.body) });
+    return { ok: true, json: async () => ({ ok: true, rebuilt: true, result: { path: 'md/test/new.md' } }) };
+  } });
+  events.contextmenu({ target: { getAttribute: () => null,
+    closest: selector => selector === 'a[href*="md/"]' ? fakeLink('#/md/test/old') : null },
+    preventDefault() {}, clientX: 10, clientY: 10 });
+  menuEvents.click({ target: { closest: () => ({ getAttribute: () => 'rename' }) } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '__md/rename');
+  assert.equal(requests[0].payload.path, 'md/test/old.md');
+  assert.equal(requests[0].payload.name, 'new');
+  assert.ok(notices.some(text => text.includes('已重命名')));
 });

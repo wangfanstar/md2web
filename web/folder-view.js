@@ -663,21 +663,23 @@
   }
 
   function pathFromElement(node) {
+    // 显式目录身份优先，目录名称可以包含点，不能按扩展名猜测。
+    var group = node.closest ? node.closest('[data-folder]') : null;
+    if (group) return group.getAttribute('data-folder') || null;
     var link = node.closest ? node.closest('a[href*="md/"]') : null;
     var raw = link ? (link.getAttribute('href') || '') : (node.getAttribute('data-path') || '');
     raw = raw.replace(/^#/, '');
     var hashIndex = raw.indexOf('md/');
     if (hashIndex !== -1) {
-      var path = raw.slice(hashIndex).split('?')[0].replace(/\/$/, '');
+      var route = raw.slice(hashIndex).split('?')[0];
+      var folderLink = /\/$/.test(route);
+      var path = route.replace(/\/$/, '');
       try {
         path = decodeURIComponent(path);
       } catch (error) { /* 保留原值 */ }
+      // Docsify 阅读路由省略 .md；写操作必须使用服务器上的实际文件名。
+      if (link && !folderLink && !/\.md$/i.test(path)) path += '.md';
       return path || null;
-    }
-    // 分组节点（所有文档 / 仓库分组 / 子文件夹分组）：生成侧栏时写入 data-folder，精确指向该目录
-    var group = node.closest ? node.closest('[data-folder]') : null;
-    if (group) {
-      return group.getAttribute('data-folder') || null;
     }
     // 兜底（旧产物没有 data-folder）：用分组下第一个文档链接推导所属目录
     var sidebarItem = node.closest ? node.closest('.sidebar-nav li') : null;
