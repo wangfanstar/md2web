@@ -553,9 +553,11 @@ class ServeTests(unittest.TestCase):
                 sock.bind(("127.0.0.1", 0))
                 port = sock.getsockname()[1]
             config = root / "config.json"
-            command = [sys.executable, "-u", str(ROOT / "serve.py"), "--dir", str(docs),
+            # 重建故意耗时 30 秒，HTTP 必须在它完成前就绪。
+            runner = "import serve,time; serve.rebuild_if_needed=lambda *a,**k: time.sleep(30); serve.main()"
+            command = [sys.executable, "-u", "-c", runner, "--dir", str(docs),
                        "--config", str(config), "--pidfile", str(root / "serve.pid"),
-                       "--bind", "0.0.0.0", "--port", str(port), "--no-build", "--no-browser"]
+                       "--bind", "0.0.0.0", "--port", str(port), "--no-browser"]
             for attempt in range(2):
                 with (root / "service.log").open("wb") as log:
                     process = subprocess.Popen(command, stdout=log, stderr=log, cwd=str(ROOT))
@@ -862,6 +864,16 @@ class ServeTests(unittest.TestCase):
                 self.assertTrue(serve.rebuild_if_needed(Path(".")))
         rebuild.assert_called_once()
         self.assertTrue(rebuild.call_args[1]['allow_empty'])
+
+    def test_service_rebuild_is_offline_unbuffered_and_bounded(self):
+        serve = load_module('serve', 'serve.py')
+        with mock.patch.object(serve.subprocess, 'run', side_effect=subprocess.TimeoutExpired('build', 300)) as run:
+            with redirect_stdout(io.StringIO()):
+                self.assertFalse(serve.rebuild())
+        command = run.call_args[0][0]
+        self.assertIn('--offline', command)
+        self.assertIn('-u', command)
+        self.assertEqual(run.call_args[1]['timeout'], 300)
 
     def test_needs_rebuild_detects_deleted_empty_subfolder(self):
         serve = load_module('serve', 'serve.py')

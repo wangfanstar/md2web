@@ -281,8 +281,8 @@ def needs_rebuild(directory, config_path=None):
 
 def rebuild(allow_empty=False, config_path=None, reconcile=False):
     """调用 setup_docsify.py 重新构建；失败时提示并继续使用现有产物。"""
-    print("检测到 docs/md 有更新，正在重新构建...")
-    command = [sys.executable, str(ROOT / 'setup_docsify.py')]
+    print("[站点重建] 检测到 docs/md 有更新，正在离线构建，详细进度如下。", flush=True)
+    command = [sys.executable, '-u', str(ROOT / 'setup_docsify.py'), '--offline']
     if allow_empty:
         command.append('--allow-empty')
     if config_path:
@@ -290,11 +290,15 @@ def rebuild(allow_empty=False, config_path=None, reconcile=False):
     if reconcile:
         command.append('--reconcile-config')
     with BUILD_LOCK:
-        result = subprocess.run(command, cwd=str(ROOT))
+        try:
+            result = subprocess.run(command, cwd=str(ROOT), timeout=300)
+        except subprocess.TimeoutExpired:
+            print("[重建失败] 超过 300 秒已停止构建，HTTP 服务继续运行。请检查文档目录/软链接是否可访问。", flush=True)
+            return False
     if result.returncode != 0:
-        print("警告: 重新构建失败，将使用现有产物预览。")
+        print("[重建失败] 使用现有产物继续服务；若日志提示依赖缺失，请手动运行 python3 setup_docsify.py 补齐离线资源。", flush=True)
     else:
-        print("重建完成，请刷新浏览器页面。")
+        print("[重建完成] 搜索索引和导航已更新。", flush=True)
     return result.returncode == 0
 
 
@@ -818,9 +822,8 @@ def run_authenticated_service(args, directory):
     stop_watcher = None
     stop_recorder = None
     if not args.no_build and (ROOT / "setup_docsify.py").exists():
-        rebuild_if_needed(docs_dir, config_path=config_path, before_build=reconcile_live_folders)
         stop_watcher = start_watcher(docs_dir, config_path=config_path, before_build=reconcile_live_folders)
-        print("已开启自动重建：docs/md 有变化时自动重建（每 2 秒检测）")
+        print("已开启后台自动重建：先提供已有站点访问，索引和导航在重建完成后自动更新。", flush=True)
     try:
         stop_recorder = start_document_recorder(auth_service, docs_dir / "md")
     except Exception as error:
@@ -914,7 +917,6 @@ def main(argv=None):
         print("已切换到只读预览模式。")
 
     if (ROOT / "setup_docsify.py").exists() and not args.no_build:
-        rebuild_if_needed(directory)
         stop_watcher = start_watcher(directory)
         print("已开启自动重建：docs/md 有新增/删除/修改时会自动重建（每 2 秒检测）")
     else:
