@@ -322,6 +322,32 @@
     window.setTimeout(function () { window.location.reload(); }, 400);
   }
 
+  function rememberRenamePosition() {
+    try {
+      var sidebar = document.querySelector('.docs-sidebar-scroll') || document.querySelector('.sidebar');
+      window.sessionStorage.setItem('md2web:rename-position', JSON.stringify({
+        url: window.location.href, at: Date.now(),
+        x: window.scrollX || 0, y: window.scrollY || 0,
+        sidebar: sidebar ? sidebar.scrollTop : 0
+      }));
+    } catch (error) { /* 浏览器禁用存储时仍保留正确路由。 */ }
+  }
+
+  function restoreRenamePosition() {
+    try {
+      var key = 'md2web:rename-position';
+      var position = JSON.parse(window.sessionStorage.getItem(key) || 'null');
+      if (!position) return;
+      window.sessionStorage.removeItem(key);
+      if (position.url !== window.location.href || Date.now() - position.at > 60000) return;
+      window.setTimeout(function () {
+        window.scrollTo(position.x, position.y);
+        var sidebar = document.querySelector('.docs-sidebar-scroll') || document.querySelector('.sidebar');
+        if (sidebar) sidebar.scrollTop = position.sidebar;
+      }, 180);
+    } catch (error) { /* 位置记录不影响阅读。 */ }
+  }
+
   function operationNotice(prefix, result) {
     var revision = result && result.svnRevision ? '（已提交 SVN r' + result.svnRevision + '）' : '（本地已更新）';
     return prefix + revision;
@@ -586,8 +612,14 @@
           var normalizedRoute = route.replace(/\.md$/i, '');
           if (result.path && (normalizedRoute === oldPath || (isFolder && route.indexOf(path + '/') === 0))) {
             var nextPath = result.path + (isFolder ? route.slice(path.length) : '');
-            window.history.replaceState(null, '', '#/' + nextPath.split('/').map(encodeURIComponent).join('/'));
+            var hash = String(window.location.hash || '');
+            var queryAt = hash.indexOf('?');
+            var routeQuery = queryAt < 0 ? '' : hash.slice(queryAt);
+            // 使用完整页面路径，避免 <base href="../"> 把 hash 解析到站点首页。
+            window.history.replaceState(null, '', window.location.pathname + window.location.search +
+              '#/' + nextPath.split('/').map(encodeURIComponent).join('/') + routeQuery);
           }
+          rememberRenamePosition();
           var message = payload.rebuilt === false
             ? '文档已重命名，但导航重建失败，请稍后刷新或联系管理员检查服务日志。请勿重复重命名。'
             : '已重命名并更新导航，请检查文档中的引用链接';
@@ -749,6 +781,7 @@
   }
   window.addEventListener('hashchange', function () { window.setTimeout(loadFolderView, 120); });
   window.FolderView = { isFolderRoute: isFolderRoute, reload: loadFolderView, pathFromElement: pathFromElement,
+                        restoreRenamePosition: restoreRenamePosition,
                         groupDocuments: groupDocuments, emptyStateHtml: emptyStateHtml, createEntry: createEntry,
                         repositoryActionsHtml: repositoryActionsHtml };
   window.setTimeout(loadFolderView, 200);

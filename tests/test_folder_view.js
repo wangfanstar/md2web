@@ -224,8 +224,9 @@ test('folder links keep their exact directory path for rename', () => {
 });
 
 
-test('sidebar context-menu rename sends the real markdown file path', async () => {
-  const events = {}, menuEvents = {}, requests = [], notices = [];
+for (const active of ['old', 'other']) {
+test('sidebar rename preserves the entry page and reading route: ' + active, async () => {
+  const events = {}, menuEvents = {}, requests = [], notices = [], urls = [];
   const menu = { style: {}, remove() {},
     getBoundingClientRect: () => ({ width: 100, height: 100 }),
     addEventListener: (type, callback) => { menuEvents[type] = callback; } };
@@ -233,8 +234,8 @@ test('sidebar context-menu rename sends the real markdown file path', async () =
     addEventListener: (type, callback) => { events[type] = callback; },
     createElement: () => menu,
     body: { appendChild() {} } };
-  const window = { $docsify: {}, location: { hash: '#/md/test/old' },
-    history: { replaceState() {} }, innerWidth: 1000, innerHeight: 800,
+  const window = { $docsify: {}, location: { pathname: '/html/index_test.html', search: '?mode=read', hash: '#/md/test/' + active + '?id=section' },
+    history: { replaceState: (state, title, url) => urls.push(url) }, innerWidth: 1000, innerHeight: 800,
     addEventListener() {}, setTimeout() {}, prompt: () => 'new', alert: text => notices.push(text),
     SiteAuth: { isAuthenticated: () => true, csrfToken: () => 'csrf' } };
   loadFolderView({ window, document, fetch: async (url, options) => {
@@ -251,4 +252,30 @@ test('sidebar context-menu rename sends the real markdown file path', async () =
   assert.equal(requests[0].payload.path, 'md/test/old.md');
   assert.equal(requests[0].payload.name, 'new');
   assert.ok(notices.some(text => text.includes('已重命名')));
+  if (active === 'old') assert.equal(urls[0], '/html/index_test.html?mode=read#/md/test/new.md?id=section');
+  else assert.equal(urls.length, 0);
+});
+}
+
+
+test('rename restores document and sidebar scroll only on the saved page', () => {
+  let saved = null;
+  const scrolls = [], sidebar = { scrollTop: 0 };
+  const callbacks = [];
+  const window = { $docsify: {}, location: { href: 'http://test/html/index_repo.html#/md/repo/new.md' },
+    addEventListener() {}, setTimeout: callback => callbacks.push(callback),
+    scrollTo: (x, y) => scrolls.push([x, y]),
+    sessionStorage: { getItem: () => saved, removeItem: () => { saved = null; } } };
+  const view = loadFolderView({ window, document: { readyState: 'loading', addEventListener() {},
+    querySelector: () => sidebar } });
+  callbacks.length = 0;
+  saved = JSON.stringify({ url: window.location.href, at: Date.now(), x: 0, y: 900, sidebar: 320 });
+  view.restoreRenamePosition();
+  callbacks.splice(0).forEach(callback => callback());
+  assert.deepEqual(scrolls, [[0, 900]]);
+  assert.equal(sidebar.scrollTop, 320);
+  assert.equal(saved, null);
+  saved = JSON.stringify({ url: 'http://test/other', at: Date.now(), x: 0, y: 200 });
+  view.restoreRenamePosition();
+  assert.equal(callbacks.length, 0);
 });
