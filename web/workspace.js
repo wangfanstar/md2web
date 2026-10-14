@@ -230,8 +230,8 @@
       button.addEventListener('click', function () {
         copyText(svnUrlForRoute(currentRoute()), button);
       });
-      var sourceButton = actions.querySelector('[data-workspace-source]');
-      actions.insertBefore(button, sourceButton || null);
+      var exportButton = actions.querySelector('[data-workspace-export]');
+      actions.insertBefore(button, exportButton || null);
     }
   }
 
@@ -256,7 +256,7 @@
     if (!actions) { actions = document.createElement('div'); actions.className = 'workspace-page-actions'; section.insertBefore(actions, crumb.nextSibling); }
     if (!actions.querySelector('[data-workspace-copy-path]')) {
       var numbersHidden = document.body.classList.contains('hide-heading-numbers');
-      actions.innerHTML = '<button type="button" data-workspace-copy-path title="复制当前页面链接（含 #/ 路由，可直接分享）">复制链接</button><button type="button" data-workspace-source>查看源码</button><button type="button" data-workspace-edit>编辑 MD</button><button type="button" data-workspace-download-md>下载 MD</button><button type="button" data-workspace-export>下载本页</button><button type="button" data-workspace-numbers>' + (numbersHidden ? '显示序号' : '隐藏序号') + '</button>';
+      actions.innerHTML = '<button type="button" data-workspace-copy-path title="复制当前页面链接（含 #/ 路由，可直接分享）">复制链接</button><button type="button" data-workspace-export>下载本页</button><button type="button" data-workspace-numbers>' + (numbersHidden ? '显示序号' : '隐藏序号') + '</button>';
       actions.querySelector('[data-workspace-copy-path]').addEventListener('click', function () {
         // 复制当前链接地址（浏览器地址栏里的完整 URL，含 #/ 路由），方便直接分享
         var link = window.location.href;
@@ -265,56 +265,12 @@
         }
         copyText(link, this);
       });
-      updateEditLabel(actions);
-      actions.querySelector('[data-workspace-edit]').addEventListener('click', function () {
-        var auth = window.SiteAuth && window.SiteAuth.snapshot ? window.SiteAuth.snapshot() : null;
-        if (auth && !auth.fileMode) {
-          if (!auth.available) {
-            updateEditLabel(actions);
-            if (window.SiteAuth.openLogin) {
-              window.SiteAuth.openLogin();
-            }
-            return;
-          }
-          if (!auth.authenticated) {
-            window.SiteAuth.openLogin();
-            return;
-          }
-        } else if (window.SiteAuth && window.SiteAuth.isAuthenticated && !window.SiteAuth.isAuthenticated() && window.location.protocol !== 'file:') {
-          window.SiteAuth.openLogin();
-          return;
-        }
-        if (window.MdEditor) {
-          window.MdEditor.open();
-        }
-      });
-      actions.querySelector('[data-workspace-download-md]').addEventListener('click', function () { if (window.MdEditor) { window.MdEditor.download(); } });
-      actions.querySelector('[data-workspace-source]').addEventListener('click', function () { if (window.MdEditor && window.MdEditor.openLocal) { window.MdEditor.openLocal(); } });
       actions.querySelector('[data-workspace-export]').addEventListener('click', function () { if (window.PageExport) { window.PageExport.download(); } });
       actions.querySelector('[data-workspace-numbers]').addEventListener('click', function () { var hidden = document.body.classList.toggle('hide-heading-numbers'); try { localStorage.setItem(STORAGE.numbers, hidden ? '0' : '1'); } catch (_) {} this.textContent = hidden ? '显示序号' : '隐藏序号'; });
     }
     updateSvnCopyAction(actions, route);
     addSvnDocumentUpdateAction(actions, route);
   }
-  function updateEditLabel(actions) {
-    var button = actions ? actions.querySelector('[data-workspace-edit]') : document.querySelector('[data-workspace-edit]');
-    if (!button) {
-      return;
-    }
-    var auth = window.SiteAuth && window.SiteAuth.snapshot ? window.SiteAuth.snapshot() : null;
-    if (!auth || auth.fileMode) {
-      button.textContent = '编辑 MD';
-      return;
-    }
-    if (!auth.available) {
-      button.textContent = '只读预览';
-    } else if (!auth.authenticated) {
-      button.textContent = '登录后编辑';
-    } else {
-      button.textContent = '编辑 MD';
-    }
-  }
-  document.addEventListener('siteauth:change', function () { updateEditLabel(); });
   function escape(value) { return String(value).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
   function copyText(value, button) {
     var done = function () { if (button) { var old = button.textContent; button.textContent = '已复制'; setTimeout(function () { button.textContent = old; }, 1200); } };

@@ -68,3 +68,12 @@ test('SVN copy retains longest repository mapping and does not invent a document
   assert.equal(api.svnUrlForRoute('md/docs/sub/guide'), 'https://svn.example/nested/guide.md');
   assert.equal(api.svnUrlForRoute('md/docs/sub'), '');
 });
+
+test('page actions no longer render source/edit/download-MD buttons on any page', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'web', 'workspace.js'), 'utf8');
+  assert.doesNotMatch(source, /data-workspace-source/);
+  assert.doesNotMatch(source, /data-workspace-edit/);
+  assert.doesNotMatch(source, /data-workspace-download-md/);
+  assert.match(source, /data-workspace-copy-path/);
+  assert.match(source, /data-workspace-export/);
+});
