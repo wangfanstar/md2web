@@ -856,33 +856,36 @@ def read_image_size(path):
     return None
 
 
-def folder_page_names(directories):
-    """为 docs/md 下每个目录分配入口页 index_<...>.html。
+def folder_page_names(directories, repos=None):
+    """为 docs/md 下每个目录分配入口页 index_<仓库名>_<子文件夹>.html。
 
-    顶层沿用文件夹名；子目录优先用叶子名，与其它的重名时逐级加父目录前缀，
-    仍冲突时追加数字。返回 {rel: 页面文件名}。
+    顶层目录即仓库入口页 index_<仓库ID>.html；子目录以「仓库名_子文件夹[_更深]」命名，
+    按剩余目录段依次下划线拼接，天然唯一；仍冲突时追加序号。返回 {rel: 页面文件名}。
     """
     ordered = sorted([str(rel) for rel in directories], key=lambda rel: (rel.count("/"), rel))
+    repo_by_sub = {}
+    for repo in repos or []:
+        sub = mount_subpath(repo["mount"])
+        if sub:
+            repo_by_sub[sub] = repo
     pages = {}
     taken = {"index_all.html"}
     for rel in ordered:
         parts = [part for part in rel.split("/") if part]
         if not parts:
             continue
-        name = None
-        for take in range(1, len(parts) + 1):
-            candidate = repo_page_name("-".join(parts[-take:]))
-            if candidate not in taken:
-                name = candidate
-                break
-        if name is None:
-            base = repo_page_name("-".join(parts))[:-len(".html")]
+        owner = None
+        for sub, repo in repo_by_sub.items():
+            sub_parts = [part for part in sub.split("/") if part]
+            if parts[:len(sub_parts)] == sub_parts and (owner is None or len(sub_parts) > owner[0]):
+                owner = (len(sub_parts), repo)
+        base = ([owner[1]["id"]] + parts[owner[0]:]) if owner else parts
+        name = repo_page_name("_".join(base))
+        if name in taken:
+            stem = name[:-len(".html")]
             counter = 2
-            while True:
-                candidate = base + "-" + str(counter) + ".html"
-                if candidate not in taken:
-                    name = candidate
-                    break
+            while name in taken:
+                name = stem + "-" + str(counter) + ".html"
                 counter += 1
         pages[rel] = name
         taken.add(name)
@@ -890,13 +893,8 @@ def folder_page_names(directories):
 
 
 def folder_page_map(directories, repos):
-    """rel → 入口页文件名；顶层文件夹以仓库入口页为准（保持既有 index_<仓库ID>.html）。"""
-    pages = folder_page_names(directories)
-    for repo in repos or []:
-        sub = mount_subpath(repo["mount"])
-        if sub and sub in pages:
-            pages[sub] = repo_page_name(repo["id"])
-    return pages
+    """rel → 入口页文件名：顶层仓库用 index_<仓库ID>.html，子文件夹用 index_<仓库名>_<子文件夹>.html。"""
+    return folder_page_names(directories, repos)
 
 
 def image_gallery_markdown(rel, images):

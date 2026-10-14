@@ -1481,19 +1481,21 @@ class MultiRepoTests(TempDirTestCase):
         path.write_bytes(data)
         return path
 
-    def test_folder_pages_use_leaf_names_and_disambiguate_collisions(self):
+    def test_folder_page_names_join_repo_and_subfolder(self):
         pages = self.module.folder_page_names(
-            ["硬件设计", "硬件设计/接口", "软件工具链", "软件工具链/接口", "文档"])
+            ["硬件设计", "硬件设计/接口", "硬件设计/接口/更深", "软件工具链", "软件工具链/接口", "文档"])
         self.assertEqual(pages["硬件设计"], "index_硬件设计.html")
         self.assertEqual(pages["文档"], "index_文档.html")
-        self.assertEqual(pages["硬件设计/接口"], "index_接口.html")
-        self.assertEqual(pages["软件工具链/接口"], "index_软件工具链-接口.html")
+        self.assertEqual(pages["硬件设计/接口"], "index_硬件设计_接口.html")
+        self.assertEqual(pages["硬件设计/接口/更深"], "index_硬件设计_接口_更深.html")
+        self.assertEqual(pages["软件工具链/接口"], "index_软件工具链_接口.html")
 
     def test_folder_page_map_keeps_repo_entry_names(self):
         repos = [{"id": "hardware", "mount": "md/硬件设计"}]
-        pages = self.module.folder_page_map(["硬件设计", "硬件设计/子目录"], repos)
+        pages = self.module.folder_page_map(["硬件设计", "硬件设计/子目录", "硬件设计/子目录/更深"], repos)
         self.assertEqual(pages["硬件设计"], "index_hardware.html")
-        self.assertEqual(pages["硬件设计/子目录"], "index_子目录.html")
+        self.assertEqual(pages["硬件设计/子目录"], "index_hardware_子目录.html")
+        self.assertEqual(pages["硬件设计/子目录/更深"], "index_hardware_子目录_更深.html")
 
     def test_read_image_size_parses_png_header(self):
         path = self._write_png("图片/a.png", 48, 24)
