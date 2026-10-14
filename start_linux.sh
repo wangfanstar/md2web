@@ -382,7 +382,7 @@ update_code() {
       [ -n "$line" ] || continue
       case "$(printf '%s' "$line" | cut -c4-)" in
         docs/index.html|docs/lib/*|docs/html/ref/index_html.html) ;;
-        docs/html/images/*|docs/html/uploads/*|docs/html/ref/*) only_docs=0 ;;
+        docs/html/images/*|docs/html/uploads/*|docs/html/ref/*|docs/html/md2web_config*.json) only_docs=0 ;;
         docs/html/*) ;;
         *) only_docs=0 ;;
       esac

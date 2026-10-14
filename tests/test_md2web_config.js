@@ -37,7 +37,7 @@ function page(items, repositories = []) {
       const match = selector.match(/repo-(\d+)/);
       return match ? entries[Number(match[1])][selector.startsWith('[data-repo-row]') ? 'summary' : 'detail'] : null;
     } };
-  const context = vm.createContext({ document, window: { location: { protocol: 'http:' }, confirm: () => true }, console });
+  const context = vm.createContext({ document, window: { setInterval() {}, addEventListener() {}, location: { protocol: 'http:' }, confirm: () => true }, console });
   const source = fs.readFileSync(path.join(__dirname, '../web/md2web-config.js'), 'utf8');
   vm.runInContext(source.replace(/  showPanels\(\);\r?\n  loadConfig\(\);\r?\n\}\(\)\);/,
     '  globalThis.subject = { state, readRepos, pairField, repoRow, validateRepos, updateSummary, collectFolderGroups };\r\n}());'), context);

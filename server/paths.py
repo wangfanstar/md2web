@@ -18,4 +18,6 @@ def is_blocked_static_path(value):
         return True
     if ".." in parts:
         return True
+    if parts[-1].lower().startswith('md2web_config') and parts[-1].lower().endswith('.json'):
+        return True
     return rel.lower().endswith(BLOCKED_SUFFIXES)

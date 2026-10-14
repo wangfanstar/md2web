@@ -1401,3 +1401,9 @@ body.folder-view-active .docs-page-toc {
 .feedback-dialog .status {
   margin: 8px 14px 0;
 }
+
+.workspace-svn-controls { margin: 12px 0; padding: 12px; border: 1px solid var(--docs-border, #d0d7de); border-radius: 8px; color: var(--docs-text, #24292f); font-size: 13px; }
+.workspace-svn-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.workspace-svn-actions input { min-width: 220px; flex: 1; font: inherit; }
+.workspace-svn-controls button { font: inherit; cursor: pointer; }
+.workspace-svn-controls p { margin: 8px 0; color: var(--docs-muted, #57606a); }

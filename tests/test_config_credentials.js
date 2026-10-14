@@ -23,7 +23,7 @@ test('new credentials replace the old error after ' + action, async () => {
     if (selector === '[data-status]') return status;
     return selector.startsWith('[data-pair-detail=') ? detail : summary;
   } };
-  const window = {};
+  const window = { setInterval() {}, addEventListener() {} };
   let source = fs.readFileSync(path.join(__dirname, '../web/md2web-config.js'), 'utf8').replace(/\r\n/g, '\n');
   source = source.replace('  showPanels();\n  loadConfig();',
     '  window.testApi = { state: state, save: saveRepoCredential };');

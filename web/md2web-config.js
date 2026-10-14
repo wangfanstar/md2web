@@ -2,7 +2,7 @@
   'use strict';
 
   var state = { config: null, csrf: '', authenticated: false, editable: false, busy: false, user: null,
-    credentials: {}, defaultCredential: { configured: false, username: '' }, authFingerprint: '' };
+    credentials: {}, defaultCredential: { configured: false, username: '' }, authFingerprint: '', dirty: false, jsonDirty: false, syncStatus: {} };
 
   function query(selector, root) {
     return (root || document).querySelector(selector);
@@ -26,6 +26,12 @@
     node.hidden = !text;
     node.className = 'status' + (isError ? ' error' : ' ok');
     node.textContent = text || '';
+    var profileStatus = query('[data-profile-status]');
+    if (profileStatus) {
+      profileStatus.hidden = !text;
+      profileStatus.className = node.className;
+      profileStatus.textContent = text || '';
+    }
   }
 
   function api(path, options) {
@@ -101,6 +107,90 @@
       : '没有发布记录，按最新文件修改时间';
     return author + '<br><span class="hint" title="' + escapeHtml(note) + '">'
       + escapeHtml(formatTime(update.at)) + '</span>';
+  }
+
+  function syncCell(id) {
+    var info = state.syncStatus[id];
+    if (!state.editable) return '登录管理员后查看';
+    if (!info) return '尚无同步记录';
+    var frequency = Number(info.intervalSeconds) > 0 ? '每 ' + info.intervalSeconds + ' 秒' : '仅手动更新';
+    var status = info.state === 'running' ? '正在同步…' : (info.error ? '更新失败 / 有冲突' : (info.lastSuccessAt ? '已同步' : '尚未同步'));
+    return escapeHtml(frequency) + '<br>' + escapeHtml(status) + '<br>' + escapeHtml(formatTime(info.lastSuccessAt) || '尚未成功同步')
+      + (info.revision ? '<br><span class="hint">r' + escapeHtml(info.revision) + '</span>' : '')
+      + (info.error ? '<br><span class="hint">最近尝试异常：' + escapeHtml(info.error) + '</span>' : '');
+  }
+
+  function refreshSyncStatus() {
+    if (!state.editable) return Promise.resolve();
+    return api('__config/sync-status').then(function (result) {
+      state.syncStatus = result.repositories || {};
+      all('[data-sync-id]').forEach(function (cell) { cell.innerHTML = syncCell(cell.getAttribute('data-sync-id')); });
+    }).catch(function () {
+      all('[data-sync-id]').forEach(function (cell) { cell.textContent = '同步记录读取失败，请刷新'; });
+    });
+  }
+
+  function loadProfiles() {
+    var panel = query('[data-profile-panel]');
+    if (!panel) return Promise.resolve();
+    panel.hidden = !state.editable;
+    if (!state.editable) return Promise.resolve();
+    return api('__config/profiles').then(function (result) {
+      query('[data-profile-select]').innerHTML = result.profiles.map(function (item) {
+        return '<option value="' + escapeHtml(item.name) + '"' + (item.name === result.active ? ' selected' : '')
+          + '>' + escapeHtml(item.name) + (item.name === result.active ? '（当前默认）' : '') + '</option>';
+      }).join('');
+      var active = result.profiles.filter(function (item) { return item.name === result.active; })[0] || {};
+      query('[data-profile-info]').textContent = '当前：docs/html/' + result.active
+        + ' · 保存时间：' + (formatTime(active.updatedAt) || '尚未保存');
+      query('[data-action="profile-restore"]').disabled = !active.hasPrevious;
+    });
+  }
+
+  function changeProfile(action) {
+    if (!state.editable || state.busy) return;
+    if (action === 'read') {
+      if (state.jsonDirty && !window.confirm('重新读取将替换编辑框中未保存的 JSON，继续？')) return;
+      api('__config/profile-content').then(function (result) {
+        query('[data-profile-json]').value = JSON.stringify(result.data, null, 2);
+        state.jsonDirty = false;
+        setStatus('已读取当前 JSON；编辑后点击「保存 JSON 并应用」。');
+      }).catch(function (error) { setStatus(error.message, true); });
+      return;
+    }
+    if (state.dirty) { setStatus('请先保存当前修改，再切换、复制或恢复方案。', true); return; }
+    if (state.jsonDirty && action !== 'write') { setStatus('请先保存 JSON 编辑框中的修改，或重新读取后再切换。', true); return; }
+    var name = query(action === 'create' ? '[data-profile-name]' : '[data-profile-select]').value.trim();
+    if (action === 'create' && name && name.indexOf('md2web_config') !== 0) name = 'md2web_config_' + name.replace(/\.json$/i, '') + '.json';
+    var payload = { action: action, name: name };
+    if (action === 'reload') payload = { action: 'select', name: state.config.profileName };
+    if (action === 'write') {
+      try { payload.data = JSON.parse(query('[data-profile-json]').value); }
+      catch (error) { setStatus('JSON 格式错误：' + error.message, true); return; }
+    }
+    if (action === 'restore' && !window.confirm('恢复当前配置方案的上一版？仓库文件不会被删除。')) return;
+    state.busy = true;
+    setStatus('正在应用配置方案并更新站点…');
+    api('__config/profiles', { method: 'POST', body: JSON.stringify(payload) })
+      .then(function (result) {
+        return loadConfig().then(function () {
+          setStatus('已应用默认方案：' + result.config.profileName + (result.rebuilt ? '，站点已更新。' : '；请重新构建站点以更新入口页。'));
+        });
+      }).catch(function (error) { setStatus('配置方案操作失败：' + error.message, true); })
+      .then(function () { state.busy = false; });
+  }
+
+  function renderAiPanel() {
+    var panel = query('[data-ai-panel]');
+    if (!panel) return;
+    panel.hidden = !state.editable;
+    all('[data-ai]').forEach(function (node) { node.value = (state.config.ai || {})[node.getAttribute('data-ai')] || ''; });
+  }
+
+  function rememberCredential(id, username, password) {
+    if (!state.config) return;
+    state.config.credentials = state.config.credentials || {};
+    state.config.credentials[id] = { username: username, password: password };
   }
 
   function initialBadge(item, svnEnabled) {
@@ -194,13 +284,14 @@
         + (!svnEnabled && (item.id || autoRepoId(folder, item))
           ? (sourceMode === 'symlink' ? '软链接：' : '本地模式：') + escapeHtml(item.id || autoRepoId(folder, item)) : '') + '</span>'
         + (allow ? '' : '<br><span class="repo-readonly">只读：由服务器自动更新</span>') + '</td>',
+      '<td' + (svnEnabled ? ' data-sync-id="' + escapeHtml(item.id) + '"' : '') + '>' + (svnEnabled ? syncCell(item.id) : '—') + '</td>',
       '<td><label class="repo-source-label"><span>来源类型</span><select data-repo="sourceMode"' + disabled + '>'
         + '<option value="svn"' + (sourceMode === 'svn' ? ' selected' : '') + '>SVN 库</option>'
         + '<option value="symlink"' + (sourceMode === 'symlink' ? ' selected' : '') + '>软链接（只读）</option>'
         + '<option value="local"' + (sourceMode === 'local' ? ' selected' : '') + '>本地文件夹</option></select></label></td>',
       '</tr>',
       '<tr data-pair-detail="' + pair + '"' + (sourceMode === 'local' ? ' hidden' : '') + '>',
-      '<td colspan="7"><div class="repo-detail">',
+      '<td colspan="8"><div class="repo-detail">',
       '<input type="hidden" data-repo="id" value="' + escapeHtml(item.id || '') + '">',
       '<label class="repo-field repo-field-url" data-source-field="svn"' + (svnEnabled ? '' : ' hidden')
         + '><span>SVN 地址</span><input type="text" data-repo="url" value="' + escapeHtml(item.url)
@@ -283,7 +374,7 @@
       }
     });
     body.innerHTML = rows.join('')
-      || '<tr><td colspan="6" class="hint">docs/md 下还没有文件夹，可先用编辑器右键新建文件夹。</td></tr>';
+      || '<tr><td colspan="8" class="hint">docs/md 下还没有文件夹，可先用编辑器右键新建文件夹。</td></tr>';
   }
 
   function pairOf(node) {
@@ -696,6 +787,7 @@
       body: JSON.stringify({ id: repoId, username: username, password: password })
     }).then(function () {
       state.credentials[repoId] = username;
+      rememberCredential(repoId, username, password);
       if (passwordInput) {
         passwordInput.value = '';
       }
@@ -725,6 +817,7 @@
       body: JSON.stringify({ id: 'site-backup', username: username, password: password })
     }).then(function () {
       state.credentials['site-backup'] = username;
+      rememberCredential('site-backup', username, password);
       if (passwordNode) {
         passwordNode.value = '';
       }
@@ -785,6 +878,8 @@
       setStatus('正在保存 SVN 认证路径…');
       chain = api('__config', { method: 'PUT', body: JSON.stringify(payload) }).then(function (result) {
         state.config = result.config || state.config;
+      state.dirty = false;
+      loadProfiles().catch(function (error) { setStatus(error.message, true); });
       });
     }
     chain.then(function () {
@@ -795,6 +890,7 @@
       });
     }).then(function (payload) {
       state.defaultCredential = { configured: true, username: payload.username || username };
+      rememberCredential('__default__', username, password);
       if (passwordNode) {
         passwordNode.value = '';
       }
@@ -881,6 +977,10 @@
   }
 
   function loadConfig() {
+    state.dirty = false;
+    state.jsonDirty = false;
+    var jsonEditor = query('[data-profile-json]');
+    if (jsonEditor) jsonEditor.value = '';
     return api('__auth/session').then(function (payload) {
       state.user = payload.user || null;
       state.authenticated = !!payload.authenticated && !!(payload.user && payload.user.role === 'admin');
@@ -889,9 +989,11 @@
       if (!state.authenticated) {
         // 未登录：用公开配置先展示所有仓库（只读），登录后即可编辑
         state.editable = false;
+        loadProfiles();
         state.credentials = {};
         state.defaultCredential = { configured: false, username: '' };
         state.config = { repositories: (payload.site && payload.site.repositories) || [] };
+        renderAiPanel();
         return loadFolders().then(function () {
           renderRepos();
           renderSiteBackup();
@@ -909,6 +1011,9 @@
       return api('__config').then(function (configPayload) {
         state.config = configPayload.config || {};
         state.editable = true;
+        renderAiPanel();
+        loadProfiles().catch(function (error) { setStatus(error.message, true); });
+        refreshSyncStatus();
         return loadFolders().then(function () {
           return loadCredentials();
         }).then(function () {
@@ -964,6 +1069,7 @@
   }
 
   function save() {
+    if (state.jsonDirty) { setStatus('JSON 编辑框有未保存修改，请先保存 JSON 或重新读取。', true); return; }
     if (!state.config) {
       return;
     }
@@ -980,6 +1086,13 @@
     }
     var payload = JSON.parse(JSON.stringify(state.config));
     payload.siteBackup = readSiteBackup();
+    var authUrl = query('[data-auth="url"]');
+    if (authUrl) payload.auth = Object.assign({}, payload.auth || {}, { url: authUrl.value.trim() });
+    payload.ai = Object.assign({}, payload.ai || {});
+    all('[data-ai]').forEach(function (node) {
+      var key = node.getAttribute('data-ai');
+      payload.ai[key] = key === 'contextChars' ? Number(node.value) : node.value;
+    });
     payload.folderGroups = collectFolderGroups();
     payload.repositories = repos.map(function (repo) {
       var item = {
@@ -1017,11 +1130,13 @@
     setStatus('正在保存配置…');
     api('__config', { method: 'PUT', body: JSON.stringify(payload) }).then(function (result) {
       state.config = result.config || state.config;
+      state.dirty = false;
+      loadProfiles().catch(function (error) { setStatus(error.message, true); });
       return loadFolders();
     }).then(function () {
       renderRepos();
       renderSiteBackup();
-      setStatus('配置已保存，站点正在按新仓库重建（几秒后刷新总览页即可看到入口页）。');
+      setStatus('配置和当前 JSON 方案已保存并完成备份，站点正在按新仓库重建。');
       checkHealth(null, true);
     }).catch(function (error) {
       setStatus('保存失败：' + error.message, true);
@@ -1084,6 +1199,8 @@
     setStatus('正在保存 SVN 认证路径…');
     api('__config', { method: 'PUT', body: JSON.stringify(payload) }).then(function (result) {
       state.config = result.config || state.config;
+      state.dirty = false;
+      loadProfiles().catch(function (error) { setStatus(error.message, true); });
       renderAuthPanel();
       renderDefaultCredentialPanel();
       setStatus('SVN 认证路径已保存并生效（SVN 用户会话失效，管理员会话保留）。');
@@ -1174,7 +1291,7 @@
       return loadFolders().then(renderRepos);
     }).catch(function (error) {
       setStatus('同步失败：' + error.message, true);
-    }).then(function () { if (button) button.disabled = false; });
+    }).then(function () { if (button) button.disabled = false; refreshSyncStatus(); });
   }
 
   function loadRepoTrash() {
@@ -1253,9 +1370,12 @@
       return;
     }
     var action = target.getAttribute('data-action');
-    if (action === 'login') {
+    if (action.indexOf('profile-') === 0) {
+      changeProfile(action.slice(8));
+    } else if (action === 'login') {
       login();
     } else if (action === 'add-repo') {
+      state.dirty = true;
       var body = query('[data-repo-rows]');
       var nextIndex = all('[data-repo-row]').length;
       body.insertAdjacentHTML('beforeend', repoRow({ group: '默认', allowCommit: true }, null, nextIndex));
@@ -1279,6 +1399,7 @@
           toggle.value = 'local';
         }
         entry.detail.hidden = true;
+        state.dirty = true;
         if (entry.summary) {
           entry.summary.setAttribute('data-repo-removed', '1');
         }
@@ -1431,6 +1552,18 @@
     loadConfig();
   });
 
+  document.addEventListener('input', function (event) {
+    if (event.target.matches && event.target.matches('[data-profile-json]')) state.jsonDirty = true;
+    if (event.target.matches && event.target.matches('[data-repo], [data-folder-group], [data-site-backup], [data-ai]')) state.dirty = true;
+    if (event.target.matches && event.target.matches('[data-auth="url"], [data-default="url"]')) {
+      all('[data-auth="url"], [data-default="url"]').forEach(function (node) { node.value = event.target.value; });
+    }
+  });
+  window.setInterval(function () { if (!document.hidden) refreshSyncStatus(); }, 15000);
+  window.addEventListener('beforeunload', function (event) {
+    if (!state.dirty && !state.jsonDirty) return;
+    event.preventDefault(); event.returnValue = '';
+  });
   showPanels();
   loadConfig();
 }());

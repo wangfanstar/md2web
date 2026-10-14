@@ -2722,6 +2722,22 @@
     open: open,
     openLocal: function () { open({ local: true }); },
     download: download,
+    reloadAfterSvnUpdate: function () {
+      if (state.overlay && state.overlay.classList.contains('is-open')) return false;
+      state.allowInternalNavigation = true; // 草稿仍在数据库中，当前无打开的编辑器。
+      window.location.reload();
+      return true;
+    },
+    downloadCurrent: function () {
+      if (state.overlay && state.overlay.classList.contains('is-open') && state.textarea) downloadEditorSource();
+      else if (window.location.protocol !== 'file:') {
+        authApi('__md/document?path=' + encodeURIComponent(currentResource())).then(function (payload) {
+          var doc = payload.document;
+          var text = doc.draft ? doc.draft.content : doc.published.text;
+          saveBlob(new Blob([text], { type: 'text/markdown;charset=utf-8' }), doc.path.split('/').pop());
+        }).catch(function () { download(); });
+      } else download();
+    },
     save: save,
     close: close,
     uploadImage: uploadImage,

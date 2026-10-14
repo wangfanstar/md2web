@@ -114,6 +114,15 @@ def load_config(path, docs_dir, allow_incomplete=False, create_mounts=False):
         if not isinstance(raw, dict):
             raise ConfigError("配置文件必须是 JSON 对象")
     base = config_path.resolve().parent
+    credentials = raw.get('credentials')
+    if credentials is not None:
+        if not isinstance(credentials, dict):
+            raise ConfigError('credentials 必须是账号配置对象')
+        for key, value in credentials.items():
+            if not isinstance(value, dict) or set(value) - {'username', 'password'}:
+                raise ConfigError('credentials 条目仅支持 username 和 password')
+            if not all(isinstance(value.get(field, ''), str) for field in ('username', 'password')):
+                raise ConfigError('同步账号和密码必须是字符串')
 
     security_raw = raw.get("security") or {}
     secret_key = str(security_raw.get("secretKey") or "").strip()
@@ -274,6 +283,8 @@ def load_config(path, docs_dir, allow_incomplete=False, create_mounts=False):
 
     return {
         "path": config_path.resolve(),
+        "profile_name": raw.get("profileName", "md2web_config.json"),
+        "credentials": credentials,
         "security": {"secretKey": secret_key, "generated": secret_generated},
         "server": {"bind": bind, "port": port, "secure_cookies": secure_cookies},
         "auth": {
@@ -317,6 +328,8 @@ def ensure_secret_key(config, docs_dir):
 def config_to_json(config):
     """把已加载配置还原成文件结构（含 security，供写回磁盘；API 层返回前需剥离）。"""
     data = {
+        "profileName": config.get("profile_name", "md2web_config.json"),
+        "credentials": config.get("credentials"),
         "server": dict(config["server"]),
         "auth": {
             "url": config["auth"]["url"],
@@ -353,7 +366,7 @@ def config_to_json(config):
     return data
 
 
-def save_config(path, payload, docs_dir, create_mounts=True):
+def save_config(path, payload, docs_dir, create_mounts=True, sync_profiles=True):
     """校验并原子写入配置文件，返回加载后的配置。
 
     载荷里没有 security.secretKey 时保留磁盘上的原值（网页端不应接触该密钥）。
@@ -361,6 +374,12 @@ def save_config(path, payload, docs_dir, create_mounts=True):
     if not isinstance(payload, dict):
         raise ConfigError("配置必须是 JSON 对象")
     payload = json.loads(json.dumps(payload))
+    from . import config_profiles
+    if Path(path).is_file():
+        old = json.loads(Path(path).read_text(encoding='utf-8'))
+        payload.setdefault('profileName', old.get('profileName', config_profiles.DEFAULT_NAME))
+        payload.setdefault('credentials', old.get('credentials'))
+    payload['profileName'] = config_profiles.validate_name(payload.get('profileName', config_profiles.DEFAULT_NAME))
     secret = str(((payload.get("security") or {}).get("secretKey")) or "").strip()
     if not secret:
         existing = ""
@@ -384,7 +403,12 @@ def save_config(path, payload, docs_dir, create_mounts=True):
         with handle:
             handle.write(text)
         loaded = load_config(tmp_path, docs_dir, allow_incomplete=True, create_mounts=create_mounts)
-        os.replace(tmp_path, config_path)
+        loaded["path"] = config_path.resolve()
+        if sync_profiles:
+            config_profiles.persist(loaded, docs_dir, runtime_payload=payload)
+        else:
+            config_profiles.atomic_json(config_path, payload)
+        tmp_path.unlink()
     except Exception:
         if tmp_path.exists():
             try:

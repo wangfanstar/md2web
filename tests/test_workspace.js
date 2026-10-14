@@ -18,6 +18,16 @@ function loadWorkspace(repoInfo, repoList) {
   return window.__WORKSPACE_TEST_API__;
 }
 
+test('SVN controls identify root and nested repositories and show synchronization state', () => {
+  const api = loadWorkspace({id: 'root', mount: 'md/A', url: 'https://svn.example/A', source_mode: 'svn'},
+    [{id: 'nested', mount: 'md/A/B', url: 'https://svn.example/B', sourceMode: 'svn'}]);
+  assert.equal(api.svnRepository('').id, 'root');
+  assert.equal(api.svnRepository('md/A/B/file').id, 'nested');
+  assert.equal(api.svnRepository('md/unrelated/file'), null);
+  assert.match(api.syncDescription({intervalSeconds: 0, state: 'running'}), /关闭.*正在更新/);
+  assert.match(api.syncDescription({intervalSeconds: 120, error: 'auth_failed'}), /120 秒.*auth_failed/);
+});
+
 test('SVN copy URL joins the configured repository URL and document path', () => {
   const api = loadWorkspace({ mount: 'md/硬件设计', url: 'https://svn.example/docs/' });
   assert.equal(

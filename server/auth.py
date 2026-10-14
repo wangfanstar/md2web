@@ -374,8 +374,9 @@ class AuthService:
 
     # ---- SVN 口令存储（本机密钥可逆加密，登录成功后更新，提交时复用） ----
 
+    @serialized
     def store_repo_credential(self, repository_id, username, password):
-        """保存某个仓库的同步凭据（加密入库）。"""
+        """保存同步凭据：当前 JSON 明文管理，同时兼容保留数据库加密副本。"""
         repository_id = str(repository_id or "").strip()
         username = str(username or "").strip()
         if not repository_id or not username or not password:
@@ -389,13 +390,45 @@ class AuthService:
             return False
         with self._db_lock:
             database.save_repo_credential(self.conn, repository_id, username, secret)
+        credentials = dict(self.config.get('credentials') or {})
+        credentials[repository_id] = {'username': username, 'password': password}
+        if getattr(self, 'profile_docs', None) is not None:
+            from .config import config_to_json, save_config
+            payload = config_to_json(self.config)
+            payload['credentials'] = credentials
+            loaded = save_config(self.config['path'], payload, self.profile_docs, create_mounts=False)
+            self.config.clear()
+            self.config.update(loaded)
+        elif self.config.get('credentials') is not None:
+            self.config['credentials'] = credentials
         return True
+
+    @serialized
+    def enable_config_profiles(self, docs_dir):
+        """首次升级迁移旧凭据；之后账号与口令由选中的私有 JSON 方案管理。"""
+        self.profile_docs = docs_dir
+        if self.config.get('credentials') is not None:
+            return
+        from .config import config_to_json, save_config
+        credentials = {}
+        for repo_id in [DEFAULT_CREDENTIAL_ID, 'site-backup'] + [r['id'] for r in self.config['repositories']]:
+            value = self.repo_credential(repo_id)
+            if value:
+                credentials[repo_id] = {'username': value[0], 'password': value[1]}
+        payload = config_to_json(self.config)
+        payload['credentials'] = credentials
+        loaded = save_config(self.config['path'], payload, docs_dir, create_mounts=False)
+        self.config.clear()
+        self.config.update(loaded)
 
     def repo_credential(self, repository_id):
         """读取某个仓库的同步凭据；返回 (username, password) 或 None。"""
         repository_id = str(repository_id or "").strip()
         if not repository_id:
             return None
+        if self.config.get('credentials') is not None:
+            value = self.config['credentials'].get(repository_id) or {}
+            return (value['username'], value['password']) if value.get('username') and value.get('password') else None
         with self._db_lock:
             row = database.find_repo_credential(self.conn, repository_id)
         if row is None:
@@ -406,6 +439,8 @@ class AuthService:
             return None
 
     def repo_credential_username(self, repository_id):
+        if self.config.get('credentials') is not None:
+            return (self.config['credentials'].get(repository_id) or {}).get('username') or None
         with self._db_lock:
             row = database.find_repo_credential(self.conn, str(repository_id or "").strip())
         return row["username"] if row is not None else None
@@ -448,7 +483,7 @@ class AuthService:
     def sync_repositories(self, md_dir, logger=None, force=False):
         """按各仓库频率拉取远端更新（跳过有活动草稿的文档并报告冲突）。
 
-        凭据优先使用仓库自己配置的同步账号（数据库加密保存），其次默认同步凭据，
+        凭据优先使用当前 JSON 中仓库自己的同步账号，其次默认同步凭据，
         最后回退到环境变量 sync.credential_name。
         """
         fallback = self.sync_credential()

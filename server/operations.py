@@ -405,7 +405,7 @@ def ensure_binding(conn, binding, svn_client, config, credential=None, rebind=Fa
                 "目标路径与绑定不一致，已停止操作；请管理员核对映射",
                 expected=row["target_url"], actual=info.get("url"),
             )
-    reset = ", published_revision = 0, sync_error = NULL" if rebind else ""
+    reset = ", published_revision = 0, sync_error = NULL, last_success_at = NULL" if rebind else ""
     with _db_guard(db_lock), conn:
         conn.execute(
             "UPDATE repo_bindings SET repository_uuid = ?, root_url = ?, target_url = ?, config_version = ?"
@@ -1392,6 +1392,8 @@ def sync_binding(conn, svn_client, config, md_dir, binding, credential=None, for
     username, password = credential or (None, None)
     config_dir = tempfile.mkdtemp(prefix="md2web-svn-sync-")
     staging = Path(tempfile.mkdtemp(prefix="md2web-svn-export-"))
+    with _db_guard(db_lock), conn:
+        conn.execute("UPDATE repo_bindings SET sync_state = 'running' WHERE id = ?", (row['id'],))
     try:
         info = svn_client.info(binding["url"], config_dir, username=username, password=password)
         remote_revision = int(info.get("revision") or 0)
@@ -1410,8 +1412,8 @@ def sync_binding(conn, svn_client, config, md_dir, binding, credential=None, for
                             "conflicts": sorted(pending_conflicts)}
                 if row:
                     with conn:
-                        conn.execute("UPDATE repo_bindings SET last_checked_at = ?, sync_error = NULL WHERE id = ?",
-                                     (database.now_iso(), row["id"]))
+                        conn.execute("UPDATE repo_bindings SET last_checked_at = ?, last_success_at = ?, sync_error = NULL WHERE id = ?",
+                                     (database.now_iso(), database.now_iso(), row["id"]))
                 return {"updated": False, "revision": remote_revision, "files": [], "conflicts": []}
         svn_client.export(binding["url"], staging, revision=remote_revision, force=True,
                           config_dir=config_dir, username=username, password=password)
@@ -1449,9 +1451,9 @@ def sync_binding(conn, svn_client, config, md_dir, binding, credential=None, for
             with conn:
                 conn.execute(
                     "UPDATE repo_bindings SET published_revision = ?, last_checked_at = ?,"
-                    " sync_error = ?, updated_at = ? WHERE id = ?",
+                    " sync_error = ?, updated_at = ?, last_success_at = COALESCE(?, last_success_at) WHERE id = ?",
                     (remote_revision, database.now_iso(), "conflicts" if conflicts else None,
-                     database.now_iso(), row["id"]),
+                     database.now_iso(), None if conflicts else database.now_iso(), row["id"]),
                 )
                 database.audit(conn, "operation_sync", "ok", resource=binding["mount"])
             return {"updated": True, "revision": remote_revision, "files": files, "conflicts": conflicts}
@@ -1465,3 +1467,5 @@ def sync_binding(conn, svn_client, config, md_dir, binding, credential=None, for
     finally:
         shutil.rmtree(config_dir, ignore_errors=True)
         shutil.rmtree(staging, ignore_errors=True)
+        with _db_guard(db_lock), conn:
+            conn.execute("UPDATE repo_bindings SET sync_state = 'idle' WHERE id = ?", (row['id'],))

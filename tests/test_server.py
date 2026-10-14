@@ -1253,6 +1253,51 @@ class AppTests(ServerTestBase):
 
 
 class AdminConfigTests(ServerTestBase):
+    def test_profile_json_edits_apply_auth_ai_and_plaintext_credentials(self):
+        csrf = self.admin_login()
+        data = self.client.get('/__config/profile-content').get_json()['data']
+        data['credentials'] = {'__default__': {'username': 'profile-user', 'password': ' profile-pass '}}
+        data['ai']['model'] = 'profile-model'
+        data['auth']['url'] = 'https://svn.example.com/auth-check/'
+        result = self.client.post('/__config/profiles', json={'action': 'write', 'data': data}, headers={'X-CSRF-Token': csrf})
+        self.assertEqual(result.status_code, 200, result.get_data(as_text=True))
+        self.assertEqual(self.auth.repo_sync_credential(self.config['repositories'][0]), ('profile-user', ' profile-pass '))
+        self.assertEqual(self.config['ai']['model'], 'profile-model')
+        self.assertEqual(self.config['auth']['url'], data['auth']['url'])
+        reread = self.client.get('/__config/profile-content').get_json()['data']
+        self.assertEqual(reread['credentials'], data['credentials'])
+        self.assertEqual(reread['ai']['model'], 'profile-model')
+        anonymous = self.app.test_client()
+        self.assertEqual(anonymous.get('/__config/profile-content').status_code, 401)
+        self.assertNotIn('profile-pass', anonymous.get('/__auth/session').get_data(as_text=True))
+
+    def test_profiles_require_admin_csrf_and_are_not_public_files(self):
+        self.assertEqual(self.client.get('/__config/profiles').status_code, 401)
+        self.assertEqual(self.client.get('/__config/sync-status').status_code, 401)
+        csrf = self.admin_login()
+        data = {'action': 'create', 'name': 'md2web_config_test.json'}
+        self.assertEqual(self.client.post('/__config/profiles', json=data).status_code, 403)
+        result = self.client.post('/__config/profiles', json=data, headers={'X-CSRF-Token': csrf})
+        self.assertEqual(result.status_code, 200, result.get_data(as_text=True))
+        self.assertEqual(result.get_json()['config']['profileName'], data['name'])
+        self.assertEqual(self.client.get('/__config/profiles').get_json()['active'], data['name'])
+        self.assertNotEqual(self.client.get('/html/' + data['name']).status_code, 200)
+        data['name'] = '../server.local.json'
+        self.assertEqual(self.client.post('/__config/profiles', json=data, headers={'X-CSRF-Token': csrf}).status_code, 400)
+
+    def test_sync_status_reads_local_records_without_svn(self):
+        self.admin_login()
+        repo = self.config['repositories'][0]
+        with mock.patch.object(self.svn, 'info', return_value={'uuid': 'test', 'url': repo['url'], 'root_url': repo['url']}):
+            row = server_operations.ensure_binding(self.conn, repo, self.svn, self.config, ('alice', 'good'))
+        with self.conn:
+            self.conn.execute('UPDATE repo_bindings SET last_success_at = ?, sync_error = ? WHERE id = ?',
+                              ('2026-10-13T01:00:00Z', 'auth_failed', row['id']))
+        with mock.patch.object(self.svn, 'info', side_effect=AssertionError('must not call SVN')):
+            result = self.client.get('/__config/sync-status').get_json()['repositories'][repo['id']]
+        self.assertEqual(result['lastSuccessAt'], '2026-10-13T01:00:00Z')
+        self.assertEqual(result['error'], 'auth_failed')
+
     def setUp(self):
         super().setUp()
         self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
@@ -2223,11 +2268,20 @@ class SvnOperationTests(ServerTestBase):
         self.assertTrue(first["updated"])
         self.assertEqual(first["revision"], 3)
         self.assertIn("时钟树设计.md", first["files"])
+        self.assertTrue(self.conn.execute('SELECT last_success_at FROM repo_bindings').fetchone()[0])
+        with self.conn:
+            self.conn.execute("UPDATE repo_bindings SET last_success_at = '2000-01-01T00:00:00Z'")
         second = server_operations.sync_binding(self.conn, self.svn, self.config, self.md_dir, binding,
                                                 ("alice", "good"))
         self.assertFalse(second["updated"])
         row = self.conn.execute("SELECT * FROM repo_bindings WHERE mount_path = 'md/硬件设计'").fetchone()
         self.assertEqual(row["published_revision"], 3)
+        self.assertNotEqual(row['last_success_at'], '2000-01-01T00:00:00Z')
+        stamp = row['last_success_at']
+        with mock.patch.object(self.svn, 'info', side_effect=server_svn.SvnError('auth_failed', 'bad credentials')):
+            with self.assertRaises(server_operations.OperationError):
+                server_operations.sync_binding(self.conn, self.svn, self.config, self.md_dir, binding, ('alice', 'bad'))
+        self.assertEqual(self.conn.execute('SELECT last_success_at FROM repo_bindings').fetchone()[0], stamp)
 
 
 class SvnApiTests(ServerTestBase):

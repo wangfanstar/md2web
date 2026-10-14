@@ -1481,9 +1481,16 @@
     return true;
   }
 
+  function documentFileName(item) {
+    var route = String(item.route || item.path || '').split('?')[0].replace(/\/+$/, '');
+    var name = route.split('/').pop() || 'README.md';
+    try { name = decodeURIComponent(name); } catch (_) {}
+    return /\.md$/i.test(name) ? name : name + '.md';
+  }
+
   function searchableText(item) {
     if (state.searchMode === 'file') {
-      return [item.path, item.route, item.pageTitle, item.headingTitle, item.title].join('\n');
+      return documentFileName(item);
     }
     return item.body || '';
   }
@@ -1538,6 +1545,7 @@
       return [];
     }
 
+    var seenFiles = {};
     return state.items
       .filter(function (item) {
         if (!itemInScope(item)) {
@@ -1545,20 +1553,25 @@
         }
         return state.searchMode === 'both'
           ? matchesSearchText(searchableText(item), parsed) || matchesSearchText(
-            [item.path, item.route, item.pageTitle, item.headingTitle, item.title].join('\n'), parsed)
+            documentFileName(item), parsed)
           : matchesSearchText(searchableText(item), parsed);
       })
       .reduce(function (results, item) {
-        var fileText = [item.path, item.route, item.pageTitle, item.headingTitle, item.title].join('\n');
+        var fileText = documentFileName(item);
         var fullText = searchableText(item);
         var modes = state.searchMode === 'both' ? ['file', 'full'] : [state.searchMode];
         modes.forEach(function (mode) {
           var text = mode === 'file' ? fileText : fullText;
           if (matchesSearchText(text, parsed)) {
-            results.push(Object.assign({
+            if (mode === 'file' && seenFiles[item.route]) return;
+            if (mode === 'file') seenFiles[item.route] = true;
+            results.push(Object.assign({}, item, {
               score: scoreItem(item, tokens, query) + (mode === 'file' ? 20 : 0),
-              matchMode: mode
-            }, item));
+              matchMode: mode,
+              title: mode === 'file' ? fileText : item.title,
+              headingTitle: mode === 'file' ? fileText : item.headingTitle,
+              url: mode === 'file' ? routeToHash(item.route, item.site) : item.url
+            }));
           }
         });
         return results;

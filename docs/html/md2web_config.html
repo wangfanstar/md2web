@@ -9,7 +9,9 @@
   <style>
     :root { color-scheme: light; }
     body { background: #f7f9fb; color: #1f2a37; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 26px 18px 60px; }
-    .wrap { margin: 0 auto; max-width: 1180px; }
+    .table-scroll { overflow-x: auto; }
+    .profile-panel { padding: 16px; margin-bottom: 20px; border: 1px solid var(--docs-border, #d0d7de); border-radius: 8px; }
+    .wrap { margin: 0 auto; max-width: 1440px; }
     h1 { font-size: 22px; margin: 0 0 6px; }
     .sub { color: #57606a; font-size: 13px; margin: 0 0 16px; }
     .panel { background: #fff; border: 1px solid #e3e8ee; border-radius: 10px; margin-bottom: 14px; padding: 14px 16px; }
@@ -34,8 +36,9 @@
     [data-repo-rows] > tr > td:nth-child(4),
     [data-repo-rows] > tr > td:nth-child(5) { min-width: 110px; }
     [data-repo-rows] > tr > td:nth-child(6) { min-width: 170px; }
-    [data-repo-rows] > tr > td:nth-child(7) { text-align: center; white-space: nowrap; width: 1%; }
-    [data-repo-rows] > tr > td:nth-child(7) .flag { justify-content: center; margin: 0; }
+    [data-repo-rows] > tr > td:nth-child(7) { min-width: 175px; }
+    [data-repo-rows] > tr > td:nth-child(8) { text-align: center; white-space: nowrap; width: 1%; }
+    [data-repo-rows] > tr > td:nth-child(8) .flag { justify-content: center; margin: 0; }
     .folder-group-input { min-width: 90px; }
     .status { border-radius: 6px; font-size: 12.5px; margin-top: 10px; padding: 8px 10px; }
     .status.ok { background: #ecfdf5; color: #047857; }
@@ -163,15 +166,35 @@
     </section>
 
     <section class="panel" id="repositories" data-config-main hidden>
+      <div class="profile-panel" data-profile-panel hidden>
+        <h2>配置方案</h2>
+        <div class="row">
+          <label>默认读取的 JSON<select data-profile-select aria-label="配置方案"></select></label>
+          <button type="button" data-action="profile-select">应用并设为默认</button>
+          <button type="button" data-action="profile-reload">从当前 JSON 重新读取</button>
+          <label>新方案名称<input data-profile-name placeholder="md2web_config_测试.json"></label>
+          <button type="button" data-action="profile-create">复制已保存配置为新方案</button>
+          <button type="button" data-action="profile-restore">恢复上一版</button>
+        </div>
+        <p class="hint" data-profile-info></p>
+        <div data-profile-status role="status" hidden></div>
+        <p class="hint">修改后点击「保存配置并重建站点」，自动同步当前 JSON 并保留上一版。切换方案立即生效，重启继续读取默认方案；不会删除仓库文件。同步账号、密码及 AI Key 按明文保存在方案中，仅管理员接口可读；端口、数据库位置和服务密钥单独保留。</p>
+        <p class="hint">更新代码时请保留 <code>docs/html/md2web_config*.json</code>、<code>config/server.local.json</code> 和 <code>data/</code>。JSON 不受构建覆盖，并在 <code>data/config-profiles/</code> 自动备份。</p>
+        <details><summary>直接查看 / 编辑当前 JSON（包含明文凭据）</summary>
+          <p><button type="button" data-action="profile-read">读取 JSON 到编辑框</button>
+          <button type="button" data-action="profile-write">保存 JSON 并应用</button></p>
+          <textarea data-profile-json rows="15" spellcheck="false" style="width:100%;font-family:var(--docs-font-mono,monospace)" aria-label="当前配置 JSON"></textarea>
+        </details>
+      </div>
       <h2>仓库列表</h2>
-      <table>
+      <div class="table-scroll"><table>
         <thead>
           <tr>
-            <th>md 下文件夹</th><th>仓库入口页</th><th>分组</th><th>最新更新</th><th>仓库大小</th><th>状态</th><th>来源类型</th>
+            <th>md 下文件夹</th><th>仓库入口页</th><th>分组</th><th>文档最新更新</th><th>仓库大小</th><th>连接状态</th><th>SVN 同步<br>频率 / 上次成功 / 状态</th><th>来源类型</th>
           </tr>
         </thead>
         <tbody data-repo-rows></tbody>
-      </table>
+      </table></div>
       <div class="actions">
         <button type="button" data-action="refresh-folders">刷新文件夹信息</button>
         <button type="button" data-action="health-all">检查全部状态</button>
@@ -203,7 +226,7 @@
     <section class="panel" data-config-main hidden>
       <h2>默认同步凭据（SVN 账号）</h2>
       <p class="hint">用于统一同步所有文件夹的 SVN 库：仓库没有单独配置凭据时自动使用这里的账号。
-        保存前会先用 SVN 认证路径校验用户名与密码（必须是<b>强制账号密码认证</b>的路径），校验通过后加密存入本机数据库。</p>
+        保存前会先用 SVN 认证路径校验用户名与密码（必须是<b>强制账号密码认证</b>的路径），校验通过后明文保存到当前 JSON 方案，并兼容保留数据库加密副本。</p>
       <div class="row">
         <label>SVN 认证路径<input type="text" data-default="url" placeholder="https://svn.example.com/svn/accounts/auth-check/"></label>
         <label>同步账号<input type="text" data-default="username" placeholder="SVN 用户名" autocomplete="off"></label>
@@ -219,7 +242,7 @@
     <section class="panel" data-config-main hidden>
       <h2>网站数据备份（SVN）</h2>
       <p class="hint">把网站数据（默认 <code>docs/</code>，含生成的页面、搜索索引与源文档）按频率定时合入到指定的 SVN 库；
-        凭据优先使用下面单独设置的备份账号（加密保存），未设置时回退到「默认同步凭据」或环境变量同步凭据。</p>
+        凭据优先使用下面单独设置的备份账号（明文保存到当前 JSON），未设置时回退到「默认同步凭据」或环境变量同步凭据。</p>
       <div class="row">
         <label>启用<input type="checkbox" data-site-backup="enabled"></label>
         <label>仓库地址<input type="text" data-site-backup="url" placeholder="https://svn.example.com/svn/md2web-site/trunk/"></label>
@@ -269,6 +292,20 @@
         「验证并切换为该账号」验证通过后用该账号重新登录本页（SVN 账号不是管理员，页面会变为只读，可再用管理员账号切回）。</p>
     </section>
 
+    <section class="panel" data-ai-panel hidden>
+      <h2>AI 默认配置</h2>
+      <div class="row">
+        <label>服务商<select data-ai="provider"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic 兼容</option></select></label>
+        <label>API 地址<input data-ai="baseUrl" type="url" placeholder="https://api.example.com/v1"></label>
+        <label>模型<input data-ai="model"></label>
+        <label>API Key<input data-ai="apiKey" type="password" autocomplete="new-password"></label>
+        <label>代理<select data-ai="useProxy"><option value="auto">自动</option><option value="always">始终使用</option><option value="never">不使用</option></select></label>
+        <label>上下文字符数<input data-ai="contextChars" type="number" min="1000" step="1000"></label>
+        <label>默认资料路径<input data-ai="sourcePath" placeholder="md/仓库"></label>
+      </div>
+      <p class="hint">随当前 JSON 方案保存。SVN 账号验证使用上方「SVN 认证路径」，默认同步账号及各库专用账号也会写入当前方案。AI 默认值提供给已登录用户，个人 AI 设置可覆盖默认值。</p>
+      <button type="button" class="primary" data-action="save">保存配置并重建站点</button>
+    </section>
     <section class="panel" data-repo-trash hidden>
       <h2>仓库回收站</h2>
       <p class="hint">恢复时一并还原仓库配置和本地资料。SVN 远端内容及软链接目标始终保留。</p>
@@ -281,7 +318,7 @@
     </section>
   </div>
   <script src="lib/auth.js?v=da8fd7f61e"></script>
-  <script src="lib/md2web-config.js?v=da79550e4c"></script>
+  <script src="lib/md2web-config.js?v=c9d2aa2362"></script>
   <script src="lib/md2web-feedback.js?v=d905adefde"></script>
 </body>
 </html>

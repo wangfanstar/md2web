@@ -65,12 +65,27 @@ test('default search combines document names and full text with match groups', (
   const api = loadSearch();
   api.state.loaded = true;
   api.state.items = api.flattenIndex({
-    '/md/a.md': {'/md/a.md': {route:'/md/a.md', pageTitle:'a.md', title:'DMA guide', body:'other text'}},
+    '/md/DMA guide.md': {'/md/DMA guide.md': {route:'/md/DMA guide.md', pageTitle:'DMA guide.md', title:'DMA guide', body:'other text'}},
     '/md/b.md': {'/md/b.md': {route:'/md/b.md', pageTitle:'b.md', title:'Other', body:'DMA control text'}},
   });
   assert.equal(api.state.searchMode, 'both');
   const results = api.search('DMA');
   assert.deepEqual(Array.from(results, item => item.matchMode), ['file', 'full']);
+});
+
+test('file mode ignores folders and headings and returns each real filename once', () => {
+  const api = loadSearch();
+  api.state.loaded = true;
+  api.state.searchMode = 'file';
+  api.state.items = api.flattenIndex({
+    '/md/DMA/a.md': api.buildSearchPage('/md/DMA/a.md', '# DMA title\ntext\n## DMA chapter\ntext', 4),
+    '/md/guide/DMA%20guide.md': api.buildSearchPage('/md/guide/DMA%20guide.md', '# One\ntext\n## Two\ntext', 4),
+  });
+  const hits = api.search('DMA');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].title, 'DMA guide.md');
+  assert.doesNotMatch(hits[0].url, /\?id=/);
+  assert.equal(api.search('chapter').length, 0);
 });
 
 test('repository filter exposes all repositories and current repository options', () => {

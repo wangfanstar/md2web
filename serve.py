@@ -734,7 +734,7 @@ def make_server(directory, bind, port):
 def run_authenticated_service(args, directory):
     """按配置启动 Flask + Waitress 认证编辑服务。"""
     try:
-        from server import database
+        from server import database, config_profiles
         from server.app import create_app
         from server.auth import AuthService
         from server.config import ConfigError, default_config, ensure_secret_key, load_config, save_config, reconcile_deleted_folders
@@ -751,14 +751,17 @@ def run_authenticated_service(args, directory):
         return None
 
     config_path = Path(args.config)
+    if config_profiles.recover_runtime(config_path, directory):
+        print('已从私有备份恢复服务配置和默认配置方案。')
     if not config_path.exists():
         try:
-            save_config(config_path, default_config(), directory)
+            save_config(config_path, default_config(), directory, sync_profiles=False)
         except ConfigError as error:
             raise SystemExit(f"错误: {error}")
         print(f"已生成默认配置: {config_path}（SVN 认证路径与仓库映射可在网页「设置」中填写）")
     try:
         config = load_config(config_path, directory, allow_incomplete=True)
+        config = config_profiles.initialize(config, directory)
         report = reconcile_deleted_folders(config, directory)
         if report['changed']:
             print('已清理手动删除目录的配置：' + '、'.join(report['repositories'] + report['folderGroups']))
@@ -789,6 +792,7 @@ def run_authenticated_service(args, directory):
         print("提示: 当前 svn 客户端不支持 --password-from-stdin，将用命令行参数传递口令（仅本机可见，建议升级 svn 1.10+）")
     auth_service = AuthService(conn, svn_client, config)
     auth_service.on_startup()
+    auth_service.enable_config_profiles(directory)
     if auth_service.auth_source_changed():
         auth_service.revoke_all("auth_source_changed")
 

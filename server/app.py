@@ -23,6 +23,7 @@ from .config import authenticated_config, config_to_json, public_config, save_co
 from .documents import MdSaveError
 from .paths import is_blocked_static_path
 from . import repositories
+from . import config_profiles
 from .content_lock import serialized
 
 
@@ -36,6 +37,7 @@ MAX_BODY = 100 * 1024 * 1024
 
 def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
     docs_root = Path(docs_dir).resolve()
+    auth_service.enable_config_profiles(docs_root)
     app = Flask(__name__, static_folder=None)
     app.config["MAX_CONTENT_LENGTH"] = MAX_BODY
     if hasattr(app, "json"):
@@ -105,6 +107,10 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
     @app.errorhandler(AuthError)
     def handle_auth_error(error):
         return json_error(error.status, error.code, str(error))
+
+    @app.errorhandler(server_config.ConfigError)
+    def handle_config_error(error):
+        return json_error(400, 'config_invalid', str(error))
 
     @app.errorhandler(404)
     def handle_not_found(error):
@@ -192,6 +198,118 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         data.pop("security", None)
         return data
 
+    @app.get('/__config/profiles')
+    def read_profiles():
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        return jsonify(dict(ok=True, **config_profiles.listing(config, docs_root)))
+
+    @app.post('/__config/profiles')
+    @serialized
+    def change_profile():
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        rejected = require_csrf(session)
+        if rejected:
+            return rejected
+        payload = request.get_json(silent=True) or {}
+        try:
+            action = payload.get('action')
+            if action == 'restore':
+                loaded = config_profiles.restore_previous(config, docs_root)
+            elif action == 'write':
+                loaded = config_profiles.apply_data(config, docs_root, config.get('profile_name', config_profiles.DEFAULT_NAME), payload.get('data'))
+            elif action in ('select', 'create'):
+                loaded = config_profiles.select(config, docs_root, payload.get('name'), create=action == 'create')
+            else:
+                raise server_config.ConfigError('未知的配置方案操作')
+        except (server_config.ConfigError, OSError, TypeError, ValueError) as error:
+            return json_error(400, 'profile_invalid', str(error))
+        config.clear()
+        config.update(loaded)
+        auth_service.on_config_changed()
+        auth_service.enable_config_profiles(docs_root)
+        rebuilt = rebuild_repository_pages()
+        return jsonify(ok=True, config=public_config_json(), rebuilt=rebuilt)
+
+    @app.get('/__config/profile-content')
+    def read_profile_content():
+        _, rejected = require_admin()
+        if rejected:
+            return rejected
+        try:
+            data = config_profiles.read_profile(docs_root, config.get('profile_name', config_profiles.DEFAULT_NAME))
+        except server_config.ConfigError as error:
+            return json_error(400, 'profile_invalid', str(error))
+        response = jsonify(ok=True, data=data)
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+
+    @app.get('/__config/sync-status')
+    def config_sync_status():
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        result = {}
+        with auth_service._db_lock:
+            for repo in config['repositories']:
+                if repo.get('source_mode', 'svn') != 'svn':
+                    continue
+                row = conn.execute("SELECT * FROM repo_bindings WHERE mount_path = ? AND repository_id = ? AND rtrim(target_url, '/') = ?",
+                                   (repo['mount'], repo['id'], repo['url'].rstrip('/'))).fetchone()
+                result[repo['id']] = {'intervalSeconds': operations.sync_interval_of(repo, config),
+                                      'state': row['sync_state'] if row else 'idle',
+                                      'lastSuccessAt': row['last_success_at'] if row else None,
+                                      'lastCheckedAt': row['last_checked_at'] if row else None,
+                                      'error': row['sync_error'] if row else None,
+                                      'revision': row['published_revision'] if row else None}
+        return jsonify(ok=True, repositories=result)
+
+    @app.get('/__svn/sync-status')
+    def svn_sync_status():
+        repo = next((r for r in config['repositories'] if r['id'] == request.args.get('binding')), None)
+        if not repo or repo.get('source_mode', 'svn') != 'svn':
+            return json_error(404, 'not_svn', '没有找到 SVN 仓库')
+        with auth_service._db_lock:
+            row = conn.execute("SELECT * FROM repo_bindings WHERE mount_path = ? AND rtrim(target_url, '/') = ?",
+                               (repo['mount'], repo['url'].rstrip('/'))).fetchone()
+            path = str(request.args.get('path') or '')
+            if path and not path.endswith('.md'):
+                path += '.md'
+            last_file = conn.execute("SELECT created_at FROM audit_events WHERE action = 'manual_svn_update' AND result = 'ok' AND resource = ? ORDER BY id DESC LIMIT 1", (path,)).fetchone()
+        return jsonify(ok=True, status={'intervalSeconds': operations.sync_interval_of(repo, config),
+            'state': row['sync_state'] if row else 'idle', 'error': row['sync_error'] if row else None,
+            'lastSuccessAt': row['last_success_at'] if row else None,
+            'lastCheckedAt': row['last_checked_at'] if row else None,
+            'revision': row['published_revision'] if row else None,
+            'lastFileUpdateAt': last_file[0] if last_file else None})
+
+    @app.post('/__svn/update')
+    @serialized
+    def manual_svn_update():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        rejected = require_csrf(session)
+        if rejected:
+            return rejected
+        payload = request.get_json(silent=True) or {}
+        if payload.get('remoteWins') is not True:
+            return json_error(409, 'confirm_remote', '请先下载当前文档，确认以 SVN 库为准覆盖本地版本')
+        repo = next((r for r in config['repositories'] if r['id'] == payload.get('binding')), None)
+        if not repo or repo.get('source_mode', 'svn') != 'svn':
+            return json_error(400, 'not_svn', '请选择有效的 SVN 仓库')
+        from . import svn_update
+        try:
+            result = svn_update.update(conn, auth_service.svn, config, md_dir(), repo,
+                auth_service.repo_sync_credential(repo, credential_of(session)), payload.get('path'), auth_service._db_lock)
+        except (operations.OperationError, MdSaveError) as error:
+            return json_error(error.status, 'svn_update_failed', error.message)
+        document_meta_cache.clear()
+        return jsonify(ok=True, result=result, rebuilt=rebuild_repository_pages())
+
     @app.get("/__config")
     def read_config():
         session, rejected = require_admin()
@@ -209,6 +327,8 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         if csrf_error:
             return csrf_error
         payload = request.get_json(silent=True)
+        if isinstance(payload, dict) and payload.get('profileName', config.get('profile_name')) != config.get('profile_name'):
+            return json_error(409, 'profile_changed', '默认配置方案已变化，请重新读取配置后再保存')
         try:
             loaded = save_config(config["path"], payload, docs_root)
         except server_config.ConfigError as error:

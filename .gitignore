@@ -9,3 +9,4 @@ data/
 docs/md/.repository-trash/
 # 离线依赖包随仓库提供，见 server/wheels/（不要忽略）
 config/server.local.json
+docs/html/md2web_config*.json

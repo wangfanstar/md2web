@@ -400,7 +400,137 @@
   }
 
   // 侧栏始终显示全部文档（index_all 合并视图进入文档后也不再过滤，便于跨仓库跳转）
-  function enhance() { decorateTree(); addBreadcrumb(); addUpdatedMeta(); addCodeButtons(); resolveRelativeImages(); }
+  function svnRepository(route) {
+    var best = null;
+    repositoryCandidates().forEach(function (repo) {
+      var mount = String(repo.mount || '').replace(/^\/+|\/+$/g, '');
+      if ((repo.sourceMode || repo.source_mode || 'svn') !== 'svn' || !repo.url || !mount) return;
+      if ((route === mount || route.indexOf(mount + '/') === 0) && (!best || mount.length > best.mount.length)) best = repo;
+    });
+    var root = (window.$docsify || {}).repoInfo;
+    if (!best && root && root.url && (root.sourceMode || root.source_mode || 'svn') === 'svn'
+        && (!route || route.indexOf('html/_home_') === 0 || route === 'README.md')) best = root;
+    return best;
+  }
+
+  function syncDescription(info) {
+    function date(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '暂无'; }
+    return (Number(info.intervalSeconds) > 0 ? '自动更新：每 ' + info.intervalSeconds + ' 秒' : '自动更新：关闭（可手动更新）')
+      + ' · 上次仓库同步：' + date(info.lastSuccessAt)
+      + (info.lastFileUpdateAt ? ' · 本文手动更新：' + date(info.lastFileUpdateAt) : '')
+      + ' · 状态：' + (info.state === 'running' ? '正在更新…' : (info.error ? '更新异常（' + info.error + '）' : (info.lastSuccessAt ? '同步完成' : '尚未同步')));
+  }
+
+  function refreshSvnStatus() {
+    var bar = document.querySelector('[data-svn-controls]');
+    if (!bar || window.location.protocol === 'file:') return;
+    fetch('__svn/sync-status?binding=' + encodeURIComponent(bar.getAttribute('data-binding')) + '&path=' + encodeURIComponent(bar.getAttribute('data-route')), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; }).then(function (result) {
+        var label = bar.querySelector('[data-svn-status]');
+        if (label && result && result.status) label.textContent = syncDescription(result.status);
+      }).catch(function () {});
+  }
+
+  function addSvnControls() {
+    var section = document.querySelector('.markdown-section');
+    if (!section) return;
+    var route = currentRoute();
+    var repo = svnRepository(route);
+    var old = section.querySelector('[data-svn-controls]');
+    if (!repo) { if (old) old.remove(); return; }
+    if (old && old.getAttribute('data-route') === route) return;
+    if (old) old.remove();
+    var bar = document.createElement('div');
+    bar.className = 'workspace-svn-controls';
+    bar.setAttribute('data-svn-controls', '');
+    bar.setAttribute('data-route', route);
+    bar.setAttribute('data-binding', repo.id);
+    bar.innerHTML = '<div data-svn-status>SVN 更新状态读取中…</div><div class="workspace-svn-actions">'
+      + '<button type="button" data-svn-current>更新当前文档</button>'
+      + '<button type="button" data-svn-repo>更新整个 SVN 仓库</button>'
+      + '<input data-svn-path list="svn-document-options" placeholder="输入或选择仓库内的 .md 路径" aria-label="指定 SVN 文档">'
+      + '<datalist id="svn-document-options"></datalist><button type="button" data-svn-file>更新指定文档</button>'
+      + '<button type="button" data-svn-download>先下载当前 MD</button></div>'
+      + '<p>手动更新以 SVN 库为准；如有未提交修改，请先下载保存。覆盖前服务器会备份原文档，个人草稿仍保留。</p><div data-svn-message role="status"></div>';
+    section.insertBefore(bar, section.querySelector('.workspace-page-actions') ? section.querySelector('.workspace-page-actions').nextSibling : section.firstChild);
+    try {
+      var notice = JSON.parse(sessionStorage.getItem('md2web:svn-update-notice') || 'null');
+      if (notice && notice.href === window.location.href && Date.now() - notice.at < 60000) {
+        bar.querySelector('[data-svn-message]').textContent = notice.message;
+        window.setTimeout(function () { window.scrollTo(0, notice.scrollY || 0); }, 120);
+      }
+    } catch (_) {}
+    var isDocument = route.indexOf(repo.mount + '/') === 0 && route.slice(-1) !== '/' && !section.querySelector('.folder-view');
+    bar.querySelector('[data-svn-current]').disabled = !isDocument;
+    bar.querySelector('[data-svn-download]').disabled = !isDocument;
+    if (window.location.protocol === 'file:') {
+      bar.querySelector('[data-svn-status]').textContent = '离线浏览：连接认证服务后可查看状态和更新 SVN。';
+      Array.prototype.forEach.call(bar.querySelectorAll('button, input'), function (node) { node.disabled = true; });
+      return;
+    }
+    bar.querySelector('[data-svn-path]').addEventListener('focus', function () {
+      if (bar.getAttribute('data-loaded')) return;
+      fetch('__folder?path=' + encodeURIComponent(repo.mount) + '&recursive=1').then(function (r) { return r.json(); }).then(function (data) {
+        var folder = data.folder || data;
+        bar.querySelector('datalist').innerHTML = (folder.documents || []).map(function (item) {
+          return '<option value="' + escape(item.path.slice(repo.mount.length + 1)) + '"></option>';
+        }).join('');
+        bar.setAttribute('data-loaded', '1');
+      }).catch(function () {});
+    });
+    bar.addEventListener('click', function (event) {
+      var target = event.target;
+      if (target.hasAttribute('data-svn-download')) {
+        if (window.MdEditor) window.MdEditor.downloadCurrent();
+        return;
+      }
+      if (!target.matches('[data-svn-current], [data-svn-repo], [data-svn-file]')) return;
+      var path = target.hasAttribute('data-svn-current') ? route : '';
+      if (target.hasAttribute('data-svn-file')) {
+        path = bar.querySelector('[data-svn-path]').value.trim();
+        if (!path) { bar.querySelector('[data-svn-message]').textContent = '请先输入或选择要更新的文档。'; return; }
+        if (path.indexOf('md/') !== 0) path = repo.mount + '/' + path;
+      }
+      if (path && !/\.md$/i.test(path)) path += '.md';
+      if (document.body.classList.contains('md-editor-open')) {
+        bar.querySelector('[data-svn-message]').textContent = '请先下载编辑器中的内容并关闭编辑器，再执行 SVN 更新。'; return;
+      }
+      if (!window.confirm('将以 SVN 最新版本覆盖' + (path ? '文档：' + path : '整个仓库：' + repo.id)
+        + '。请先下载保存当前 MD 或个人草稿。原文件会备份到服务器，草稿保留。继续更新？')) return;
+      target.disabled = true;
+      var message = bar.querySelector('[data-svn-message]');
+      message.textContent = '正在获取 SVN 最新版本，请等待…';
+      fetch('__auth/session', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (session) {
+        if (!session.authenticated) {
+          if (window.SiteAuth) window.SiteAuth.openLogin();
+          throw new Error('请登录后更新');
+        }
+        return fetch('__svn/update', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': session.csrfToken },
+          body: JSON.stringify({ binding: repo.id, path: path || null, remoteWins: true }) });
+      }).then(function (r) { return r.json().then(function (data) { if (!r.ok || !data.ok) throw new Error(data.error || '更新失败'); return data; }); })
+        .then(function (data) {
+          var result = data.result;
+          message.textContent = '已更新到 r' + result.revision + '，覆盖 ' + result.overwritten.length + ' 个文件。备份：' + result.backup
+            + (result.drafts.length ? '；有 ' + result.drafts.length + ' 个个人草稿，请下载保存，勿直接提交旧草稿。' : '')
+            + (data.rebuilt ? '。已更新正文、导航和搜索索引。' : '。页面重建失败，请检查服务日志后重建。');
+          if (data.rebuilt) {
+            if (currentRoute() === route && window.MdEditor && window.MdEditor.reloadAfterSvnUpdate) {
+              try { sessionStorage.setItem('md2web:svn-update-notice', JSON.stringify({ href: window.location.href,
+                at: Date.now(), scrollY: window.scrollY, message: message.textContent })); } catch (_) {}
+              if (window.MdEditor.reloadAfterSvnUpdate()) return;
+            }
+            var refresh = document.createElement('button'); refresh.textContent = '刷新当前页面';
+            refresh.onclick = function () { window.location.reload(); }; message.appendChild(refresh);
+          }
+          refreshSvnStatus();
+          document.dispatchEvent(new CustomEvent('md2web:documents-changed'));
+        }).catch(function (error) { message.textContent = error.message; })
+        .then(function () { target.disabled = false; });
+    });
+    refreshSvnStatus();
+  }
+
+  function enhance() { decorateTree(); addBreadcrumb(); addUpdatedMeta(); addSvnControls(); addCodeButtons(); resolveRelativeImages(); }
   function schedule() { clearTimeout(state.timer); state.timer = setTimeout(enhance, 40); }
 
   // 页面带 <base href="../"> 时，纯 hash 链接（#/md/...、#id）会被浏览器解析到站点根，
@@ -430,11 +560,14 @@
     state.observer = new MutationObserver(schedule);
     state.observer.observe(document.body, { childList: true, subtree: true });
     window.addEventListener('hashchange', schedule);
+    window.setInterval(function () { if (!document.hidden) refreshSvnStatus(); }, 15000);
   }
   if (window.__WORKSPACE_TEST__) {
     window.__WORKSPACE_TEST_API__ = {
       repositoryCandidates: repositoryCandidates,
-      svnUrlForRoute: svnUrlForRoute
+      svnUrlForRoute: svnUrlForRoute,
+      svnRepository: svnRepository,
+      syncDescription: syncDescription
     };
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
