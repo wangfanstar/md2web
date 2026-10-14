@@ -158,3 +158,14 @@ test('sidebar numbering follows the md hierarchy (1 / 2 / 2.1 / 2.2)', () => {
   assert.match(css, /\.sidebar-nav \.workspace-tree-index/);
   assert.match(css, /body\.hide-heading-numbers \.sidebar-nav \.workspace-tree-index/);
 });
+
+test('sidebar reserves a fixed leading marker so same-level items align', () => {
+  const js = fs.readFileSync(path.join(__dirname, '..', 'web', 'workspace.js'), 'utf8');
+  assert.match(js, /workspace-tree-marker/);
+  assert.match(js, /function isGroupLabel/);
+  const css = fs.readFileSync(path.join(__dirname, '..', 'web', 'workspace.css'), 'utf8');
+  assert.match(css, /\.sidebar-nav \.workspace-tree-marker/);
+  // 展开箭头与前导标记同宽并留出相同间距
+  assert.match(css, /\.sidebar-nav \.workspace-folder-toggle \{[^}]*margin-right: 4px/);
+  assert.match(css, /\.sidebar-nav \.workspace-tree-marker \{[^}]*width: 16px/);
+});

@@ -44,15 +44,18 @@
     var label = li.querySelector(':scope > strong, :scope > a, :scope > span');
     if (!label) return text(li);
     var clone = label.cloneNode(true);
-    all('.workspace-folder-toggle, .workspace-folder-count, .workspace-tree-index', clone).forEach(function (node) { node.remove(); });
+    all('.workspace-folder-toggle, .workspace-folder-count, .workspace-tree-index, .workspace-tree-marker', clone).forEach(function (node) { node.remove(); });
     return text(clone);
   }
-  // 文档链接文本要去掉层级序号，过滤时只按真实名称匹配
+  // 文档链接文本要去掉层级序号与前导标记，过滤时只按真实名称匹配
   function linkLabel(a) {
     if (!a) return '';
     var clone = a.cloneNode(true);
-    all('.workspace-tree-index', clone).forEach(function (node) { node.remove(); });
+    all('.workspace-tree-index, .workspace-tree-marker', clone).forEach(function (node) { node.remove(); });
     return text(clone);
+  }
+  function isGroupLabel(label) {
+    return !!(label && (label.classList.contains('sidebar-group-link') || label.classList.contains('sidebar-group-name')));
   }
   function folderKey(li) {
     var labels = [], node = li;
@@ -87,8 +90,9 @@
           if (!badge) {
             badge = document.createElement('span');
             badge.className = 'workspace-tree-index';
-            var toggle = label.querySelector(':scope > .workspace-folder-toggle');
-            if (toggle) label.insertBefore(badge, toggle.nextSibling);
+            var anchor = label.querySelector(':scope > .workspace-folder-toggle')
+              || label.querySelector(':scope > .workspace-tree-marker');
+            if (anchor) label.insertBefore(badge, anchor.nextSibling);
             else label.insertBefore(badge, label.firstChild);
             badge.textContent = value;
           } else if (badge.textContent !== value) {
@@ -108,39 +112,46 @@
     if (!root) return;
     var collapsed = readCollapsed();
     all('li', root).forEach(function (li) {
-      if (!isFolder(li)) return;
       var child = li.querySelector(':scope > ul');
       var label = li.querySelector(':scope > strong, :scope > a, :scope > span');
       if (!label) label = li.firstElementChild;
-      if (!label || !label.querySelector(':scope > .workspace-folder-toggle')) {
-        var button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'workspace-folder-toggle';
-        button.setAttribute('aria-label', '展开或折叠目录');
-        if (label) label.insertBefore(button, label.firstChild);
-        else li.insertBefore(button, child);
-        button.addEventListener('click', function (event) {
-          event.preventDefault(); event.stopPropagation();
-          var close = !li.classList.contains('is-collapsed');
-          setCollapsed(li, close);
-          collapsed[folderKey(li)] = close;
-          saveCollapsed(collapsed);
-        });
-      }
-      if (!label || !label.querySelector(':scope > .workspace-folder-count')) {
-        var count = document.createElement('span');
-        count.className = 'workspace-folder-count';
-        count.textContent = String(all(':scope > ul a[href]', li).filter(function (a) {
-          // 只统计文档链接（分组名链接指向 index_*.html，不计入文件数量）
-          return (a.getAttribute('href') || '').indexOf('.html') === -1;
-        }).length);
-        var target = label || li;
-        target.appendChild(count);
-      }
-      if (Object.prototype.hasOwnProperty.call(collapsed, folderKey(li))) {
-        setCollapsed(li, !!collapsed[folderKey(li)]);
-      } else if (!li.classList.contains('is-collapsed')) {
-        setCollapsed(li, false);
+      if (!label) return;
+      if (child) {
+        if (!label.querySelector(':scope > .workspace-folder-toggle')) {
+          var button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'workspace-folder-toggle';
+          button.setAttribute('aria-label', '展开或折叠目录');
+          label.insertBefore(button, label.firstChild);
+          button.addEventListener('click', function (event) {
+            event.preventDefault(); event.stopPropagation();
+            var close = !li.classList.contains('is-collapsed');
+            setCollapsed(li, close);
+            collapsed[folderKey(li)] = close;
+            saveCollapsed(collapsed);
+          });
+        }
+        if (!label.querySelector(':scope > .workspace-folder-count')) {
+          var count = document.createElement('span');
+          count.className = 'workspace-folder-count';
+          count.textContent = String(all(':scope > ul a[href]', li).filter(function (a) {
+            // 只统计文档链接（分组名链接指向 index_*.html，不计入文件数量）
+            return (a.getAttribute('href') || '').indexOf('.html') === -1;
+          }).length);
+          label.appendChild(count);
+        }
+        if (Object.prototype.hasOwnProperty.call(collapsed, folderKey(li))) {
+          setCollapsed(li, !!collapsed[folderKey(li)]);
+        } else if (!li.classList.contains('is-collapsed')) {
+          setCollapsed(li, false);
+        }
+      } else if (!label.querySelector(':scope > .workspace-tree-marker, :scope > .workspace-folder-toggle')) {
+        // 空文件夹与文档：用固定宽度的前导标记占位，保证与可展开目录、同级文件缩进一致
+        var marker = document.createElement('span');
+        marker.className = 'workspace-tree-marker';
+        marker.setAttribute('aria-hidden', 'true');
+        marker.textContent = isGroupLabel(label) ? '▫' : '·';
+        label.insertBefore(marker, label.firstChild);
       }
     });
     if (!document.querySelector('.workspace-tree-tools')) {

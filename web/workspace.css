@@ -18,7 +18,7 @@ body { color: var(--workspace-ink); background: #f7f9fb; }
 .workspace-tree-filter input:focus { border-color: var(--workspace-accent); box-shadow: 0 0 0 2px rgba(40,120,200,.12); }
 .workspace-tree-tools button, .workspace-page-actions button { border: 1px solid #d5dee8; border-radius: 5px; background: #fff; color: #506174; cursor: pointer; font: inherit; font-size: 11px; padding: 5px 8px; }
 .workspace-tree-tools button:hover, .workspace-page-actions button:hover { border-color: var(--workspace-accent); color: var(--workspace-accent); }
-.sidebar-nav li > strong, .sidebar-nav li > span { display: flex; align-items: center; gap: 3px; }
+.sidebar-nav li > strong, .sidebar-nav li > span { align-items: center; display: flex; gap: 0; padding: 4px 6px; }
 
 /* 目录树层级缩进与层级引导线（桌面与移动端一致） */
 .sidebar-nav { padding: 6px 8px 16px; }
@@ -46,7 +46,7 @@ body { color: var(--workspace-ink); background: #f7f9fb; }
   color: #38495c;
   display: flex;
   font-weight: 600;
-  gap: 3px;
+  gap: 0;
 }
 .sidebar-nav li > a.sidebar-group-link strong {
   font-weight: 600;
@@ -55,7 +55,7 @@ body { color: var(--workspace-ink); background: #f7f9fb; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sidebar-nav li > a.sidebar-group-link .workspace-folder-toggle { flex: 0 0 auto; }
+.sidebar-nav li > a.sidebar-group-link .workspace-folder-toggle { flex: 0 0 16px; width: 16px; margin-right: 4px; text-align: center; }
 .sidebar-nav li > a.sidebar-group-link .workspace-folder-count { flex: 0 0 auto; }
 .sidebar-nav li > a.sidebar-group-link:hover { background: #eef2f6; color: var(--docs-accent); }
 .sidebar-nav li > a.sidebar-group-link:hover strong { color: inherit; }
@@ -70,7 +70,18 @@ body { color: var(--workspace-ink); background: #f7f9fb; }
 }
 .sidebar-nav ul ul a { font-size: 12px; }
 .sidebar-nav ul ul ul a { color: #4a5b6d; font-size: 11.5px; }
-.sidebar-nav .workspace-folder-toggle { flex: 0 0 16px; width: 16px; height: 19px; border: 0; padding: 0; background: transparent; color: var(--workspace-muted); cursor: pointer; font-size: 13px; }
+.sidebar-nav .workspace-folder-toggle { flex: 0 0 16px; width: 16px; height: 19px; border: 0; padding: 0; margin-right: 4px; background: transparent; color: var(--workspace-muted); cursor: pointer; font-size: 13px; text-align: center; }
+/* 空文件夹 / 文档的前导标记：与展开箭头同宽，保证同级名称左边缘对齐 */
+.sidebar-nav .workspace-tree-marker {
+  color: #b6c0cb;
+  display: inline-block;
+  flex: 0 0 16px;
+  font-size: 12px;
+  line-height: 19px;
+  margin-right: 4px;
+  text-align: center;
+  width: 16px;
+}
 .sidebar-nav .workspace-folder-count { margin-left: auto; color: #9aa7b5; font-size: 10px; font-weight: 400; }
 /* md 层级序号：1 / 1.1 / 1.1.1（与「隐藏序号」开关联动） */
 .sidebar-nav .workspace-tree-index {
