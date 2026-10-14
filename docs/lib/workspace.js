@@ -270,7 +270,83 @@
     }
     updateSvnCopyAction(actions, route);
     addSvnDocumentUpdateAction(actions, route);
+    updateDocActions(actions, route);
   }
+
+  // 仅在实际文档页显示「查看源码 / 编辑 MD / 下载 MD」；
+  // 各入口页 index_*.html（含 index_all.html）的首页与文件夹列表不显示。
+  function isDocumentView(route, section) {
+    if (!route || route.indexOf('md/') !== 0 || route.charAt(route.length - 1) === '/') return false;
+    var root = section || document.querySelector('.markdown-section');
+    return !(root && root.querySelector('.folder-view'));
+  }
+
+  function updateEditLabel(actions) {
+    var button = actions ? actions.querySelector('[data-workspace-edit]') : document.querySelector('[data-workspace-edit]');
+    if (!button) return;
+    var auth = window.SiteAuth && window.SiteAuth.snapshot ? window.SiteAuth.snapshot() : null;
+    if (!auth || auth.fileMode) { button.textContent = '编辑 MD'; return; }
+    if (!auth.available) { button.textContent = '只读预览'; }
+    else if (!auth.authenticated) { button.textContent = '登录后编辑'; }
+    else { button.textContent = '编辑 MD'; }
+  }
+
+  function editDocument(actions) {
+    var auth = window.SiteAuth && window.SiteAuth.snapshot ? window.SiteAuth.snapshot() : null;
+    if (auth && !auth.fileMode) {
+      if (!auth.available) {
+        updateEditLabel(actions);
+        if (window.SiteAuth.openLogin) window.SiteAuth.openLogin();
+        return;
+      }
+      if (!auth.authenticated) { window.SiteAuth.openLogin(); return; }
+    } else if (window.SiteAuth && window.SiteAuth.isAuthenticated && !window.SiteAuth.isAuthenticated() && window.location.protocol !== 'file:') {
+      window.SiteAuth.openLogin();
+      return;
+    }
+    if (window.MdEditor) window.MdEditor.open();
+  }
+
+  function updateDocActions(actions, route) {
+    var section = document.querySelector('.markdown-section');
+    var names = ['source', 'edit', 'download'];
+    var buttons = {
+      source: actions.querySelector('[data-workspace-source]'),
+      edit: actions.querySelector('[data-workspace-edit]'),
+      download: actions.querySelector('[data-workspace-download-md]')
+    };
+    if (!isDocumentView(route, section)) {
+      names.forEach(function (name) { if (buttons[name]) buttons[name].remove(); });
+      return;
+    }
+    var exportButton = actions.querySelector('[data-workspace-export]');
+    if (!buttons.source) {
+      buttons.source = document.createElement('button');
+      buttons.source.type = 'button';
+      buttons.source.setAttribute('data-workspace-source', '');
+      buttons.source.textContent = '查看源码';
+      buttons.source.addEventListener('click', function () { if (window.MdEditor && window.MdEditor.openLocal) window.MdEditor.openLocal(); });
+      actions.insertBefore(buttons.source, exportButton || null);
+    }
+    if (!buttons.edit) {
+      buttons.edit = document.createElement('button');
+      buttons.edit.type = 'button';
+      buttons.edit.setAttribute('data-workspace-edit', '');
+      buttons.edit.textContent = '编辑 MD';
+      buttons.edit.addEventListener('click', function () { editDocument(actions); });
+      actions.insertBefore(buttons.edit, exportButton || null);
+      updateEditLabel(actions);
+    }
+    if (!buttons.download) {
+      buttons.download = document.createElement('button');
+      buttons.download.type = 'button';
+      buttons.download.setAttribute('data-workspace-download-md', '');
+      buttons.download.textContent = '下载 MD';
+      buttons.download.addEventListener('click', function () { if (window.MdEditor) window.MdEditor.download(); });
+      actions.insertBefore(buttons.download, exportButton || null);
+    }
+  }
+  document.addEventListener('siteauth:change', function () { updateEditLabel(); });
   function escape(value) { return String(value).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
   function copyText(value, button) {
     var done = function () { if (button) { var old = button.textContent; button.textContent = '已复制'; setTimeout(function () { button.textContent = old; }, 1200); } };
@@ -589,6 +665,7 @@
       svnRepository: svnRepository,
       isSvnDocumentRoute: isSvnDocumentRoute,
       isSvnDocumentPage: isSvnDocumentPage,
+      isDocumentView: isDocumentView,
       syncDescription: syncDescription
     };
   }

@@ -69,11 +69,18 @@ test('SVN copy retains longest repository mapping and does not invent a document
   assert.equal(api.svnUrlForRoute('md/docs/sub'), '');
 });
 
-test('page actions no longer render source/edit/download-MD buttons on any page', () => {
+test('document actions show on md pages but not on index entry/root views', () => {
+  const api = loadWorkspace({});
+  const plain = { querySelector: () => null };
+  assert.equal(api.isDocumentView('md/硬件设计/时钟树', plain), true);
+  assert.equal(api.isDocumentView('md/硬件设计/时钟树.md', plain), true);
+  assert.equal(api.isDocumentView('', plain), false);
+  assert.equal(api.isDocumentView('md/硬件设计', plain), false);
+  assert.equal(api.isDocumentView('md/硬件设计/', plain), false);
+  assert.equal(api.isDocumentView('md/硬件设计/子目录', { querySelector: () => ({}) }), false);
   const source = fs.readFileSync(path.join(__dirname, '..', 'web', 'workspace.js'), 'utf8');
-  assert.doesNotMatch(source, /data-workspace-source/);
-  assert.doesNotMatch(source, /data-workspace-edit/);
-  assert.doesNotMatch(source, /data-workspace-download-md/);
-  assert.match(source, /data-workspace-copy-path/);
-  assert.match(source, /data-workspace-export/);
+  assert.match(source, /isDocumentView/);
+  for (const needle of ['data-workspace-source', 'data-workspace-edit', 'data-workspace-download-md']) {
+    assert.ok(source.includes(needle), needle);
+  }
 });
