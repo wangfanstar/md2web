@@ -84,3 +84,60 @@ test('document actions show on md pages but not on index entry/root views', () =
     assert.ok(source.includes(needle), needle);
   }
 });
+
+test('sidebar numbering follows the md hierarchy (1 / 2 / 2.1 / 2.2)', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'web', 'workspace.js'), 'utf8');
+  function el(tag, className) {
+    return {
+      tagName: String(tag).toUpperCase(), children: [], parentNode: null, style: {},
+      className: className || '',
+      get textContent() { return this.children.map((c) => c.textContent || '').join(''); },
+      set textContent(value) { this.children = [{ textContent: String(value), children: [] }]; },
+      appendChild(child) { child.parentNode = this; this.children.push(child); return child; },
+      insertBefore(child, ref) {
+        child.parentNode = this;
+        const index = ref ? this.children.indexOf(ref) : -1;
+        if (index < 0) this.children.push(child); else this.children.splice(index, 0, child);
+        return child;
+      },
+      querySelectorAll(selector) {
+        const out = [];
+        String(selector).split(',').map((part) => part.trim().replace(/^:scope\s*>\s*/, '')).forEach((part) => {
+          this.children.forEach((child) => {
+            if (part.charAt(0) === '.') { if (String(child.className).split(' ').indexOf(part.slice(1)) !== -1) out.push(child); }
+            else if (child.tagName === part.toUpperCase()) out.push(child);
+          });
+        });
+        return out;
+      },
+      querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+    };
+  }
+  const documentLi = (text) => { const node = el('li'); const link = el('a'); link.textContent = text; node.appendChild(link); return node; };
+  const root = el('ul');
+  root.appendChild(documentLi('文档一'));
+  const sub = el('ul');
+  sub.appendChild(documentLi('文档二'));
+  sub.appendChild(documentLi('文档三'));
+  const folderLi = el('li');
+  const strong = el('strong'); strong.textContent = '子目录';
+  folderLi.appendChild(strong); folderLi.appendChild(sub);
+  root.appendChild(folderLi);
+  const document = { readyState: 'loading', addEventListener() {}, querySelector: () => null,
+    createElement: (tag) => el(tag), body: { classList: { add() {}, remove() {} } } };
+  const window = { __WORKSPACE_TEST__: true, location: { hash: '#/', protocol: 'file:' }, $docsify: {}, addEventListener() {} };
+  const context = vm.createContext({ window, document, console, setTimeout, clearTimeout });
+  vm.runInContext(source, context, { filename: 'workspace.js' });
+  context.window.__WORKSPACE_TEST_API__.addTreeNumbers(root);
+  const numbers = [];
+  (function collect(node) {
+    node.children.forEach((child) => {
+      if (child.className === 'workspace-tree-index') numbers.push(child.textContent);
+      collect(child);
+    });
+  })(root);
+  assert.deepEqual(numbers, ['1', '2', '2.1', '2.2']);
+  const css = fs.readFileSync(path.join(__dirname, '..', 'web', 'workspace.css'), 'utf8');
+  assert.match(css, /\.sidebar-nav \.workspace-tree-index/);
+  assert.match(css, /body\.hide-heading-numbers \.sidebar-nav \.workspace-tree-index/);
+});

@@ -44,7 +44,14 @@
     var label = li.querySelector(':scope > strong, :scope > a, :scope > span');
     if (!label) return text(li);
     var clone = label.cloneNode(true);
-    all('.workspace-folder-toggle, .workspace-folder-count', clone).forEach(function (node) { node.remove(); });
+    all('.workspace-folder-toggle, .workspace-folder-count, .workspace-tree-index', clone).forEach(function (node) { node.remove(); });
+    return text(clone);
+  }
+  // 文档链接文本要去掉层级序号，过滤时只按真实名称匹配
+  function linkLabel(a) {
+    if (!a) return '';
+    var clone = a.cloneNode(true);
+    all('.workspace-tree-index', clone).forEach(function (node) { node.remove(); });
     return text(clone);
   }
   function folderKey(li) {
@@ -53,6 +60,41 @@
     return 'folder:' + labels.join('/').toLowerCase();
   }
   function isFolder(li) { return !!li.querySelector(':scope > ul'); }
+
+  // 按 md 层级给左侧导航加序号（1 / 1.1 / 1.1.1），过滤后只对可见条目连续编号
+  function addTreeNumbers(root) {
+    function walk(ul, prefix) {
+      var index = 0;
+      all(':scope > li', ul).forEach(function (li) {
+        var label = li.querySelector(':scope > strong, :scope > a, :scope > span') || li.firstElementChild;
+        if (li.style.display === 'none') {
+          // 被过滤掉的条目移除序号，避免再次显示时出现重复编号
+          var hidden = label && label.querySelector(':scope > .workspace-tree-index');
+          if (hidden) hidden.remove();
+          return;
+        }
+        index += 1;
+        var path = prefix.concat(index);
+        if (label) {
+          var value = path.join('.');
+          var badge = label.querySelector(':scope > .workspace-tree-index');
+          if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'workspace-tree-index';
+            var toggle = label.querySelector(':scope > .workspace-folder-toggle');
+            if (toggle) label.insertBefore(badge, toggle.nextSibling);
+            else label.insertBefore(badge, label.firstChild);
+            badge.textContent = value;
+          } else if (badge.textContent !== value) {
+            badge.textContent = value;
+          }
+        }
+        var child = li.querySelector(':scope > ul');
+        if (child) walk(child, path);
+      });
+    }
+    walk(root, []);
+  }
 
   function decorateTree() {
     var nav = document.querySelector('.sidebar-nav');
@@ -109,7 +151,7 @@
         '</div></div>';
       var scroll = nav.closest('.docs-sidebar-scroll') || nav.parentNode;
       scroll.insertBefore(tools, nav);
-      tools.querySelector('input').addEventListener('input', function () { state.filter = this.value.trim().toLowerCase(); filterTree(root); });
+      tools.querySelector('input').addEventListener('input', function () { state.filter = this.value.trim().toLowerCase(); filterTree(root); addTreeNumbers(root); });
       var more = tools.querySelector('.workspace-tree-more');
       var menu = tools.querySelector('.workspace-tree-menu');
       function closeMenu() { menu.hidden = true; more.setAttribute('aria-expanded', 'false'); }
@@ -135,6 +177,7 @@
     var input = document.querySelector('.workspace-tree-filter-input');
     if (input && input.value !== state.filter) input.value = state.filter;
     filterTree(root);
+    addTreeNumbers(root);
     var routeChanged = state.lastRoute !== currentRoute();
     if (routeChanged) { state.lastRoute = currentRoute(); locateCurrent(root, false); }
   }
@@ -144,7 +187,7 @@
     function visit(ul) {
       var any = false;
       all(':scope > li', ul).forEach(function (li) {
-        var own = text(li.querySelector(':scope > a')) .toLowerCase();
+        var own = linkLabel(li.querySelector(':scope > a')).toLowerCase();
         var match = !query || own.indexOf(query) !== -1 || folderLabel(li).toLowerCase().indexOf(query) !== -1;
         var childMatch = isFolder(li) ? visit(li.querySelector(':scope > ul')) : false;
         var visible = match || childMatch;
@@ -666,6 +709,7 @@
       isSvnDocumentRoute: isSvnDocumentRoute,
       isSvnDocumentPage: isSvnDocumentPage,
       isDocumentView: isDocumentView,
+      addTreeNumbers: addTreeNumbers,
       syncDescription: syncDescription
     };
   }

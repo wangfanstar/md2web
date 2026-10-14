@@ -72,6 +72,16 @@ body { color: var(--workspace-ink); background: #f7f9fb; }
 .sidebar-nav ul ul ul a { color: #4a5b6d; font-size: 11.5px; }
 .sidebar-nav .workspace-folder-toggle { flex: 0 0 16px; width: 16px; height: 19px; border: 0; padding: 0; background: transparent; color: var(--workspace-muted); cursor: pointer; font-size: 13px; }
 .sidebar-nav .workspace-folder-count { margin-left: auto; color: #9aa7b5; font-size: 10px; font-weight: 400; }
+/* md 层级序号：1 / 1.1 / 1.1.1（与「隐藏序号」开关联动） */
+.sidebar-nav .workspace-tree-index {
+  color: #9aa7b5;
+  flex: 0 0 auto;
+  font-family: var(--docs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  margin-right: 4px;
+}
+body.hide-heading-numbers .sidebar-nav .workspace-tree-index { display: none; }
 .sidebar-nav a.workspace-current { background: rgba(40,120,200,.11); color: var(--workspace-accent); font-weight: 600; border-radius: 4px; }
 .markdown-section { position: relative; max-width: 980px; }
 .workspace-breadcrumb { align-items: center; color: var(--workspace-muted); display: flex; flex-wrap: wrap; font-size: 12px; gap: 6px; margin: 0 0 12px; }
