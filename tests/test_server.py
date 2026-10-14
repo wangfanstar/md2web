@@ -1264,6 +1264,9 @@ class AdminConfigTests(ServerTestBase):
         self.assertEqual(self.auth.repo_sync_credential(self.config['repositories'][0]), ('profile-user', ' profile-pass '))
         self.assertEqual(self.config['ai']['model'], 'profile-model')
         self.assertEqual(self.config['auth']['url'], data['auth']['url'])
+        # 管理员读取配置时下发明文凭据，供配置页回填同步账号与密码
+        exposed = self.client.get('/__config').get_json()['config']
+        self.assertEqual(exposed['credentials'], data['credentials'])
         reread = self.client.get('/__config/profile-content').get_json()['data']
         self.assertEqual(reread['credentials'], data['credentials'])
         self.assertEqual(reread['ai']['model'], 'profile-model')

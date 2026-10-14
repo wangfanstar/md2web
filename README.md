@@ -56,7 +56,7 @@ python3 -m pip install --no-index --find-links server/wheels -r server/requireme
 3. 填写 `md2web_config_测试.json` 等名称，点「复制已保存配置为新方案」。选择已有文件后点「应用并设为默认」，立即应用，重启继续读取它。方案切换保留数据库、端口和服务加密密钥，不删除文档。
 4. 每次保存保留独立私有备份和上一版，点「恢复上一版」可撤销配置。服务配置文件丢失时会从 `data/config-profiles/runtime.json` 恢复；当前 JSON 丢失时用私有备份重建；损坏的 JSON 启动时保留为 `.rejected` 并恢复上一份有效备份。
 
-同步凭据按用户指定使用**明文 JSON**：`credentials.__default__` 是默认 SVN 账号，`credentials.<仓库ID>` 是仓库专用账号，`credentials.site-backup` 是网站备份账号；每项为 `{"username":"账号","password":"密码"}`。专用账号优先于默认账号。首次升级会迁移原加密数据库中的同步凭据；此后以当前 JSON 为准，切换方案不会混用其他方案的账号。`auth.url` 指定登录/验证用的 SVN 路径；本机管理员密码仍由数据库管理，不写入方案。`ai` 支持 `provider`、`baseUrl`、`model`、`apiKey`、`useProxy`、`contextChars`、`sourcePath`。
+同步凭据按用户指定使用**明文 JSON**：`credentials.__default__` 是默认 SVN 账号，`credentials.<仓库ID>` 是仓库专用账号，`credentials.site-backup` 是网站备份账号；每项为 `{"username":"账号","password":"密码"}`。专用账号优先于默认账号。配置页会从管理员配置视图回填每个仓库、默认凭据与网站备份的同步账号和密码（仅管理员可见），读取或切换 JSON 方案后立即生效。首次升级会迁移原加密数据库中的同步凭据；此后以当前 JSON 为准，切换方案不会混用其他方案的账号。`auth.url` 指定登录/验证用的 SVN 路径；本机管理员密码仍由数据库管理，不写入方案。`ai` 支持 `provider`、`baseUrl`、`model`、`apiKey`、`useProxy`、`contextChars`、`sourcePath`。
 
 方案和备份包含明文敏感信息，已加入 `.gitignore`，认证服务及 `--preview` 均禁止直接下载方案文件；只有管理员带 CSRF 的接口可以修改。不要通过其他未配置访问限制的静态服务器公开 `docs/html/md2web_config*.json`，也不要将这些文件强制加入 Git。
 

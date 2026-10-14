@@ -132,6 +132,16 @@ test('repository detail renders inline credential inputs and status', () => {
   assert.match(html, /repo-credential-status/);
 });
 
+test('loaded JSON credentials backfill the inline account and password fields', () => {
+  const p = page([]);
+  p.state.config.credentials = { folder: { username: 'svn-user', password: 'svn-pass' },
+    __default__: { username: 'default-user', password: 'default-pass' } };
+  const html = p.repoRow({ id: 'folder', mount: 'md/folder' }, null, 0);
+  assert.match(html, /data-repo="credUsername"[^>]*value="svn-user"/);
+  assert.match(html, /data-repo="credPassword"[^>]*value="svn-pass"/);
+  assert.match(html, /已单独配置：svn-user/);
+});
+
 test('sync credentials are edited inline without browser prompts', () => {
   const source = fs.readFileSync(path.join(__dirname, '../web/md2web-config.js'), 'utf8');
   assert.doesNotMatch(source, /window\.prompt/);

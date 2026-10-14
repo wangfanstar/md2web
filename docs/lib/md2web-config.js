@@ -307,8 +307,8 @@
       '<div class="repo-credential" data-source-field="svn"' + (svnEnabled ? '' : ' hidden') + '>',
       '<label class="repo-field"><span>同步账号</span><input type="text" data-repo="credUsername" placeholder="SVN 用户名" autocomplete="off" value="'
         + escapeHtml(credential.username) + '"' + disabled + '></label>',
-      '<label class="repo-field"><span>密码</span><input type="password" data-repo="credPassword" placeholder="保存时填写，不回显" autocomplete="new-password"'
-        + disabled + '></label>',
+      '<label class="repo-field"><span>密码</span><input type="password" data-repo="credPassword" placeholder="SVN 密码" autocomplete="new-password" value="'
+        + escapeHtml(storedCredentialField(item.id, 'password')) + '"' + disabled + '></label>',
       '<div class="repo-credential-actions">',
       '<button type="button" data-action="repo-credential"' + disabled + '>保存凭据</button>',
       '<span class="hint repo-credential-status' + (credential.cls ? ' ' + credential.cls : '') + '">'
@@ -713,7 +713,7 @@
   }
 
   function credentialInfo(repoId) {
-    var own = (state.credentials && state.credentials[repoId]) || '';
+    var own = (state.credentials && state.credentials[repoId]) || storedCredentialField(repoId, 'username');
     if (own) {
       return { username: own, status: '已单独配置：' + own, cls: 'is-own' };
     }
@@ -724,11 +724,24 @@
     return { username: '', status: '未配置（同步时回退环境变量）', cls: '' };
   }
 
+  // 管理员接口（GET /__config）下发的配置带明文 credentials（含口令，仅管理员可见），
+  // 用于回填页面上的同步账号与密码，切换/读取 JSON 方案后同样立即生效。
+  function storedCredential(repoId) {
+    var entry = state.config && state.config.credentials && state.config.credentials[repoId];
+    return entry && typeof entry === 'object' ? entry : null;
+  }
+
+  function storedCredentialField(repoId, field) {
+    var entry = storedCredential(repoId);
+    return entry && typeof entry[field] === 'string' ? entry[field] : '';
+  }
+
   function updateCredentialStatus(entry) {
     if (!entry || !entry.detail) {
       return;
     }
-    var info = credentialInfo(pairField(entry, 'id'));
+    var repoId = pairField(entry, 'id');
+    var info = credentialInfo(repoId);
     var status = entry.detail.querySelector('.repo-credential-status');
     if (status) {
       status.textContent = info.status;
@@ -738,15 +751,23 @@
     if (username && !username.value && info.username) {
       username.value = info.username;
     }
+    var password = entry.detail.querySelector('[data-repo="credPassword"]');
+    if (password && !password.value) {
+      password.value = storedCredentialField(repoId, 'password');
+    }
   }
 
   function renderSiteCredentialStatus() {
     var usernameNode = query('[data-site-credential="username"]');
+    var passwordNode = query('[data-site-credential="password"]');
     var label = query('[data-site-credential-label]');
-    var own = (state.credentials && state.credentials['site-backup']) || '';
+    var own = (state.credentials && state.credentials['site-backup']) || storedCredentialField('site-backup', 'username');
     var fallback = (state.defaultCredential && state.defaultCredential.username) || '';
     if (usernameNode && !usernameNode.value && own) {
       usernameNode.value = own;
+    }
+    if (passwordNode && !passwordNode.value) {
+      passwordNode.value = storedCredentialField('site-backup', 'password');
     }
     if (label) {
       label.textContent = own
@@ -843,16 +864,19 @@
         : '登录管理员后可查看/修改';
     }
     if (usernameInput) {
-      usernameInput.value = (state.defaultCredential && state.defaultCredential.username) || '';
+      usernameInput.value = (state.defaultCredential && state.defaultCredential.username)
+        || storedCredentialField('__default__', 'username');
       usernameInput.disabled = !state.editable;
     }
     if (passwordInput) {
+      passwordInput.value = storedCredentialField('__default__', 'password');
       passwordInput.disabled = !state.editable;
     }
     if (label) {
       label.textContent = (state.defaultCredential && state.defaultCredential.username)
         ? '已配置默认凭据：' + state.defaultCredential.username
-        : (state.authenticated ? '未配置默认凭据（同步时回退环境变量）' : '登录管理员后可配置默认同步凭据');
+        : (storedCredentialField('__default__', 'username') ? '已配置默认凭据：' + storedCredentialField('__default__', 'username')
+          : (state.authenticated ? '未配置默认凭据（同步时回退环境变量）' : '登录管理员后可配置默认同步凭据'));
     }
   }
 
@@ -926,7 +950,11 @@
     });
     var siteUser = query('[data-site-credential="username"]');
     if (siteUser) {
-      siteUser.value = (state.credentials && state.credentials['site-backup']) || '';
+      siteUser.value = (state.credentials && state.credentials['site-backup']) || storedCredentialField('site-backup', 'username');
+    }
+    var sitePassword = query('[data-site-credential="password"]');
+    if (sitePassword) {
+      sitePassword.value = storedCredentialField('site-backup', 'password');
     }
     all('[data-site-credential]').forEach(function (node) {
       node.disabled = !state.editable;
