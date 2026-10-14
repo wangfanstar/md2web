@@ -110,19 +110,34 @@ test('sidebar numbering follows the md hierarchy (1 / 2 / 2.1 / 2.2)', () => {
         });
         return out;
       },
-      querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+      querySelector(selector) { return this.querySelectorAll(selector)[0] || null; },
+      remove() {
+        if (this.parentNode) {
+          const index = this.parentNode.children.indexOf(this);
+          if (index >= 0) this.parentNode.children.splice(index, 1);
+        }
+      }
     };
   }
   const documentLi = (text) => { const node = el('li'); const link = el('a'); link.textContent = text; node.appendChild(link); return node; };
+  const folderLi = (text, list) => {
+    const node = el('li');
+    const strong = el('strong'); strong.textContent = text; node.appendChild(strong);
+    node.appendChild(list);
+    return node;
+  };
+  const subList = el('ul');
+  subList.appendChild(documentLi('文档二'));
+  subList.appendChild(documentLi('文档三'));
+  const inner = el('ul');
+  inner.appendChild(documentLi('文档一'));
+  inner.appendChild(folderLi('子目录', subList));
+  const topStrong = el('strong'); topStrong.textContent = '所有文档';
+  const topLi = el('li');
+  topLi.appendChild(topStrong);
+  topLi.appendChild(inner);
   const root = el('ul');
-  root.appendChild(documentLi('文档一'));
-  const sub = el('ul');
-  sub.appendChild(documentLi('文档二'));
-  sub.appendChild(documentLi('文档三'));
-  const folderLi = el('li');
-  const strong = el('strong'); strong.textContent = '子目录';
-  folderLi.appendChild(strong); folderLi.appendChild(sub);
-  root.appendChild(folderLi);
+  root.appendChild(topLi);
   const document = { readyState: 'loading', addEventListener() {}, querySelector: () => null,
     createElement: (tag) => el(tag), body: { classList: { add() {}, remove() {} } } };
   const window = { __WORKSPACE_TEST__: true, location: { hash: '#/', protocol: 'file:' }, $docsify: {}, addEventListener() {} };
@@ -136,7 +151,9 @@ test('sidebar numbering follows the md hierarchy (1 / 2 / 2.1 / 2.2)', () => {
       collect(child);
     });
   })(root);
+  // 顶层「所有文档」分组不出序号，子层级从 1 开始
   assert.deepEqual(numbers, ['1', '2', '2.1', '2.2']);
+  assert.equal(topStrong.querySelector(':scope > .workspace-tree-index'), null);
   const css = fs.readFileSync(path.join(__dirname, '..', 'web', 'workspace.css'), 'utf8');
   assert.match(css, /\.sidebar-nav \.workspace-tree-index/);
   assert.match(css, /body\.hide-heading-numbers \.sidebar-nav \.workspace-tree-index/);

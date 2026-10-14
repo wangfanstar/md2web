@@ -61,23 +61,29 @@
   }
   function isFolder(li) { return !!li.querySelector(':scope > ul'); }
 
-  // 按 md 层级给左侧导航加序号（1 / 1.1 / 1.1.1），过滤后只对可见条目连续编号
+  // 按 md 层级给左侧导航加序号（1 / 1.1 / 1.1.1）：顶层「所有文档/仓库」分组不加序号，
+  // 从下一层子文件夹开始编号；过滤后只对可见条目连续编号
   function addTreeNumbers(root) {
-    function walk(ul, prefix) {
+    function walk(ul, prefix, depth) {
       var index = 0;
       all(':scope > li', ul).forEach(function (li) {
         var label = li.querySelector(':scope > strong, :scope > a, :scope > span') || li.firstElementChild;
+        var badge = label && label.querySelector(':scope > .workspace-tree-index');
         if (li.style.display === 'none') {
           // 被过滤掉的条目移除序号，避免再次显示时出现重复编号
-          var hidden = label && label.querySelector(':scope > .workspace-tree-index');
-          if (hidden) hidden.remove();
+          if (badge) badge.remove();
+          return;
+        }
+        var child = li.querySelector(':scope > ul');
+        if (depth === 0) {
+          if (badge) badge.remove();
+          if (child) walk(child, prefix, depth + 1);
           return;
         }
         index += 1;
         var path = prefix.concat(index);
         if (label) {
           var value = path.join('.');
-          var badge = label.querySelector(':scope > .workspace-tree-index');
           if (!badge) {
             badge = document.createElement('span');
             badge.className = 'workspace-tree-index';
@@ -89,11 +95,10 @@
             badge.textContent = value;
           }
         }
-        var child = li.querySelector(':scope > ul');
-        if (child) walk(child, path);
+        if (child) walk(child, path, depth + 1);
       });
     }
-    walk(root, []);
+    walk(root, [], 0);
   }
 
   function decorateTree() {
