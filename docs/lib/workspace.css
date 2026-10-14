@@ -96,6 +96,11 @@ body { color: var(--workspace-ink); background: #f7f9fb; }
 }
 .workspace-page-actions [data-workspace-copy-svn] { border-color: #bfdbfe; color: var(--workspace-accent); }
 .workspace-page-actions [data-workspace-copy-svn]:hover { background: #eef4fd; border-color: var(--workspace-accent); }
+.workspace-page-actions [data-workspace-update-svn] { border-color: #bfdbfe; color: var(--workspace-accent); }
+.workspace-page-actions [data-workspace-update-svn]:hover { background: #eef4fd; border-color: var(--workspace-accent); }
+.workspace-svn-doc-status { align-self: center; color: var(--docs-muted, #57606a); font-size: 11px; line-height: 1.4; max-width: 420px; }
+.workspace-svn-doc-status:empty { display: none; }
+.workspace-svn-doc-status button { margin-left: 6px; }
 .markdown-section pre { position: relative; }
 .workspace-copy-code { position: absolute; top: 7px; right: 8px; border: 1px solid rgba(255,255,255,.25); border-radius: 4px; background: rgba(18,28,40,.7); color: #e8eef5; cursor: pointer; font-size: 11px; opacity: .75; padding: 3px 7px; }
 .workspace-copy-code:hover { opacity: 1; }

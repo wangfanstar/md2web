@@ -41,6 +41,18 @@ test('SVN copy URL is empty for local repositories', () => {
   assert.equal(api.svnUrlForRoute('md/硬件设计/时钟树.md'), '');
 });
 
+test('SVN document routes are distinguished from repository entry pages', () => {
+  const api = loadWorkspace({ mount: 'md/硬件设计', url: 'https://svn.example/docs/' });
+  const repo = { mount: 'md/硬件设计', url: 'https://svn.example/docs/' };
+  assert.equal(api.isSvnDocumentRoute('md/硬件设计/时钟树', repo), true);
+  assert.equal(api.isSvnDocumentRoute('md/硬件设计/时钟树.md', repo), true);
+  assert.equal(api.isSvnDocumentRoute('', repo), false);
+  assert.equal(api.isSvnDocumentRoute('md/硬件设计', repo), false);
+  assert.equal(api.isSvnDocumentRoute('md/硬件设计/', repo), false);
+  assert.equal(api.isSvnDocumentRoute('md/其他/时钟树', repo), false);
+  assert.equal(api.isSvnDocumentRoute('md/硬件设计/时钟树', null), false);
+});
+
 test('SVN copy restores the md suffix omitted by Docsify and excludes section queries', () => {
   const api = loadWorkspace({ mount: 'md/硬件设计', url: 'https://svn.example/docs/' });
   for (const route of ['md/硬件设计/接口 说明.v2', '#/md/硬件设计/接口 说明.v2?id=章节', 'md/硬件设计/接口 说明.v2.md']) {
