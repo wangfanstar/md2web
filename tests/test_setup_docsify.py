@@ -1464,6 +1464,72 @@ class MultiRepoTests(TempDirTestCase):
             self.module.cleanup_repo_artifacts([repo])
         self.assertFalse(stale.exists())
 
+    def _write_png(self, rel, width, height):
+        import struct
+        import zlib
+        path = self.md / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        def chunk(tag, data):
+            return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff)
+
+        raw = b""
+        for _ in range(height):
+            raw += b"\x00" + bytes((10, 20, 30)) * width
+        data = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+        path.write_bytes(data)
+        return path
+
+    def test_folder_pages_use_leaf_names_and_disambiguate_collisions(self):
+        pages = self.module.folder_page_names(
+            ["硬件设计", "硬件设计/接口", "软件工具链", "软件工具链/接口", "文档"])
+        self.assertEqual(pages["硬件设计"], "index_硬件设计.html")
+        self.assertEqual(pages["文档"], "index_文档.html")
+        self.assertEqual(pages["硬件设计/接口"], "index_接口.html")
+        self.assertEqual(pages["软件工具链/接口"], "index_软件工具链-接口.html")
+
+    def test_folder_page_map_keeps_repo_entry_names(self):
+        repos = [{"id": "hardware", "mount": "md/硬件设计"}]
+        pages = self.module.folder_page_map(["硬件设计", "硬件设计/子目录"], repos)
+        self.assertEqual(pages["硬件设计"], "index_hardware.html")
+        self.assertEqual(pages["硬件设计/子目录"], "index_子目录.html")
+
+    def test_read_image_size_parses_png_header(self):
+        path = self._write_png("图片/a.png", 48, 24)
+        self.assertEqual(self.module.read_image_size(path), (48, 24))
+
+    def test_image_gallery_markdown_lists_size_and_dimensions(self):
+        self._write_png("图片集/a.png", 48, 24)
+        text = self.module.image_gallery_markdown("图片集", ["a.png"])
+        self.assertIn("workspace-image-card", text)
+        self.assertIn("48×24", text)
+        self.assertIn("md/%E5%9B%BE%E7%89%87%E9%9B%86/a.png", text)
+
+    def test_write_folder_home_generates_gallery_for_image_only_folder(self):
+        self.module.HTML_DIR.mkdir(parents=True, exist_ok=True)
+        self._write_png("图片集/a.png", 10, 20)
+        homepage = self.module.write_folder_home("图片集", "index_图片集.html", False, ["a.png"], {})
+        self.assertEqual(homepage, "html/_home_图片集.md")
+        text = (self.docs / "html" / "_home_图片集.md").read_text(encoding="utf-8")
+        self.assertIn("workspace-image-grid", text)
+        self.assertIn("10×20", text)
+
+    def test_render_doc_tree_links_nested_folders(self):
+        tree = self.module.build_doc_tree(["a/b/c.md"], ["a", "a/b"])
+        pages = {"a": "index_a.html", "a/b": "index_a-b.html"}
+
+        def dir_link(folder):
+            rel = folder[len("md/"):] if folder.startswith("md/") else folder
+            return "html/" + pages[rel] if rel in pages else ""
+
+        lines = []
+        self.module.render_doc_tree(tree, "/md", "  ", lines, lambda route: route,
+                                     preserve_folders=True, dir_link=dir_link)
+        text = "\n".join(lines)
+        self.assertIn('href="html/index_a.html" data-folder="md/a"', text)
+        self.assertIn('href="html/index_a-b.html" data-folder="md/a/b"', text)
+
     def test_auto_folder_repos_cover_unconfigured_folders(self):
         self.write_doc("硬件设计/时钟树设计.md", "# A")
         self.write_doc("验证指南/仿真环境搭建.md", "# B")

@@ -1186,6 +1186,48 @@ body.folder-view-active .docs-page-toc {
 }
 .folder-view-table td[data-updated-cell] { white-space: nowrap; }
 
+/* 全图片文件夹入口页：图片画廊 */
+.workspace-image-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  margin: 14px 0 20px;
+}
+.workspace-image-card {
+  background: var(--docs-surface, #fff);
+  border: 1px solid var(--docs-border, #e3e8ee);
+  border-radius: 10px;
+  margin: 0;
+  overflow: hidden;
+  padding: 0;
+}
+.workspace-image-card img {
+  background: #f6f8fb;
+  display: block;
+  height: 150px;
+  object-fit: contain;
+  width: 100%;
+}
+.workspace-image-card figcaption {
+  border-top: 1px solid var(--docs-border, #e3e8ee);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+}
+.workspace-image-name {
+  color: var(--docs-ink, #1f2a37);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-image-meta {
+  color: var(--docs-muted, #57606a);
+  font-family: var(--docs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+}
+
 .folder-view-hint {
   color: var(--docs-muted, #57606a);
   font-size: 12.5px;

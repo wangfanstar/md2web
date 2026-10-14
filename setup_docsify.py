@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import sys
 import urllib.error
 import urllib.parse
@@ -767,6 +768,182 @@ def write_empty_repo_home(repo):
     return HTML_PREFIX + name
 
 
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+
+
+def human_size(num):
+    """人类可读的文件大小（B/KB/MB/GB）。"""
+    value = float(num or 0)
+    for unit in ("B", "KB", "MB", "GB"):
+        if value < 1024 or unit == "GB":
+            return "%d B" % int(value) if unit == "B" else "%.1f %s" % (value, unit)
+        value /= 1024
+    return "%.1f GB" % value
+
+
+def list_images(directory):
+    """目录下直接包含的图片文件（跳过隐藏文件与子目录），按名称排序。"""
+    try:
+        names = sorted(os.listdir(str(directory)))
+    except OSError:
+        return []
+    result = []
+    for name in names:
+        if name.startswith(".") or Path(name).suffix.lower() not in IMAGE_SUFFIXES:
+            continue
+        if (Path(directory) / name).is_file():
+            result.append(name)
+    return result
+
+
+def _jpeg_size(data):
+    index = 2
+    while index + 9 < len(data):
+        if data[index] != 0xFF:
+            index += 1
+            continue
+        marker = data[index + 1]
+        if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+            index += 2
+            continue
+        if marker in (0xD9, 0xDA):
+            break
+        length = data[index + 2] * 256 + data[index + 3]
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            height = data[index + 5] * 256 + data[index + 6]
+            width = data[index + 7] * 256 + data[index + 8]
+            return (width, height)
+        index += 2 + length
+    return None
+
+
+def _webp_size(data):
+    fmt = data[12:16]
+    if fmt == b"VP8X" and len(data) >= 30:
+        width = 1 + (data[24] | (data[25] << 8) | (data[26] << 16))
+        height = 1 + (data[27] | (data[28] << 8) | (data[29] << 16))
+        return (width, height)
+    if fmt == b"VP8 " and len(data) >= 30 and data[23:26] == b"\x9d\x01\x2a":
+        width = (data[26] | (data[27] << 8)) & 0x3FFF
+        height = (data[28] | (data[29] << 8)) & 0x3FFF
+        return (width, height)
+    if fmt == b"VP8L" and len(data) >= 25:
+        bits = data[21] | (data[22] << 8) | (data[23] << 16) | (data[24] << 24)
+        return ((bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1)
+    return None
+
+
+def read_image_size(path):
+    """尽力从文件头解析图片宽高（仅标准库）；失败返回 None。"""
+    try:
+        with open(str(path), "rb") as handle:
+            head = handle.read(131072)
+    except OSError:
+        return None
+    try:
+        if head[:8] == b"\x89PNG\r\n\x1a\n" and len(head) >= 24:
+            return struct.unpack(">II", head[16:24])
+        if head[:6] in (b"GIF87a", b"GIF89a") and len(head) >= 10:
+            return struct.unpack("<HH", head[6:10])
+        if head[:2] == b"BM" and len(head) >= 26:
+            return struct.unpack("<II", head[18:26])
+        if head[:2] == b"\xff\xd8":
+            return _jpeg_size(head)
+        if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+            return _webp_size(head)
+    except (struct.error, IndexError):
+        return None
+    return None
+
+
+def folder_page_names(directories):
+    """为 docs/md 下每个目录分配入口页 index_<...>.html。
+
+    顶层沿用文件夹名；子目录优先用叶子名，与其它的重名时逐级加父目录前缀，
+    仍冲突时追加数字。返回 {rel: 页面文件名}。
+    """
+    ordered = sorted([str(rel) for rel in directories], key=lambda rel: (rel.count("/"), rel))
+    pages = {}
+    taken = {"index_all.html"}
+    for rel in ordered:
+        parts = [part for part in rel.split("/") if part]
+        if not parts:
+            continue
+        name = None
+        for take in range(1, len(parts) + 1):
+            candidate = repo_page_name("-".join(parts[-take:]))
+            if candidate not in taken:
+                name = candidate
+                break
+        if name is None:
+            base = repo_page_name("-".join(parts))[:-len(".html")]
+            counter = 2
+            while True:
+                candidate = base + "-" + str(counter) + ".html"
+                if candidate not in taken:
+                    name = candidate
+                    break
+                counter += 1
+        pages[rel] = name
+        taken.add(name)
+    return pages
+
+
+def folder_page_map(directories, repos):
+    """rel → 入口页文件名；顶层文件夹以仓库入口页为准（保持既有 index_<仓库ID>.html）。"""
+    pages = folder_page_names(directories)
+    for repo in repos or []:
+        sub = mount_subpath(repo["mount"])
+        if sub and sub in pages:
+            pages[sub] = repo_page_name(repo["id"])
+    return pages
+
+
+def image_gallery_markdown(rel, images):
+    """全图片文件夹的画廊首页：缩略图 + 名称/大小/尺寸。"""
+    name = rel.split("/")[-1]
+    lines = ["# " + name, "", "共 %d 张图片。" % len(images), "", '<div class="workspace-image-grid">']
+    for filename in images:
+        target = MD_DIR / rel / filename
+        source = urllib.parse.quote("md/" + rel + "/" + filename, safe="/")
+        meta = []
+        try:
+            meta.append(human_size(target.stat().st_size))
+        except OSError:
+            pass
+        dims = read_image_size(target)
+        if dims:
+            meta.append("%d×%d" % dims)
+        lines.append(
+            '<figure class="workspace-image-card">'
+            '<img src="' + source + '" alt="' + html.escape(filename, quote=True) + '" loading="lazy">'
+            '<figcaption><span class="workspace-image-name">' + html.escape(filename) + '</span>'
+            '<span class="workspace-image-meta">' + html.escape(" · ".join(meta)) + '</span>'
+            '</figcaption></figure>'
+        )
+    lines += ["</div>", ""]
+    return "\n".join(lines)
+
+
+def write_folder_home(rel, page, has_documents, images, repo):
+    """为文件夹入口页生成占位首页：全图片显示画廊，否则显示空状态/新建入口。"""
+    if images and not has_documents:
+        text = image_gallery_markdown(rel, images)
+    else:
+        mount = html.escape("md/" + rel, quote=True)
+        text = ("# " + rel.split("/")[-1] + "\n\n该文件夹还没有文档。\n")
+        if repo and not repo.get("read_only") and repo.get("allow_commit", True):
+            text += ('\n<p>登录认证编辑服务后可继续创建内容：</p>\n'
+                     '<div class="folder-view-empty-actions">'
+                     '<button type="button" data-folder-action="new-document" data-path="' + mount
+                     + '">新建文档</button> '
+                     '<button type="button" data-folder-action="new-folder" data-path="' + mount
+                     + '">新建文件夹</button></div>\n')
+    name = "_home_" + page[len("index_"):-len(".html")] + ".md"
+    (HTML_DIR / name).write_text(text, encoding="utf-8")
+    return HTML_PREFIX + name
+
+
 def load_all_repos():
     """仓库列表 = 配置的仓库 + 未配置文件夹的自动入口页（本地模式默认页）。"""
     repos = load_repositories()
@@ -1015,13 +1192,14 @@ def generate_search_index(md_files, title=DEFAULT_TITLE, depth=SEARCH_DEPTH, pat
 
 
 def generate_offline_data(md_files, path=None, search_index_path=None, sidebar="_sidebar.md", include_readme=True,
-                          homepage=None, contents=None):
+                          homepage=None, contents=None, extra_pages=()):
     """内嵌 Markdown 和搜索索引，使 file:// 直接打开时绕过 XHR/fetch 限制。"""
     LIB_DIR.mkdir(parents=True, exist_ok=True)
     content = {}
     names = ([HTML_PREFIX + "README.md"] if include_readme else []) + [sidebar]
     if homepage:
         names.append(homepage)
+    names.extend(extra_pages)
     for name in names:
         item = DOCS_DIR / name
         if item.exists():
@@ -1089,7 +1267,7 @@ def render_doc_tree(node, route_prefix, indent, lines, link, preserve_folders=Fa
             continue
         folder = (route_prefix + "/" + name).strip("/")
         label = f"**{html.escape(name)}**"
-        target = dir_link(name) if dir_link else ""
+        target = dir_link(folder) if dir_link else ""
         if target:
             # 原始 HTML 锚点：Markdown 链接会被 docsify 重写成 hash 路由
             lines.append(
@@ -1101,30 +1279,36 @@ def render_doc_tree(node, route_prefix, indent, lines, link, preserve_folders=Fa
                 f'{indent}- <span class="sidebar-group-name"'
                 f' data-folder="{html.escape(folder, quote=True)}">{label}</span>'
             )
-        render_doc_tree(child, route_prefix + "/" + name, indent + "  ", lines, link, preserve_folders)
+        render_doc_tree(child, route_prefix + "/" + name, indent + "  ", lines, link, preserve_folders, dir_link)
     for filename in sorted(node["files"]):
         lines.append(
             f"{indent}- [{html.escape(Path(filename).stem)}]({markdown_link_path(link(route_prefix + '/' + filename))})"
         )
 
 
-def generate_sidebar(md_files, path=None, heading="目录", link_first_level=False, top_link="", dir_paths=()):
+def generate_sidebar(md_files, path=None, heading="目录", link_first_level=False, top_link="", dir_paths=(),
+                     folder_pages=None):
     """生成 _sidebar.md 侧边栏文件。
 
-    link_first_level=True 时一级分组名按名称链接到仓库入口页（全局侧栏）；
-    top_link 直接指定一级分组的链接（各仓库侧栏指回自己的入口页 index_<仓库>.html）；
+    folder_pages 为 {md 下相对目录: 入口页文件名}，用于把所有文件夹（含子文件夹）
+    链接到各自的 index_<文件夹>.html；缺失时回退到 top_link / link_first_level 规则。
     dir_paths 为 docs/md 下的真实目录，用于把空文件夹也显示在左侧导航里。
     """
     # 侧栏第一行固定为「所有文档」，链接回全部文档合并视图
     lines = ['- <a class="sidebar-group-link" href="' + HTML_PREFIX
              + 'index_all.html" data-folder="md">**所有文档**</a>']
     tree = build_doc_tree(md_files, dir_paths)
+    pages = folder_pages or {}
 
-    def dir_link(name):
+    def dir_link(folder):
+        rel = folder[len("md/"):] if folder.startswith("md/") else folder
+        page = pages.get(rel)
+        if page:
+            return HTML_PREFIX + page
         if top_link:
             return top_link
         if link_first_level:
-            return HTML_PREFIX + repo_page_name(name)
+            return HTML_PREFIX + repo_page_name(rel.split("/")[0])
         return ""
 
     render_doc_tree(tree, "/md", "  ", lines, lambda route: route, preserve_folders=True, dir_link=dir_link)
@@ -1229,7 +1413,7 @@ def generate_index_html(title=DEFAULT_TITLE, path=None, page_name="index.html", 
                          sidebar="_sidebar.md", search_index="search-index.json",
                          offline_data="lib/offline-data.js", homepage=None,
                          read_only=False, allow_commit=True, repo=None, repos=None,
-                         route_sidebar=False, home_link=None, in_html_dir=None):
+                         route_sidebar=False, home_link=None, in_html_dir=None, recycle_mount=None):
     """生成 index.html"""
     prism_lang_map_js = json.dumps(PRISM_LANG_FALLBACK, ensure_ascii=False)
     title_html = html.escape(title)
@@ -1259,7 +1443,7 @@ def generate_index_html(title=DEFAULT_TITLE, path=None, page_name="index.html", 
     read_only_js = "true" if read_only else "false"
     allow_commit_js = "true" if allow_commit else "false"
     repo_js = json.dumps(repo or {}, ensure_ascii=False).replace("<", "\\u003c")
-    recycle_mount = (repo or {}).get("mount") if repo and not (repo or {}).get("all") else "md"
+    recycle_mount = recycle_mount or ((repo or {}).get("mount") if repo and not (repo or {}).get("all") else "md")
     recycle_href = HTML_PREFIX + "md2web_recycle.html?mount=" + urllib.parse.quote(str(recycle_mount or "md"), safe="")
     html_text = f"""<!DOCTYPE html>
 <!-- 基于 docsify 4.13.1（MIT，https://github.com/docsifyjs/docsify）构建，含本地修改；
@@ -1644,11 +1828,14 @@ def cleanup_legacy_root_artifacts():
         print(f"  [清理] 旧布局残留 {len(removed)} 个：{', '.join(removed[:6])}")
 
 
-def cleanup_repo_artifacts(repos):
+def cleanup_repo_artifacts(repos, folder_pages=()):
     """删除已不在配置里的仓库入口页/侧栏/索引/离线数据，避免遗留旧仓库页面。"""
     cleanup_legacy_root_artifacts()
     HTML_DIR.mkdir(parents=True, exist_ok=True)
     keep = {repo["id"] for repo in repos}
+    page_names = list(folder_pages or [])
+    for name in page_names:
+        keep.add(name[len("index_"):-len(".html")] if name.startswith("index_") and name.endswith(".html") else name)
     removed = []
     patterns = [
         ("index_*.html", lambda name: name[len("index_"):-len(".html")]),
@@ -1682,6 +1869,9 @@ def cleanup_repo_artifacts(repos):
             except OSError:
                 pass
     keep_homes = {repo_home_name(repo["id"]) for repo in repos}
+    for name in page_names:
+        if name.startswith("index_") and name.endswith(".html"):
+            keep_homes.add("_home_" + name[len("index_"):-len(".html")] + ".md")
     for path in sorted(HTML_DIR.glob("_home_*.md")):
         if path.name not in keep_homes:
             try:
@@ -1993,15 +2183,42 @@ def main(argv=None):
         print("2. 生成导航、首页、搜索索引...")
         repos = load_all_repos()
         md_dirs = scan_directories(MD_DIR)
+        pages = folder_page_map(md_dirs, repos)
         HTML_DIR.mkdir(parents=True, exist_ok=True)
         generate_sidebar(md_files, path=HTML_DIR / "_sidebar.md", link_first_level=True,
-                         dir_paths=md_dirs)
+                         dir_paths=md_dirs, folder_pages=pages)
         generate_readme(md_files, args.title, repos=repos, path=HTML_DIR / "README.md")
         generate_search_index(md_files, args.title, repos=repos, path=HTML_DIR / "search-index.json", contents=contents)
         generate_offline_data(md_files, sidebar=HTML_PREFIX + "_sidebar.md", contents=contents)
 
-        print("3. 生成多仓库页面（每仓库一个入口 + 总览 + 配置页）...")
-        cleanup_repo_artifacts(repos)
+        print("3. 生成文件夹入口页与多仓库页面...")
+        cleanup_repo_artifacts(repos, folder_pages=list(pages.values()))
+
+        def repo_for_rel(rel):
+            repo, _ = repo_for_route("md/" + rel, repos)
+            return repo or {}
+
+        # 预生成文件夹首页：全图片显示画廊，否则空状态；供入口页与离线快照使用
+        homepage_by_rel = {}
+        image_only_by_rel = {}
+        extras_by_repo = {}
+        for rel in md_dirs:
+            docs = files_for_mount(md_files, "md/" + rel)
+            images = list_images(MD_DIR / rel)
+            repo = repo_for_rel(rel)
+            readme = MD_DIR / rel / "README.md"
+            generated = None
+            if docs:
+                homepage = ("md/" + rel + "/README.md") if readme.is_file() else ("md/" + docs[0])
+            else:
+                homepage = write_folder_home(rel, pages[rel], False, images, repo)
+                generated = homepage
+            homepage_by_rel[rel] = homepage
+            image_only_by_rel[rel] = bool(images) and not docs
+            if generated:
+                owner = mount_subpath(repo.get("mount")) or rel.split("/")[0]
+                extras_by_repo.setdefault(owner, []).append(generated)
+
         generate_index_html(args.title, path=HTML_DIR / "index_all.html", site_name=args.title,
                             repo={"all": True}, repos=repos, route_sidebar=True,
                             homepage=HTML_PREFIX + "README.md", home_link="index.html")
@@ -2015,25 +2232,43 @@ def main(argv=None):
             offline_data = f"lib/offline-data_{repo['id']}.js"
             generate_sidebar(repo_files, path=HTML_DIR / sidebar, heading=repo["id"],
                              top_link=HTML_PREFIX + page,
-                             dir_paths=dirs_for_mount(md_dirs, repo["mount"]))
-            empty_home = write_empty_repo_home(repo) if not repo_files else None
+                             dir_paths=dirs_for_mount(md_dirs, repo["mount"]),
+                             folder_pages=pages)
+            homepage = homepage_by_rel.get(sub)
+            if homepage is None:
+                homepage = write_folder_home(sub or repo["id"], page, False,
+                                             list_images(MD_DIR / sub) if sub else [], repo)
             generate_offline_data(repo_files, path=LIB_DIR / f"offline-data_{repo['id']}.js",
                                   search_index_path=HTML_DIR / "search-index.json",
                                   sidebar=HTML_PREFIX + sidebar,
-                                  include_readme=False, homepage=empty_home, contents=contents)
-            if (MD_DIR / sub / "README.md").is_file():
-                homepage = f"md/{sub}/README.md"
-            elif repo_files:
-                homepage = f"md/{repo_files[0]}"
-            else:
-                homepage = empty_home
+                                  include_readme=False, homepage=homepage, contents=contents,
+                                  extra_pages=extras_by_repo.get(sub, []))
             generate_index_html(args.title, path=HTML_DIR / page, page_name=page,
                                 site_name=f"{repo['id']} · {args.title}",
                                 sidebar=sidebar, search_index=search_index, offline_data=offline_data,
                                 homepage=homepage, read_only=repo.get("read_only", False),
                                 allow_commit=repo.get("allow_commit", True), repo=repo,
-                                repos=repos, route_sidebar=True,
+                                repos=repos, route_sidebar=not image_only_by_rel.get(sub, False),
                                 home_link=HTML_PREFIX + "index_all.html")
+        # 子文件夹入口页：与仓库入口页一致的 docsify 应用，范围限定在该文件夹
+        for rel in md_dirs:
+            if "/" not in rel:
+                continue
+            repo = repo_for_rel(rel)
+            if not repo:
+                continue
+            page = pages[rel]
+            leaf = rel.split("/")[-1]
+            repo_page = repo_page_name(repo["id"])
+            generate_index_html(args.title, path=HTML_DIR / page, page_name=page,
+                                site_name=f"{leaf} · {args.title}",
+                                sidebar=f"_sidebar_{repo['id']}.md", search_index="search-index.json",
+                                offline_data=f"lib/offline-data_{repo['id']}.js",
+                                homepage=homepage_by_rel.get(rel), read_only=repo.get("read_only", False),
+                                allow_commit=repo.get("allow_commit", True),
+                                repo={"mount": "md/" + rel, "id": page, "label": leaf, "all": False},
+                                repos=repos, route_sidebar=not image_only_by_rel.get(rel, False),
+                                home_link=HTML_PREFIX + repo_page, recycle_mount=repo["mount"])
         reference_web = scan_reference_web()
         generate_reference_web(reference_web)
         generate_master_index_html(repos, args.title, reference_web=reference_web)
