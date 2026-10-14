@@ -83,7 +83,7 @@
     }
     var clone = section.cloneNode(true);
     Array.prototype.forEach.call(
-      clone.querySelectorAll('.workspace-breadcrumb, .workspace-page-actions, .search-reading-toolbar, .workspace-copy-code, .search-section-arrow, .search-section-badge, .search-section-body'),
+      clone.querySelectorAll('.workspace-breadcrumb, .workspace-page-actions, .workspace-svn-controls, .search-reading-toolbar, .workspace-copy-code, .search-section-arrow, .search-section-badge, .search-section-body'),
       function (node) { node.remove(); }
     );
     Array.prototype.forEach.call(clone.querySelectorAll('canvas'), function (canvas) {

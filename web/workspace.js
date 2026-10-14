@@ -440,6 +440,9 @@
       .then(function (r) { return r.ok ? r.json() : null; }).then(function (result) {
         var label = bar.querySelector('[data-svn-status]');
         if (label && result && result.status) label.textContent = syncDescription(result.status);
+        var info = result && result.status;
+        var state = !info ? 'idle' : (info.state === 'running' ? 'running' : (info.error ? 'error' : (info.lastSuccessAt ? 'ok' : 'idle')));
+        bar.setAttribute('data-state', state);
       }).catch(function () {});
   }
 
@@ -508,11 +511,15 @@
     bar.setAttribute('data-svn-controls', '');
     bar.setAttribute('data-route', route);
     bar.setAttribute('data-binding', repo.id);
-    bar.innerHTML = '<div data-svn-status>SVN 更新状态读取中…</div><div class="workspace-svn-actions">'
-      + '<button type="button" data-svn-repo>更新整个 SVN 仓库</button>'
+    bar.innerHTML = '<div class="workspace-svn-head">'
+      + '<span class="workspace-svn-title">SVN 手动更新</span>'
+      + '<span class="workspace-svn-status" data-svn-status>状态读取中…</span>'
+      + '</div><div class="workspace-svn-actions">'
+      + '<button type="button" class="workspace-svn-primary" data-svn-repo>更新整个 SVN 仓库</button>'
       + '<input data-svn-path list="svn-document-options" placeholder="输入或选择仓库内的 .md 路径" aria-label="指定 SVN 文档">'
       + '<datalist id="svn-document-options"></datalist><button type="button" data-svn-file>更新指定文档</button></div>'
-      + '<p>手动更新以 SVN 库为准；如有未提交修改，请先下载保存。覆盖前服务器会备份原文档，个人草稿仍保留。</p><div data-svn-message role="status"></div>';
+      + '<p class="workspace-svn-note">手动更新以 SVN 库为准；如有未提交修改，请先下载保存。覆盖前服务器会备份原文档，个人草稿仍保留。</p>'
+      + '<div class="workspace-svn-message" data-svn-message role="status"></div>';
     section.insertBefore(bar, section.querySelector('.workspace-page-actions') ? section.querySelector('.workspace-page-actions').nextSibling : section.firstChild);
     var notice = consumeSvnNotice(bar.querySelector('[data-svn-message]'));
     if (notice) window.setTimeout(function () { window.scrollTo(0, notice.scrollY || 0); }, 120);
