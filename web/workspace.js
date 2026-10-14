@@ -456,7 +456,7 @@
     return null;
   }
 
-  // 手动以远端覆盖本地：负责登录检查、确认、结果提示与页面刷新
+  // 手动以远端覆盖本地：免登录（使用服务器配置的同步账号），负责确认、结果提示与页面刷新
   function performSvnUpdate(repo, path, message, button, route) {
     function say(value) { if (message) message.textContent = value; }
     if (document.body.classList.contains('md-editor-open')) {
@@ -467,11 +467,9 @@
     if (button) button.disabled = true;
     say('正在获取 SVN 最新版本，请等待…');
     fetch('__auth/session', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (session) {
-      if (!session.authenticated) {
-        if (window.SiteAuth) window.SiteAuth.openLogin();
-        throw new Error('请登录后更新');
-      }
-      return fetch('__svn/update', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': session.csrfToken },
+      var headers = { 'Content-Type': 'application/json' };
+      if (session && session.authenticated && session.csrfToken) headers['X-CSRF-Token'] = session.csrfToken;
+      return fetch('__svn/update', { method: 'POST', headers: headers,
         body: JSON.stringify({ binding: repo.id, path: path || null, remoteWins: true }) });
     }).then(function (r) { return r.json().then(function (data) { if (!r.ok || !data.ok) throw new Error(data.error || '更新失败'); return data; }); })
       .then(function (data) {

@@ -8,6 +8,18 @@ from pathlib import Path
 
 DEFAULT_NAME = 'md2web_config.json'
 FIELDS = ('auth', 'sync', 'repositories', 'folderGroups', 'siteBackup', 'ai', 'credentials')
+# 配置页固定可选的三套配置：主配置、默认配置、备份配置
+PRESETS = (
+    ('md2web_config.json', '主配置'),
+    ('md2web_config_default.json', '默认配置'),
+    ('md2web_config_backup.json', '备份配置'),
+)
+PRESET_NAMES = [name for name, _ in PRESETS]
+PRESET_LABELS = dict(PRESETS)
+
+
+def label_for(name):
+    return PRESET_LABELS.get(name, name)
 
 
 def validate_name(name):
@@ -189,13 +201,34 @@ def restore_previous(current, docs):
     return apply_data(current, docs, name, read_json(private_dir(docs) / (name + '.previous')))
 
 
+def ensure_presets(current, docs):
+    """保证配置页三种可选配置都存在：主配置、默认配置、备份配置。
+
+    缺失时用当前运行配置生成一份快照（镜像到 docs/html/ 与私有目录），
+    已有文件不会被覆盖，管理员之后可分别编辑。
+    """
+    data = None
+    for name, _ in PRESETS:
+        try:
+            mirror = Path(docs) / 'html' / name
+            backup = private_dir(docs) / name
+            if mirror.is_file() or backup.is_file():
+                continue
+            if data is None:
+                data = profile_data(current)
+            atomic_json(mirror, data)
+            atomic_json(backup, data)
+        except OSError:
+            continue
+
+
 def initialize(current, docs):
     """启动时读取默认方案；升级前的旧配置自动迁移，已有方案不会被构建覆盖。"""
     from .config import ConfigError
     name = validate_name(current.get('profile_name', DEFAULT_NAME))
     if (Path(docs) / 'html' / name).is_file() or (private_dir(docs) / name).is_file():
         try:
-            return select(current, docs, name)
+            result = select(current, docs, name)
         except ConfigError:
             # 手工编辑的 JSON 损坏时，用上次成功保存的私有副本启动，并保留坏文件供核对。
             backup = private_dir(docs) / name
@@ -206,15 +239,18 @@ def initialize(current, docs):
             rejected = private_dir(docs) / (name + '.rejected')
             rejected.write_bytes(mirror.read_bytes())
             os.chmod(str(rejected), 0o600)
-            restored = apply_data(current, docs, name, data)
+            result = apply_data(current, docs, name, data)
             print('[配置恢复] 已从私有备份恢复 ' + name + '；原 JSON 保留在 data/config-profiles/ 对应 .rejected 文件中。')
-            return restored
-    persist(current, docs)
-    return current
+    else:
+        persist(current, docs)
+        result = current
+    ensure_presets(result, docs)
+    return result
 
 
 def listing(current, docs):
     from .config import ConfigError
+    ensure_presets(current, docs)
     names = {current.get('profile_name', DEFAULT_NAME)}
     for directory in (Path(docs) / 'html', private_dir(docs)):
         for path in directory.glob('md2web_config*.json'):
@@ -228,7 +264,8 @@ def listing(current, docs):
         backup = private_dir(docs) / name
         file_path = mirror if mirror.is_file() else backup
         stamp = datetime.fromtimestamp(file_path.stat().st_mtime, timezone.utc).isoformat() if file_path.is_file() else None
-        items.append({'name': name, 'updatedAt': stamp,
+        items.append({'name': name, 'label': label_for(name), 'updatedAt': stamp,
                       'hasPrevious': (private_dir(docs) / (name + '.previous')).is_file()})
     return {'active': current.get('profile_name', DEFAULT_NAME), 'profiles': items,
+            'presets': PRESET_NAMES,
             'directory': 'docs/html/', 'backupDirectory': 'data/config-profiles/'}

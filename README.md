@@ -51,7 +51,7 @@ python3 -m pip install --no-index --find-links server/wheels -r server/requireme
 
 在认证服务中打开 `html/md2web_config.html`，管理员登录后使用顶部「配置方案」：
 
-1. 首次启动迁移既有配置到 `docs/html/md2web_config.json`。JSON 包括 `auth`（SVN 账号验证地址）、`sync`、`repositories`、`folderGroups`、`siteBackup`、`ai` 和 `credentials`。
+1. 首次启动迁移既有配置到 `docs/html/md2web_config.json`。JSON 包括 `auth`（SVN 账号验证地址）、`sync`、`repositories`、`folderGroups`、`siteBackup`、`ai` 和 `credentials`。配置页固定可选三套：`md2web_config.json`（主配置）、`md2web_config_default.json`（默认配置）、`md2web_config_backup.json`（备份配置）；缺失时按当前配置自动生成快照，已有文件不会被覆盖，可分别切换与编辑。
 2. 修改表单后点「保存配置并重建站点」，立即同步当前 JSON。也可展开 JSON 编辑框，读取、编辑并保存应用；在服务器上手工修改文件后点「从当前 JSON 重新读取」。未保存的表单/JSON 修改会在切换前提示处理。
 3. 填写 `md2web_config_测试.json` 等名称，点「复制已保存配置为新方案」。选择已有文件后点「应用并设为默认」，立即应用，重启继续读取它。方案切换保留数据库、端口和服务加密密钥，不删除文档。
 4. 每次保存保留独立私有备份和上一版，点「恢复上一版」可撤销配置。服务配置文件丢失时会从 `data/config-profiles/runtime.json` 恢复；当前 JSON 丢失时用私有备份重建；损坏的 JSON 启动时保留为 `.rejected` 并恢复上一份有效备份。
@@ -64,7 +64,7 @@ python3 -m pip install --no-index --find-links server/wheels -r server/requireme
 
 配置页仓库表格和 SVN 仓库入口页（`index_<仓库>.html`）显示有效更新频率、最近成功同步时间及运行/成功/异常状态，每 15 秒刷新状态。频率 0 表示关闭自动更新；失败不会改写上一次成功时间。单篇文档手动更新另显示「本文手动更新」时间。
 
-在 SVN 仓库入口页（`index_<仓库>.html`）显示自动更新状态，并提供「更新整个 SVN 仓库」或输入/选择指定文件的更新；Markdown 文档页不再显示自动更新信息块，改为在「复制链接」旁提供「更新当前 SVN 文档」按钮。更新需要登录并确认以远端为准：编辑器打开时先保存/下载并关闭，覆盖前原文档备份到 `data/svn-update-backups/<编号>/`，个人草稿不删除。返回的备份目录内按 `md/仓库/...` 保存原文件，`manifest.json` 记录操作。单文件更新只改指定文件，不将整个仓库版本误标为已同步；自动同步继续跳过活动草稿并报告冲突。更新成功后自动原位刷新正文、导航和搜索；更新期间若打开编辑器则保留编辑器并显示刷新按钮；未出现在远端快照中的本地文件保持不变。
+在 SVN 仓库入口页（`index_<仓库>.html`）显示自动更新状态，并提供「更新整个 SVN 仓库」或输入/选择指定文件的更新；Markdown 文档页不再显示自动更新信息块，改为在「复制链接」旁提供「更新当前 SVN 文档」按钮。整库与单篇更新都无需登录，直接用配置里的同步账号（仓库自有 → 默认 → 会话/环境变量）拉取，仅允许同源请求；覆盖前需确认以远端为准。原文档备份到 `data/svn-update-backups/<编号>/`，个人草稿不删除。返回的备份目录内按 `md/仓库/...` 保存原文件，`manifest.json` 记录操作。单文件更新只改指定文件，不将整个仓库版本误标为已同步；自动同步继续跳过活动草稿并报告冲突。更新成功后自动原位刷新正文、导航和搜索；更新期间若打开编辑器则保留编辑器并显示刷新按钮；未出现在远端快照中的本地文件保持不变。
 
 搜索中的「文档名匹配」只匹配解码后的真实文件名，每份文档只返回一次；目录名、章节标题不再被误报为文件名命中。「全文匹配」继续独立搜索正文。
 

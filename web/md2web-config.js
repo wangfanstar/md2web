@@ -137,8 +137,9 @@
     if (!state.editable) return Promise.resolve();
     return api('__config/profiles').then(function (result) {
       query('[data-profile-select]').innerHTML = result.profiles.map(function (item) {
+        var label = item.label && item.label !== item.name ? item.label + '（' + item.name + '）' : item.name;
         return '<option value="' + escapeHtml(item.name) + '"' + (item.name === result.active ? ' selected' : '')
-          + '>' + escapeHtml(item.name) + (item.name === result.active ? '（当前默认）' : '') + '</option>';
+          + '>' + escapeHtml(label) + (item.name === result.active ? ' · 当前默认' : '') + '</option>';
       }).join('');
       var active = result.profiles.filter(function (item) { return item.name === result.active; })[0] || {};
       query('[data-profile-info]').textContent = '当前：docs/html/' + result.active

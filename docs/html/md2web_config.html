@@ -178,6 +178,7 @@
         </div>
         <p class="hint" data-profile-info></p>
         <div data-profile-status role="status" hidden></div>
+        <p class="hint">默认内置三套可选配置：<code>md2web_config.json</code>（主配置）、<code>md2web_config_default.json</code>（默认配置）、<code>md2web_config_backup.json</code>（备份配置）；缺失时按当前配置自动生成快照，可在下拉中切换并分别保存。</p>
         <p class="hint">修改后点击「保存配置并重建站点」，自动同步当前 JSON 并保留上一版。切换方案立即生效，重启继续读取默认方案；不会删除仓库文件。同步账号、密码及 AI Key 按明文保存在方案中，仅管理员接口可读；端口、数据库位置和服务密钥单独保留。</p>
         <p class="hint">更新代码时请保留 <code>docs/html/md2web_config*.json</code>、<code>config/server.local.json</code> 和 <code>data/</code>。JSON 不受构建覆盖，并在 <code>data/config-profiles/</code> 自动备份。</p>
         <details><summary>直接查看 / 编辑当前 JSON（包含明文凭据）</summary>
@@ -318,7 +319,7 @@
     </section>
   </div>
   <script src="lib/auth.js?v=da8fd7f61e"></script>
-  <script src="lib/md2web-config.js?v=c9d2aa2362"></script>
+  <script src="lib/md2web-config.js?v=54effaf5a9"></script>
   <script src="lib/md2web-feedback.js?v=d905adefde"></script>
 </body>
 </html>

@@ -114,6 +114,29 @@ class ConfigProfileTests(unittest.TestCase):
         self.assertEqual((profiles.private_dir(self.docs) / 'md2web_config.json.rejected').read_text(encoding='utf-8'), '{broken')
         self.assertEqual(profiles.read_profile(self.docs, profiles.DEFAULT_NAME)['folderGroups'], {})
 
+    def test_listing_exposes_three_preset_profiles_with_labels(self):
+        result = profiles.listing(self.loaded, self.docs)
+        names = [item['name'] for item in result['profiles']]
+        for preset in profiles.PRESET_NAMES:
+            self.assertIn(preset, names)
+        labels = {item['name']: item['label'] for item in result['profiles']}
+        self.assertEqual(labels['md2web_config_default.json'], '默认配置')
+        self.assertEqual(labels['md2web_config_backup.json'], '备份配置')
+        for preset in ('md2web_config_default.json', 'md2web_config_backup.json'):
+            self.assertTrue((self.docs / 'html' / preset).is_file())
+            self.assertTrue((profiles.private_dir(self.docs) / preset).is_file())
+        # 三套预设都能被选中加载
+        for preset in profiles.PRESET_NAMES:
+            self.assertEqual(profiles.select(self.loaded, self.docs, preset)['profile_name'], preset)
+
+    def test_existing_preset_files_are_not_overwritten(self):
+        mirror = self.docs / 'html/md2web_config_backup.json'
+        data = profiles.profile_data(self.loaded)
+        data['folderGroups'] = {'md/keep': '保留'}
+        mirror.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+        profiles.ensure_presets(self.loaded, self.docs)
+        self.assertEqual(json.loads(mirror.read_text(encoding='utf-8'))['folderGroups'], {'md/keep': '保留'})
+
 
 if __name__ == '__main__':
     unittest.main()

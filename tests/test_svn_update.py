@@ -91,23 +91,40 @@ class ManualSvnUpdateTests(unittest.TestCase):
         self.assertEqual(self.file.read_text(encoding='utf-8'), '# local\n')
         self.assertEqual((self.md / 'repo/other.md').read_text(encoding='utf-8'), '# local other\n')
 
-    def test_api_requires_login_csrf_confirmation_and_rebuilds(self):
+    def test_api_single_document_update_uses_configured_credential_without_login(self):
         from server.app import create_app
         auth = AuthService(self.conn, self.svn, self.config)
         rebuilt = mock.Mock(return_value=True)
         client = create_app(self.config, self.conn, auth, self.docs, rebuilt).test_client()
         payload = {'binding': 'repo', 'path': self.path, 'remoteWins': True}
-        self.assertEqual(client.post('/__svn/update', json=payload).status_code, 401)
-        login = client.post('/__auth/login', json={'username': 'admin', 'password': 'admin', 'mode': 'admin'}).get_json()
-        self.assertEqual(client.post('/__svn/update', json=payload).status_code, 403)
-        headers = {'X-CSRF-Token': login['csrfToken']}
-        self.assertEqual(client.post('/__svn/update', json={'binding': 'repo'}, headers=headers).status_code, 409)
-        response = client.post('/__svn/update', json=payload, headers=headers)
+        # 单篇文档更新无需登录，自动使用配置中的同步账号
+        response = client.post('/__svn/update', json=payload)
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.get_json()['result']['overwritten'], [self.path])
         rebuilt.assert_called_once()
         self.assertTrue(client.get('/__svn/sync-status?binding=repo&path=' + self.path).get_json()['status']['lastFileUpdateAt'])
+        # 跨站来源被拒绝
+        self.assertEqual(client.post('/__svn/update', json=payload, headers={'Origin': 'https://evil.example'}).status_code, 403)
+        # 缺少远端覆盖确认 / 无效仓库与服务端路径校验仍然生效
+        self.assertEqual(client.post('/__svn/update', json={'binding': 'repo', 'path': self.path}).status_code, 409)
+        self.assertEqual(client.post('/__svn/update', json={'binding': 'nope', 'path': self.path, 'remoteWins': True}).status_code, 400)
         payload['path'] = 'md/other/invalid.md'
-        self.assertEqual(client.post('/__svn/update', json=payload, headers=headers).status_code, 400)
+        self.assertEqual(client.post('/__svn/update', json=payload).status_code, 400)
+
+    def test_whole_repository_update_also_runs_without_login(self):
+        from server.app import create_app
+        auth = AuthService(self.conn, self.svn, self.config)
+        rebuilt = mock.Mock(return_value=True)
+        client = create_app(self.config, self.conn, auth, self.docs, rebuilt).test_client()
+        payload = {'binding': 'repo', 'remoteWins': True}
+        # 整库更新同样免登录，用配置账号拉取
+        response = client.post('/__svn/update', json=payload)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(self.file.read_text(encoding='utf-8'), '# remote\n')
+        # 跨站来源被拒绝
+        self.assertEqual(client.post('/__svn/update', json=payload, headers={'Origin': 'https://evil.example'}).status_code, 403)
+        # 仍需远端覆盖确认
+        self.assertEqual(client.post('/__svn/update', json={'binding': 'repo'}).status_code, 409)
 
 
 if __name__ == '__main__':

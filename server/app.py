@@ -289,22 +289,23 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
     @app.post('/__svn/update')
     @serialized
     def manual_svn_update():
-        session, rejected = require_session()
-        if rejected:
-            return rejected
-        rejected = require_csrf(session)
+        # 手动更新以 SVN 库为准，不写回远端；单篇文档与整库都免登录，
+        # 由仓库配置里的同步账号自动完成，仅要求同源请求以防跨站触发。
+        rejected = require_same_origin()
         if rejected:
             return rejected
         payload = request.get_json(silent=True) or {}
         if payload.get('remoteWins') is not True:
             return json_error(409, 'confirm_remote', '请先下载当前文档，确认以 SVN 库为准覆盖本地版本')
+        session = current_session()
         repo = next((r for r in config['repositories'] if r['id'] == payload.get('binding')), None)
         if not repo or repo.get('source_mode', 'svn') != 'svn':
             return json_error(400, 'not_svn', '请选择有效的 SVN 仓库')
         from . import svn_update
         try:
             result = svn_update.update(conn, auth_service.svn, config, md_dir(), repo,
-                auth_service.repo_sync_credential(repo, credential_of(session)), payload.get('path'), auth_service._db_lock)
+                auth_service.repo_sync_credential(repo, credential_of(session) if session else None),
+                payload.get('path'), auth_service._db_lock)
         except (operations.OperationError, MdSaveError) as error:
             return json_error(error.status, 'svn_update_failed', error.message)
         document_meta_cache.clear()
