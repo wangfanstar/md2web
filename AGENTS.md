@@ -215,7 +215,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - SVN 同步成功（包括远端无变化）记录 `last_success_at`，异常/冲突保留上次成功时间；`sync_state` 运行时为 running、结束恢复 idle。`GET /__svn/sync-status` 公开返回频率/状态/时间，不返回凭据；配置页与仓库入口页每 15 秒读取（文档页不再显示，只在操作后刷新）。单文件成功时间从 manual_svn_update 审计读取，不伪报全仓库同步完成。
 - 搜索 file 模式仅使用实际路由的末级文件名（解码、保留 `.md`）；不得把父目录、pageTitle 或章节标题加入文件名条件。相同文档的章节结果去重，命中文档名时链接到文档而非任意章节。全文匹配保持独立。新增验证见 `tests/test_config_profiles.py`、`tests/test_svn_update.py` 和前端搜索/工作台用例。
 
-- 仓库删除/恢复由 `server/repositories.py` 和管理员接口 `POST /__admin/repo-delete|repo-restore` 管理，需登录管理员与 CSRF；本地目录（软链接仅链接本身）移入 `docs/md/.repository-trash/<id>/`，配置写入失败回滚目录移动，恢复不覆盖已有路径，活动草稿/未完成提交禁止删除。`GET /__admin/repo-trash` 供配置页恢复列表使用，隐藏回收站不进入构建或静态分发。
+- 仓库删除/恢复由 `server/repositories.py` 和管理员接口 `POST /__admin/repo-delete|repo-restore` 管理，需登录管理员与 CSRF；本地目录（软链接仅链接本身）移入 `docs/md/.repository-trash/<id>/`，配置写入失败回滚目录移动，恢复不覆盖已有路径，活动草稿/未完成提交禁止删除。`GET /__admin/repo-trash` 供配置页恢复列表使用，隐藏回收站不进入构建或静态分发。配置页恢复区为 `<section id="repository-trash" data-repo-trash>`：管理员登录后显示可恢复仓库，未登录/非管理员也会显示面板并提示「前往管理员登录」（`loadRepoTrash` 始终取消隐藏，不再静默失败），入口页/合并视图的「仓库回收站」链接带 `#repository-trash`，配置页监听 `hashchange` 打开该面板。
 - `index_all.html` 的“手动同步并刷新仓库”调用 `/__admin/sync`，忽略定时同步频率（含 0），保留草稿冲突检查，然后重建入口、导航和索引；自动同步仍按频率运行。网络同步不持数据库锁。
 - 仓库管理重建使用 `setup_docsify.py --allow-empty`，允许删除最后一个仓库后生成空站点；普通构建仍拒绝空源目录，任何模式都拒绝源目录缺失。
 - 启动/restart/自动监视重建使用 `--allow-empty --reconcile-config --config <实际配置文件>`；`server.config.reconcile_deleted_folders` 清理手动删除的本地仓库和旧索引/`docs/lib/source-folders.json` 证明存在过的 SVN 仓库、目录分组，保存配置时不得重建目录。未拉取的 SVN 库和仍存在的失效链接须保留。构建先抓取 Markdown 内容快照，后续语言扫描/索引/离线资源共用该快照，扫描中删除文件可重新扫描；非 UTF-8 和权限错误仍明确失败。

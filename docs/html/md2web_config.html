@@ -155,7 +155,7 @@
       勾选「配置 SVN」才会展开 SVN 地址、更新频率、只读/允许合入等设置（不勾选表示本地模式，不连接 SVN）。
       保存后站点会自动重建：每个仓库生成一个入口页 <code>index_&lt;仓库名&gt;.html</code>，根目录 <code>index.html</code> 为分组总览。</p>
 
-    <section class="panel" data-config-login hidden>
+    <section class="panel" id="admin-login" data-config-login hidden>
       <h2>管理员登录</h2>
       <div class="row">
         <label>用户名<input type="text" data-login-username value="admin" autocomplete="username"></label>
@@ -307,7 +307,7 @@
       <p class="hint">随当前 JSON 方案保存。SVN 账号验证使用上方「SVN 认证路径」，默认同步账号及各库专用账号也会写入当前方案。AI 默认值提供给已登录用户，个人 AI 设置可覆盖默认值。</p>
       <button type="button" class="primary" data-action="save">保存配置并重建站点</button>
     </section>
-    <section class="panel" data-repo-trash hidden>
+    <section class="panel" id="repository-trash" data-repo-trash hidden>
       <h2>仓库回收站</h2>
       <p class="hint">恢复时一并还原仓库配置和本地资料。SVN 远端内容及软链接目标始终保留。</p>
       <div data-repo-trash-list></div>
@@ -319,7 +319,7 @@
     </section>
   </div>
   <script src="lib/auth.js?v=da8fd7f61e"></script>
-  <script src="lib/md2web-config.js?v=9b24a65e66"></script>
+  <script src="lib/md2web-config.js?v=ed2e56d4fa"></script>
   <script src="lib/md2web-feedback.js?v=d905adefde"></script>
 </body>
 </html>

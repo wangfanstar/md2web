@@ -1034,6 +1034,7 @@
             siteBadge.textContent = '（登录管理员后自动检查）';
           }
           setStatus('当前为只读展示：登录管理员账号后可直接修改并保存。');
+          if (window.location.hash === '#repository-trash') loadRepoTrash();
           return state.config;
         });
       }
@@ -1324,11 +1325,21 @@
   }
 
   function loadRepoTrash() {
-    if (!state.editable) { setStatus('请先登录管理员账号后查看仓库回收站。', true); return; }
     var panel = query('[data-repo-trash]');
+    if (!panel) return;
     panel.hidden = false;
+    var list = query('[data-repo-trash-list]');
+    if (!list) return;
+    if (!state.editable) {
+      list.innerHTML = '<p>仓库回收站需要管理员登录后才能查看和恢复。</p>'
+        + '<p><a href="#admin-login">前往管理员登录</a></p>';
+      setStatus('请先登录管理员账号后查看仓库回收站。', true);
+      panel.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    list.innerHTML = '<p>正在读取仓库回收站…</p>';
     api('__admin/repo-trash').then(function (payload) {
-      query('[data-repo-trash-list]').innerHTML = (payload.entries || []).map(function (item) {
+      list.innerHTML = (payload.entries || []).map(function (item) {
         return '<p><strong>' + escapeHtml(item.id) + '</strong> · <code>' + escapeHtml(item.mount)
           + '</code> · ' + escapeHtml(item.deletedAt) + ' <button type="button" data-action="restore-repo" data-entry-id="'
           + escapeHtml(item.entryId) + '">恢复仓库</button></p>';
@@ -1589,6 +1600,10 @@
     }
   });
   window.setInterval(function () { if (!document.hidden) refreshSyncStatus(); }, 15000);
+  // 从其它页面带 #repository-trash 进来，或在页内点击该锚点时都能打开仓库回收站
+  window.addEventListener('hashchange', function () {
+    if (window.location.hash === '#repository-trash') loadRepoTrash();
+  });
   window.addEventListener('beforeunload', function (event) {
     if (!state.dirty && !state.jsonDirty) return;
     event.preventDefault(); event.returnValue = '';

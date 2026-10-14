@@ -156,6 +156,16 @@ test('showPanels reveals every main configuration panel (auth path, credentials,
   assert.equal(p.panels.every(panel => panel.hidden === false), true);
 });
 
+test('repository trash is reachable without admin and linked from the config page', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../web/md2web-config.js'), 'utf8');
+  assert.match(source, /function loadRepoTrash/);
+  assert.match(source, /#repository-trash/);
+  assert.match(source, /前往管理员登录/);
+  const html = fs.readFileSync(path.join(__dirname, '../web/md2web_config.html'), 'utf8');
+  assert.match(html, /id="repository-trash"/);
+  assert.match(html, /id="admin-login"/);
+});
+
 test('sync credentials are edited inline without browser prompts', () => {
   const source = fs.readFileSync(path.join(__dirname, '../web/md2web-config.js'), 'utf8');
   assert.doesNotMatch(source, /window\.prompt/);
