@@ -54,7 +54,7 @@
   function showPanels() {
     var fileMode = window.location.protocol === 'file:';
     query('[data-config-file]').hidden = !fileMode;
-    query('[data-config-main]').hidden = fileMode;
+    all('[data-config-main]').forEach(function (panel) { panel.hidden = fileMode; });
     query('[data-config-login]').hidden = fileMode || state.authenticated;
     var hint = query('[data-edit-hint]');
     if (hint) {

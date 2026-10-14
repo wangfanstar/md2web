@@ -32,19 +32,26 @@ function page(items, repositories = []) {
     return { summary, detail, fields, display };
   });
   const document = { addEventListener: (name, fn) => (listeners[name] ||= []).push(fn),
-    querySelectorAll: selector => selector === '[data-repo-row]' ? entries.map(e => e.summary) : [],
+    querySelectorAll: selector => selector === '[data-repo-row]' ? entries.map(e => e.summary)
+      : (selector === '[data-config-main]' ? panels : []),
     querySelector: selector => {
       const match = selector.match(/repo-(\d+)/);
-      return match ? entries[Number(match[1])][selector.startsWith('[data-repo-row]') ? 'summary' : 'detail'] : null;
+      if (match) return entries[Number(match[1])][selector.startsWith('[data-repo-row]') ? 'summary' : 'detail'];
+      if (selector === '[data-config-file]') return filePanel;
+      if (selector === '[data-config-login]') return loginPanel;
+      return null;
     } };
+  const panels = [{ hidden: true }, { hidden: true }, { hidden: true }, { hidden: true }];
+  const filePanel = { hidden: true };
+  const loginPanel = { hidden: true };
   const context = vm.createContext({ document, window: { setInterval() {}, addEventListener() {}, location: { protocol: 'http:' }, confirm: () => true }, console });
   const source = fs.readFileSync(path.join(__dirname, '../web/md2web-config.js'), 'utf8');
   vm.runInContext(source.replace(/  showPanels\(\);\r?\n  loadConfig\(\);\r?\n\}\(\)\);/,
-    '  globalThis.subject = { state, readRepos, pairField, repoRow, validateRepos, updateSummary, collectFolderGroups };\r\n}());'), context);
+    '  globalThis.subject = { state, readRepos, pairField, repoRow, validateRepos, updateSummary, collectFolderGroups, showPanels };\r\n}());'), context);
   const subject = context.subject;
   subject.state.config = { repositories };
   subject.state.editable = true;
-  return { ...subject, entries, click(action, index = 0) {
+  return { ...subject, entries, panels, click(action, index = 0) {
     const target = { getAttribute: () => action, closest: selector => selector === '[data-action]' ? target : entries[index].detail.closest(selector) };
     listeners.click.forEach(fn => fn({ target }));
   } };
@@ -140,6 +147,13 @@ test('loaded JSON credentials backfill the inline account and password fields', 
   assert.match(html, /data-repo="credUsername"[^>]*value="svn-user"/);
   assert.match(html, /data-repo="credPassword"[^>]*value="svn-pass"/);
   assert.match(html, /已单独配置：svn-user/);
+});
+
+test('showPanels reveals every main configuration panel (auth path, credentials, backup)', () => {
+  const p = page([]);
+  p.showPanels();
+  assert.ok(p.panels.length > 1);
+  assert.equal(p.panels.every(panel => panel.hidden === false), true);
 });
 
 test('sync credentials are edited inline without browser prompts', () => {

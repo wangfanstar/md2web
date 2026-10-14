@@ -1269,6 +1269,8 @@ class AdminConfigTests(ServerTestBase):
         self.assertEqual(exposed['credentials'], data['credentials'])
         reread = self.client.get('/__config/profile-content').get_json()['data']
         self.assertEqual(reread['credentials'], data['credentials'])
+        # SVN 认证路径随 JSON 方案一起读写，JSON 编辑框可见
+        self.assertEqual(reread['auth']['url'], data['auth']['url'])
         self.assertEqual(reread['ai']['model'], 'profile-model')
         anonymous = self.app.test_client()
         self.assertEqual(anonymous.get('/__config/profile-content').status_code, 401)
