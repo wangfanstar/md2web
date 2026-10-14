@@ -493,45 +493,39 @@ class AuthService:
             force=force, db_lock=self._db_lock,
         )
 
+    @serialized
     def backup_site_data(self, root, logger=None):
-        """把网站数据合入到配置的 SVN 库（凭据优先仓库配置，其次默认凭据/环境变量）。"""
         credential = self.repo_sync_credential({"id": "site-backup"})
-        with self._db_lock:
-            return operations.backup_site(self.conn, self.svn, self.config, root, credential)
+        return operations.backup_site(self.conn, self.svn, self.config, root, credential)
 
+    @serialized
     def repo_health_reports(self, md_dir, bindings, credential=None, include_site_backup=False):
-        """检查仓库健康（凭据优先仓库配置，其次默认凭据）；include_site_backup 时附带网站备份工作副本报告。"""
-        with self._db_lock:
-            reports = []
-            for binding in bindings:
-                reports.append(operations.repo_health(
-                    self.conn, self.svn, self.config, md_dir, binding,
-                    self.repo_sync_credential(binding, credential)))
-            if include_site_backup:
-                report = operations.site_workcopy_health(self.svn, self.config)
-                if report is not None:
-                    reports.append(report)
-            return reports
+        reports = [operations.repo_health(self.conn, self.svn, self.config, md_dir, binding,
+                   self.repo_sync_credential(binding, credential), db_lock=self._db_lock) for binding in bindings]
+        if include_site_backup:
+            report = operations.site_workcopy_health(self.svn, self.config)
+            if report is not None:
+                reports.append(report)
+        return reports
 
+    @serialized
     def repair_repository(self, md_dir, binding, credential=None):
-        with self._db_lock:
-            return operations.repair_repo(self.conn, self.svn, self.config, md_dir, binding,
-                                          self.repo_sync_credential(binding, credential))
+        return operations.repair_repo(self.conn, self.svn, self.config, md_dir, binding,
+                                      self.repo_sync_credential(binding, credential), db_lock=self._db_lock)
 
+    @serialized
     def recreate_repository(self, md_dir, binding, credential=None):
-        with self._db_lock:
-            return operations.recreate_repo(self.conn, self.svn, self.config, md_dir, binding,
-                                            self.repo_sync_credential(binding, credential))
+        return operations.recreate_repo(self.conn, self.svn, self.config, md_dir, binding,
+                                        self.repo_sync_credential(binding, credential), db_lock=self._db_lock)
 
+    @serialized
     def repair_site_backup_workcopy(self):
-        with self._db_lock:
-            return operations.repair_site_workcopy(self.svn, self.config)
+        return operations.repair_site_workcopy(self.svn, self.config)
 
+    @serialized
     def recreate_site_backup_workcopy(self, root):
-        with self._db_lock:
-            return operations.recreate_site_workcopy(
-                self.conn, self.svn, self.config, root,
-                self.repo_sync_credential({"id": "site-backup"}))
+        return operations.recreate_site_workcopy(self.conn, self.svn, self.config, root,
+                                                 self.repo_sync_credential({"id": "site-backup"}))
 
     def record_document_snapshot(self, md_dir):
         """扫描 docs/md 并记录增删改（首次为基线，不产生事件）。"""

@@ -41,7 +41,8 @@ test('new credentials replace the old error after ' + action, async () => {
   }
   assert.deepEqual(calls.map(item => item.url), ['__admin/repo-credential', '__admin/repo-health']);
   assert.equal(calls[0].body.password, ' pass & word ');
-  assert.equal(inputs.credPassword.value, '');
+  assert.equal(inputs.credPassword.value, ' pass & word '); // JSON 保存后按产品约定回显
+  assert.equal(window.testApi.state.config.credentials.repo.password, ' pass & word ');
   assert.match(badge.textContent, /正常/);
   assert.doesNotMatch(badge.textContent, /认证失败/);
 });

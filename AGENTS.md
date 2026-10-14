@@ -226,3 +226,13 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 3. `node --check web/custom-search.js`、`web/workspace.js`、`web/mermaid-init.js`、`web/media-viewer.js`、`web/packetdiag.js`、`web/packetdiag-init.js`、`web/page-export.js`、`web/md-editor.js`、`web/text-find.js`、`web/math-init.js`、`web/prism-init.js`、`web/auth.js`、`web/sanitize.js` 通过
 4. **用 3.6.8 跑** `python setup_docsify.py` 后 `git status` 无意外生成物差异（构建幂等）
 5. `docs/md` 内容逐字节未变
+
+
+## 2026-10-14 SVN 审查修复约定
+
+- `server/svn_snapshot.py` 为自动/手动同步共用的快照校验和备份发布入口；校验最长匹配仓库、UTF-8、隐藏目录/回收站、源及目标链接；发布失败回滚，回滚失败须报告备份路径。不得重新引入逐文件校验后立即覆盖的自动同步实现。
+- `prepare_commit` 核对草稿首个 revision 的 before_hash，创建关联绑定的 operation；`run_commit` 核对冻结配置、本地基线和更新后工作副本基线。旧 NULL binding_id 操作通过冻结 manifest 的 mount 参与阻断。`svn_committed` 仅重试本地发布，`running/uncertain` 不可直接重提；成功只结束本次提交对应的草稿，不丢弃更新的草稿。
+- `published_revision` 仅代表整库同步水位，单文档提交不得推进。数据库 v10 一次性清零旧 SVN 水位并清除 last_checked_at，让旧部署补拉快照；不改变本地库水位。
+- 内容操作统一先拿 content_lock，再短暂拿 AuthService._db_lock；所有 SVN 网络调用必须在 DB 锁外。修复、删除重建、健康检查和网站备份同样遵循。prepare_commit/run_commit/provision_repository 由 HTTP 调用时传入 db_lock。
+- 网站备份复用静态私有路径规则排除方案 JSON、数据库、配置目录、隐藏目录及链接，显式 include 私有路径报错；不能依赖 .gitignore 过滤 SVN 备份。历史远端凭据不自动清理。
+- `tests/test_review_regressions.py` 覆盖审查问题，SVN 假客户端 info 必须回显实际请求地址，不能固定返回认证地址。凭据框从当前 JSON 回填是现行产品行为，保存/健康检查测试应验证回填和状态变化。

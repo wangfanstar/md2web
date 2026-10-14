@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .passwords import hash_password
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 # 兼容目标：RHEL7 自带 SQLite 3.7.17（Python 3.6 的 sqlite3）。
 # Windows 端也必须只写这些版本能解析的对象，保证 data/ 数据库可在两个平台间直接共用。
@@ -340,6 +340,9 @@ def migrate(conn, logger=None):
                 conn.executescript(MIGRATION_V8_SQL)
             if version < 9:
                 conn.executescript(MIGRATION_V9_SQL)
+            if version < 10:
+                # 旧版单文件提交会抬高整库水位；升级只重置 SVN 库，下一轮完整同步补齐。
+                conn.execute("UPDATE repo_bindings SET published_revision = 0, last_checked_at = NULL, sync_state = 'idle' WHERE source_mode = 'svn'")
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     sanitize_schema(conn, logger)
     return SCHEMA_VERSION

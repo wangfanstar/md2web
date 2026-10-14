@@ -63,7 +63,7 @@ def delete(config, conn, db_lock, md_dir, repo_id, mount=None):
         raise operations.OperationError(403, '请先在配置页处理父目录软链接')
     with db_lock:
         entries.check_drafts(conn, mount)
-        if entries.pending(conn, mount):
+        if entries.pending(conn, mount) or operations.pending_commit(conn, mount):
             raise operations.OperationError(409, '仓库有待核对操作，请先处理后再删除')
         active = conn.execute("SELECT o.id FROM operations o JOIN repo_bindings b ON o.binding_id = b.id "
                               "WHERE b.mount_path = ? AND o.state IN ('prepared','running','uncertain','svn_committed')",

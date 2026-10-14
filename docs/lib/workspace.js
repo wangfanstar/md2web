@@ -320,6 +320,8 @@
   // 各入口页 index_*.html（含 index_all.html）的首页与文件夹列表不显示。
   function isDocumentView(route, section) {
     if (!route || route.indexOf('md/') !== 0 || route.charAt(route.length - 1) === '/') return false;
+    if (route.replace(/\.md$/i, '').split('/').length < 3) return false;
+    if (repositoryCandidates().some(function (repo) { return String(repo.mount || '').replace(/^\/+|\/+$/g, '') === route; })) return false;
     var root = section || document.querySelector('.markdown-section');
     return !(root && root.querySelector('.folder-view'));
   }

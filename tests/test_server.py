@@ -101,7 +101,7 @@ def repo_relative(path):
 INFO_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <info>
 <entry kind="dir" path="auth-check" revision="{revision}">
-<url>https://svn.example.invalid/svn/accounts/auth-check</url>
+<url>{url}</url>
 <repository>
 <root>https://svn.example.invalid/svn/accounts</root>
 <uuid>{uuid}</uuid>
@@ -114,7 +114,8 @@ INFO_XML = """<?xml version="1.0" encoding="UTF-8"?>
 def emit_info(revision=None, uuid=None):
     state = load_state()
     sys.stdout.write(INFO_XML.format(revision=revision if revision is not None else state.get("revision", 0),
-                                     uuid=uuid or state.get("uuid")))
+                                     uuid=uuid or state.get("uuid"),
+                                     url=next((arg for arg in args if arg.startswith("http")), "https://svn.example.invalid/svn/accounts/auth-check").replace("&", "&amp;")))
 
 
 if "--version" in args:
@@ -1991,7 +1992,7 @@ class SvnOperationTests(ServerTestBase):
         self.assertEqual(self.repo_state()["revision"], 4)
         self.assertEqual(self.repo_state()["files"]["时钟树设计.md"], content)
         binding = self.conn.execute("SELECT * FROM repo_bindings WHERE mount_path = 'md/硬件设计'").fetchone()
-        self.assertEqual(binding["published_revision"], 4)
+        self.assertFalse(binding["published_revision"])  # 单文件提交不推进整库水位
         self.assertEqual(binding["repository_uuid"], "11111111-2222-3333-4444-555555555555")
 
     def test_commit_includes_referenced_images(self):

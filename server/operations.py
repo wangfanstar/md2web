@@ -19,6 +19,7 @@ import uuid
 import hashlib
 from pathlib import Path
 from contextlib import contextmanager
+from functools import wraps
 
 from . import database, documents, folder_sources
 from .drafts import unified_diff as documents_diff
@@ -34,8 +35,21 @@ def _db_guard(lock):
         with lock:
             yield
 
+def _call_db(lock, function, *args, **kwargs):
+    with _db_guard(lock):
+        return function(*args, **kwargs)
+
+
+def _database_serialized(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with _db_guard(kwargs.get('db_lock')):
+            return function(*args, **kwargs)
+    return wrapped
+
+
 ACTIVE_STATES = ("prepared", "running")
-DONE_STATES = ("svn_committed", "published")
+DONE_STATES = ("published",)
 
 
 class OperationError(Exception):
@@ -358,7 +372,7 @@ def _binding_row(conn, binding):
     return _row_dict(row)
 
 
-def ensure_binding(conn, binding, svn_client, config, credential=None, rebind=False, db_lock=None):
+def ensure_binding(conn, binding, svn_client, config, credential=None, rebind=False, db_lock=None, remote_info=None):
     """读取远端仓库身份并登记/核对绑定（UUID、根 URL、目标 URL）。
 
     rebind=True（仅「删除重建」）时不阻止身份变化：把绑定更新为远端实际身份并重置已发布版本。
@@ -369,12 +383,10 @@ def ensure_binding(conn, binding, svn_client, config, credential=None, rebind=Fa
     username, password = credential or (None, None)
     config_dir = tempfile.mkdtemp(prefix="md2web-svn-bind-")
     try:
-        info = svn_client.info(binding["url"], config_dir, username=username, password=password)
+        info = remote_info if remote_info is not None else svn_client.info(binding["url"], config_dir, username=username, password=password)
     except SvnError as error:
         if error.code == "auth_failed":
             raise OperationError(401, "SVN 账号或口令无效，请重新输入后再提交")
-        if row is not None:
-            return row
         raise OperationError(502, f"无法读取仓库信息：{error}")
     finally:
         shutil.rmtree(config_dir, ignore_errors=True)
@@ -391,6 +403,8 @@ def ensure_binding(conn, binding, svn_client, config, credential=None, rebind=Fa
         with _db_guard(db_lock):
             row = _row_dict(conn.execute("SELECT * FROM repo_bindings WHERE id = ?", (cursor.lastrowid,)).fetchone())
         return row
+    if row['repository_id'] != binding['id'] and not rebind:
+        raise OperationError(409, '仓库 ID 与挂载绑定不一致，请管理员重新绑定')
     if row["repository_uuid"] and info.get("uuid") and row["repository_uuid"] != info["uuid"]:
         if not rebind:
             raise OperationError(
@@ -408,17 +422,27 @@ def ensure_binding(conn, binding, svn_client, config, credential=None, rebind=Fa
     reset = ", published_revision = 0, sync_error = NULL, last_success_at = NULL" if rebind else ""
     with _db_guard(db_lock), conn:
         conn.execute(
-            "UPDATE repo_bindings SET repository_uuid = ?, root_url = ?, target_url = ?, config_version = ?"
+            "UPDATE repo_bindings SET repository_uuid = ?, root_url = ?, target_url = ?, config_version = ?, repository_id = ?"
             + reset + ", last_checked_at = ?, updated_at = ? WHERE id = ?",
             (info.get("uuid", ""), info.get("root_url", ""), info.get("url", binding["url"]),
-             config_version, database.now_iso(), database.now_iso(), row["id"]),
+             config_version, binding["id"], database.now_iso(), database.now_iso(), row["id"]),
         )
     with _db_guard(db_lock):
         row = _row_dict(conn.execute("SELECT * FROM repo_bindings WHERE id = ?", (row["id"],)).fetchone())
     return row
 
 
-def prepare_commit(conn, user_id, config, md_dir, document_path, message, expected_version=None):
+def pending_commit(conn, mount):
+    for row in conn.execute("SELECT * FROM operations WHERE kind = 'svn_commit' AND state IN ('prepared','running','uncertain','svn_committed')").fetchall():
+        manifest = json.loads(row['reviewed_manifest'] or '{}')
+        if manifest.get('mount') == mount:
+            return dict(row)
+    return None
+
+
+@serialized
+@_database_serialized
+def prepare_commit(conn, user_id, config, md_dir, document_path, message, expected_version=None, db_lock=None):
     """冻结待提交版本：只有草稿版本与基线一致时才允许准备。"""
     from . import drafts as drafts_module
 
@@ -442,6 +466,9 @@ def prepare_commit(conn, user_id, config, md_dir, document_path, message, expect
     published = drafts_module.published_text(md_dir, rel)
     if published is not None and documents.text_hash(published) == head["after_hash"]:
         raise OperationError(409, "草稿内容与已发布版本一致，无需提交")
+    base = conn.execute("SELECT before_hash FROM revisions WHERE id = ?", (draft_row["base_revision_id"],)).fetchone()
+    if base is None or documents.text_hash(published or "") != base["before_hash"]:
+        raise OperationError(409, "文档基线已变化，请先下载草稿并核对最新文档，再重新建立草稿")
     manifest = {
         "path": rel,
         "repositoryId": binding["id"],
@@ -455,7 +482,13 @@ def prepare_commit(conn, user_id, config, md_dir, document_path, message, expect
         "images": documents.referenced_images(md_dir, rel, head["content"]),
         "attachments": documents.referenced_attachments(md_dir, rel, head["content"]),
     }
-    operation_id = create_operation(conn, user_id, None, "svn_commit", manifest)
+    row = _binding_row(conn, binding)
+    if row is None:
+        with conn:
+            conn.execute("INSERT INTO repo_bindings (repository_id, mount_path, repository_uuid, root_url, target_url, credential_group, config_version, created_at, updated_at) VALUES (?, ?, '', '', ?, ?, ?, ?, ?)",
+                         (binding['id'], binding['mount'], binding['url'], binding['credential_group'], str(config['path']), database.now_iso(), database.now_iso()))
+        row = _binding_row(conn, binding)
+    operation_id = create_operation(conn, user_id, row['id'] if row else None, "svn_commit", manifest)
     diff = documents_diff(published or "", head["content"], rel)
     return {
         "operationId": operation_id,
@@ -468,15 +501,15 @@ def prepare_commit(conn, user_id, config, md_dir, document_path, message, expect
 
 
 @serialized
-def run_commit(conn, svn_client, config, md_dir, workspace_root, operation_id, user_id, credential):
+def run_commit(conn, svn_client, config, md_dir, workspace_root, operation_id, user_id, credential, db_lock=None):
     """执行提交：幂等、私有工作副本、实际 diff 核对、发布到 docs/md。"""
-    operation = get_operation(conn, operation_id, user_id)
+    operation = _call_db(db_lock, get_operation, conn, operation_id, user_id)
     if operation is None:
         raise OperationError(404, "操作不存在或无权访问")
     if operation["state"] in DONE_STATES:
         return {"operationId": operation_id, "state": operation["state"],
                 "svnRevision": operation["svn_revision"], "reused": True}
-    retryable = tuple(ACTIVE_STATES) + ("needs_auth",)
+    retryable = ("prepared", "needs_auth", "svn_committed")
     if operation["state"] not in retryable:
         raise OperationError(409, "操作状态为 " + str(operation["state"]) + "，不能继续执行")
     manifest = json.loads(operation["reviewed_manifest"] or "{}")
@@ -485,17 +518,35 @@ def run_commit(conn, svn_client, config, md_dir, workspace_root, operation_id, u
     for repo in config.get("repositories") or []:
         if repo["id"] == manifest.get("repositoryId"):
             binding = repo
-    if binding is None:
+    if (binding is None or binding['mount'] != manifest.get('mount')
+            or binding['url'].rstrip('/') != manifest.get('targetUrl', '').rstrip('/')):
         raise OperationError(409, "仓库映射已变更，请重新准备提交")
+    if operation['state'] == 'svn_committed':
+        row = _call_db(db_lock, _binding_row, conn, binding)
+        if row is None:
+            raise OperationError(409, "仓库绑定已丢失，请管理员核对已提交的 SVN 版本")
+        try:
+            _call_db(db_lock, publish_committed, conn, md_dir, rel, _call_db(db_lock, operation_content, conn, manifest), operation['svn_revision'], row['id'])
+        except OSError as error:
+            raise OperationError(502, 'SVN 已提交，本地发布失败；修复磁盘问题后重试此操作即可，不会重复提交：' + str(error))
+        _call_db(db_lock, finish_commit, conn, operation_id, manifest)
+        return {'operationId': operation_id, 'state': 'published', 'svnRevision': operation['svn_revision'], 'reused': True}
 
-    _set_state(conn, operation_id, "running")
+    current_path = documents.resolve_md_file(md_dir, rel)
+    current_hash = documents.text_hash(documents.read_md_text(current_path)) if current_path.is_file() else None
+    if current_hash != manifest.get('basePublishedHash'):
+        _call_db(db_lock, _set_state, conn, operation_id, 'failed', error_code='local_changed')
+        raise OperationError(409, '本地文档在准备提交后已变化，请先保存草稿并核对差异')
+    _call_db(db_lock, _set_state, conn, operation_id, "running")
     username, password = credential or (None, None)
     if not username or not password:
-        _set_state(conn, operation_id, "needs_auth", error_code="needs_auth")
+        _call_db(db_lock, _set_state, conn, operation_id, "needs_auth", error_code="needs_auth")
         raise OperationError(401, "会话凭据不可用：请重新登录后再提交")
 
     try:
-        binding_row = ensure_binding(conn, binding, svn_client, config, credential)
+        binding_row = ensure_binding(conn, binding, svn_client, config, credential, db_lock=db_lock)
+        with _db_guard(db_lock), conn:
+            conn.execute('UPDATE operations SET binding_id = ? WHERE id = ?', (binding_row['id'], operation_id))
         mount_relative = rel[len(binding["mount"]):].lstrip("/")
         if not mount_relative:
             raise OperationError(400, "提交路径必须是挂载目录下的文档")
@@ -516,8 +567,12 @@ def run_commit(conn, svn_client, config, md_dir, workspace_root, operation_id, u
             if error.code not in ("not_found_remote",):
                 raise
         existing = documents.read_md_text(target_file) if target_file.is_file() else ""
+        remote_hash = documents.text_hash(existing) if target_file.is_file() else None
+        if remote_hash != manifest.get('basePublishedHash'):
+            _call_db(db_lock, _set_state, conn, operation_id, 'failed', error_code='remote_changed')
+            raise OperationError(409, "SVN 远端文档已变化，已停止提交；请下载草稿并对比合并后重新提交")
         eol = documents.detect_eol(existing)
-        content = documents.normalize_eol(operation_content(conn, manifest))
+        content = documents.normalize_eol(_call_db(db_lock, operation_content, conn, manifest))
         if eol != "\n":
             content = content.replace("\n", eol)
         target_file.parent.mkdir(parents=True, exist_ok=True)
@@ -557,11 +612,12 @@ def run_commit(conn, svn_client, config, md_dir, workspace_root, operation_id, u
                                      config_dir=config_dir,
                                      username=username, password=password)
         if revision is None:
+            _call_db(db_lock, _set_state, conn, operation_id, 'uncertain', error_code='missing_revision')
             raise OperationError(502, "提交未返回 revision，结果需人工核对")
-        _set_state(conn, operation_id, "svn_committed", svn_revision=revision,
+        _call_db(db_lock, _set_state, conn, operation_id, "svn_committed", svn_revision=revision,
                    finished_at=database.now_iso(), error_code=None)
-        publish_committed(conn, md_dir, rel, content, revision, binding_row["id"])
-        _set_state(conn, operation_id, "published")
+        _call_db(db_lock, publish_committed, conn, md_dir, rel, content, revision, binding_row["id"])
+        _call_db(db_lock, finish_commit, conn, operation_id, manifest)
         shutil.rmtree(work_dir, ignore_errors=True)
         return {"operationId": operation_id, "state": "published", "svnRevision": revision,
                 "path": rel, "message": manifest["message"],
@@ -569,17 +625,32 @@ def run_commit(conn, svn_client, config, md_dir, workspace_root, operation_id, u
                 "attachments": [Path(str(item)).relative_to(target_file.parent).as_posix()
                                 for item in attachment_paths]}
     except OperationError:
+        current = _call_db(db_lock, get_operation, conn, operation_id, user_id)
+        if current and current['state'] == 'running':
+            _call_db(db_lock, _set_state, conn, operation_id, 'failed', error_code='validation_failed')
         raise
+    except OSError as error:
+        current = _call_db(db_lock, get_operation, conn, operation_id, user_id)
+        if current and current['state'] == 'svn_committed':
+            raise OperationError(502, 'SVN 已提交，本地发布失败；修复磁盘问题后重试此操作即可，不会重复提交：' + str(error))
+        _call_db(db_lock, _set_state, conn, operation_id, 'failed', error_code='filesystem_error')
+        raise OperationError(502, '本地文件操作失败：' + str(error))
     except SvnError as error:
         if error.code == "auth_failed":
-            _set_state(conn, operation_id, "needs_auth", error_code="auth_failed")
+            _call_db(db_lock, _set_state, conn, operation_id, "needs_auth", error_code="auth_failed")
             raise OperationError(401, "SVN 账号或口令无效，请重新输入后再提交")
         uncertain = error.code in ("timeout", "unreachable", "failed")
-        _set_state(conn, operation_id, "uncertain" if uncertain else "failed",
+        _call_db(db_lock, _set_state, conn, operation_id, "uncertain" if uncertain else "failed",
                    error_code=error.code, finished_at=database.now_iso())
         if uncertain:
             raise OperationError(502, f"提交结果不确定（{error.code}）：请核对 SVN 日志后再决定，系统不会自动重试")
         raise OperationError(409 if error.code in ("conflict", "not_found_remote") else 502, str(error))
+
+
+def finish_commit(conn, operation_id, manifest):
+    with conn:
+        conn.execute("UPDATE drafts SET state = 'committed' WHERE head_revision_id = ? AND state = 'active'", (manifest['draftRevisionId'],))
+        _set_state(conn, operation_id, 'published')
 
 
 def operation_content(conn, manifest):
@@ -615,10 +686,8 @@ def publish_committed(conn, md_dir, rel, content, revision, binding_id):
                 pass
     with conn:
         conn.execute(
-            "UPDATE repo_bindings SET published_revision = CASE"
-            " WHEN published_revision IS NULL OR published_revision < ? THEN ? ELSE published_revision END,"
-            " last_checked_at = ?, sync_error = NULL, updated_at = ? WHERE id = ?",
-            (revision, revision, database.now_iso(), database.now_iso(), binding_id),
+            "UPDATE repo_bindings SET updated_at = ? WHERE id = ?",
+            (database.now_iso(), binding_id),
         )
         database.audit(conn, "operation_publish", "ok", operation_id=None, resource=rel)
     return path
@@ -1052,6 +1121,7 @@ def site_backup_due(last_run, interval_seconds, now=None):
     return (now or time.time()) - float(last_run) >= float(interval_seconds)
 
 
+@serialized
 def backup_site(conn, svn_client, config, root, credential=None, message=None, now=None):
     """把网站数据（默认 docs/）合入到配置的 SVN 库：检出工作副本 → 复制 → svn add → 提交。"""
     settings = config.get("site_backup") or {}
@@ -1060,6 +1130,17 @@ def backup_site(conn, svn_client, config, root, credential=None, message=None, n
         raise OperationError(400, "未配置网站数据仓库地址（siteBackup.url）")
     username, password = credential or (None, None)
     includes = settings.get("include") or ["docs"]
+    from .paths import is_blocked_static_path
+    def private(path):
+        return is_blocked_static_path(Path(path).as_posix())
+    def ignore(directory, names):
+        return [name for name in names if private(name) or folder_sources.is_directory_link(Path(directory) / name)
+                or (Path(directory) / name).is_symlink()]
+    root = Path(root).resolve()
+    for item in includes:
+        candidate = root / item
+        if Path(item).is_absolute() or '..' in Path(item).parts or private(item) or root not in candidate.resolve().parents:
+            raise OperationError(400, '网站备份路径无效或包含私有数据：' + str(item))
     work_root = Path(config["storage"]["workspaces"]).parent / "site-wc"
     work_root.mkdir(parents=True, exist_ok=True)
     config_dir = str(work_root / "svn-config")
@@ -1073,6 +1154,8 @@ def backup_site(conn, svn_client, config, root, credential=None, message=None, n
             source = Path(root) / item
             if not source.exists():
                 continue
+            if source.is_symlink() or folder_sources.is_directory_link(source):
+                raise OperationError(400, '网站备份不能包含目录链接：' + str(item))
             target = work_root / item
             if target.exists():
                 if target.is_dir():
@@ -1080,11 +1163,15 @@ def backup_site(conn, svn_client, config, root, credential=None, message=None, n
                 else:
                     target.unlink()
             if source.is_dir():
-                shutil.copytree(source, target)
+                shutil.copytree(source, target, ignore=ignore)
             else:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source, target)
             copied.append(item)
+        for candidate in work_root.rglob('*'):
+            rel = candidate.relative_to(work_root)
+            if '.svn' not in rel.parts and 'svn-config' not in rel.parts and private(rel):
+                raise OperationError(409, '备份工作副本含旧私有文件，请先清理并核查 SVN 历史：' + rel.as_posix())
         svn_client.add(work_root, config_dir=config_dir, username=username, password=password)
         status = svn_client.status(work_root, config_dir=config_dir, username=username, password=password)
         if not str(status or "").strip():
@@ -1101,7 +1188,7 @@ def backup_site(conn, svn_client, config, root, credential=None, message=None, n
         raise OperationError(502, "网站数据备份失败：%s" % error)
 
 
-def repo_health(conn, svn_client, config, md_dir, binding, credential=None):
+def repo_health(conn, svn_client, config, md_dir, binding, credential=None, db_lock=None):
     """检查仓库健康：配置、本地目录、远端连通与认证、仓库身份（UUID）、本地内容。
 
     返回 {status, level, detail, hints, indexPage, localPath, revision, syncError}
@@ -1112,7 +1199,8 @@ def repo_health(conn, svn_client, config, md_dir, binding, credential=None):
     sub = mount[3:] if mount.startswith("md/") else mount
     local_path = Path(md_dir) / Path(*[part for part in sub.split("/") if part])
     index_page = "index_%s.html" % _slug(binding["id"])
-    row = _binding_row(conn, binding)
+    with _db_guard(db_lock):
+        row = _binding_row(conn, binding)
     sync_error = row["sync_error"] if row is not None else None
     revision = int(row["published_revision"] or 0) if row is not None else 0
     result = {
@@ -1308,18 +1396,20 @@ def recreate_site_workcopy(conn, svn_client, config, root, credential=None, mess
     return {"notes": notes, "result": result}
 
 
-def repair_repo(conn, svn_client, config, md_dir, binding, credential=None):
+@serialized
+def repair_repo(conn, svn_client, config, md_dir, binding, credential=None, db_lock=None):
     """修复：网站备份工作副本 cleanup（修不好就移入回收站）+ 强制重新拉取该仓库内容。"""
     if (binding.get("source_mode") or "svn") != "svn":
         raise OperationError(400, "该文件夹不是 SVN 库（本地文件夹/软链接），不支持该操作")
     notes = repair_site_workcopy(svn_client, config)
-    result = provision_repository(conn, svn_client, config, md_dir, binding, credential, force=True)
+    result = provision_repository(conn, svn_client, config, md_dir, binding, credential, force=True, db_lock=db_lock)
     notes.append("已重新拉取 %s（r%s，覆盖 %d 个文件）" % (binding["mount"], result.get("revision"),
                                                     len(result.get("files") or [])))
     return {"notes": notes, "result": result}
 
 
-def recreate_repo(conn, svn_client, config, md_dir, binding, credential=None):
+@serialized
+def recreate_repo(conn, svn_client, config, md_dir, binding, credential=None, db_lock=None):
     """删除重建：本地目录移入 data/trash，重新绑定仓库身份后强制重新拉取。"""
     if (binding.get("source_mode") or "svn") != "svn":
         raise OperationError(400, "该文件夹不是 SVN 库（本地文件夹/软链接），不支持该操作")
@@ -1328,7 +1418,14 @@ def recreate_repo(conn, svn_client, config, md_dir, binding, credential=None):
     local_path = Path(md_dir) / Path(*[part for part in sub.split("/") if part])
     trash = Path(config["storage"]["database"]).parent / "trash" / (
         datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + binding["id"])
-    before = _binding_row(conn, binding)
+    with _db_guard(db_lock):
+        from .entries import pending, check_drafts
+        if pending(conn, mount) or pending_commit(conn, mount):
+            raise OperationError(409, '仓库存在未完成提交，不能删除重建')
+        check_drafts(conn, mount)
+        before = _binding_row(conn, binding)
+    if folder_sources.has_link_ancestor(md_dir, mount):
+        raise OperationError(400, 'SVN 删除重建不能操作软链接')
     notes = []
     if local_path.exists():
         trash.parent.mkdir(parents=True, exist_ok=True)
@@ -1337,8 +1434,9 @@ def recreate_repo(conn, svn_client, config, md_dir, binding, credential=None):
     else:
         notes.append("本地目录不存在，直接重新拉取")
     result = provision_repository(conn, svn_client, config, md_dir, binding, credential,
-                                  force=True, rebind=True)
-    after = _binding_row(conn, binding)
+                                  force=True, rebind=True, db_lock=db_lock)
+    with _db_guard(db_lock):
+        after = _binding_row(conn, binding)
     if (before is not None and after is not None
             and before["repository_uuid"] != after["repository_uuid"]):
         notes.append("仓库身份已重新绑定（UUID %s → %s）" % (before["repository_uuid"] or "无",
@@ -1348,8 +1446,9 @@ def recreate_repo(conn, svn_client, config, md_dir, binding, credential=None):
     return {"notes": notes, "result": result, "trash": str(trash)}
 
 
+@serialized
 def provision_repository(conn, svn_client, config, md_dir, binding, credential=None, force=False,
-                         rebind=False):
+                         rebind=False, db_lock=None):
     """创建 docs/md 下的仓库目录（不存在时）并从 SVN 拉取内容，供配置页「创建并拉取」。
 
     force=True（修复/删除重建）时忽略「远端版本未变化就不拉取」的短路，强制重新导出；
@@ -1364,8 +1463,8 @@ def provision_repository(conn, svn_client, config, md_dir, binding, credential=N
     target = Path(md_dir) / Path(*parts[1:])
     created = not target.exists()
     target.mkdir(parents=True, exist_ok=True)
-    ensure_binding(conn, binding, svn_client, config, credential, rebind=rebind)
-    result = sync_binding(conn, svn_client, config, md_dir, binding, credential, force=force)
+    ensure_binding(conn, binding, svn_client, config, credential, rebind=rebind, db_lock=db_lock)
+    result = sync_binding(conn, svn_client, config, md_dir, binding, credential, force=force, db_lock=db_lock)
     return {
         "mount": mount,
         "path": str(target),
@@ -1383,19 +1482,23 @@ def sync_binding(conn, svn_client, config, md_dir, binding, credential=None, for
     force=True 时即使远端版本 ≤ 已发布版本也重新导出（修复/删除重建场景）。
     """
     from .entries import pending
+    if binding.get('source_mode', 'svn') != 'svn':
+        raise OperationError(400, '该仓库不是 SVN 库')
     with _db_guard(db_lock):
-        if pending(conn, binding['mount']):
+        if pending(conn, binding['mount']) or pending_commit(conn, binding['mount']):
             raise OperationError(409, '仓库有待核对的文档操作，请先检查 SVN 日志和本地文件')
         row = _binding_row(conn, binding)
-    if row is None:
-        row = ensure_binding(conn, binding, svn_client, config, credential, db_lock=db_lock)
     username, password = credential or (None, None)
     config_dir = tempfile.mkdtemp(prefix="md2web-svn-sync-")
     staging = Path(tempfile.mkdtemp(prefix="md2web-svn-export-"))
-    with _db_guard(db_lock), conn:
-        conn.execute("UPDATE repo_bindings SET sync_state = 'running' WHERE id = ?", (row['id'],))
     try:
+        if row:
+            with _db_guard(db_lock), conn:
+                conn.execute("UPDATE repo_bindings SET sync_state = 'running' WHERE id = ?", (row['id'],))
         info = svn_client.info(binding["url"], config_dir, username=username, password=password)
+        row = ensure_binding(conn, binding, svn_client, config, credential, db_lock=db_lock, remote_info=info)
+        with _db_guard(db_lock), conn:
+            conn.execute("UPDATE repo_bindings SET sync_state = 'running' WHERE id = ?", (row['id'],))
         remote_revision = int(info.get("revision") or 0)
         published = int(row["published_revision"] or 0) if row else 0
         with _db_guard(db_lock):
@@ -1417,37 +1520,15 @@ def sync_binding(conn, svn_client, config, md_dir, binding, credential=None, for
                 return {"updated": False, "revision": remote_revision, "files": [], "conflicts": []}
         svn_client.export(binding["url"], staging, revision=remote_revision, force=True,
                           config_dir=config_dir, username=username, password=password)
+        from . import svn_snapshot
+        snapshot = svn_snapshot.collect(staging, binding, config)
         with _db_guard(db_lock):
-            mount_dir = Path(md_dir) / Path(*binding["mount"].split("/")[1:])
             draft_paths = active_draft_paths(conn)
-            files = []
-            conflicts = []
-            for source in sorted(staging.rglob("*.md")):
-                relative = source.relative_to(staging)
-                target = mount_dir / relative
-                document_path = binding["mount"] + "/" + str(relative).replace("\\", "/")
-                if document_path in draft_paths:
-                    # 有人正在编辑（存在活动草稿）：不覆盖本地文件，提示合并
-                    conflicts.append(document_path)
-                    continue
-                target.parent.mkdir(parents=True, exist_ok=True)
-                text = source.read_text(encoding="utf-8")
-                handle = tempfile.NamedTemporaryFile(
-                    mode="w", encoding="utf-8", newline="", delete=False,
-                    dir=str(target.parent), prefix="." + target.name + ".", suffix=".tmp",
-                )
-                tmp_path = Path(handle.name)
-                try:
-                    with handle:
-                        handle.write(text)
-                    os.replace(tmp_path, target)
-                finally:
-                    if tmp_path.exists():
-                        try:
-                            tmp_path.unlink()
-                        except OSError:
-                            pass
-                files.append(str(relative).replace("\\", "/"))
+        conflicts = sorted(set(snapshot) & draft_paths)
+        publish_files = {path: content for path, content in snapshot.items() if path not in draft_paths}
+        svn_snapshot.publish(md_dir, publish_files, remote_revision, conflicts)
+        files = [path[len(binding['mount']) + 1:] for path in publish_files]
+        with _db_guard(db_lock):
             with conn:
                 conn.execute(
                     "UPDATE repo_bindings SET published_revision = ?, last_checked_at = ?,"
@@ -1457,15 +1538,19 @@ def sync_binding(conn, svn_client, config, md_dir, binding, credential=None, for
                 )
                 database.audit(conn, "operation_sync", "ok", resource=binding["mount"])
             return {"updated": True, "revision": remote_revision, "files": files, "conflicts": conflicts}
-    except SvnError as error:
+    except (SvnError, OSError, UnicodeError, ValueError, documents.MdSaveError, OperationError) as error:
+        code = error.code if isinstance(error, SvnError) else 'publish_failed'
         with _db_guard(db_lock):
             if row:
                 with conn:
                     conn.execute("UPDATE repo_bindings SET sync_error = ?, last_checked_at = ? WHERE id = ?",
-                                 (error.code, database.now_iso(), row["id"]))
-        raise OperationError(502, f"同步失败（{error.code}）：保留现有站点内容")
+                                 (code, database.now_iso(), row["id"]))
+        if isinstance(error, OperationError):
+            raise
+        raise OperationError(502, "同步失败（%s）：%s" % (code, error))
     finally:
         shutil.rmtree(config_dir, ignore_errors=True)
         shutil.rmtree(staging, ignore_errors=True)
-        with _db_guard(db_lock), conn:
-            conn.execute("UPDATE repo_bindings SET sync_state = 'idle' WHERE id = ?", (row['id'],))
+        if row:
+            with _db_guard(db_lock), conn:
+                conn.execute("UPDATE repo_bindings SET sync_state = 'idle' WHERE id = ?", (row['id'],))

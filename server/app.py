@@ -1092,7 +1092,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         credential = auth_service.repo_sync_credential(binding, credential_of(session))
         try:
             result = operations.provision_repository(conn, auth_service.svn, config, md_dir(), binding,
-                                                     credential)
+                                                     credential, db_lock=auth_service._db_lock)
         except operations.OperationError as error:
             return json_error(error.status, "provision_error", error.message, **error.extra)
         if on_config_changed is not None:
@@ -1508,7 +1508,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         try:
             result = operations.prepare_commit(
                 conn, session["user"]["id"], config, md_dir(),
-                payload.get("path"), payload.get("message"), payload.get("expectedVersion"),
+                payload.get("path"), payload.get("message"), payload.get("expectedVersion"), db_lock=auth_service._db_lock,
             )
         except operations.OperationError as error:
             credential_invalidated(session, error)
@@ -1551,7 +1551,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         try:
             result = operations.run_commit(
                 conn, auth_service.svn, config, md_dir(), config["storage"]["workspaces"],
-                payload.get("operationId"), session["user"]["id"], credential,
+                payload.get("operationId"), session["user"]["id"], credential, db_lock=auth_service._db_lock,
             )
         except operations.OperationError as error:
             credential_invalidated(session, error)
@@ -1659,6 +1659,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         return jsonify({"ok": True, "entries": entries})
 
     @app.post("/__svn/refresh")
+    @serialized
     def svn_refresh():
         session, rejected = require_session()
         if rejected:
@@ -1667,18 +1668,19 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         if csrf_error:
             return csrf_error
         payload = request.get_json(silent=True) or {}
-        targets = list(config.get("repositories") or [])
+        targets = [repo for repo in config.get("repositories") or [] if repo.get("source_mode", "svn") == "svn"]
         if payload.get("binding"):
             targets = [repo for repo in targets if repo["id"] == payload.get("binding")]
         results = []
         for binding in targets:
             try:
                 result = operations.sync_binding(conn, auth_service.svn, config, md_dir(), binding,
-                                                 credential_of(session))
+                                                 auth_service.repo_sync_credential(binding, credential_of(session)),
+                                                 db_lock=auth_service._db_lock)
                 results.append({"binding": binding["id"], "ok": True, **result})
             except operations.OperationError as error:
                 results.append({"binding": binding["id"], "ok": False, "error": error.message})
-        return jsonify({"ok": True, "results": results})
+        return jsonify({"ok": True, "results": results, "rebuilt": rebuild_repository_pages()})
 
     reference_web_lock = threading.Lock()
 
