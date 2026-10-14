@@ -279,3 +279,37 @@ test('rename restores document and sidebar scroll only on the saved page', () =>
   view.restoreRenamePosition();
   assert.equal(callbacks.length, 0);
 });
+
+test('SVN badge only appears in the combined view for SVN repositories', () => {
+  const repoList = [
+    { id: 'hw', sub: '硬件设计', mount: 'md/硬件设计', sourceMode: 'svn' },
+    { id: 'loc', sub: '软件', mount: 'md/软件', sourceMode: 'local' }
+  ];
+  function view(repoInfo) {
+    return loadFolderView({ window: { $docsify: { repoInfo, repoList }, location: { hash: '#/' },
+      addEventListener() {}, setTimeout() {} } });
+  }
+  const combined = view({ all: true });
+  assert.match(combined.svnBadge('md/硬件设计/时钟树.md'), /folder-view-svn-badge/);
+  assert.equal(combined.svnBadge('md/软件/a.md'), '');
+  assert.equal(combined.svnBadge('md/未配置/a.md'), '');
+  const single = view({ mount: 'md/硬件设计' });
+  assert.equal(single.svnBadge('md/硬件设计/时钟树.md'), '');
+});
+
+test('document table marks the updated cell and the SVN badge', () => {
+  const repoList = [{ id: 'hw', sub: '硬件设计', mount: 'md/硬件设计', sourceMode: 'svn' }];
+  const view = loadFolderView({ window: { $docsify: { repoInfo: { all: true }, repoList },
+    location: { hash: '#/' }, addEventListener() {}, setTimeout() {} } });
+  const html = view.documentTableHtml([{ name: 'a.md', path: 'md/硬件设计/a.md', size: 12, mtime: 1700000000 }]);
+  assert.match(html, /data-updated-cell="md\/硬件设计\/a.md"/);
+  assert.match(html, /folder-view-svn-badge/);
+  assert.equal(view.svnRepoForPath('md/硬件设计/a.md').id, 'hw');
+  assert.equal(view.svnRepoForPath('md/未配置/a.md'), null);
+});
+
+test('folder context menu offers SVN update for SVN documents', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'web', 'folder-view.js'), 'utf8');
+  assert.match(source, /data-menu-action="svn-update"/);
+  assert.match(source, /__svn\/update/);
+});

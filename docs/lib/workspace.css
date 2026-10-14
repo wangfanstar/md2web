@@ -1149,6 +1149,22 @@ body.folder-view-active .docs-page-toc {
   padding: 2px 9px;
 }
 
+/* SVN 库标记（index_all 合并视图） */
+.folder-view-svn-badge {
+  background: #eef4fd;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  color: var(--docs-accent, #1f6feb);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  margin-left: 6px;
+  padding: 1px 7px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.folder-view-table td[data-updated-cell] { white-space: nowrap; }
+
 .folder-view-hint {
   color: var(--docs-muted, #57606a);
   font-size: 12.5px;

@@ -93,6 +93,73 @@
     return repo ? 'html/index_' + repo.id + '.html' : 'html/index_all.html';
   }
 
+  function svnRepoForPath(path) {
+    var repo = repoForRoute(path);
+    return repo && (repo.sourceMode || repo.source_mode || 'svn') === 'svn' ? repo : null;
+  }
+
+  // 只在合并视图 index_all.html 中，给 SVN 库的仓库/文档加标记
+  function svnBadge(path) {
+    if (!(config.repoInfo && config.repoInfo.all) || !svnRepoForPath(path)) {
+      return '';
+    }
+    return ' <span class="folder-view-svn-badge" title="该条目属于 SVN 库">SVN</span>';
+  }
+
+  function formatIsoTime(stamp) {
+    if (!stamp) return '';
+    var date = new Date(stamp);
+    if (isNaN(date.getTime())) return String(stamp);
+    return date.toLocaleString('zh-CN', { hour12: false });
+  }
+
+  // 文档表：更新时间先显示文件时间，SVN 文档再异步替换为 SVN 提交时间
+  function documentTableHtml(items) {
+    var rows = (items || []).map(function (item) {
+      return '<tr>'
+        + '<td><a href="' + escapeHtml(siteForPath(item.path)) + '#/' + escapeHtml(item.path) + '" title="'
+        + escapeHtml(item.path) + '">'
+        + escapeHtml(item.name) + '</a>' + svnBadge(item.path) + '</td>'
+        + '<td>' + escapeHtml(formatBytes(item.size)) + '</td>'
+        + '<td data-updated-cell="' + escapeHtml(item.path) + '">' + escapeHtml(formatTime(item.mtime)) + '</td>'
+        + '<td><button type="button" data-folder-action="menu" data-path="' + escapeHtml(item.path)
+        + '">操作</button></td>'
+        + '</tr>';
+    }).join('');
+    return '<table class="folder-view-table"><thead><tr><th>名称</th><th>大小</th><th>更新时间</th><th></th></tr></thead>'
+      + '<tbody>' + (rows || '<tr><td colspan="4">该文件夹暂无文档</td></tr>') + '</tbody></table>';
+  }
+
+  // SVN 文档显示 SVN 提交时间（/__doc-meta 优先发布记录、其次 svn log 带缓存），限制并发
+  function enrichSvnTimes(article) {
+    if (!(config.repoInfo && config.repoInfo.all) || window.location.protocol === 'file:'
+        || typeof fetch !== 'function') {
+      return;
+    }
+    var cells = Array.prototype.slice.call(article.querySelectorAll('[data-updated-cell]')).filter(function (cell) {
+      return svnRepoForPath(cell.getAttribute('data-updated-cell'));
+    });
+    var index = 0;
+    function next() {
+      if (index >= cells.length) return;
+      var cell = cells[index++];
+      var path = cell.getAttribute('data-updated-cell');
+      fetch('__doc-meta?path=' + encodeURIComponent(path), { credentials: 'same-origin' })
+        .then(function (response) { return response.ok ? response.json() : null; })
+        .then(function (payload) {
+          var meta = payload && payload.meta;
+          if (!meta || meta.source !== 'svn' || !meta.updatedAt) return;
+          cell.textContent = formatIsoTime(meta.updatedAt);
+          cell.title = 'SVN 提交时间' + (meta.revision ? '（r' + meta.revision + '）' : '');
+        })
+        .catch(function () {})
+        .then(next);
+    }
+    for (var i = 0; i < Math.min(4, cells.length); i += 1) {
+      next();
+    }
+  }
+
   function emptyStateHtml(folderPath, readOnly) {
     if (readOnly) {
       return '<div class="folder-view-empty" data-folder-empty>'
@@ -116,21 +183,6 @@
       return;
     }
     document.body.classList.add('folder-view-active');
-    function documentTable(items) {
-      var rows = (items || []).map(function (item) {
-        return '<tr>'
-          + '<td><a href="' + escapeHtml(siteForPath(item.path)) + '#/' + escapeHtml(item.path) + '" title="'
-          + escapeHtml(item.path) + '">'
-          + escapeHtml(item.name) + '</a></td>'
-          + '<td>' + escapeHtml(formatBytes(item.size)) + '</td>'
-          + '<td>' + escapeHtml(formatTime(item.mtime)) + '</td>'
-          + '<td><button type="button" data-folder-action="menu" data-path="' + escapeHtml(item.path)
-          + '">操作</button></td>'
-          + '</tr>';
-      }).join('');
-      return '<table class="folder-view-table"><thead><tr><th>名称</th><th>大小</th><th>更新时间</th><th></th></tr></thead>'
-        + '<tbody>' + (rows || '<tr><td colspan="4">该文件夹暂无文档</td></tr>') + '</tbody></table>';
-    }
     var sections = groupDocuments(folder.documents || []);
     var singleFolder = sections.length <= 1 && (!sections.length || sections[0].folder === folder.path);
     var documentsHtml;
@@ -139,20 +191,20 @@
       var emptyReadOnly = !!config.repoReadOnly || config.repoAllowCommit === false;
       documentsHtml = '<h2>文档</h2>' + emptyStateHtml(folder.path, emptyReadOnly);
     } else if (singleFolder) {
-      documentsHtml = '<h2>文档</h2>' + documentTable(sections.length ? sections[0].documents : []);
+      documentsHtml = '<h2>文档</h2>' + documentTableHtml(sections.length ? sections[0].documents : []);
     } else {
       documentsHtml = '<h2>文档</h2>' + sections.map(function (section) {
         var badge = section.group
           ? '<span class="folder-view-group-badge">分组：' + escapeHtml(section.group) + '</span>'
           : '';
         return '<h3 class="folder-view-group"><span class="folder-view-group-name">'
-          + escapeHtml(relativeFolderLabel(folder.path, section.folder)) + '/</span>' + badge + '</h3>'
-          + documentTable(section.documents);
+          + escapeHtml(relativeFolderLabel(folder.path, section.folder)) + '/</span>' + badge + svnBadge(section.folder)
+          + '</h3>' + documentTableHtml(section.documents);
       }).join('');
     }
     var folders = (folder.folders || []).map(function (item) {
       var repository = repos.filter(function (repo) { return repo.mount === item.path; })[0];
-      return '<li><a href="#/' + escapeHtml(item.path) + '/">' + escapeHtml(item.name) + '/</a>'
+      return '<li><a href="#/' + escapeHtml(item.path) + '/">' + escapeHtml(item.name) + '/</a>' + svnBadge(item.path)
         + '<button type="button" data-folder-action="menu" data-path="' + escapeHtml(item.path)
         + '" aria-label="操作 ' + escapeHtml(item.name) + '">操作</button>'
         + (config.repoInfo && config.repoInfo.all && repository
@@ -183,6 +235,7 @@
         sessionStorage.removeItem('md2web:repository-notice');
       } catch (error) { /* 禁用浏览器存储时不显示跨刷新提示。 */ }
     }
+    enrichSvnTimes(article);
   }
 
   function repositoryActionsHtml() {
@@ -582,8 +635,27 @@
     }).catch(function () { /* 目录请求失败时保留名称，由创建接口显示具体错误。 */ });
   }
 
+  function updateSvnDocument(path) {
+    var repo = svnRepoForPath(path);
+    if (!repo) {
+      window.alert('该文档不在 SVN 库中，无法从 SVN 更新。');
+      return;
+    }
+    if (!window.confirm('以 SVN 库最新版本覆盖文档：' + path + '？原文件会在服务器备份，个人草稿保留。继续？')) return;
+    api('__svn/update', { method: 'POST', body: JSON.stringify({ binding: repo.id, path: path, remoteWins: true }) })
+      .then(function (payload) {
+        var result = payload.result || {};
+        reloadSoon('已更新到 r' + result.revision + '，覆盖 ' + ((result.overwritten || []).length) + ' 个文件。');
+      })
+      .catch(function (error) { window.alert('更新 SVN 最新版本失败：' + error.message); });
+  }
+
   function runAction(action, path, isFolder) {
     var parent = isFolder ? (path || currentRoute()) : folderPathOf(path || currentRoute());
+    if (action === 'svn-update') {
+      updateSvnDocument(path);
+      return;
+    }
     if (action === 'new-document') {
       openCreateDialog(parent, 'document');
       return;
@@ -668,7 +740,9 @@
     closeMenu();
     menu = document.createElement('div');
     menu.className = 'folder-context-menu';
+    var svnDoc = !isFolder && svnRepoForPath(path);
     menu.innerHTML = [
+      (svnDoc ? '<button type="button" data-menu-action="svn-update">更新 SVN 最新版本</button>' : ''),
       '<button type="button" data-menu-action="new-document">新建文档</button>',
       '<button type="button" data-menu-action="new-folder">新建文件夹</button>',
       '<button type="button" data-menu-action="rename">重命名</button>',
@@ -687,7 +761,8 @@
       }
       var action = button.getAttribute('data-menu-action');
       closeMenu();
-      if (!requireLogin()) {
+      // 「更新 SVN 最新版本」用服务器配置的同步账号，免登录
+      if (action !== 'svn-update' && !requireLogin()) {
         return;
       }
       runAction(action, path, isFolder);
@@ -783,6 +858,7 @@
   window.FolderView = { isFolderRoute: isFolderRoute, reload: loadFolderView, pathFromElement: pathFromElement,
                         restoreRenamePosition: restoreRenamePosition,
                         groupDocuments: groupDocuments, emptyStateHtml: emptyStateHtml, createEntry: createEntry,
-                        repositoryActionsHtml: repositoryActionsHtml };
+                        repositoryActionsHtml: repositoryActionsHtml, svnRepoForPath: svnRepoForPath,
+                        svnBadge: svnBadge, documentTableHtml: documentTableHtml };
   window.setTimeout(loadFolderView, 200);
 }());
