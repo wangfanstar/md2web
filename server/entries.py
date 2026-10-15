@@ -312,7 +312,11 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
                                                      % (path, error))
             result = operations.create_entry(md_dir, path, kind, destination.name)
         elif action == 'rename':
-            result = operations.rename_entry(md_dir, path, destination.name)
+            if binding and binding.get('source_mode') == 'local':
+                with db_lock:
+                    result = operations.rename_local_entry(conn, md_dir, binding, path, destination.name)
+            else:
+                result = operations.rename_entry(md_dir, path, destination.name)
         elif action == 'move':
             result = operations.move_entry(md_dir, path, dest_path)
         elif action == 'delete':

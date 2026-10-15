@@ -242,6 +242,8 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 
 ## 2026-10-15 复审修复约定
 
+- 本地库重命名必须调用 `operations.rename_local_entry`，在同一数据库事务中迁移 `repository_documents` 的精确路径及目录后代路径，并更新源版本/清单 hash；失败时回滚磁盘移动。仅调用文件系统 rename 会在下次 SQLite 物化时复活旧文件。回归见 `tests/test_rename_storage.py`。
+
 - prepared 是审阅状态，不参与整库同步的未完成远端提交阻断；running/uncertain/svn_committed 继续阻断。`operations.cancel_commit` + `POST /__svn/cancel` 要求本人会话与 CSRF，只取消 prepared/needs_auth；放弃草稿和再次 prepare 清理本人同文档旧审阅。不能通过取消绕过真正未完成提交。
 - svn_committed 恢复前校验本地 hash，只接受原基线或已发布目标内容；其他情况返回 409 并保留恢复状态。
 - `svn_snapshot.publish(confirm=...)` 把数据库事务确认纳入文件回滚边界；确认失败回滚文件，回滚失败保留备份路径提示。不宣称支持突然断电下的多文件原子事务。

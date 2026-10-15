@@ -1012,6 +1012,49 @@ def create_entry(md_dir, parent, kind, name):
     return {"path": "md/" + _lexical_relative(md_dir, target), "kind": "document"}
 
 
+def rename_local_entry(conn, md_dir, binding, relative, name):
+    """同步移动本地仓库的文件与 SQLite 路径，避免后续物化复活旧名称。"""
+    row = _binding_row(conn, binding)
+    if row is None:
+        return rename_entry(md_dir, relative, name)
+    source = _managed_path(md_dir, relative)
+    result = None
+    try:
+        with conn:
+            result = rename_entry(md_dir, relative, name)
+            destination = result['path']
+            rows = conn.execute('SELECT id, path FROM repository_documents WHERE binding_id = ?',
+                                (row['id'],)).fetchall()
+            now = database.now_iso()
+            revision = int(row.get('source_revision') or 0) + 1
+            for item in rows:
+                old_path = item['path']
+                if old_path != relative and not old_path.startswith(relative + '/'):
+                    continue
+                new_path = destination + old_path[len(relative):]
+                # 历史删除记录可被重新占用；有效记录冲突由唯一约束拒绝。
+                conn.execute("DELETE FROM repository_documents WHERE binding_id=? AND path=? AND state='deleted'",
+                             (row['id'], new_path))
+                conn.execute('UPDATE repository_documents SET path=?, source_revision=?, updated_at=? WHERE id=?',
+                             (new_path, revision, now, item['id']))
+            current = conn.execute("SELECT path, content_hash FROM repository_documents WHERE binding_id=? AND state!='deleted'",
+                                   (row['id'],)).fetchall()
+            digest = _manifest_hash({item['path']: {'hash': item['content_hash']} for item in current})
+            conn.execute('UPDATE repo_bindings SET source_revision=?, source_hash=?, updated_at=? WHERE id=?',
+                         (revision, digest, now, row['id']))
+    except Exception:
+        if result is not None:
+            renamed = _managed_path(md_dir, result['path'])
+            if source.exists():
+                raise OperationError(500, '重命名数据库更新失败，原路径已被占用；请核对新旧路径，未覆盖任何文件')
+            try:
+                renamed.rename(source)
+            except OSError:
+                raise OperationError(500, '重命名数据库更新失败且文件回滚失败，请核对：' + relative + ' → ' + result['path'])
+        raise
+    return result
+
+
 def rename_entry(md_dir, relative, name):
     """重命名文档或文件夹（保持同目录）。"""
     target = _managed_path(md_dir, relative)
