@@ -897,6 +897,22 @@ def folder_page_map(directories, repos):
     return folder_page_names(directories, repos)
 
 
+def folder_extras_for(md_dirs, pages, sub):
+    """某仓库（mount 子路径 sub）下子文件夹入口页需要的离线附加页面：专属侧栏与占位首页。"""
+    extras = []
+    for rel in md_dirs or []:
+        if "/" not in rel or not (rel == sub or rel.startswith(str(sub) + "/")):
+            continue
+        slug = pages[rel][len("index_"):-len(".html")]
+        sidebar = "_sidebar_" + slug + ".md"
+        if (HTML_DIR / sidebar).is_file():
+            extras.append(HTML_PREFIX + sidebar)
+        home = "_home_" + slug + ".md"
+        if (HTML_DIR / home).is_file():
+            extras.append(HTML_PREFIX + home)
+    return extras
+
+
 def image_gallery_markdown(rel, images):
     """全图片文件夹的画廊首页：缩略图 + 名称/大小/尺寸。"""
     name = rel.split("/")[-1]
@@ -2156,10 +2172,13 @@ def main(argv=None):
         if args.index_only:
             print("=== 只刷新搜索索引与离线数据（不重新生成站点文件） ===\n")
             repos = load_all_repos()
+            md_dirs = scan_directories(MD_DIR)
+            pages = folder_page_map(md_dirs, repos)
             HTML_DIR.mkdir(parents=True, exist_ok=True)
             generate_search_index(md_files, args.title, repos=repos, contents=contents)
             generate_offline_data(md_files, sidebar=HTML_PREFIX + "_sidebar.md", contents=contents)
             for repo in repos:
+                sub = mount_subpath(repo["mount"])
                 repo_files = files_for_mount(md_files, repo["mount"])
                 sidebar = f"_sidebar_{repo['id']}.md"
                 generate_offline_data(repo_files, path=LIB_DIR / f"offline-data_{repo['id']}.js",
@@ -2167,7 +2186,8 @@ def main(argv=None):
                                       sidebar=HTML_PREFIX + sidebar,
                                       include_readme=False,
                                       homepage=(HTML_PREFIX + repo_home_name(repo["id"])) if not repo_files else None,
-                                      contents=contents)
+                                      contents=contents,
+                                      extra_pages=folder_extras_for(md_dirs, pages, sub))
             print("\n=== 索引刷新完成 ===")
             return
 
@@ -2196,26 +2216,29 @@ def main(argv=None):
             repo, _ = repo_for_route("md/" + rel, repos)
             return repo or {}
 
-        # 预生成文件夹首页：全图片显示画廊，否则空状态；供入口页与离线快照使用
+        # 预生成文件夹首页与专属侧栏：供入口页与离线快照使用
         homepage_by_rel = {}
         image_only_by_rel = {}
-        extras_by_repo = {}
+        sidebar_by_rel = {}
         for rel in md_dirs:
             docs = files_for_mount(md_files, "md/" + rel)
             images = list_images(MD_DIR / rel)
             repo = repo_for_rel(rel)
             readme = MD_DIR / rel / "README.md"
-            generated = None
             if docs:
                 homepage = ("md/" + rel + "/README.md") if readme.is_file() else ("md/" + docs[0])
             else:
                 homepage = write_folder_home(rel, pages[rel], False, images, repo)
-                generated = homepage
             homepage_by_rel[rel] = homepage
             image_only_by_rel[rel] = bool(images) and not docs
-            if generated:
-                owner = mount_subpath(repo.get("mount")) or rel.split("/")[0]
-                extras_by_repo.setdefault(owner, []).append(generated)
+            if "/" in rel:
+                # 子文件夹专属侧栏：效果类似仓库入口页，只显示到达该文件夹的路径与其中内容，
+                # 不列出同级的其它子文件夹入口页
+                sidebar = "_sidebar_" + pages[rel][len("index_"):-len(".html")] + ".md"
+                generate_sidebar(files_for_mount(md_files, "md/" + rel), path=HTML_DIR / sidebar,
+                                 heading=rel.split("/")[-1], top_link=HTML_PREFIX + pages[rel],
+                                 dir_paths=dirs_for_mount(md_dirs, "md/" + rel), folder_pages=pages)
+                sidebar_by_rel[rel] = sidebar
 
         generate_index_html(args.title, path=HTML_DIR / "index_all.html", site_name=args.title,
                             repo={"all": True}, repos=repos, route_sidebar=True,
@@ -2240,7 +2263,7 @@ def main(argv=None):
                                   search_index_path=HTML_DIR / "search-index.json",
                                   sidebar=HTML_PREFIX + sidebar,
                                   include_readme=False, homepage=homepage, contents=contents,
-                                  extra_pages=extras_by_repo.get(sub, []))
+                                  extra_pages=folder_extras_for(md_dirs, pages, sub))
             generate_index_html(args.title, path=HTML_DIR / page, page_name=page,
                                 site_name=f"{repo['id']} · {args.title}",
                                 sidebar=sidebar, search_index=search_index, offline_data=offline_data,
@@ -2260,7 +2283,7 @@ def main(argv=None):
             repo_page = repo_page_name(repo["id"])
             generate_index_html(args.title, path=HTML_DIR / page, page_name=page,
                                 site_name=f"{leaf} · {args.title}",
-                                sidebar=f"_sidebar_{repo['id']}.md", search_index="search-index.json",
+                                sidebar=sidebar_by_rel.get(rel), search_index="search-index.json",
                                 offline_data=f"lib/offline-data_{repo['id']}.js",
                                 homepage=homepage_by_rel.get(rel), read_only=repo.get("read_only", False),
                                 allow_commit=repo.get("allow_commit", True),
