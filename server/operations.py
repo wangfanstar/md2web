@@ -199,6 +199,9 @@ def _local_publish(conn, md_dir, binding, binding_row, rel, content, old_hash, u
     new_hash = documents.text_hash(text)
     revision = int(binding_row.get("source_revision") or 0) + 1
     now = database.now_iso()
+    from . import local_history
+    target = documents.resolve_md_file(md_dir, rel)
+    before = documents.read_md_text(target) if target.is_file() else None
     try:
         with conn:
             conn.execute(
@@ -220,7 +223,8 @@ def _local_publish(conn, md_dir, binding, binding_row, rel, content, old_hash, u
                          " VALUES (?, ?, 'local', 'local_publish', ?, ?, ?, ?, ?, ?, ?)",
                          (binding_row["id"], operation_id, rel, old_hash, new_hash,
                           binding_row.get("source_revision"), revision, user_id, now))
-        _materialize_repository(conn, md_dir, binding_row["id"], binding["mount"])
+            _materialize_repository(conn, md_dir, binding_row["id"], binding["mount"])
+            local_history.record(conn, rel, before, text, user_id)
         _set_state(conn, operation_id, "published", finished_at=database.now_iso())
     except Exception as error:
         _set_state(conn, operation_id, "failed", error_code="local_publish_failed", finished_at=database.now_iso())
@@ -296,9 +300,13 @@ def local_publish_content(conn, config, md_dir, user_id, document_path, content,
 def publish_file(conn, md_dir, user_id, document_path, content, base_hash=None):
     """未关联仓库的文档：直接原子写回 docs/md（base_hash 冲突检测）并记审计。"""
     rel = documents.normalize_md_path(document_path)
+    from . import local_history
+    target = documents.resolve_md_file(md_dir, rel)
+    before = documents.read_md_text(target) if target.is_file() else None
     documents.save_md(md_dir, rel, content, base_hash=base_hash)
     text = documents.normalize_eol(content)
     with conn:
+        local_history.record(conn, rel, before, text, user_id)
         database.audit(conn, "file_publish", "ok", actor_id=user_id, resource=rel)
     return {"state": "published", "path": rel, "hash": documents.text_hash(text), "mode": "file"}
 
@@ -1023,6 +1031,11 @@ def rename_local_entry(conn, md_dir, binding, relative, name):
         with conn:
             result = rename_entry(md_dir, relative, name)
             destination = result['path']
+            versions = conn.execute('SELECT id, path FROM local_document_versions').fetchall()
+            for version in versions:
+                if version['path'] == relative or version['path'].startswith(relative + '/'):
+                    conn.execute('UPDATE local_document_versions SET path=? WHERE id=?',
+                                 (destination + version['path'][len(relative):], version['id']))
             rows = conn.execute('SELECT id, path FROM repository_documents WHERE binding_id = ?',
                                 (row['id'],)).fetchall()
             now = database.now_iso()

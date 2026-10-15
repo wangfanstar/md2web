@@ -658,8 +658,15 @@ body.media-viewer-open {
 .md-editor-text {
   box-sizing: border-box;
   border: 0;
-  font-family: var(--workspace-mono);
+  font-family: var(--docs-mono, Consolas, monospace);
   font-size: 13px;
+  font-weight: 400;
+  font-style: normal;
+  font-variant-ligatures: none;
+  font-kerning: none;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-indent: 0;
   inset: 0;
   line-height: 1.75;
   margin: 0;
@@ -672,6 +679,8 @@ body.media-viewer-open {
 }
 
 .md-editor-highlight {
+  right: auto;
+  bottom: auto;
   background: #fbfdff;
   color: #1f2a37;
   overflow: hidden;
@@ -681,6 +690,8 @@ body.media-viewer-open {
 /* 高亮层只负责颜色和背景，必须与透明 textarea 保持完全相同的字形宽度；
    粗体/斜体/删除线会改变字符度量，从而让可见字符与真实光标错位。 */
 .md-editor-highlight span {
+  font-family: inherit;
+  line-height: inherit;
   font-size: inherit;
   font-style: normal !important;
   font-weight: 400 !important;

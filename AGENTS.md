@@ -242,6 +242,10 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 
 ## 2026-10-15 复审修复约定
 
+- 编辑器透明 textarea 与高亮 pre 必须共用 `--docs-mono`、字重、行高和换行规则；`syncHighlightGeometry` 用 textarea.clientWidth/clientHeight 排除滚动条宽度，ResizeObserver/分栏调整同步，高亮输入不得延迟。`tests/browser/editor-geometry.cjs` 用 Playwright 实测滚动条、中文/Tab/长行、两种窗口宽度、点击文字的实际 selectionStart 和即时输入；可通过 `MD2WEB_BROWSER` 指定 Chromium 浏览器可执行文件。
+
+- SQLite v11 的 `local_document_versions` 保存本地已发布全文历史，由 `server/local_history.py` 管理，与个人 SVN 草稿隔离；本地保存成功记录前后版本，相同内容去重。历史/版本/差异接口要求登录并持数据库锁，本地版本以 `local:<id>` 标识且必须校验文档路径；默认差异为 previous → published。本地库重命名同步迁移历史路径。验收见 `tests/test_local_history.py`。
+
 - 本地库重命名必须调用 `operations.rename_local_entry`，在同一数据库事务中迁移 `repository_documents` 的精确路径及目录后代路径，并更新源版本/清单 hash；失败时回滚磁盘移动。仅调用文件系统 rename 会在下次 SQLite 物化时复活旧文件。回归见 `tests/test_rename_storage.py`。
 
 - prepared 是审阅状态，不参与整库同步的未完成远端提交阻断；running/uncertain/svn_committed 继续阻断。`operations.cancel_commit` + `POST /__svn/cancel` 要求本人会话与 CSRF，只取消 prepared/needs_auth；放弃草稿和再次 prepare 清理本人同文档旧审阅。不能通过取消绕过真正未完成提交。

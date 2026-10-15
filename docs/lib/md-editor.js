@@ -458,15 +458,16 @@
       return Promise.resolve();
     }
     panels.hidden = false;
-    panels.querySelector('[data-editor-panels-title]').textContent = '修改历史（个人草稿）';
+    panels.querySelector('[data-editor-panels-title]').textContent = isLocalDocument() ? '修改历史（已保存版本）' : '修改历史（个人草稿）';
     panels.querySelector('[data-editor-diff]').hidden = true;
     var list = panels.querySelector('[data-editor-history-list]');
     list.hidden = false;
     list.textContent = '正在读取历史…';
-    return authApi('__md/history?path=' + encodeURIComponent(state.resource)).then(function (payload) {
+    return authApi('__md/history?path=' + encodeURIComponent(state.resource)
+      + (isLocalDocument() ? '&mode=local' : '')).then(function (payload) {
       var revisions = (payload.history && payload.history.revisions) || [];
       if (!revisions.length) {
-        list.textContent = '还没有草稿版本：Ctrl+S 保存一次草稿后即可看到历史。';
+        list.textContent = isLocalDocument() ? '暂无已保存历史。保存修改后会记录修改前后的版本；升级前未记录的历史无法恢复。' : '还没有草稿版本：Ctrl+S 保存一次草稿后即可看到历史。';
         return;
       }
       list.innerHTML = revisions.map(function (item) {
@@ -487,7 +488,7 @@
   function diffWith(reference) {
     setStatus('正在生成差异…');
     return authApi('__md/diff?path=' + encodeURIComponent(state.resource)
-      + '&from=' + encodeURIComponent(reference) + '&to=draft').then(function (payload) {
+      + '&from=' + encodeURIComponent(reference) + '&to=' + (isLocalDocument() ? 'published' : 'draft')).then(function (payload) {
       var diff = payload.diff || {};
       var header = diff.from && diff.to ? diff.from.label + ' → ' + diff.to.label + '\n\n' : '';
       showDiffPanel(header + (diff.diff || ''), '版本差异');
@@ -498,7 +499,7 @@
   }
 
   function loadRevisionContent(revisionId) {
-    return authApi('__md/revision?id=' + encodeURIComponent(revisionId)).then(function (payload) {
+    return authApi('__md/revision?id=' + encodeURIComponent(revisionId) + '&path=' + encodeURIComponent(state.resource)).then(function (payload) {
       state.textarea.value = payload.revision.content;
       setStatus('已载入版本 #' + revisionId + '（未保存；Ctrl+S 会另存为新版本）');
       afterContentChanged(true);
@@ -742,7 +743,7 @@
       return true;
     }
     if (action === 'diff') {
-      diffWith('published');
+      diffWith(isLocalDocument() ? 'previous' : 'published');
       return true;
     }
     if (action === 'load-latest') {
@@ -922,17 +923,25 @@
     return output.join('');
   }
 
+  function syncHighlightGeometry() {
+    if (!state.highlight || !state.textarea) return;
+    // textarea 的滚动条占据布局宽度，pre 不能继续使用父容器的完整宽度。
+    state.highlight.style.width = state.textarea.clientWidth + 'px';
+    state.highlight.style.height = state.textarea.clientHeight + 'px';
+    state.highlight.scrollTop = state.textarea.scrollTop;
+    state.highlight.scrollLeft = state.textarea.scrollLeft;
+  }
+
   function updateHighlight() {
     if (!state.highlight || !state.textarea) {
       return;
     }
     if (state.textarea.value.length > 300000) {
-      state.highlight.textContent = state.textarea.value;
+      state.highlight.textContent = state.textarea.value + '\n';
     } else {
       state.highlight.innerHTML = highlightMarkdown(state.textarea.value);
     }
-    state.highlight.scrollTop = state.textarea.scrollTop;
-    state.highlight.scrollLeft = state.textarea.scrollLeft;
+    syncHighlightGeometry();
   }
 
   // ---------- 粘贴图片（写入文档同级 images/） ----------
@@ -1503,7 +1512,7 @@
 
   function scheduleHighlight() {
     window.clearTimeout(state.highlightTimer);
-    state.highlightTimer = window.setTimeout(updateHighlight, 70);
+    updateHighlight(); // 可见文字与原生输入、光标在同一帧更新。
   }
 
   function afterContentChanged(immediate) {
@@ -2045,6 +2054,7 @@
     if (source) {
       source.style.width = state.split + '%';
     }
+    syncHighlightGeometry();
     try {
       localStorage.setItem(SPLIT_STORAGE, String(state.split));
     } catch (_) { /* 忽略隐私模式 */ }
@@ -2553,6 +2563,12 @@
     state.overlay = overlay;
     state.textarea = overlay.querySelector('.md-editor-text');
     state.highlight = overlay.querySelector('.md-editor-highlight');
+    if (window.ResizeObserver) {
+      state.sourceResizeObserver = new ResizeObserver(syncHighlightGeometry);
+      state.sourceResizeObserver.observe(state.textarea);
+    } else {
+      window.addEventListener('resize', syncHighlightGeometry);
+    }
     state.preview = overlay.querySelector('.md-editor-preview');
     state.titleEl = overlay.querySelector('[data-editor-title]');
     state.statusEl = overlay.querySelector('[data-editor-status]');

@@ -1294,11 +1294,28 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             return json_error(error.status, "attachment_error", error.message)
         return jsonify({"ok": True, **result})
 
+    def local_history_path(raw):
+        from . import documents
+        path = documents.normalize_md_path(raw)
+        binding = server_config.match_repository(config, path)
+        return path if not binding or binding.get('source_mode') == 'local' else None
+
     @app.get("/__md/revision")
     def read_revision():
         session, rejected = require_session()
         if rejected:
             return rejected
+        if str(request.args.get('id') or '').startswith('local:'):
+            from . import local_history
+            try:
+                path = local_history_path(request.args.get('path') or '')
+                if path is None:
+                    return json_error(404, 'not_found', '不是本地文档')
+                with auth_service._db_lock:
+                    revision = local_history.get_revision(conn, path, request.args.get('id'))
+                return jsonify(ok=True, revision=revision)
+            except (drafts.DraftError, server_documents_error()) as error:
+                return json_error(error.status, 'history_error', error.message)
         try:
             revision_id = int(request.args.get("id") or 0)
         except (TypeError, ValueError):
@@ -1320,7 +1337,14 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         if rejected:
             return rejected
         try:
-            history = drafts.list_history(conn, session["user"]["id"], md_dir(), request.args.get("path") or "")
+            from . import local_history
+            path = local_history_path(request.args.get('path') or '')
+            with auth_service._db_lock:
+                history = (local_history.list_history(conn, md_dir(), path) if path else
+                           drafts.list_history(conn, session['user']['id'], md_dir(), request.args.get('path') or ''))
+                # 兼容旧客户端对未绑定文档显式保存的个人草稿；新版本地编辑器明确请求 mode=local。
+                if path and not history['revisions'] and request.args.get('mode') != 'local':
+                    history = drafts.list_history(conn, session['user']['id'], md_dir(), path)
         except server_documents_error() as error:
             return json_error(error.status, "invalid_path", error.message)
         return jsonify({"ok": True, "history": history})
@@ -1331,6 +1355,13 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         if rejected:
             return rejected
         try:
+            from . import local_history
+            path = local_history_path(request.args.get('path') or '')
+            if path and request.args.get('to') != 'draft':
+                with auth_service._db_lock:
+                    result = local_history.diff_documents(conn, md_dir(), path,
+                        request.args.get('from') or 'previous', request.args.get('to') or 'published')
+                return jsonify(ok=True, diff=result)
             result = drafts.diff_documents(
                 conn,
                 session["user"]["id"],
@@ -1381,6 +1412,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         return cursor.lastrowid
 
     @app.route("/__md/publish", methods=["POST"])
+    @serialized
     def pending_publish():
         """无 SVN 库文档的一步保存：写入 docs/md（本地模式走 SQLite 主库）并触发站点重建。"""
         session, rejected = require_session()
@@ -1403,14 +1435,15 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 return json_error(400, "use_svn_commit",
                                   "该文档关联 SVN 仓库：请先「本地暂存」，再用「提交 SVN」写入仓库")
         try:
-            if binding is not None and binding.get("source_mode") == "local":
-                result = operations.local_publish_content(
-                    conn, config, md_dir(), session["user"]["id"], path,
-                    payload.get("content"), payload.get("baseHash"))
-            else:
-                result = operations.publish_file(
-                    conn, md_dir(), session["user"]["id"], path,
-                    payload.get("content"), payload.get("baseHash"))
+            with auth_service._db_lock:
+                if binding is not None and binding.get("source_mode") == "local":
+                    result = operations.local_publish_content(
+                        conn, config, md_dir(), session["user"]["id"], path,
+                        payload.get("content"), payload.get("baseHash"))
+                else:
+                    result = operations.publish_file(
+                        conn, md_dir(), session["user"]["id"], path,
+                        payload.get("content"), payload.get("baseHash"))
         except operations.OperationError as error:
             extra = dict(error.extra)
             code = extra.pop("code", "publish_error")
