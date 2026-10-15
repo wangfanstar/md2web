@@ -622,27 +622,105 @@ def _is_usable_ipv4(address):
     return bool(address) and not address.startswith("127.") and address != "0.0.0.0"
 
 
-def local_ipv4_addresses():
-    """本机局域网 IPv4 列表（不发起真实网络流量）。"""
-    addresses = []
+# docker0/virbr0/br-xxx/veth 等虚拟网卡地址在局域网内通常不可达，仅用于提示
+VIRTUAL_INTERFACE_PREFIXES = ("docker", "veth", "virbr", "br-", "tun", "tap", "vmnet", "vboxnet", "dummy")
+
+
+def is_virtual_interface(name):
+    """判断网卡名是否常见虚拟网卡（docker/virbr/veth…）。"""
+    name = (name or "").strip().lower()
+    if not name:
+        return False
+    for prefix in VIRTUAL_INTERFACE_PREFIXES:
+        if name.startswith(prefix):
+            return True
+    return False
+
+
+def parse_ip_addr_output(text):
+    """解析 `ip -4 -o addr show` 输出 → [(网卡名, IPv4)]（跳过回环）。"""
+    entries = []
+    for line in (text or "").splitlines():
+        fields = line.split()
+        if len(fields) < 4 or fields[2] != "inet":
+            continue
+        name = fields[1].split("@")[0]
+        address = fields[3].split("/")[0]
+        if _is_usable_ipv4(address):
+            entries.append((name, address))
+    return entries
+
+
+def parse_active_firewall_zones(text):
+    """解析 `firewall-cmd --get-active-zones` 输出 → zone 名列表。"""
+    zones = []
+    for line in (text or "").splitlines():
+        if not line.strip() or line.startswith((" ", "\t")):
+            continue
+        name = line.split()[0].strip()
+        if name and name not in zones:
+            zones.append(name)
+    return zones
+
+
+def _socket_ipv4_addresses():
+    """回退方案：hostname 解析 / UDP 探测（多 IP 机器可能只拿到一个地址）。"""
+    entries = []
     try:
         for address in socket.gethostbyname_ex(socket.gethostname())[2]:
             if _is_usable_ipv4(address):
-                addresses.append(address)
+                entries.append(("", address))
     except (OSError, socket.error):
         pass
-    if not addresses:
+    if not entries:
         probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             probe.connect(("10.255.255.255", 1))
             address = probe.getsockname()[0]
             if _is_usable_ipv4(address):
-                addresses.append(address)
+                entries.append(("", address))
         except (OSError, socket.error):
             pass
         finally:
             probe.close()
-    return sorted(set(addresses))
+    return entries
+
+
+def local_ipv4_entries():
+    """本机非回环 IPv4 → [(网卡名, 地址)]：物理网卡在前、虚拟网卡在后。
+
+    Linux 优先读 `ip -4 -o addr show`（多网卡机器能拿到全部地址），
+    其次 `hostname -I`，最后回退 socket 解析（可能只有一个地址）。
+    """
+    entries = []
+    output = _command_output(["ip", "-4", "-o", "addr", "show"])
+    if output:
+        entries = parse_ip_addr_output(output)
+    if not entries:
+        output = _command_output(["hostname", "-I"])
+        if output:
+            for address in output.split():
+                if _is_usable_ipv4(address):
+                    entries.append(("", address))
+    if not entries:
+        entries = _socket_ipv4_addresses()
+    unique = []
+    seen = set()
+    for name, address in entries:
+        if address in seen:
+            continue
+        seen.add(address)
+        unique.append((name, address))
+    physical = sorted([item for item in unique if not is_virtual_interface(item[0])],
+                      key=lambda item: item[1])
+    virtual = sorted([item for item in unique if is_virtual_interface(item[0])],
+                     key=lambda item: item[1])
+    return physical + virtual
+
+
+def local_ipv4_addresses():
+    """本机局域网 IPv4 列表（不发起真实网络流量）。"""
+    return [address for _, address in local_ipv4_entries()]
 
 
 def access_urls(bind, port):
@@ -684,11 +762,19 @@ def _command_output(command, timeout=3):
 
 
 def firewall_hint_lines(port):
-    """按本机防火墙实际情况给出放行命令（检测不到时给出通用命令）。"""
+    """按本机防火墙实际情况给出放行命令（firewalld 多网卡时按 zone 提示）。"""
     state = _command_output(["firewall-cmd", "--state"])
     if state and "running" in state:
-        return ["检测到 firewalld 正在运行，需要用 root 放行端口：",
-                "      sudo firewall-cmd --add-port=%d/tcp --permanent && sudo firewall-cmd --reload" % port]
+        lines = ["检测到 firewalld 正在运行，需要用 root 放行端口（按网卡所属 zone 生效，多网卡机器每个 zone 都要放行）：",
+                 "      sudo firewall-cmd --add-port=%d/tcp --permanent && sudo firewall-cmd --reload" % port,
+                 "      查看网卡与 zone：sudo firewall-cmd --get-active-zones"]
+        zones = parse_active_firewall_zones(_command_output(["firewall-cmd", "--get-active-zones"]))
+        if zones:
+            lines.append("      当前活动 zone：" + ", ".join(zones))
+            for zone in zones:
+                lines.append("      sudo firewall-cmd --zone=%s --add-port=%d/tcp --permanent" % (zone, port))
+            lines.append("      sudo firewall-cmd --reload")
+        return lines
     status = _command_output(["ufw", "status"])
     if status and status.strip().lower().startswith("status: active"):
         return ["检测到 ufw 已启用，需要放行端口：",
@@ -704,10 +790,22 @@ def print_access_hints(bind, port, config_path=None):
     print("本机访问: " + local)
     for url in others:
         print("局域网访问: " + url)
+    wildcard = bind in ("0.0.0.0", "::", "*")
     if others:
         for line in firewall_hint_lines(port):
             print("  " + line if not line.startswith("      ") else "  " + line.strip())
-        print("  提示: 已监听所有网卡（局域网内均可访问登录页），仅本机使用请加 --bind 127.0.0.1")
+        if wildcard:
+            print("  提示: 已监听所有网卡（局域网内均可访问登录页），仅本机使用请加 --bind 127.0.0.1")
+            virtual = [address for name, address in local_ipv4_entries() if is_virtual_interface(name)]
+            if virtual:
+                print("  注意: %s 来自虚拟网卡（docker/virbr 等），局域网内通常不可访问，请用物理网卡地址。"
+                      % ", ".join(virtual))
+        else:
+            missing = [address for address in local_ipv4_addresses() if address != bind]
+            if missing:
+                target = ("把 %s 的 server.bind 改为 '0.0.0.0'" % config_path) if config_path else "把配置 server.bind 改为 '0.0.0.0'"
+                print("  注意: 当前只监听 %s，本机其它地址（%s）用同一端口打不开；" % (bind, ", ".join(missing)))
+                print("        需要所有地址都能访问请用 --bind 0.0.0.0（或%s）" % target)
     elif is_loopback_host(bind):
         print("当前仅本机可访问；需要局域网访问请加 --bind 0.0.0.0"
               + ("，或把 %s 的 server.bind 改为 '0.0.0.0'" % config_path if config_path else "（或修改配置 server.bind）"))

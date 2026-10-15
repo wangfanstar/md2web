@@ -632,6 +632,84 @@ class ServeTests(unittest.TestCase):
             self.assertFalse(address.startswith("127."), address)
             self.assertNotEqual(address, "0.0.0.0")
 
+    def test_parse_ip_addr_output_lists_all_interface_addresses(self):
+        """多 IP 机器：`ip -4 -o addr show` 的每个地址都要列出（不只看 hostname）。"""
+        serve = load_module("serve", "serve.py")
+        text = (
+            "1: lo    inet 127.0.0.1/8 scope host lo\n"
+            "2: eth0    inet 192.168.1.50/24 brd 192.168.1.255 scope global eth0\n"
+            "3: eth1    inet 10.0.0.8/16 brd 10.0.255.255 scope global eth1\n"
+            "4: docker0    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0\n"
+        )
+        entries = serve.parse_ip_addr_output(text)
+        self.assertEqual([(name, address) for name, address in entries],
+                         [("eth0", "192.168.1.50"), ("eth1", "10.0.0.8"), ("docker0", "172.17.0.1")],
+                         "应解析出全部非回环地址并保留网卡名")
+        serve._command_output = lambda command, timeout=3: text if list(command)[:2] == ["ip", "-4"] else None
+        self.assertEqual(serve.local_ipv4_addresses(), ["10.0.0.8", "192.168.1.50", "172.17.0.1"],
+                         "物理网卡地址在前，虚拟网卡地址在后")
+
+    def test_local_ipv4_addresses_falls_back_to_hostname(self):
+        serve = load_module("serve", "serve.py")
+
+        def fake(command, timeout=3):
+            if list(command)[:2] == ["ip", "-4"]:
+                return None
+            if list(command)[:1] == ["hostname"]:
+                return "192.168.1.7 10.1.2.3 \n"
+            return None
+
+        serve._command_output = fake
+        self.assertEqual(serve.local_ipv4_addresses(), ["10.1.2.3", "192.168.1.7"])
+
+    def test_parse_active_firewall_zones(self):
+        serve = load_module("serve", "serve.py")
+        text = "public\n  interfaces: eth0\nwork\n  interfaces: eth1\n"
+        self.assertEqual(serve.parse_active_firewall_zones(text), ["public", "work"])
+        self.assertEqual(serve.parse_active_firewall_zones(""), [])
+        self.assertEqual(serve.parse_active_firewall_zones("public (default)"), ["public (default)".split()[0]])
+
+    def test_firewall_hint_lines_mentions_each_zone(self):
+        """多网卡机器：firewalld 按 zone 绑定网卡，必须提示每个 zone 都放行。"""
+        serve = load_module("serve", "serve.py")
+        answers = {
+            ("firewall-cmd", "--state"): "running\n",
+            ("firewall-cmd", "--get-active-zones"): "public\n  interfaces: eth0\nwork\n  interfaces: eth1\n",
+        }
+        serve._command_output = lambda command, timeout=3: answers.get(tuple(command))
+        text = "\n".join(serve.firewall_hint_lines(8882))
+        self.assertIn("--get-active-zones", text)
+        self.assertIn("public", text)
+        self.assertIn("work", text)
+        self.assertIn("--zone=work --add-port=8882/tcp", text)
+
+    def test_print_access_hints_warns_when_bind_is_one_of_many_ip(self):
+        """只监听某一个 IP 时，必须提示本机其它地址用同端口打不开。"""
+        serve = load_module("serve", "serve.py")
+        serve._command_output = lambda command, timeout=3: None
+        serve.local_ipv4_entries = lambda: [("eth0", "192.168.1.50"), ("eth1", "10.0.0.8")]
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            serve.print_access_hints("192.168.1.50", 8882, "/etc/md2web/config.json")
+        output = buffer.getvalue()
+        self.assertIn("http://192.168.1.50:8882", output)
+        self.assertIn("10.0.0.8", output)
+        self.assertIn("只监听", output)
+        self.assertIn("--bind 0.0.0.0", output)
+        self.assertIn("server.bind", output)
+
+    def test_print_access_hints_labels_virtual_interfaces(self):
+        """docker0/virbr0 这类虚拟网卡地址通常外部不可达，应在提示里说明。"""
+        serve = load_module("serve", "serve.py")
+        serve._command_output = lambda command, timeout=3: None
+        serve.local_ipv4_entries = lambda: [("eth0", "192.168.1.50"), ("docker0", "172.17.0.1")]
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            serve.print_access_hints("0.0.0.0", 8882)
+        output = buffer.getvalue()
+        self.assertIn("172.17.0.1", output)
+        self.assertIn("虚拟网卡", output)
+
     def test_print_access_hints_firewall_commands(self):
         import io
         from contextlib import redirect_stdout
