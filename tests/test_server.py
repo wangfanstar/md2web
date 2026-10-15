@@ -113,9 +113,15 @@ INFO_XML = """<?xml version="1.0" encoding="UTF-8"?>
 
 def emit_info(revision=None, uuid=None):
     state = load_state()
+    target_url = next((arg for arg in args if arg.startswith("http")), None)
+    if target_url is None:
+        for root, url in state.get("wc", {}).items():
+            if any(str(Path(arg).resolve()) == str(Path(root).resolve()) for arg in args):
+                target_url = url
+                break
     sys.stdout.write(INFO_XML.format(revision=revision if revision is not None else state.get("revision", 0),
                                      uuid=uuid or state.get("uuid"),
-                                     url=next((arg for arg in args if arg.startswith("http")), "https://svn.example.invalid/svn/accounts/auth-check").replace("&", "&amp;")))
+                                     url=(target_url or "https://svn.example.invalid/svn/accounts/auth-check").replace("&", "&amp;")))
 
 
 if "--version" in args:

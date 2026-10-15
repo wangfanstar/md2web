@@ -512,6 +512,7 @@
       return;
     }
     authApi('__md/discard', { method: 'POST', body: JSON.stringify({ path: state.resource }) }).then(function () {
+      state.prepareOperation = null;
       setStatus('已放弃草稿，正在重新载入已发布版本…');
       var panels = ensurePanels();
       if (panels) {
@@ -587,7 +588,7 @@
         + '随文档存档的图片：' + (images.length ? images.join('、') : '（无）') + '\n'
         + '随文档存档的附件：' + (attachments.length ? attachments.join('、') : '（无）') + '\n\n'
         + (payload.diff || '（无差异）')
-        + '\n\n点击下方「确认提交」写入 SVN；点「关闭」可稍后再提交。',
+        + '\n\n点击下方「确认提交」写入 SVN；也可「取消审阅」保留草稿。',
         '审阅提交（确认后写入 SVN）'
       );
       var panels = ensurePanels();
@@ -599,11 +600,33 @@
           confirmButton.setAttribute('data-editor-action', 'svn-confirm');
           confirmButton.textContent = '确认提交';
           head.insertBefore(confirmButton, head.querySelector('[data-editor-action="discard-draft"]'));
+          var cancelButton = document.createElement('button');
+          cancelButton.type = 'button';
+          cancelButton.setAttribute('data-editor-action', 'svn-cancel');
+          cancelButton.textContent = '取消审阅';
+          head.insertBefore(cancelButton, confirmButton.nextSibling);
         }
       }
       setStatus('已生成审阅清单，请确认差异后提交');
     }).catch(function (error) {
       setStatus('准备提交失败：' + error.message);
+    });
+  }
+
+  function cancelSvnPreview() {
+    var pending = state.prepareOperation;
+    if (!pending) return Promise.resolve();
+    return authApi('__svn/cancel', {
+      method: 'POST', body: JSON.stringify({ operationId: pending.operationId })
+    }).then(function () {
+      if (state.prepareOperation === pending) state.prepareOperation = null;
+      var button = state.overlay && state.overlay.querySelector('[data-editor-action="svn-confirm"]');
+      if (button) button.remove();
+      var cancelButton = state.overlay && state.overlay.querySelector('[data-editor-action="svn-cancel"]');
+      if (cancelButton) cancelButton.remove();
+      setStatus('已取消审阅，草稿已保留');
+    }).catch(function (error) {
+      setStatus('取消审阅未完成：' + error.message);
     });
   }
 
@@ -619,6 +642,7 @@
       setStatus(reason + '请在提示框中输入用于本次合入的账号密码。');
       var credentials = promptCredentials(reason);
       if (!credentials) {
+        cancelSvnPreview();
         setStatus('已取消合入：需要 SVN 账号才能写入仓库（草稿已保留）');
         return;
       }
@@ -644,6 +668,7 @@
       if (error.status === 401) {
         var credentials = promptCredentials();
         if (!credentials) {
+          cancelSvnPreview();
           setStatus('已取消提交（需要 SVN 账号密码）');
           return;
         }
@@ -698,6 +723,10 @@
   function handlePanelAction(target, action) {
     if (action === 'svn-commit') {
       startSvnCommit();
+      return true;
+    }
+    if (action === 'svn-cancel') {
+      cancelSvnPreview();
       return true;
     }
     if (action === 'svn-confirm') {
@@ -1985,6 +2014,7 @@
     if (isModified() && !window.confirm('有未保存的修改，确定关闭编辑器？')) {
       return;
     }
+    cancelSvnPreview();
     if (state.publishedOnServer) {
       // 已保存到服务器：关闭编辑器后整页刷新，让正文显示最新内容
       state.publishedOnServer = false;

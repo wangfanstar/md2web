@@ -238,3 +238,12 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 内容操作统一先拿 content_lock，再短暂拿 AuthService._db_lock；所有 SVN 网络调用必须在 DB 锁外。修复、删除重建、健康检查和网站备份同样遵循。prepare_commit/run_commit/provision_repository 由 HTTP 调用时传入 db_lock。
 - 网站备份复用静态私有路径规则排除方案 JSON、数据库、配置目录、隐藏目录及链接，显式 include 私有路径报错；不能依赖 .gitignore 过滤 SVN 备份。历史远端凭据不自动清理。
 - `tests/test_review_regressions.py` 覆盖审查问题，SVN 假客户端 info 必须回显实际请求地址，不能固定返回认证地址。凭据框从当前 JSON 回填是现行产品行为，保存/健康检查测试应验证回填和状态变化。
+
+
+## 2026-10-15 复审修复约定
+
+- prepared 是审阅状态，不参与整库同步的未完成远端提交阻断；running/uncertain/svn_committed 继续阻断。`operations.cancel_commit` + `POST /__svn/cancel` 要求本人会话与 CSRF，只取消 prepared/needs_auth；放弃草稿和再次 prepare 清理本人同文档旧审阅。不能通过取消绕过真正未完成提交。
+- svn_committed 恢复前校验本地 hash，只接受原基线或已发布目标内容；其他情况返回 409 并保留恢复状态。
+- `svn_snapshot.publish(confirm=...)` 把数据库事务确认纳入文件回滚边界；确认失败回滚文件，回滚失败保留备份路径提示。不宣称支持突然断电下的多文件原子事务。
+- `SvnClient.cat` 以 bytes 接收正文并严格 UTF-8 解码，保留 CRLF；命令诊断文本仍可容错解码。网站备份复用已有 `.svn` 前核对实际 URL，不一致拒绝复制与提交。
+- `folder_page_names` 先预留全部仓库入口（包含嵌套库），普通子目录按 casefold 去重；生成子目录页面时跳过配置仓库挂载。`tests/test_review_1015.py` 包含独立临时构建和复审回归。

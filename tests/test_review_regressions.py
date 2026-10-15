@@ -77,9 +77,10 @@ class ReviewTests(unittest.TestCase):
         self.assertFalse((self.md / 'repo/a.md').exists())
         self.assertTrue(self.conn.execute('SELECT sync_error FROM repo_bindings').fetchone()[0])
 
-    def test_prepared_and_legacy_null_operations_block_update(self):
+    def test_running_and_legacy_null_operations_block_update(self):
         operation = self.prepare()
         self.assertIsNotNone(self.conn.execute('SELECT binding_id FROM operations WHERE id=?', (operation,)).fetchone()[0])
+        operations._set_state(self.conn, operation, 'running')
         for legacy in (False, True):
             if legacy:
                 self.conn.execute('UPDATE operations SET binding_id=NULL WHERE id=?', (operation,))

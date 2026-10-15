@@ -1346,6 +1346,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         return jsonify({"ok": True, "diff": result})
 
     @app.post("/__md/discard")
+    @serialized
     def discard_draft():
         session, rejected = require_session()
         if rejected:
@@ -1355,7 +1356,8 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             return csrf_error
         payload = request.get_json(silent=True) or {}
         try:
-            result = drafts.discard_draft(conn, session["user"]["id"], payload.get("path"))
+            with auth_service._db_lock:
+                result = drafts.discard_draft(conn, session["user"]["id"], payload.get("path"))
         except drafts.DraftError as error:
             return json_error(error.status, "draft_error", error.message)
         except server_documents_error() as error:
@@ -1516,6 +1518,21 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         except MdSaveError as error:
             return json_error(error.status, "invalid_path", error.message)
         return jsonify({"ok": True, **result})
+
+    @app.post('/__svn/cancel')
+    def svn_cancel():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        rejected = require_csrf(session)
+        if rejected:
+            return rejected
+        payload = request.get_json(silent=True) or {}
+        try:
+            result = operations.cancel_commit(conn, session['user']['id'], payload.get('operationId'), db_lock=auth_service._db_lock)
+        except operations.OperationError as error:
+            return json_error(error.status, 'cancel_error', error.message)
+        return jsonify(ok=True, result=result)
 
     @app.post("/__svn/commit")
     def svn_commit():

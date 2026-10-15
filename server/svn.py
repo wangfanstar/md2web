@@ -149,7 +149,7 @@ class SvnClient:
         env["SVN_ASP_DOT_NET_HACK"] = ""
         return env
 
-    def _run(self, args, stdin_text=None, timeout=None, config_dir=None):
+    def _run(self, args, stdin_text=None, timeout=None, config_dir=None, raw=False):
         command = list(self.command)
         if config_dir is not None:
             command += ["--config-dir", str(config_dir)]
@@ -157,12 +157,12 @@ class SvnClient:
         try:
             completed = subprocess.run(
                 command,
-                input=stdin_text,
+                input=stdin_text.encode("utf-8") if raw and stdin_text is not None else stdin_text,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                universal_newlines=True,
-                encoding="utf-8",
-                errors="replace",
+                universal_newlines=not raw,
+                encoding=None if raw else "utf-8",
+                errors=None if raw else "replace",
                 timeout=timeout or self.timeout,
                 shell=False,
                 env=self._environment(),
@@ -343,7 +343,14 @@ class SvnClient:
         if revision is not None:
             args += ["-r", str(int(revision))]
         args.append(url)
-        return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
+        completed = self._run(args, stdin_text=stdin_text, config_dir=config_dir, raw=True)
+        if completed.returncode != 0:
+            detail = completed.stderr.decode('utf-8', 'replace')
+            raise SvnError(classify_error(detail), detail=detail)
+        try:
+            return completed.stdout.decode('utf-8')
+        except UnicodeDecodeError:
+            raise SvnError('invalid_encoding', 'SVN 文档不是有效 UTF-8，未更新本地文档：' + str(url))
 
     def log(self, target, limit=50, config_dir=None, username=None, password=None, revision=None):
         creds, stdin_text = self._credential_args(username, password)

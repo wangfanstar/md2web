@@ -8,6 +8,7 @@
 """
 
 import json
+import sqlite3
 import os
 import calendar
 from datetime import datetime
@@ -433,11 +434,29 @@ def ensure_binding(conn, binding, svn_client, config, credential=None, rebind=Fa
 
 
 def pending_commit(conn, mount):
-    for row in conn.execute("SELECT * FROM operations WHERE kind = 'svn_commit' AND state IN ('prepared','running','uncertain','svn_committed')").fetchall():
+    for row in conn.execute("SELECT * FROM operations WHERE kind = 'svn_commit' AND state IN ('running','uncertain','svn_committed')").fetchall():
         manifest = json.loads(row['reviewed_manifest'] or '{}')
         if manifest.get('mount') == mount:
             return dict(row)
     return None
+
+
+def cancel_previews(conn, user_id, document_path):
+    for row in conn.execute("SELECT id, reviewed_manifest FROM operations WHERE actor_id=? AND kind='svn_commit' AND state IN ('prepared','needs_auth')", (user_id,)).fetchall():
+        if json.loads(row['reviewed_manifest'] or '{}').get('path') == document_path:
+            conn.execute("UPDATE operations SET state='cancelled', finished_at=? WHERE id=?", (database.now_iso(), row['id']))
+
+
+@serialized
+@_database_serialized
+def cancel_commit(conn, user_id, operation_id, db_lock=None):
+    row = get_operation(conn, operation_id, user_id)
+    if row is None:
+        raise OperationError(404, '操作不存在或无权访问')
+    if row['kind'] != 'svn_commit' or row['state'] not in ('prepared', 'needs_auth', 'cancelled'):
+        raise OperationError(409, '该提交已开始或结果待核对，不能取消')
+    _set_state(conn, operation_id, 'cancelled', finished_at=database.now_iso())
+    return {'operationId': operation_id, 'state': 'cancelled'}
 
 
 @serialized
@@ -488,6 +507,7 @@ def prepare_commit(conn, user_id, config, md_dir, document_path, message, expect
             conn.execute("INSERT INTO repo_bindings (repository_id, mount_path, repository_uuid, root_url, target_url, credential_group, config_version, created_at, updated_at) VALUES (?, ?, '', '', ?, ?, ?, ?, ?)",
                          (binding['id'], binding['mount'], binding['url'], binding['credential_group'], str(config['path']), database.now_iso(), database.now_iso()))
         row = _binding_row(conn, binding)
+    cancel_previews(conn, user_id, rel)
     operation_id = create_operation(conn, user_id, row['id'] if row else None, "svn_commit", manifest)
     diff = documents_diff(published or "", head["content"], rel)
     return {
@@ -522,6 +542,10 @@ def run_commit(conn, svn_client, config, md_dir, workspace_root, operation_id, u
             or binding['url'].rstrip('/') != manifest.get('targetUrl', '').rstrip('/')):
         raise OperationError(409, "仓库映射已变更，请重新准备提交")
     if operation['state'] == 'svn_committed':
+        target = documents.resolve_md_file(md_dir, rel)
+        actual = documents.text_hash(documents.read_md_text(target)) if target.is_file() else None
+        if actual not in (manifest.get('basePublishedHash'), manifest.get('contentHash')):
+            raise OperationError(409, 'SVN 已提交，但本地文档在故障期间已修改；请先保存并核对差异，未覆盖本地文件')
         row = _call_db(db_lock, _binding_row, conn, binding)
         if row is None:
             raise OperationError(409, "仓库绑定已丢失，请管理员核对已提交的 SVN 版本")
@@ -1149,6 +1173,10 @@ def backup_site(conn, svn_client, config, root, credential=None, message=None, n
         if not (work_root / ".svn").exists():
             svn_client.checkout(url, work_root, depth="empty", config_dir=config_dir,
                                 username=username, password=password)
+        else:
+            info = svn_client.info(str(work_root), config_dir, username=username, password=password)
+            if str(info.get('url') or '').rstrip('/') != url.rstrip('/'):
+                raise OperationError(409, '网站备份地址与现有工作副本不一致；请在配置页对网站备份执行删除重建后再备份')
         copied = []
         for item in includes:
             source = Path(root) / item
@@ -1526,10 +1554,9 @@ def sync_binding(conn, svn_client, config, md_dir, binding, credential=None, for
             draft_paths = active_draft_paths(conn)
         conflicts = sorted(set(snapshot) & draft_paths)
         publish_files = {path: content for path, content in snapshot.items() if path not in draft_paths}
-        svn_snapshot.publish(md_dir, publish_files, remote_revision, conflicts)
         files = [path[len(binding['mount']) + 1:] for path in publish_files]
-        with _db_guard(db_lock):
-            with conn:
+        def confirm_snapshot():
+            with _db_guard(db_lock), conn:
                 conn.execute(
                     "UPDATE repo_bindings SET published_revision = ?, last_checked_at = ?,"
                     " sync_error = ?, updated_at = ?, last_success_at = COALESCE(?, last_success_at) WHERE id = ?",
@@ -1537,8 +1564,9 @@ def sync_binding(conn, svn_client, config, md_dir, binding, credential=None, for
                      database.now_iso(), None if conflicts else database.now_iso(), row["id"]),
                 )
                 database.audit(conn, "operation_sync", "ok", resource=binding["mount"])
-            return {"updated": True, "revision": remote_revision, "files": files, "conflicts": conflicts}
-    except (SvnError, OSError, UnicodeError, ValueError, documents.MdSaveError, OperationError) as error:
+        svn_snapshot.publish(md_dir, publish_files, remote_revision, conflicts, confirm=confirm_snapshot)
+        return {"updated": True, "revision": remote_revision, "files": files, "conflicts": conflicts}
+    except (SvnError, OSError, UnicodeError, ValueError, sqlite3.Error, documents.MdSaveError, OperationError) as error:
         code = error.code if isinstance(error, SvnError) else 'publish_failed'
         with _db_guard(db_lock):
             if row:

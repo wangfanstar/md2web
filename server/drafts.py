@@ -254,6 +254,8 @@ def discard_draft(conn, user_id, document_path):
             "UPDATE drafts SET state = 'discarded', updated_at = ? WHERE id = ?",
             (database.now_iso(), row["id"]),
         )
+        from .operations import cancel_previews
+        cancel_previews(conn, user_id, rel)
         database.audit(conn, "draft_discard", "ok", actor_id=user_id, resource=rel)
     return {"path": rel, "discarded": True}
 

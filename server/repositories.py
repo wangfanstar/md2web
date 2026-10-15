@@ -66,7 +66,7 @@ def delete(config, conn, db_lock, md_dir, repo_id, mount=None):
         if entries.pending(conn, mount) or operations.pending_commit(conn, mount):
             raise operations.OperationError(409, '仓库有待核对操作，请先处理后再删除')
         active = conn.execute("SELECT o.id FROM operations o JOIN repo_bindings b ON o.binding_id = b.id "
-                              "WHERE b.mount_path = ? AND o.state IN ('prepared','running','uncertain','svn_committed')",
+                              "WHERE b.mount_path = ? AND o.state IN ('running','uncertain','svn_committed')",
                               (mount,)).fetchone()
         if active:
             raise operations.OperationError(409, '仓库存在未完成的提交，请先核对后再删除')

@@ -857,38 +857,40 @@ def read_image_size(path):
 
 
 def folder_page_names(directories, repos=None):
-    """为 docs/md 下每个目录分配入口页 index_<仓库名>_<子文件夹>.html。
-
-    顶层目录即仓库入口页 index_<仓库ID>.html；子目录以「仓库名_子文件夹[_更深]」命名，
-    按剩余目录段依次下划线拼接，天然唯一；仍冲突时追加序号。返回 {rel: 页面文件名}。
-    """
-    ordered = sorted([str(rel) for rel in directories], key=lambda rel: (rel.count("/"), rel))
+    """先保留所有仓库固定入口，再为普通子目录分配不区分大小写的唯一名称。"""
+    ordered = sorted(set(str(rel) for rel in directories), key=lambda rel: (rel.count('/'), rel))
     repo_by_sub = {}
+    taken = {'index_all.html'}
     for repo in repos or []:
-        sub = mount_subpath(repo["mount"])
+        name = repo_page_name(repo['id'])
+        if name.casefold() in taken:
+            raise BuildError('仓库入口页名称冲突：' + name)
+        taken.add(name.casefold())
+        sub = mount_subpath(repo['mount'])
         if sub:
             repo_by_sub[sub] = repo
     pages = {}
-    taken = {"index_all.html"}
     for rel in ordered:
-        parts = [part for part in rel.split("/") if part]
+        parts = [part for part in rel.split('/') if part]
         if not parts:
+            continue
+        if rel in repo_by_sub:
+            pages[rel] = repo_page_name(repo_by_sub[rel]['id'])
             continue
         owner = None
         for sub, repo in repo_by_sub.items():
-            sub_parts = [part for part in sub.split("/") if part]
+            sub_parts = sub.split('/')
             if parts[:len(sub_parts)] == sub_parts and (owner is None or len(sub_parts) > owner[0]):
                 owner = (len(sub_parts), repo)
-        base = ([owner[1]["id"]] + parts[owner[0]:]) if owner else parts
-        name = repo_page_name("_".join(base))
-        if name in taken:
-            stem = name[:-len(".html")]
-            counter = 2
-            while name in taken:
-                name = stem + "-" + str(counter) + ".html"
-                counter += 1
+        base = ([owner[1]['id']] + parts[owner[0]:]) if owner else parts
+        name = repo_page_name('_'.join(base))
+        stem = name[:-len('.html')]
+        counter = 2
+        while name.casefold() in taken:
+            name = stem + '-' + str(counter) + '.html'
+            counter += 1
         pages[rel] = name
-        taken.add(name)
+        taken.add(name.casefold())
     return pages
 
 
@@ -2271,9 +2273,11 @@ def main(argv=None):
                                 allow_commit=repo.get("allow_commit", True), repo=repo,
                                 repos=repos, route_sidebar=not image_only_by_rel.get(sub, False),
                                 home_link=HTML_PREFIX + "index_all.html")
+        # 配置仓库入口已生成，子目录循环不得覆盖它（包括嵌套仓库）。
+        repository_mounts = {mount_subpath(repo['mount']) for repo in repos}
         # 子文件夹入口页：与仓库入口页一致的 docsify 应用，范围限定在该文件夹
         for rel in md_dirs:
-            if "/" not in rel:
+            if "/" not in rel or rel in repository_mounts:
                 continue
             repo = repo_for_rel(rel)
             if not repo:

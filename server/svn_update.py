@@ -24,7 +24,7 @@ def update(conn, svn, config, md_dir, binding, credential, path=None, db_lock=No
             raise operations.OperationError(409, '有未完成的提交，请先核对提交结果后再更新')
     row = operations.ensure_binding(conn, binding, svn, config, credential, db_lock=db_lock)
     with operations._db_guard(db_lock), conn:
-        unfinished = conn.execute("SELECT id FROM operations WHERE binding_id = ? AND state IN ('prepared', 'running', 'uncertain', 'svn_committed') LIMIT 1", (row['id'],)).fetchone()
+        unfinished = conn.execute("SELECT id FROM operations WHERE binding_id = ? AND state IN ('running', 'uncertain', 'svn_committed') LIMIT 1", (row['id'],)).fetchone()
         if unfinished:
             raise operations.OperationError(409, '仓库存在待完成或结果不确定的提交，请先处理后再更新')
         conn.execute("UPDATE repo_bindings SET sync_state = 'running' WHERE id = ?", (row['id'],))
@@ -46,12 +46,13 @@ def update(conn, svn, config, md_dir, binding, credential, path=None, db_lock=No
                 files = svn_snapshot.collect(stage, binding, config)
             with operations._db_guard(db_lock):
                 drafts = sorted(set(files) & operations.active_draft_paths(conn))
-            result = svn_snapshot.publish(md_dir, files, revision, drafts)
-            with operations._db_guard(db_lock), conn:
-                if not path:
-                    conn.execute('UPDATE repo_bindings SET published_revision = ?, last_success_at = ?, last_checked_at = ?, sync_error = NULL WHERE id = ?',
-                                 (revision, database.now_iso(), database.now_iso(), row['id']))
-                database.audit(conn, 'manual_svn_update', 'ok', resource=path or binding['mount'])
+            def confirm_snapshot():
+                with operations._db_guard(db_lock), conn:
+                    if not path:
+                        conn.execute('UPDATE repo_bindings SET published_revision = ?, last_success_at = ?, last_checked_at = ?, sync_error = NULL WHERE id = ?',
+                                     (revision, database.now_iso(), database.now_iso(), row['id']))
+                    database.audit(conn, 'manual_svn_update', 'ok', resource=path or binding['mount'])
+            result = svn_snapshot.publish(md_dir, files, revision, drafts, confirm=confirm_snapshot)
             return result
         except Exception as error:
             with operations._db_guard(db_lock), conn:

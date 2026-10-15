@@ -28,7 +28,7 @@ def collect(stage, binding, settings):
     return files
 
 
-def publish(md_dir, files, revision, drafts=()):
+def publish(md_dir, files, revision, drafts=(), confirm=None):
     md_dir = Path(md_dir)
     backup = md_dir.parent.parent / 'data' / 'svn-update-backups' / uuid.uuid4().hex
     changed, created, applied = [], [], []
@@ -67,6 +67,8 @@ def publish(md_dir, files, revision, drafts=()):
             finally:
                 if os.path.exists(handle.name):
                     os.unlink(handle.name)
+        if confirm is not None:
+            confirm()  # 数据库确认也属于发布事务；失败时回滚已写入的文件。
     except Exception as error:
         failures = []
         for rel in reversed(applied):
