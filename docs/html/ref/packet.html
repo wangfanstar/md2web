@@ -712,6 +712,17 @@
     .view-port *, .view-port *::before, .view-port *::after { animation: none !important; transition: none !important; }
   }
 
+  /* Port Forwarding Path：每条路径前的序号徽标 */
+  .view-port .row-heading { display: flex; align-items: flex-start; gap: 7px; margin-bottom: 6px; }
+  .view-port .row-label .row-heading strong { flex: 1 1 auto; margin-bottom: 0; }
+  .view-port .row-index {
+    display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border-radius: 6px;
+    background: #eaf0f4; color: var(--muted);
+    font: 700 10px/1 "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+  }
+  .view-port .path-row.selected .row-index { background: var(--blue); color: #fff; }
+
 </style>
 </head>
 <body>
@@ -1727,7 +1738,7 @@
     function renderComparisonRows() {
       const visible = getVisibleRoutes();
       $("#port-compare-count").textContent = `${visible.length} / ${ROUTES.length}`;
-      $("#port-comparison-rows").innerHTML = visible.length ? visible.map((route) => `<article class="path-row${route.id === state.selectedRouteId ? " selected" : ""}" data-route-id="${route.id}"><button class="row-label" type="button" data-route-id="${route.id}"><strong>${escapeHtml(route.label)}</strong><small>${escapeHtml(route.category)}</small><span class="route-tags">${tagsMarkup(route.tags)}</span></button><div class="row-body">${route.stages.map(stageMarkup).join("")}</div></article>`).join("") : `<div class="empty-state">没有匹配路径，请调整搜索或筛选条件。</div>`;
+      $("#port-comparison-rows").innerHTML = visible.length ? visible.map((route) => `<article class="path-row${route.id === state.selectedRouteId ? " selected" : ""}" data-route-id="${route.id}"><button class="row-label" type="button" data-route-id="${route.id}"><span class="row-heading"><span class="row-index">${ROUTES.indexOf(route) + 1}</span><strong>${escapeHtml(route.label)}</strong></span><small>${escapeHtml(route.category)}</small><span class="route-tags">${tagsMarkup(route.tags)}</span></button><div class="row-body">${route.stages.map(stageMarkup).join("")}</div></article>`).join("") : `<div class="empty-state">没有匹配路径，请调整搜索或筛选条件。</div>`;
     }
     function renderDetailPanel() {
       const route = routeById(state.selectedRouteId) || ROUTES[0];
