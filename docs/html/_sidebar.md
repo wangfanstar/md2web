@@ -2,3 +2,4 @@
   - <a class="sidebar-group-link" href="html/index_使用说明.html" data-folder="md/使用说明">**使用说明**</a>
     - [快速开始](/md/使用说明/快速开始.md)
     - [绘图示例](/md/使用说明/绘图示例.md)
+  - [RLM_TEST_CASES](/md/RLM_TEST_CASES.md)

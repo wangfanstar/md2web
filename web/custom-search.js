@@ -953,17 +953,24 @@
     });
   }
 
-  function scheduleActiveToc() {
+  function scheduleActiveToc(event) {
+    // Captured element scrolls must not pull the independently scrolled TOC back.
+    if (event && event.type === 'scroll' && event.target !== document && event.target !== window) {
+      return;
+    }
     window.clearTimeout(tocActiveTimer);
     tocActiveTimer = window.setTimeout(updateActiveTocLink, 120);
   }
 
   function handleFilePageTocClick(event) {
-    if (window.location.protocol !== 'file:') {
+    if (event.button > 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) {
       return;
     }
-    var link = event.target.closest && event.target.closest('.docs-page-toc-link');
+    var link = event.target.closest && event.target.closest('a');
     var id = link && link.getAttribute('data-page-toc-id');
+    if (!id && link && link.closest('.markdown-section')) {
+      id = localHeadingId(link.getAttribute('href'));
+    }
     var heading = id && document.getElementById(id);
     if (!heading) {
       return;
@@ -973,6 +980,39 @@
     event.preventDefault();
     event.stopPropagation();
     scrollToHeadingEl(heading);
+  }
+
+  function markdownHeadingSlug(text) {
+    return String(text).trim().toLowerCase()
+      .replace(/[\u2000-\u206f\u2e00-\u2e7f\\'!"#$%&()*+,./:;<=>?@[\]^`{|}~]/g, '')
+      .replace(/\s/g, '-');
+  }
+
+  function localHeadingId(href) {
+    var value = String(href || '');
+    var prefix = currentRouteBase() + '?id=';
+    if (value.indexOf(prefix) === 0) {
+      value = value.slice(prefix.length).split('&')[0];
+    } else if (/^#[^/]/.test(value)) {
+      value = value.slice(1);
+    } else {
+      return null;
+    }
+    try { value = decodeURIComponent(value); } catch (_) { return null; }
+    var section = document.querySelector('.markdown-section');
+    if (!section) { return null; }
+    var headings = Array.prototype.slice.call(section.querySelectorAll('h1[id],h2[id],h3[id],h4[id],h5[id],h6[id]'));
+    var exact = headings.filter(function (heading) { return heading.id === value; })[0];
+    if (exact) { return exact.id; }
+    var counts = Object.create(null);
+    var match = null;
+    headings.forEach(function (heading) {
+      var slug = markdownHeadingSlug(heading.textContent);
+      var count = counts[slug] || 0;
+      counts[slug] = count + 1;
+      if (value === slug + (count ? '-' + count : '')) { match = heading.id; }
+    });
+    return match;
   }
 
   function scrollToHeadingEl(heading) {
@@ -2827,7 +2867,7 @@
         }
       });
     });
-    document.addEventListener('click', handleFilePageTocClick);
+    document.addEventListener('click', handleFilePageTocClick, true);
     document.addEventListener('click', handleSearchResultClick);
     document.addEventListener('click', handleSearchResultNavigate, true);
     loadHistory();
@@ -2866,6 +2906,8 @@
 
   if (window.__CUSTOM_SEARCH_TEST__) {
     window.__CUSTOM_SEARCH_TEST_API__ = {
+      localHeadingId: localHeadingId,
+      scheduleActiveToc: scheduleActiveToc,
       fetchLiveSnapshot: fetchLiveSnapshot,
       updateLiveSidebar: updateLiveSidebar,
       parseQuery: parseQuery,

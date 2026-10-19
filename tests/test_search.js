@@ -4,6 +4,28 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
+test('manual Markdown anchors resolve to actual Docsify headings', () => {
+  const headings = [
+    { id: '_1-测试环境与准备', textContent: '1. 测试环境与准备' },
+    { id: '_3-寄存器直读-直写用例', textContent: '3. 寄存器直读 / 直写用例' },
+    { id: '附录-a-命令速查表', textContent: '附录 A — 命令速查表' }
+  ];
+  const api = loadSearch(undefined, { document: {
+    readyState: 'loading', addEventListener() {},
+    querySelector() { return { querySelectorAll() { return headings; } }; }
+  } });
+  assert.equal(api.localHeadingId('#1-测试环境与准备'), headings[0].id);
+  assert.equal(api.localHeadingId('#/md/guide/a.md?id=3-寄存器直读--直写用例'), headings[1].id);
+  assert.equal(api.localHeadingId('#附录-a--命令速查表'), headings[2].id);
+  assert.equal(api.localHeadingId('#/md/other.md?id=1-测试环境与准备'), null);
+  assert.equal(api.localHeadingId('#%ZZ'), null);
+});
+
+test('scrolling the TOC does not schedule a scroll back to the active heading', () => {
+  const api = loadSearch();
+  assert.doesNotThrow(() => api.scheduleActiveToc({type: 'scroll', target: {}}));
+});
+
 function loadSearch(pathname = '/html/index_all.html', overrides = {}) {
   const source = fs.readFileSync(path.join(__dirname, '..', 'web', 'custom-search.js'), 'utf8');
   const window = {
