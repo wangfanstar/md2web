@@ -740,7 +740,17 @@
     border-color: #8fbdd9;
     box-shadow: 0 0 0 2px rgba(44, 109, 159, .12);
   }
-  .view-port .row-label { background: #f8fbfd; }
+  .view-port .row-label {
+    appearance: none;
+    background: #f8fbfd;
+    border: 0;
+    border-right: 1px solid #e2e9f0;
+    color: inherit;
+    font: inherit;
+    outline: none;
+  }
+  .view-port .row-label:focus-visible { outline: 2px solid rgba(44, 109, 159, .5); outline-offset: -2px; }
+  .view-port .column-title { border-right-color: #e2e9f0; }
   .view-port .path-row.selected .row-label { background: #eef7fc; }
 
 </style>
