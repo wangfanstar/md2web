@@ -303,28 +303,40 @@ def mutate(conn, db_lock, svn, config, md_dir, actor_id, credential, action, pay
                 check_drafts(conn, path)
         if action not in ('create', 'restore', 'trash-empty') and signature(target) != baseline:
             raise operations.OperationError(409, '本地内容在操作期间变化，请核对后再同步')
-        if action == 'create':
-            if initialize_mount:
-                try:
-                    target.mkdir(parents=True, exist_ok=True)
-                except OSError as error:
-                    raise operations.OperationError(500, '无法创建仓库目录 %s，请检查服务器目录写权限：%s'
-                                                     % (path, error))
-            result = operations.create_entry(md_dir, path, kind, destination.name)
-        elif action == 'rename':
-            if binding and binding.get('source_mode') == 'local':
-                with db_lock:
-                    result = operations.rename_local_entry(conn, md_dir, binding, path, destination.name)
-            else:
-                result = operations.rename_entry(md_dir, path, destination.name)
-        elif action == 'move':
-            result = operations.move_entry(md_dir, path, dest_path)
-        elif action == 'delete':
-            result = recycle.move_to_trash(md_dir, path, binding['mount'] if binding else 'md', payload.get('_trash_id'))
-        elif action == 'restore':
-            result = recycle.restore(md_dir, payload.get('mount') or 'md', payload.get('entryId'))
-        else:
-            result = {'count': recycle.empty(md_dir, payload.get('mount') or 'md', payload.get('entryId'))}
+        def perform():
+            if action == 'create':
+                if initialize_mount:
+                    try:
+                        target.mkdir(parents=True, exist_ok=True)
+                    except OSError as error:
+                        raise operations.OperationError(500, '无法创建仓库目录 %s，请检查服务器目录写权限：%s'
+                                                         % (path, error))
+                return operations.create_entry(md_dir, path, kind, destination.name)
+            if action == 'rename':
+                return operations.rename_entry(md_dir, path, destination.name)
+            if action == 'move':
+                return operations.move_entry(md_dir, path, dest_path)
+            if action == 'delete':
+                return recycle.move_to_trash(md_dir, path, binding['mount'] if binding else 'md', payload.get('_trash_id'))
+            if action == 'restore':
+                return recycle.restore(md_dir, payload.get('mount') or 'md', payload.get('entryId'))
+            return {'count': recycle.empty(md_dir, payload.get('mount') or 'md', payload.get('entryId'))}
+
+        if not binding or binding.get('source_mode') == 'local':
+            from . import local_entries
+            def confirm(result):
+                result.update({'operationId': request_id, 'svnRevision': revision, 'state': 'published'})
+                manifest['result'] = result
+                conn.execute("UPDATE operations SET state='published', reviewed_manifest=?, finished_at=? WHERE id=?",
+                             (json.dumps(manifest, ensure_ascii=False), database.now_iso(), request_id))
+                database.audit(conn, 'entry_' + action, 'ok', actor_id=actor_id, resource=path, operation_id=request_id)
+            with db_lock:
+                if action == 'rename':
+                    return operations.rename_local_entry(conn, md_dir, binding, path, destination.name,
+                                                         config=config, confirm=confirm)
+                return local_entries.apply(conn, config, md_dir, binding, action, path, destination,
+                                           payload, perform, confirm)
+        result = perform()
         result.update({'operationId': request_id, 'svnRevision': revision, 'state': 'published'})
         manifest['result'] = result
         with db_lock:

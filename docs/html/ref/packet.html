@@ -1,0 +1,1806 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PZZ · Packet Forwarding Paths</title>
+  <style>
+
+  :root { color-scheme: light; }
+  *, *::before, *::after { box-sizing: border-box; }
+  html { min-width: 0; background: #f5f7f4; }
+  body { margin: 0; min-width: 0; background: #f5f7f4; color: #17221e; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  button, input { font: inherit; }
+  button { cursor: pointer; }
+  .merge-shell { width: min(100%, 1920px); margin: 0 auto; padding: 18px 24px 0; }
+  .merge-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 18px 22px 16px; border: 1px solid #cfd8d0; border-radius: 18px 18px 0 0; background: rgba(255,255,255,.94); box-shadow: 0 12px 28px rgba(39,61,48,.08); }
+  .merge-eyebrow { margin: 0 0 5px; color: #437c59; font-size: 11px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+  .merge-header h1 { margin: 0; font-size: clamp(21px, 2.2vw, 32px); letter-spacing: -.04em; }
+  .merge-subtitle { max-width: 720px; margin: 6px 0 0; color: #65736d; font-size: 13px; line-height: 1.5; }
+  .view-tabs { display: flex; flex: 0 0 auto; gap: 6px; padding: 5px; border: 1px solid #d5ded7; border-radius: 13px; background: #eef3ef; }
+  .view-tab { border: 0; border-radius: 9px; padding: 10px 15px; color: #53635b; background: transparent; font-size: 13px; font-weight: 800; white-space: nowrap; }
+  .view-tab:hover { color: #1f5f3c; background: #e2ece4; }
+  .view-tab.is-active { color: #fff; background: #26744a; box-shadow: 0 5px 12px rgba(38,116,74,.22); }
+  .merge-content { min-width: 0; }
+  .view-panel[hidden] { display: none !important; }
+  @media (max-width: 900px) {
+    .merge-shell { padding-inline: 10px; }
+    .merge-header { align-items: stretch; flex-direction: column; gap: 14px; padding: 15px; }
+    .view-tabs { width: 100%; }
+    .view-tab { flex: 1; }
+  }
+  @media (max-width: 520px) {
+    .merge-header h1 { font-size: 22px; }
+    .merge-subtitle { font-size: 12px; }
+    .view-tab { padding: 9px 8px; font-size: 12px; }
+  }
+
+.view-bypass {
+      --bg: #f3f5f8;
+      --panel: #ffffff;
+      --panel-soft: #f8fafc;
+      --ink: #15202b;
+      --muted: #627182;
+      --faint: #8e9baa;
+      --line: #d9e0e7;
+      --line-strong: #bac6d1;
+      --blue: #2f6f9f;
+      --blue-soft: #e8f2f9;
+      --slate: #54677d;
+      --slate-soft: #edf1f5;
+      --green: #317356;
+      --green-soft: #e8f3ec;
+      --amber: #9b641f;
+      --amber-soft: #fff3df;
+      --rose: #9d4c53;
+      --rose-soft: #fff0f1;
+      --shadow: 0 10px 28px rgba(28, 44, 60, .08);
+      --shadow-soft: 0 3px 12px rgba(28, 44, 60, .06);
+      --radius: 12px;
+      --mono: "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --sans: "Microsoft YaHei UI", "Segoe UI", system-ui, -apple-system, sans-serif;
+    }.view-bypass * { box-sizing: border-box; }.view-bypass { scroll-behavior: smooth; }.view-bypass {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 8% -5%, rgba(69, 137, 184, .12), transparent 30rem),
+        radial-gradient(circle at 100% 0%, rgba(63, 132, 91, .08), transparent 28rem),
+        var(--bg);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.45;
+    }.view-bypass button,.view-bypass input { font: inherit; }.view-bypass button { color: inherit; }.view-bypass code,.view-bypass .mono { font-family: var(--mono); }.view-bypass .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) auto;
+      gap: 22px;
+      align-items: end;
+      padding: 18px clamp(18px, 3vw, 42px) 14px;
+      border-bottom: 1px solid rgba(186, 198, 209, .82);
+      background: rgba(243, 245, 248, .92);
+      backdrop-filter: blur(14px);
+    }.view-bypass .eyebrow {
+      margin: 0 0 4px;
+      color: var(--blue);
+      font: 700 11px/1.2 var(--mono);
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }.view-bypass h1,.view-bypass h2,.view-bypass h3,.view-bypass p { margin-top: 0; }.view-bypass h1 {
+      margin-bottom: 4px;
+      font-size: clamp(23px, 2.7vw, 34px);
+      line-height: 1.15;
+      letter-spacing: -.025em;
+    }.view-bypass .subtitle {
+      max-width: 860px;
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }.view-bypass .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+      align-items: center;
+    }.view-bypass .search-wrap {
+      position: relative;
+      min-width: min(320px, 45vw);
+    }.view-bypass .search-wrap::before {
+      content: "⌕";
+      position: absolute;
+      left: 11px;
+      top: 6px;
+      color: var(--faint);
+      font-size: 20px;
+      line-height: 1;
+    }.view-bypass #bypass-packet-search {
+      width: 100%;
+      padding: 9px 12px 9px 33px;
+      border: 1px solid var(--line-strong);
+      border-radius: 9px;
+      outline: none;
+      background: rgba(255,255,255,.82);
+      color: var(--ink);
+      box-shadow: inset 0 1px 2px rgba(20,35,50,.04);
+    }.view-bypass #bypass-packet-search:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px rgba(47,111,159,.13);
+    }.view-bypass .filter-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: flex-end;
+    }.view-bypass .filter-btn,.view-bypass .ghost-btn {
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(255,255,255,.68);
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+      transition: border-color .15s ease, background .15s ease, color .15s ease, transform .15s ease;
+    }.view-bypass .filter-btn:hover,.view-bypass .ghost-btn:hover { transform: translateY(-1px); border-color: var(--blue); color: var(--blue); }.view-bypass .filter-btn.active { border-color: var(--blue); background: var(--blue); color: #fff; }.view-bypass .ghost-btn { background: transparent; }.view-bypass .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 10px;
+      border-radius: 7px;
+      background: var(--green-soft);
+      color: var(--green);
+      font-size: 12px;
+      white-space: nowrap;
+    }.view-bypass .status-chip.warn { background: var(--amber-soft); color: var(--amber); }.view-bypass .status-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }.view-bypass .pipeline-strip {
+      padding: 14px clamp(18px, 3vw, 42px) 15px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.6);
+    }.view-bypass .section-kicker {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 9px;
+      color: var(--faint);
+      font: 700 10px/1.2 var(--mono);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }.view-bypass .section-kicker span:last-child { font: 400 11px/1.2 var(--sans); letter-spacing: 0; text-transform: none; }.view-bypass .pipeline-scroll { overflow-x: auto; padding: 2px 0 6px; }.view-bypass .pipeline-flow { display: flex; align-items: center; min-width: 960px; gap: 7px; }.view-bypass .phase-badge {
+      flex: 0 0 auto;
+      padding: 3px 7px;
+      border-radius: 5px;
+      color: #fff;
+      font: 700 10px/1 var(--mono);
+      letter-spacing: .04em;
+    }.view-bypass .phase-badge.ingress { background: var(--blue); }.view-bypass .phase-badge.lookup { background: var(--slate); }.view-bypass .phase-badge.mmu { background: var(--green); }.view-bypass .phase-badge.egress { background: var(--amber); }.view-bypass .common-node {
+      flex: 0 0 auto;
+      padding: 7px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: var(--panel);
+      color: var(--ink);
+      font: 700 12px/1 var(--mono);
+      box-shadow: var(--shadow-soft);
+    }.view-bypass .common-node.ingress { border-color: #a9cce2; background: var(--blue-soft); }.view-bypass .common-node.lookup { border-color: #b9c4d3; background: var(--slate-soft); }.view-bypass .common-node.mmu { border-color: #acd2bd; background: var(--green-soft); }.view-bypass .common-node.egress { border-color: #e2c493; background: var(--amber-soft); }.view-bypass .flow-arrow { flex: 0 0 auto; color: #9aa9b7; font-size: 18px; line-height: 1; }.view-bypass .workspace {
+      display: grid;
+      grid-template-columns: 222px minmax(0, 1fr) 340px;
+      gap: 14px;
+      align-items: start;
+      padding: 16px clamp(18px, 3vw, 42px) 30px;
+    }.view-bypass .panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255,255,255,.86);
+      box-shadow: var(--shadow-soft);
+    }.view-bypass .side-panel,.view-bypass .detail-panel { position: sticky; top: 117px; }.view-bypass .side-panel { overflow: hidden; }.view-bypass .side-head,.view-bypass .detail-head {
+      padding: 14px 14px 11px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,.95), rgba(248,250,252,.86));
+    }.view-bypass .side-head h2,.view-bypass .detail-head h2 { margin-bottom: 3px; font-size: 15px; }.view-bypass .side-head p,.view-bypass .detail-head p { margin-bottom: 0; color: var(--muted); font-size: 11px; }.view-bypass .packet-picker { display: grid; gap: 5px; padding: 9px; max-height: calc(100vh - 260px); overflow-y: auto; }.view-bypass .packet-choice {
+      display: grid;
+      grid-template-columns: 24px minmax(0,1fr);
+      gap: 7px;
+      align-items: start;
+      width: 100%;
+      padding: 8px 7px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }.view-bypass .packet-choice:hover { border-color: #bcd2e2; background: var(--blue-soft); }.view-bypass .packet-choice.selected { border-color: var(--blue); background: var(--blue-soft); box-shadow: inset 3px 0 0 var(--blue); }.view-bypass .packet-num {
+      display: grid;
+      place-items: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      background: var(--slate-soft);
+      color: var(--slate);
+      font: 700 11px/1 var(--mono);
+    }.view-bypass .packet-choice.selected .packet-num { background: var(--blue); color: #fff; }.view-bypass .packet-name { display: block; color: var(--ink); font-size: 12px; font-weight: 700; line-height: 1.25; }.view-bypass .packet-meta { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }.view-bypass .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 5px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      color: var(--muted);
+      font: 700 9px/1.2 var(--mono);
+      white-space: nowrap;
+    }.view-bypass .tag.special { border-color: #e5c68f; background: var(--amber-soft); color: var(--amber); }.view-bypass .tag.green { border-color: #b2d7c1; background: var(--green-soft); color: var(--green); }.view-bypass .compare-panel { min-width: 0; overflow: hidden; }.view-bypass .compare-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-end;
+      padding: 14px 15px 11px;
+      border-bottom: 1px solid var(--line);
+    }.view-bypass .compare-head h2 { margin: 0; font-size: 15px; }.view-bypass .compare-head p { margin: 2px 0 0; color: var(--muted); font-size: 11px; }.view-bypass .compare-count { color: var(--blue); font: 700 11px/1 var(--mono); white-space: nowrap; }.view-bypass .comparison-scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: 8px; }.view-bypass .comparison-header,.view-bypass .path-row {
+      display: grid;
+      grid-template-columns: 198px minmax(1060px, 1fr);
+      min-width: 1258px;
+    }.view-bypass .comparison-header {
+      position: sticky;
+      top: 0;
+      z-index: 4;
+      border-bottom: 1px solid var(--line);
+      background: #f8fafc;
+    }.view-bypass .comparison-header > div { padding: 8px 12px; color: var(--faint); font: 700 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }.view-bypass .comparison-header .stage-head { display: flex; gap: 6px; align-items: center; }.view-bypass .stage-head::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--line-strong); }.view-bypass .stage-head.ingress::before { background: var(--blue); }.view-bypass .stage-head.lookup::before { background: var(--slate); }.view-bypass .stage-head.mmu::before { background: var(--green); }.view-bypass .stage-head.egress::before { background: var(--amber); }.view-bypass .path-row { border-bottom: 1px solid #e5e9ee; background: rgba(255,255,255,.7); }.view-bypass .path-row:hover { background: #fbfdff; }.view-bypass .path-row.selected { background: linear-gradient(90deg, #eef7fc, #fff); box-shadow: inset 4px 0 0 var(--blue); }.view-bypass .row-label {
+      position: sticky;
+      left: 0;
+      z-index: 3;
+      min-width: 0;
+      padding: 9px 12px;
+      border-right: 1px solid var(--line);
+      background: rgba(255,255,255,.95);
+      cursor: pointer;
+    }.view-bypass .path-row.selected .row-label { background: #eef7fc; }.view-bypass .row-title { display: flex; gap: 7px; align-items: flex-start; }.view-bypass .row-number { flex: 0 0 auto; color: var(--blue); font: 700 11px/1.4 var(--mono); }.view-bypass .row-name { color: var(--ink); font-size: 12px; font-weight: 700; line-height: 1.25; }.view-bypass .row-badges { display: flex; flex-wrap: wrap; gap: 3px; padding: 5px 0 0 18px; }.view-bypass .row-track {
+      display: grid;
+      grid-template-columns: 1.1fr 1.15fr 1.2fr;
+      min-width: 1060px;
+      gap: 0;
+      padding: 8px 10px;
+    }.view-bypass .row-stage {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      padding: 2px 7px;
+      border-right: 1px dashed #d8e0e8;
+    }.view-bypass .row-stage:last-child { border-right: 0; }.view-bypass .stage-nodes { display: flex; min-width: 0; flex-wrap: nowrap; align-items: center; gap: 4px; }.view-bypass .stage-arrow { flex: 0 0 auto; color: #9aa9b7; font-size: 13px; line-height: 1; }.view-bypass .module-node {
+      flex: 0 0 auto;
+      max-width: 116px;
+      overflow: hidden;
+      padding: 5px 7px;
+      border: 1px solid var(--line-strong);
+      border-radius: 5px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+      font: 700 10px/1.2 var(--mono);
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease;
+    }.view-bypass .module-node:hover { z-index: 2; transform: translateY(-1px); border-color: var(--blue); box-shadow: 0 3px 9px rgba(47,111,159,.16); }.view-bypass .module-node.stage-ingress { border-color: #a9cce2; background: var(--blue-soft); }.view-bypass .module-node.stage-lookup { border-color: #bcc8d7; background: var(--slate-soft); }.view-bypass .module-node.stage-mmu { border-color: #aed4be; background: var(--green-soft); }.view-bypass .module-node.stage-egress { border-color: #e1c494; background: var(--amber-soft); }.view-bypass .module-node.stage-special { border-color: #e4b2b5; background: var(--rose-soft); }.view-bypass .row-stage .module-node { max-width: 92px; padding: 4px 5px; font-size: 9px; }.view-bypass .row-stage .stage-arrow { font-size: 11px; }.view-bypass .row-stage .stage-nodes { gap: 3px; }.view-bypass .row-annotation { display: block; margin: 3px 0 0; color: var(--faint); font: 9px/1.2 var(--mono); white-space: nowrap; }.view-bypass .empty-state { padding: 40px 18px; text-align: center; color: var(--muted); }.view-bypass .empty-state strong { display: block; margin-bottom: 5px; color: var(--ink); }.view-bypass .detail-panel { min-width: 0; overflow: hidden; }.view-bypass .detail-head { display: flex; gap: 9px; align-items: flex-start; }.view-bypass .detail-number { display: grid; place-items: center; flex: 0 0 auto; width: 30px; height: 30px; border-radius: 8px; background: var(--blue); color: #fff; font: 700 13px/1 var(--mono); }.view-bypass .detail-title h2 { margin-bottom: 2px; font-size: 16px; }.view-bypass .detail-title p { line-height: 1.35; }.view-bypass .detail-body { padding: 12px 14px 16px; max-height: calc(100vh - 235px); overflow: auto; }.view-bypass .detail-section { margin-bottom: 17px; }.view-bypass .detail-section:last-child { margin-bottom: 0; }.view-bypass .detail-section h3 { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; color: var(--slate); font: 700 10px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; }.view-bypass .detail-section h3::before { content: ""; width: 4px; height: 12px; border-radius: 2px; background: var(--blue); }.view-bypass .detail-tags,.view-bypass .detail-annotations { display: flex; flex-wrap: wrap; gap: 5px; }.view-bypass .detail-annotation { padding: 4px 6px; border-radius: 5px; background: var(--panel-soft); color: var(--muted); font: 10px/1.2 var(--mono); }.view-bypass .detail-stage { margin-bottom: 8px; }.view-bypass .detail-stage:last-child { margin-bottom: 0; }.view-bypass .detail-stage-label { margin-bottom: 4px; color: var(--faint); font-size: 11px; font-weight: 700; }.view-bypass .detail-path { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }.view-bypass .detail-path .module-node { max-width: 122px; padding: 5px 6px; font-size: 9px; }.view-bypass .detail-path-arrow { color: var(--faint); font-size: 12px; }.view-bypass .branch-card { margin-bottom: 8px; padding: 9px; border: 1px solid #ecd3a7; border-radius: 8px; background: #fffaf0; }.view-bypass .branch-card:last-child { margin-bottom: 0; }.view-bypass .branch-title { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; color: var(--amber); font-size: 12px; font-weight: 700; }.view-bypass .branch-trigger { color: var(--muted); font-size: 10px; }.view-bypass .branch-note { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }.view-bypass .note-list,.view-bypass .ref-list { display: grid; gap: 6px; margin: 0; padding-left: 17px; color: var(--muted); font-size: 11px; }.view-bypass .note-list li::marker { color: var(--amber); }.view-bypass .ref-list li::marker { color: var(--blue); }.view-bypass .ref-list code { overflow-wrap: anywhere; color: var(--blue); font-size: 10px; }.view-bypass .limitation { padding: 8px 9px; border: 1px solid #e5c68f; border-radius: 7px; background: var(--amber-soft); color: #73501e; font-size: 11px; }.view-bypass #bypass-validation-status { margin: 0 clamp(18px, 3vw, 42px) 30px; }.view-bypass .validation-bar { padding: 8px 10px; border: 1px solid #b5d7c2; border-radius: 7px; background: var(--green-soft); color: var(--green); font: 11px/1.3 var(--mono); }.view-bypass .validation-bar.error { border-color: #e4b2b5; background: var(--rose-soft); color: var(--rose); white-space: pre-wrap; }.view-bypass dialog {
+      width: min(620px, calc(100vw - 30px));
+      padding: 0;
+      border: 1px solid var(--line-strong);
+      border-radius: 14px;
+      background: var(--panel);
+      color: var(--ink);
+      box-shadow: 0 24px 80px rgba(20, 35, 50, .24);
+    }.view-bypass dialog::backdrop { background: rgba(23, 36, 48, .34); backdrop-filter: blur(3px); }.view-bypass .dialog-head { display: flex; justify-content: space-between; gap: 12px; align-items: start; padding: 15px 16px 12px; border-bottom: 1px solid var(--line); background: var(--panel-soft); }.view-bypass .dialog-head h2 { margin: 0 0 3px; font-size: 17px; }.view-bypass .dialog-head p { margin: 0; color: var(--muted); font-size: 11px; }.view-bypass .dialog-close { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--muted); cursor: pointer; }.view-bypass .dialog-body { display: grid; gap: 14px; padding: 16px; }.view-bypass .dialog-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }.view-bypass .info-block { padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }.view-bypass .info-block h3 { margin: 0 0 5px; color: var(--faint); font: 700 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }.view-bypass .info-block p,.view-bypass .info-block ul { margin: 0; color: var(--muted); font-size: 12px; }.view-bypass .info-block ul { padding-left: 16px; }.view-bypass .dialog-refs { margin: 0; padding-left: 17px; color: var(--blue); font: 11px/1.45 var(--mono); }.view-bypass .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+    @media (max-width: 1270px) {.view-bypass .workspace { grid-template-columns: 200px minmax(0, 1fr); }.view-bypass .detail-panel { position: static; grid-column: 1 / -1; }.view-bypass .detail-body { max-height: none; }
+    }
+
+    @media (max-width: 760px) {.view-bypass .topbar { grid-template-columns: 1fr; align-items: start; gap: 13px; }.view-bypass .toolbar { justify-content: flex-start; }.view-bypass .search-wrap { min-width: 100%; }.view-bypass .workspace { grid-template-columns: 1fr; padding-inline: 12px; }.view-bypass .side-panel,.view-bypass .detail-panel { position: static; }.view-bypass .packet-picker { max-height: none; grid-template-columns: repeat(2, minmax(0,1fr)); }.view-bypass .side-head { grid-column: 1 / -1; }.view-bypass .comparison-header,.view-bypass .path-row { grid-template-columns: 176px minmax(1060px, 1fr); }.view-bypass .row-track { min-width: 1060px; }.view-bypass #bypass-validation-status { margin-inline: 12px; }.view-bypass .dialog-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 470px) {.view-bypass .packet-picker { grid-template-columns: 1fr; }.view-bypass .topbar,.view-bypass .pipeline-strip { padding-inline: 12px; }.view-bypass .filter-row { justify-content: flex-start; }
+    }
+  
+
+  /* bypass-full-view-layout */
+  .view-bypass .workspace { min-width: 0; }
+  .view-bypass .pipeline-scroll { overflow-x: hidden; }
+  .view-bypass .pipeline-flow { min-width: 0; flex-wrap: wrap; white-space: normal; }
+  .view-bypass .common-node { flex: 1 1 auto; min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.2; text-align: center; }
+  .view-bypass .comparison-scroll { overflow-x: hidden; overflow-y: hidden; }
+  .view-bypass .comparison-header, .view-bypass .path-row { min-width: 0; grid-template-columns: clamp(150px, 18vw, 198px) minmax(0, 1fr); }
+  .view-bypass .comparison-header > div { min-width: 0; overflow-wrap: anywhere; }
+  .view-bypass .row-track { min-width: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .view-bypass .row-stage { min-width: 0; }
+  .view-bypass .stage-nodes { flex: 1 1 auto; min-width: 0; flex-wrap: wrap; }
+  .view-bypass .module-node { flex: 0 1 auto; min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
+  .view-bypass .row-annotation { white-space: normal; overflow-wrap: anywhere; }
+  @media (max-width: 760px) {
+    .view-bypass .comparison-header, .view-bypass .path-row { grid-template-columns: 136px minmax(0, 1fr); }
+    .view-bypass .row-track { grid-template-columns: 1fr; }
+    .view-bypass .row-stage { border-right: 0; border-bottom: 1px dashed #d8e0e8; }
+    .view-bypass .row-stage:last-child { border-bottom: 0; }
+  }
+
+.view-port {
+      --bg: #f4f8fb;
+      --panel: rgba(255,255,255,.94);
+      --ink: #213142;
+      --muted: #64778a;
+      --line: #cbd7e2;
+      --blue: #2c6d9f;
+      --blue-soft: #e6f1f8;
+      --green: #3e805b;
+      --green-soft: #e7f2e9;
+      --amber: #ab742a;
+      --amber-soft: #fff2d2;
+      --purple: #7653a2;
+      --purple-soft: #f0eafa;
+      --red: #a65b5b;
+      --red-soft: #f9eaea;
+      --shadow: 0 12px 28px rgba(44, 73, 100, .08);
+      --radius: 12px;
+      --label-col: 242px;
+    }.view-port * { box-sizing: border-box; }.view-port { min-width: 320px; background: var(--bg); }.view-port {
+      margin: 0;
+      color: var(--ink);
+      font: 13px/1.45 "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      background:
+        radial-gradient(circle at 6% -8%, rgba(45, 112, 163, .13), transparent 28rem),
+        radial-gradient(circle at 100% 0, rgba(70, 137, 92, .10), transparent 28rem),
+        var(--bg);
+    }.view-port button,.view-port input { font: inherit; }.view-port button { color: inherit; }.view-port .page { width: min(1920px, calc(100% - 28px)); margin: 0 auto; padding: 14px 0 24px; }.view-port .topbar {
+      display: grid;
+      grid-template-columns: minmax(360px, 1fr) auto;
+      gap: 22px;
+      align-items: end;
+      padding: 4px 3px 14px;
+      border-bottom: 1px solid var(--line);
+    }.view-port .eyebrow,.view-port .kicker,.view-port .stage-label,.view-port .column-title {
+      margin: 0;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }.view-port h1,.view-port h2,.view-port h3,.view-port p { margin-top: 0; }.view-port h1 { margin-bottom: 4px; font-size: clamp(21px, 2vw, 30px); line-height: 1.1; letter-spacing: -.02em; }.view-port .subtitle { max-width: 760px; margin: 0; color: var(--muted); }.view-port .toolbar { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }.view-port .search-wrap { position: relative; min-width: 250px; }.view-port .search-wrap input {
+      width: 100%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px;
+      background: #fff; color: var(--ink); outline: none;
+    }.view-port .search-wrap input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(44,109,159,.14); }.view-port .filter-row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }.view-port .filter-btn,.view-port .ghost-btn {
+      border: 1px solid var(--line); border-radius: 999px; padding: 7px 11px;
+      background: rgba(255,255,255,.8); cursor: pointer; transition: .16s ease;
+    }.view-port .filter-btn:hover,.view-port .ghost-btn:hover { border-color: var(--blue); color: var(--blue); }.view-port .filter-btn.active { border-color: var(--blue); background: var(--blue); color: #fff; }.view-port .ghost-btn { background: transparent; color: var(--muted); }.view-port .direction-strip,.view-port .pipeline-strip,.view-port .panel {
+      border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow);
+    }.view-port .direction-strip { display: grid; grid-template-columns: repeat(5, minmax(110px, 1fr)); gap: 1px; margin: 14px 0; overflow: hidden; }.view-port .direction-cell { min-height: 70px; padding: 11px 14px; background: rgba(255,255,255,.75); border-right: 1px solid var(--line); }.view-port .direction-cell:last-child { border-right: 0; }.view-port .direction-cell strong { display: block; margin: 4px 0 2px; font-size: 14px; }.view-port .direction-cell span { color: var(--muted); font-size: 11px; }.view-port .direction-cell.ingress .kicker { color: var(--blue); }.view-port .direction-cell.local .kicker { color: var(--green); }.view-port .direction-cell.cross .kicker { color: var(--purple); }.view-port .direction-cell.egress .kicker { color: var(--amber); }.view-port .direction-cell.output .kicker { color: var(--red); }.view-port .pipeline-strip { padding: 12px 14px; margin-bottom: 14px; }.view-port .section-head { display: flex; justify-content: space-between; gap: 14px; align-items: baseline; margin-bottom: 9px; }.view-port .section-head h2 { margin: 0; font-size: 13px; letter-spacing: .1em; }.view-port .section-head p { margin: 0; color: var(--muted); font-size: 11px; }.view-port .pipeline-scroll { overflow-x: hidden; padding-bottom: 3px; }.view-port .pipeline-flow { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; white-space: normal; }.view-port .phase-badge { padding: 3px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: .08em; }.view-port .phase-badge.ingress { background: var(--blue-soft); color: var(--blue); }.view-port .phase-badge.local { background: var(--green-soft); color: var(--green); }.view-port .phase-badge.cross { background: var(--purple-soft); color: var(--purple); }.view-port .phase-badge.egress { background: var(--amber-soft); color: var(--amber); }.view-port .phase-badge.output { background: var(--red-soft); color: var(--red); }.view-port .backbone-node {
+      display: inline-flex; align-items: center; min-height: 28px; padding: 4px 9px;
+      border: 1px solid #aebdca; border-radius: 4px; background: #f8fbfd; font-weight: 650; white-space: nowrap;
+    }.view-port .backbone-node.ingress { background: var(--blue-soft); border-color: #9fc1d9; }.view-port .backbone-node.local { background: var(--green-soft); border-color: #a9c7b2; }.view-port .backbone-node.cross { background: var(--purple-soft); border-color: #c0b1da; }.view-port .backbone-node.egress { background: var(--amber-soft); border-color: #d9bd83; }.view-port .backbone-node.output { background: var(--red-soft); border-color: #dcb0b0; }.view-port .arrow { color: #7d8d9c; font-size: 17px; }.view-port .workspace { display: grid; grid-template-columns: 210px minmax(0, 1fr) 315px; gap: 14px; align-items: start; }.view-port .panel { min-width: 0; }.view-port .side-panel { position: sticky; top: 12px; z-index: 4; max-height: calc(100vh - 24px); overflow-y: auto; overflow-x: hidden; }.view-port .side-head,.view-port .detail-head,.view-port .compare-head { padding: 14px 15px 11px; border-bottom: 1px solid var(--line); }.view-port .side-head h2,.view-port .detail-head h2,.view-port .compare-head h2 { margin: 0 0 3px; font-size: 15px; }.view-port .side-head p,.view-port .compare-head p,.view-port .detail-head p { margin: 0; color: var(--muted); font-size: 11px; }.view-port .route-picker { padding: 8px; }.view-port .route-choice {
+      display: block; width: 100%; padding: 10px 9px; border: 1px solid transparent; border-radius: 8px;
+      background: transparent; text-align: left; cursor: pointer; transition: .15s ease;
+    }.view-port .route-choice:hover { background: #f2f7fa; border-color: #d5e1ea; }.view-port .route-choice.selected { background: var(--blue-soft); border-color: #a8c9df; box-shadow: inset 3px 0 var(--blue); }.view-port .route-index { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 6px; border-radius: 5px; background: #eaf0f4; color: var(--muted); font-weight: 700; vertical-align: top; }.view-port .route-choice.selected .route-index { background: var(--blue); color: #fff; }.view-port .route-name { display: inline; font-weight: 700; line-height: 1.3; }.view-port .route-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 0 28px; }.view-port .tag { display: inline-flex; padding: 2px 5px; border-radius: 4px; background: #edf2f5; color: var(--muted); font-size: 10px; }.view-port .tag.local { background: var(--green-soft); color: var(--green); }.view-port .tag.cross { background: var(--purple-soft); color: var(--purple); }.view-port .tag.aux { background: var(--amber-soft); color: var(--amber); }.view-port .tag.cpp { background: var(--red-soft); color: var(--red); }.view-port .empty-state { padding: 30px 16px; color: var(--muted); text-align: center; }.view-port .compare-panel { overflow: hidden; }.view-port .compare-head { display: flex; justify-content: space-between; gap: 12px; align-items: end; }.view-port .compare-count { color: var(--blue); font-weight: 700; white-space: nowrap; }.view-port .comparison-scroll { overflow-x: hidden; overflow-y: visible; }.view-port .comparison-grid { min-width: 0; }.view-port .column-head,.view-port .path-row { display: grid; grid-template-columns: var(--label-col) minmax(0, 1fr); }.view-port .column-head { border-bottom: 1px solid var(--line); background: #f9fbfc; }.view-port .column-title { padding: 9px 12px; border-right: 1px solid var(--line); }.view-port .column-stage-head { display: grid; grid-template-columns: 1.05fr 2fr 1.3fr 1.75fr .9fr; padding: 9px 0; min-width: 0; }.view-port .column-stage-head span { min-width: 0; padding: 0 10px; border-right: 1px solid #e3e9ee; overflow-wrap: anywhere; }.view-port .path-row { min-height: 151px; border-bottom: 1px solid var(--line); }.view-port .path-row:last-child { border-bottom: 0; }.view-port .path-row.selected { background: linear-gradient(90deg, #eef7fc, rgba(255,255,255,.84)); box-shadow: inset 4px 0 var(--blue); }.view-port .row-label {
+      position: sticky; left: 0; z-index: 2; min-width: 0; padding: 12px 10px;
+      border-right: 1px solid var(--line); background: rgba(249,252,253,.96); text-align: left; cursor: pointer;
+    }.view-port .path-row.selected .row-label { background: #eef7fc; }.view-port .row-label strong { display: block; margin-bottom: 6px; font-size: 12px; line-height: 1.35; }.view-port .row-label small { display: block; margin-bottom: 7px; color: var(--muted); line-height: 1.3; }.view-port .row-label .route-tags { margin: 0; }.view-port .row-body { display: grid; grid-template-columns: 1.05fr 2fr 1.3fr 1.75fr .9fr; align-items: stretch; min-width: 0; }.view-port .stage-cell { position: relative; min-width: 0; padding: 9px 10px; border-right: 1px solid #e3e9ee; }.view-port .stage-cell:last-child { border-right: 0; }.view-port .stage-cell.source { background: rgba(246,249,251,.55); }.view-port .stage-cell.ingress { background: rgba(230,241,248,.24); }.view-port .stage-cell.local { background: rgba(231,242,233,.3); }.view-port .stage-cell.cross { background: rgba(240,234,250,.34); }.view-port .stage-cell.egress { background: rgba(255,242,210,.25); }.view-port .stage-cell.output { background: rgba(249,234,234,.27); }.view-port .stage-cell .stage-label { margin-bottom: 7px; font-size: 9px; letter-spacing: .08em; }.view-port .stage-cell.source .stage-label { color: var(--muted); }.view-port .stage-cell.ingress .stage-label { color: var(--blue); }.view-port .stage-cell.local .stage-label { color: var(--green); }.view-port .stage-cell.cross .stage-label { color: var(--purple); }.view-port .stage-cell.egress .stage-label { color: var(--amber); }.view-port .stage-cell.output .stage-label { color: var(--red); }.view-port .stage-line { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }.view-port .module-node {
+      display: inline-flex; align-items: center; min-width: 0; min-height: 29px; max-width: 100%; padding: 4px 8px;
+      border: 1px solid #aebdca; border-radius: 4px; background: #fff; color: var(--ink); font-size: 11px;
+      font-weight: 700; line-height: 1.18; text-align: left; cursor: pointer; transition: .14s ease; white-space: normal; overflow-wrap: anywhere;
+    }.view-port button.module-node:hover,.view-port button.module-node:focus-visible { border-color: var(--blue); background: #f3f9fc; outline: none; box-shadow: 0 0 0 2px rgba(44,109,159,.13); }.view-port .module-node.stage-ingress { background: var(--blue-soft); border-color: #9fc1d9; }.view-port .module-node.stage-local { background: var(--green-soft); border-color: #a9c7b2; }.view-port .module-node.stage-cross { background: var(--purple-soft); border-color: #c0b1da; }.view-port .module-node.stage-egress { background: var(--amber-soft); border-color: #d9bd83; }.view-port .module-node.stage-output { background: var(--red-soft); border-color: #dcb0b0; }.view-port .module-node.stage-source { background: #f8fbfd; }.view-port .stage-arrow { color: #81909d; font-size: 15px; }.view-port .stage-note { margin-top: 7px; color: var(--muted); font-size: 10px; line-height: 1.25; }.view-port .stage-branches { display: grid; gap: 5px; margin-top: 5px; padding-top: 5px; border-top: 1px dashed #c9d4dd; }.view-port .branch-label { display: inline-flex; flex: 0 0 92px; color: var(--muted); font-size: 10px; line-height: 1.2; }.view-port .detail-panel { position: sticky; top: 12px; overflow: hidden; }.view-port .detail-body { padding: 13px 15px 16px; }.view-port .detail-kicker { color: var(--blue); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }.view-port .detail-summary { margin: 8px 0 12px; color: var(--muted); }.view-port .detail-section { padding: 10px 0; border-top: 1px solid #e3e9ee; }.view-port .detail-section h3 { margin: 0 0 7px; font-size: 12px; }.view-port .detail-section ul { margin: 0; padding-left: 18px; color: var(--muted); }.view-port .detail-section li { margin-bottom: 5px; }.view-port .detail-stage-list { display: grid; gap: 5px; }.view-port .detail-stage { display: grid; grid-template-columns: 68px 1fr; gap: 8px; align-items: start; }.view-port .detail-stage-label { color: var(--muted); font-size: 10px; }.view-port .detail-stage-modules { color: var(--ink); font-weight: 650; }.view-port .ref-list { display: flex; flex-wrap: wrap; gap: 5px; }.view-port .ref { padding: 3px 5px; border-radius: 4px; background: #eef2f5; color: var(--muted); font: 10px/1.2 Consolas, monospace; }.view-port #port-validation-status { margin-top: 10px; padding: 8px 10px; border: 1px solid #aed0b7; border-radius: 7px; background: var(--green-soft); color: var(--green); font-size: 11px; }.view-port #port-validation-status.invalid { border-color: #dcb0b0; background: var(--red-soft); color: var(--red); }.view-port dialog { width: min(560px, calc(100% - 28px)); padding: 0; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); box-shadow: 0 24px 70px rgba(20,40,60,.25); }.view-port dialog::backdrop { background: rgba(24,39,54,.34); backdrop-filter: blur(2px); }.view-port .dialog-head { display: flex; justify-content: space-between; gap: 14px; padding: 15px 17px 11px; border-bottom: 1px solid var(--line); }.view-port .dialog-head h2 { margin: 0 0 3px; font-size: 17px; }.view-port .dialog-head p { margin: 0; color: var(--muted); font-size: 11px; }.view-port .dialog-close { align-self: start; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; background: #fff; cursor: pointer; }.view-port .dialog-body { padding: 15px 17px 18px; }.view-port .module-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px 16px; margin-bottom: 12px; }.view-port .module-fact { padding: 8px 9px; border: 1px solid #e0e7ec; border-radius: 7px; background: #fafcfd; }.view-port .module-fact span { display: block; color: var(--muted); font-size: 10px; }.view-port .module-fact strong { display: block; margin-top: 2px; font-size: 12px; }.view-port .dialog-body ul { margin: 7px 0 0; padding-left: 18px; color: var(--muted); }.view-port .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    @media (max-width: 1450px) {.view-port { --label-col: 205px; }.view-port .workspace { grid-template-columns: 190px minmax(0, 1fr); }.view-port .detail-panel { grid-column: 1 / -1; position: static; }.view-port .detail-body { display: grid; grid-template-columns: minmax(240px, .8fr) minmax(300px, 1.2fr); gap: 0 20px; }.view-port .detail-head { grid-column: 1 / -1; }.view-port .detail-body > .detail-summary,.view-port .detail-body > .detail-section:first-of-type { grid-column: 1; }.view-port .detail-body > .detail-section:not(:first-of-type) { grid-column: 2; }
+    }
+    @media (max-width: 760px) {.view-port { --label-col: 165px; }.view-port .page { width: min(100% - 16px, 1920px); padding-top: 8px; }.view-port .topbar { grid-template-columns: 1fr; gap: 12px; }.view-port .toolbar,.view-port .filter-row { justify-content: flex-start; }.view-port .search-wrap { min-width: min(100%, 320px); flex: 1 1 100%; }.view-port .direction-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }.view-port .direction-cell:nth-child(5) { grid-column: 1 / -1; }.view-port .workspace { grid-template-columns: 1fr; }.view-port .detail-panel { grid-column: auto; }.view-port .detail-body { display: block; }.view-port .side-panel { order: 0; }.view-port .compare-panel { order: 1; }.view-port .detail-panel { order: 2; }.view-port .module-grid { grid-template-columns: 1fr; }.view-port .side-panel { position: static; max-height: none; overflow: hidden; }
+    }
+    @media (prefers-reduced-motion: reduce) {.view-port *,.view-port *::before,.view-port *::after { scroll-behavior: auto !important; transition: none !important; } }
+  
+  
+  /* ============================================================
+     PRESENTATION UPGRADE LAYER (v2)
+     仅调整演示方式：视觉层次 / 图形化节点 / 联动动效 / 暗色 / 打印
+     不改变任何信息内容、数据结构与交互功能
+     ============================================================ */
+
+  /* ---- 全局观感 ---- */
+  .merge-shell { padding: 16px 22px 0; }
+  .merge-header {
+    border-radius: 20px 20px 0 0;
+    border-color: #c9d5cd;
+    background:
+      radial-gradient(120% 160% at 0% 0%, rgba(47,111,159,.10), transparent 42%),
+      radial-gradient(120% 160% at 100% 0%, rgba(49,115,86,.09), transparent 42%),
+      rgba(255,255,255,.96);
+    box-shadow: 0 16px 40px rgba(28,44,60,.10);
+  }
+  .merge-header h1 { font-weight: 800; }
+  .view-tabs { border-radius: 14px; box-shadow: inset 0 1px 3px rgba(28,44,60,.06); }
+  .view-tab { transition: background .18s ease, color .18s ease, box-shadow .18s ease, transform .18s ease; }
+  .view-tab:hover { transform: translateY(-1px); }
+  .view-tab.is-active { box-shadow: 0 6px 16px rgba(38,116,74,.26); }
+
+  ::selection { background: rgba(47,111,159,.22); }
+
+  /* 滚动条（演示细节） */
+  .view-bypass .packet-picker::-webkit-scrollbar,
+  .view-bypass .detail-body::-webkit-scrollbar,
+  .view-bypass .comparison-scroll::-webkit-scrollbar,
+  .view-bypass .pipeline-scroll::-webkit-scrollbar,
+  .view-port .side-panel::-webkit-scrollbar { width: 9px; height: 9px; }
+  .view-bypass .packet-picker::-webkit-scrollbar-thumb,
+  .view-bypass .detail-body::-webkit-scrollbar-thumb,
+  .view-bypass .comparison-scroll::-webkit-scrollbar-thumb,
+  .view-bypass .pipeline-scroll::-webkit-scrollbar-thumb,
+  .view-port .side-panel::-webkit-scrollbar-thumb {
+    border: 2px solid transparent; border-radius: 8px;
+    background: rgba(98,113,130,.35); background-clip: padding-box;
+  }
+  .view-bypass .packet-picker::-webkit-scrollbar-thumb:hover,
+  .view-bypass .detail-body::-webkit-scrollbar-thumb:hover,
+  .view-bypass .comparison-scroll::-webkit-scrollbar-thumb:hover,
+  .view-port .side-panel::-webkit-scrollbar-thumb:hover { background: rgba(47,111,159,.55); background-clip: padding-box; }
+
+  /* ---- 面板与卡片层次 ---- */
+  .view-bypass .panel {
+    border-color: #d3dde5;
+    background: rgba(255,255,255,.92);
+    box-shadow: 0 8px 22px rgba(28,44,60,.07);
+    transition: box-shadow .2s ease, border-color .2s ease;
+  }
+  .view-bypass .panel:hover { border-color: #c2d0dc; box-shadow: 0 12px 30px rgba(28,44,60,.10); }
+  .view-bypass .side-head,
+  .view-bypass .detail-head,
+  .view-bypass .compare-head { background: linear-gradient(180deg, #ffffff, #f6f9fc); }
+
+  .view-port .panel {
+    border-color: #cfdae4;
+    box-shadow: 0 8px 22px rgba(44,73,100,.07);
+    transition: box-shadow .2s ease, border-color .2s ease;
+  }
+  .view-port .panel:hover { border-color: #bdcdda; box-shadow: 0 12px 30px rgba(44,73,100,.10); }
+
+  /* ---- 主干流水线：轨道化 ---- */
+  .view-bypass .pipeline-strip {
+    background:
+      linear-gradient(180deg, rgba(255,255,255,.9), rgba(246,249,252,.85));
+  }
+  .view-bypass .common-node {
+    border-radius: 9px;
+    font-weight: 800;
+    transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+  }
+  .view-bypass .common-node:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(28,44,60,.14); }
+  .view-bypass .common-node.ingress { background: linear-gradient(180deg, #eef7fd, var(--blue-soft)); }
+  .view-bypass .common-node.lookup  { background: linear-gradient(180deg, #f4f7fa, var(--slate-soft)); }
+  .view-bypass .common-node.mmu     { background: linear-gradient(180deg, #eef8f1, var(--green-soft)); }
+  .view-bypass .common-node.egress  { background: linear-gradient(180deg, #fff7e8, var(--amber-soft)); }
+  .view-bypass .flow-arrow { font-weight: 700; opacity: .85; }
+
+  .view-port .backbone-node { border-radius: 7px; transition: transform .16s ease, box-shadow .16s ease; }
+  .view-port .backbone-node:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(44,73,100,.14); }
+
+  /* ---- 报文列表（左栏） ---- */
+  .view-bypass .packet-choice {
+    border-radius: 10px;
+    transition: background .16s ease, border-color .16s ease, transform .16s ease, box-shadow .16s ease;
+  }
+  .view-bypass .packet-choice:hover { transform: translateX(2px); }
+  .view-bypass .packet-choice.selected {
+    box-shadow: inset 3px 0 0 var(--blue), 0 4px 14px rgba(47,111,159,.14);
+  }
+  .view-bypass .packet-num { transition: background .16s ease, color .16s ease, transform .16s ease; }
+  .view-bypass .packet-choice:hover .packet-num { transform: scale(1.06); }
+
+  .view-port .route-choice { border-radius: 10px; transition: background .16s ease, border-color .16s ease, transform .16s ease; }
+  .view-port .route-choice:hover { transform: translateX(2px); }
+  .view-port .route-choice.selected { box-shadow: inset 3px 0 var(--blue), 0 4px 14px rgba(44,109,159,.13); }
+
+  /* ---- 横向对照：阶段色带 + 图形化节点 ---- */
+  .view-bypass .comparison-header { background: linear-gradient(180deg, #fbfdfe, #f4f8fb); }
+  .view-bypass .path-row { transition: background .16s ease, box-shadow .16s ease; }
+  .view-bypass .path-row:hover { background: #f7fbfe; }
+  .view-bypass .path-row.selected {
+    background: linear-gradient(90deg, #ecf6fc, #ffffff 55%);
+    box-shadow: inset 4px 0 0 var(--blue), 0 2px 12px rgba(47,111,159,.08);
+  }
+  .view-bypass .row-stage {
+    border-radius: 8px;
+    border-right: 0;
+    margin: 3px 3px;
+    padding: 4px 8px;
+    transition: background .16s ease, box-shadow .16s ease;
+  }
+  .view-bypass .row-stage.stage-ingress { background: linear-gradient(180deg, rgba(232,242,249,.75), rgba(232,242,249,.35)); }
+  .view-bypass .row-stage.stage-mmu     { background: linear-gradient(180deg, rgba(232,243,236,.75), rgba(232,243,236,.35)); }
+  .view-bypass .row-stage.stage-egress  { background: linear-gradient(180deg, rgba(255,243,223,.75), rgba(255,243,223,.35)); }
+  .view-bypass .row-stage.stage-special { background: linear-gradient(180deg, rgba(255,240,241,.75), rgba(255,240,241,.35)); }
+  .view-bypass .path-row:hover .row-stage { box-shadow: inset 0 0 0 1px rgba(47,111,159,.10); }
+
+  .view-bypass .module-node {
+    border-radius: 999px;
+    padding: 5px 10px;
+    font-weight: 700;
+    position: relative;
+    transition: transform .14s ease, border-color .14s ease, box-shadow .14s ease, background .14s ease;
+  }
+  .view-bypass .module-node::before {
+    content: "";
+    position: absolute;
+    left: 6px; top: 50%;
+    width: 5px; height: 5px;
+    margin-top: -2.5px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: .38;
+    transition: opacity .14s ease, transform .14s ease;
+  }
+  .view-bypass .module-node { padding-left: 17px; }
+  .view-bypass .row-stage .module-node { padding: 4px 8px 4px 15px; }
+  .view-bypass .module-node:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(47,111,159,.20); }
+  .view-bypass .module-node:hover::before { opacity: .9; transform: scale(1.25); }
+  .view-bypass .module-node.stage-ingress { background: linear-gradient(180deg, #f2f9fe, var(--blue-soft)); }
+  .view-bypass .module-node.stage-lookup  { background: linear-gradient(180deg, #f7f9fb, var(--slate-soft)); }
+  .view-bypass .module-node.stage-mmu     { background: linear-gradient(180deg, #f2faf5, var(--green-soft)); }
+  .view-bypass .module-node.stage-egress  { background: linear-gradient(180deg, #fff9ec, var(--amber-soft)); }
+  .view-bypass .module-node.stage-special { background: linear-gradient(180deg, #fff5f5, var(--rose-soft)); }
+  .view-bypass .stage-arrow { font-weight: 800; color: #8fa0b0; }
+
+  .view-port .stage-cell { border-radius: 8px; margin: 3px 2px; transition: background .16s ease, box-shadow .16s ease; }
+  .view-port .module-node {
+    border-radius: 999px;
+    padding: 4px 11px;
+    transition: transform .14s ease, border-color .14s ease, box-shadow .14s ease, background .14s ease;
+  }
+  .view-port .module-node:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(44,109,159,.18); }
+  .view-port .module-node.stage-ingress { background: linear-gradient(180deg, #f2f8fc, var(--blue-soft)); }
+  .view-port .module-node.stage-local   { background: linear-gradient(180deg, #f3faf5, var(--green-soft)); }
+  .view-port .module-node.stage-cross   { background: linear-gradient(180deg, #f8f4fd, var(--purple-soft)); }
+  .view-port .module-node.stage-egress  { background: linear-gradient(180deg, #fff9ea, var(--amber-soft)); }
+  .view-port .module-node.stage-output  { background: linear-gradient(180deg, #fdf4f4, var(--red-soft)); }
+
+  /* ---- 详情面板 ---- */
+  .view-bypass .detail-body,
+  .view-port .detail-body { scroll-behavior: smooth; }
+  .view-bypass .detail-section,
+  .view-port .detail-section {
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: #f9fbfd;
+    border: 1px solid #e4ebf1;
+  }
+  .view-bypass .detail-section { margin-bottom: 12px; }
+  .view-bypass .detail-section h3,
+  .view-port .detail-section h3 { color: var(--slate); }
+  .view-bypass .branch-card {
+    border-radius: 10px;
+    border: 1px solid #e3d6e9;
+    background: linear-gradient(180deg, #fdfbff, #faf6fd);
+    padding: 10px 12px;
+  }
+  .view-bypass .note-list li,
+  .view-port .detail-section li { line-height: 1.55; }
+  .view-bypass code,
+  .view-port code {
+    border: 1px solid #dbe4ec;
+    border-radius: 5px;
+    padding: 1px 5px;
+    background: #f2f6fa;
+  }
+
+  /* ---- 弹窗 ---- */
+  .view-bypass dialog[open] { animation: pv2-pop .18s ease-out; }
+  .view-bypass dialog::backdrop { animation: pv2-fade .18s ease-out; }
+  .view-bypass .info-block { border-radius: 10px; transition: border-color .15s ease, box-shadow .15s ease; }
+  .view-bypass .info-block:hover { border-color: #c8d8e6; box-shadow: 0 4px 12px rgba(28,44,60,.07); }
+  .view-bypass .dialog-close { border-radius: 8px; transition: border-color .15s ease, color .15s ease, background .15s ease; }
+  .view-bypass .dialog-close:hover { border-color: var(--blue); color: var(--blue); background: var(--blue-soft); }
+
+  @keyframes pv2-pop { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
+  @keyframes pv2-fade { from { opacity: 0; } to { opacity: 1; } }
+
+  /* 路径行入场（轻量，不阻塞） */
+  .view-bypass .path-row { animation: pv2-rise .22s ease-out both; }
+  @keyframes pv2-rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  /* ---- 暗色模式（仅演示配色，不影响内容） ---- */
+  @media (prefers-color-scheme: dark) {
+    html, body { background: #0f151b; }
+    .merge-shell { color-scheme: dark; }
+    .merge-header {
+      border-color: #2a3742;
+      background:
+        radial-gradient(120% 160% at 0% 0%, rgba(47,111,159,.22), transparent 42%),
+        radial-gradient(120% 160% at 100% 0%, rgba(49,115,86,.18), transparent 42%),
+        #161f28;
+      box-shadow: 0 16px 40px rgba(0,0,0,.35);
+    }
+    .merge-header h1 { color: #e8eef4; }
+    .merge-subtitle { color: #93a3b1; }
+    .merge-eyebrow { color: #6fb38c; }
+    .view-tabs { background: #1b242e; border-color: #2c3945; }
+    .view-tab { color: #9fb0bf; }
+    .view-tab:hover { background: #232f3b; color: #cfe3f5; }
+    .view-tab.is-active { background: #2f7d5b; color: #fff; }
+
+    .view-bypass, .view-port {
+      --bg: #0f151b;
+      --panel: #161f28;
+      --panel-soft: #1a242e;
+      --ink: #e6edf4;
+      --muted: #97a7b5;
+      --faint: #6d7d8b;
+      --line: #26323d;
+      --line-strong: #35434f;
+      --blue: #5da2d5;
+      --blue-soft: #16293a;
+      --slate: #8ba3b8;
+      --slate-soft: #1c2731;
+      --green: #57b183;
+      --green-soft: #142b22;
+      --amber: #d3a35c;
+      --amber-soft: #2e2415;
+      --rose: #d0858b;
+      --rose-soft: #2f1b1d;
+      --purple: #a68ad0;
+      --purple-soft: #251d33;
+      --red: #d08585;
+      --red-soft: #2f1d1d;
+      --shadow: 0 10px 28px rgba(0,0,0,.35);
+      --shadow-soft: 0 3px 12px rgba(0,0,0,.28);
+      background: radial-gradient(circle at 8% -5%, rgba(69,137,184,.16), transparent 30rem), #0f151b;
+    }
+    .view-bypass .topbar { background: rgba(15,21,27,.9); border-bottom-color: #26323d; }
+    .view-bypass .panel, .view-port .panel { background: rgba(22,31,40,.94); border-color: #26323d; }
+    .view-bypass .side-head, .view-bypass .detail-head, .view-bypass .compare-head,
+    .view-port .side-head, .view-port .detail-head, .view-port .compare-head {
+      background: linear-gradient(180deg, #1a242e, #161f28);
+      border-bottom-color: #26323d;
+    }
+    .view-bypass .pipeline-strip { background: linear-gradient(180deg, #141c24, #121920); border-bottom-color: #26323d; }
+    .view-bypass .comparison-header, .view-port .column-head { background: linear-gradient(180deg, #1a242e, #161f28); }
+    .view-bypass .path-row { background: rgba(22,31,40,.6); border-bottom-color: #202b35; }
+    .view-bypass .path-row:hover { background: #1a2630; }
+    .view-bypass .path-row.selected { background: linear-gradient(90deg, #14283a, #161f28 55%); }
+    .view-bypass .row-label { background: rgba(22,31,40,.96); border-right-color: #26323d; }
+    .view-bypass .path-row.selected .row-label { background: #14283a; }
+    .view-bypass .module-node, .view-port .module-node { background: #1a242e; border-color: #35434f; color: #dbe6ef; }
+    .view-bypass .common-node { background: #1a242e; border-color: #35434f; }
+    .view-bypass .packet-choice.selected { background: var(--blue-soft); }
+    .view-bypass .packet-num { background: #202b35; color: #9fb0bf; }
+    .view-bypass .tag, .view-port .tag { background: #1c2731; border-color: #2c3945; }
+    .view-bypass .detail-section, .view-port .detail-section { background: #141c24; border-color: #26323d; }
+    .view-bypass .branch-card { background: #1a1626; border-color: #322a44; }
+    .view-bypass code, .view-port code { background: #1a242e; border-color: #2c3945; }
+    .view-bypass .info-block { background: #1a242e; border-color: #26323d; }
+    .view-bypass dialog { background: #161f28; border-color: #35434f; color: #e6edf4; }
+    .view-bypass .dialog-head { background: #1a242e; border-bottom-color: #26323d; }
+    .view-bypass .dialog-close { background: #1a242e; border-color: #2c3945; color: #9fb0bf; }
+    .view-bypass #bypass-packet-search, .view-port .search-wrap input { background: #1a242e; border-color: #35434f; color: #e6edf4; }
+    .view-bypass .filter-btn, .view-bypass .ghost-btn, .view-port .filter-btn, .view-port .ghost-btn { background: #1a242e; border-color: #2c3945; color: #9fb0bf; }
+    .view-port .backbone-node { background: #1a242e; border-color: #35434f; }
+  }
+
+
+  /* ---- DARK GRADIENT OVERRIDE（暗色下用纯色令牌替换亮色渐变起点） ---- */
+  @media (prefers-color-scheme: dark) {
+    .view-bypass .common-node.ingress { background: var(--blue-soft); }
+    .view-bypass .common-node.lookup  { background: var(--slate-soft); }
+    .view-bypass .common-node.mmu     { background: var(--green-soft); }
+    .view-bypass .common-node.egress  { background: var(--amber-soft); }
+    .view-bypass .module-node.stage-ingress { background: var(--blue-soft); }
+    .view-bypass .module-node.stage-lookup  { background: var(--slate-soft); }
+    .view-bypass .module-node.stage-mmu     { background: var(--green-soft); }
+    .view-bypass .module-node.stage-egress  { background: var(--amber-soft); }
+    .view-bypass .module-node.stage-special { background: var(--rose-soft); }
+    .view-port .module-node.stage-ingress { background: var(--blue-soft); }
+    .view-port .module-node.stage-local   { background: var(--green-soft); }
+    .view-port .module-node.stage-cross   { background: var(--purple-soft); }
+    .view-port .module-node.stage-egress  { background: var(--amber-soft); }
+    .view-port .module-node.stage-output  { background: var(--red-soft); }
+    .view-bypass .row-stage.stage-ingress { background: rgba(22,41,58,.55); }
+    .view-bypass .row-stage.stage-mmu     { background: rgba(20,43,34,.55); }
+    .view-bypass .row-stage.stage-egress  { background: rgba(46,36,21,.55); }
+    .view-bypass .row-stage.stage-special { background: rgba(47,27,29,.55); }
+  }
+
+  /* ---- 打印（演示输出） ---- */
+  @media print {
+    .view-tabs, .toolbar, .filter-row, #bypass-validation-status { display: none !important; }
+    .merge-header { border-radius: 0; box-shadow: none; }
+    .view-bypass .topbar, .view-port .topbar { position: static; background: #fff; }
+    .view-bypass .side-panel, .view-bypass .detail-panel, .view-port .side-panel, .view-port .detail-panel { position: static; }
+    .view-bypass .panel, .view-port .panel { box-shadow: none; break-inside: avoid; }
+    .view-bypass .path-row { break-inside: avoid; animation: none; }
+    .view-bypass .module-node, .view-port .module-node { box-shadow: none !important; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .view-bypass *, .view-bypass *::before, .view-bypass *::after,
+    .view-port *, .view-port *::before, .view-port *::after { animation: none !important; transition: none !important; }
+  }
+
+</style>
+</head>
+<body>
+  <div class="merge-shell">
+    <header class="merge-header">
+      <div>
+        <a href="index_html.html" style="display:inline-block;margin-bottom:6px;color:#4ea1ff;font-size:12px;text-decoration:none">&#8592; 返回上级</a>
+        <p class="merge-eyebrow">PZZ · PACKET FORWARDING PATHS</p>
+        <h1>报文转发路径总览</h1>
+        <p class="merge-subtitle">在同一画面中查询硬件 bypass 报文路径与 AUX / HPP 端口到端口转发路径。</p>
+      </div>
+      <nav class="view-tabs" role="tablist" aria-label="路径视图切换">
+        <button class="view-tab is-active" id="packet-tab" type="button" role="tab" aria-selected="true" aria-controls="view-bypass" data-view-tab="bypass">报文路径 · 10 类</button>
+        <button class="view-tab" id="port-tab" type="button" role="tab" aria-selected="false" aria-controls="view-port" data-view-tab="port">端口路径 · AUX / HPP</button>
+      </nav>
+    </header>
+    <main class="merge-content">
+      <section class="view-panel view-bypass is-active" id="view-bypass" role="tabpanel" aria-labelledby="packet-tab">
+<div id="bypass-app">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">PZZ · HARDWARE BYPASS PATH</p>
+        <h1>10 类报文处理路径总览</h1>
+        <p class="subtitle">以清晰硬件路径图为主线，结合 PZZ 报文处理 Markdown，把共同主干、分支条件和模块职责放到一个可查询画面中。</p>
+      </div>
+      <div class="toolbar">
+        <div class="search-wrap">
+          <label class="sr-only" for="bypass-packet-search">搜索报文、模块或字段</label>
+          <input id="bypass-packet-search" type="search" placeholder="搜索报文 / 模块 / 字段 · 按 / 聚焦" autocomplete="off">
+        </div>
+        <div class="filter-row" aria-label="报文分组筛选">
+          <button class="filter-btn active" type="button" data-filter="all" aria-pressed="true">全部</button>
+          <button class="filter-btn" type="button" data-filter="Scale Up" aria-pressed="false">Scale Up</button>
+          <button class="filter-btn" type="button" data-filter="L2" aria-pressed="false">L2</button>
+          <button class="filter-btn" type="button" data-filter="L3" aria-pressed="false">L3</button>
+          <button class="filter-btn" type="button" data-filter="VXLAN" aria-pressed="false">VXLAN</button>
+          <button class="filter-btn" type="button" data-filter="MC/MIRROR" aria-pressed="false">MC/MIRROR</button>
+          <button class="ghost-btn" id="bypass-reset-filters" type="button">重置</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="pipeline-strip" id="bypass-shared-pipeline" aria-labelledby="bypass-shared-pipeline-title">
+      <div class="section-kicker">
+        <span id="bypass-shared-pipeline-title">COMMON BACKBONE</span>
+        <span>可选模块以条件标识；不同报文的完整路径见下方横向对照</span>
+      </div>
+      <div class="pipeline-scroll">
+        <div class="pipeline-flow">
+          <span class="phase-badge ingress">INGRESS</span>
+          <span class="common-node ingress">Parser</span><span class="flow-arrow">→</span>
+          <span class="common-node ingress">VFP</span><span class="flow-arrow">→</span>
+          <span class="common-node ingress">ING VLAN</span><span class="flow-arrow">→</span>
+          <span class="phase-badge lookup">LOOKUP</span>
+          <span class="common-node lookup">EMF / LPM / ACL</span><span class="flow-arrow">→</span>
+          <span class="common-node lookup">L2EIF / NEXTHOP</span><span class="flow-arrow">→</span>
+          <span class="phase-badge mmu">MMU</span>
+          <span class="common-node mmu">PITX · XMMU · MCE</span><span class="flow-arrow">→</span>
+          <span class="common-node mmu">TM · MITX</span><span class="flow-arrow">→</span>
+          <span class="phase-badge egress">EGRESS</span>
+          <span class="common-node egress">PERX · EGR.parser · PETX</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <aside class="panel side-panel" id="bypass-packet-list" aria-label="报文类型列表">
+        <div class="side-head">
+          <h2>报文类型</h2>
+          <p>点击编号或名称聚焦路径</p>
+        </div>
+        <div class="packet-picker" id="bypass-packet-picker"></div>
+      </aside>
+
+      <section class="panel compare-panel" id="bypass-comparison-canvas" aria-label="报文路径横向对照">
+        <div class="compare-head">
+          <div>
+            <h2>Hardware Bypass Path · 横向对照</h2>
+            <p>固定左侧报文标签，向右查看 Parser、查表、MMU 和 Egress 的节点差异；点击节点可查看模块说明。</p>
+          </div>
+          <div class="compare-count" id="bypass-compare-count">10 / 10</div>
+        </div>
+        <div class="comparison-scroll">
+          <div class="comparison-header" aria-hidden="true">
+            <div>PACKET TYPE</div>
+            <div class="row-track">
+              <div class="stage-head ingress">INGRESS · 解析 / 查表</div>
+              <div class="stage-head mmu">MMU · Buffer / Copy / TM</div>
+              <div class="stage-head egress">EGRESS · Modify / Output</div>
+            </div>
+          </div>
+          <div id="bypass-comparison-rows"></div>
+        </div>
+      </section>
+
+      <aside class="panel detail-panel" id="bypass-detail-panel" aria-live="polite"></aside>
+    </section>
+
+    <div id="bypass-validation-status" role="status" aria-live="polite"></div>
+
+    <dialog id="bypass-module-dialog" aria-labelledby="bypass-module-dialog-title">
+      <div class="dialog-head">
+        <div>
+          <h2 id="bypass-module-dialog-title">模块说明</h2>
+          <p id="bypass-module-dialog-stage"></p>
+        </div>
+        <button class="dialog-close" id="bypass-module-dialog-close" type="button" aria-label="关闭模块说明">关闭</button>
+      </div>
+      <div class="dialog-body" id="bypass-module-dialog-body"></div>
+    </dialog>
+  </div>
+      </section>
+      <section class="view-panel view-port" id="view-port" role="tabpanel" aria-labelledby="port-tab" hidden>
+<div class="page">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">PZZ · AUX / HPP PORT PATH</p>
+        <h1>从 AUX / HPP 入口到本 DIE、跨 DIE 与出口</h1>
+        <p class="subtitle">把入口身份、HPP 数据面、本 DIE Fabric、UCIe / Spare UCIe 以及 HPP / AUX 出口放在一张可查询的横向路径图里。</p>
+      </div>
+      <div class="toolbar">
+        <div class="search-wrap">
+          <label class="sr-only" for="port-port-search">搜索路径、模块或信号</label>
+          <input id="port-port-search" type="search" placeholder="搜索路径 / 模块 / 信号 · 按 / 聚焦" autocomplete="off">
+        </div>
+        <div class="filter-row" aria-label="路径筛选">
+          <button class="filter-btn active" type="button" data-filter="all" aria-pressed="true">全部</button>
+          <button class="filter-btn" type="button" data-filter="local" aria-pressed="false">本 DIE</button>
+          <button class="filter-btn" type="button" data-filter="cross" aria-pressed="false">跨 DIE</button>
+          <button class="filter-btn" type="button" data-filter="aux" aria-pressed="false">AUX</button>
+          <button class="filter-btn" type="button" data-filter="hpp" aria-pressed="false">HPP</button>
+          <button class="filter-btn" type="button" data-filter="cpp" aria-pressed="false">CPP / Mirror</button>
+          <button class="ghost-btn" id="port-reset-filters" type="button">重置</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="direction-strip" aria-label="路径方向总览">
+      <div class="direction-cell ingress"><p class="kicker">01 · INGRESS</p><strong>AUX / HPP port</strong><span>MAC / FEC / MACI RX</span></div>
+      <div class="direction-cell ingress"><p class="kicker">02 · HPP PIPE</p><strong>PIRX → Parser → HPP</strong><span>头部解析、L2/L3、metadata</span></div>
+      <div class="direction-cell local"><p class="kicker">03 · LOCAL DIE</p><strong>PITX → XMMU → TM</strong><span>FD、buffer、队列与本地调度</span></div>
+      <div class="direction-cell cross"><p class="kicker">04 · CROSS DIE</p><strong>UCIe / BWLI · Spare UCIe</strong><span>目的 DIE、过路与 Mirror</span></div>
+      <div class="direction-cell output"><p class="kicker">05 · OUTPUT</p><strong>HPP / AUX / CPIS</strong><span>PERX → Egress HPP → PETX / MACI TX</span></div>
+    </section>
+
+    <section class="pipeline-strip" id="port-shared-backbone" aria-labelledby="port-backbone-title">
+      <div class="section-head">
+        <h2 id="port-backbone-title">COMMON PORT-TO-PORT BACKBONE</h2>
+        <p>条件路径以紫色标识；详情面板解释本 DIE、跨 DIE 与出口选择</p>
+      </div>
+      <div class="pipeline-scroll">
+        <div class="pipeline-flow">
+          <span class="phase-badge ingress">INPUT</span><span class="backbone-node ingress">AUX / HPP MAC</span><span class="arrow">→</span>
+          <span class="backbone-node ingress">MACI RX / CPP MACI</span><span class="arrow">→</span>
+          <span class="backbone-node ingress">PIRX · Parser · L2/L3 HPP</span><span class="arrow">→</span>
+          <span class="backbone-node local">PITX · XMMU · TM / MCE</span><span class="arrow">→</span>
+          <span class="phase-badge cross">OPTIONAL</span><span class="backbone-node cross">UCIe / BWLI · SPARE UCIE</span><span class="arrow">→</span>
+          <span class="backbone-node egress">PERX · Egress HPP · PETX</span><span class="arrow">→</span>
+          <span class="backbone-node output">HPP / AUX / CPIS OUT</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <aside class="panel side-panel" id="port-route-picker" aria-label="端到端路径列表">
+        <div class="side-head"><h2>端到端路径</h2><p>点击路径聚焦本 DIE / 跨 DIE 细节</p></div>
+        <div class="route-picker" id="port-route-picker-list"></div>
+      </aside>
+
+      <section class="panel compare-panel" id="port-comparison-canvas" aria-label="端口转发路径横向对照">
+        <div class="compare-head"><div><h2>Port Forwarding Path · 横向对照</h2><p>固定左侧路径标签，向右查看入口、HPP、Fabric、跨 DIE 与出口</p></div><div class="compare-count" id="port-compare-count">6 / 6</div></div>
+        <div class="comparison-scroll">
+          <div class="comparison-grid">
+            <div class="column-head">
+              <div class="column-title">ROUTE</div>
+              <div class="column-stage-head"><span>入口身份</span><span>Ingress HPP / CPP</span><span>本 DIE Fabric</span><span>Cross-DIE / Egress</span><span>出口</span></div>
+            </div>
+            <div id="port-comparison-rows"></div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel detail-panel" id="port-detail-panel" aria-live="polite"></aside>
+    </section>
+    <div id="port-validation-status" role="status" aria-live="polite"></div>
+  </div>
+
+  <dialog id="port-module-dialog" aria-labelledby="port-module-dialog-title">
+    <div class="dialog-head"><div><h2 id="port-module-dialog-title">模块说明</h2><p id="port-module-dialog-stage"></p></div><button class="dialog-close" id="port-module-dialog-close" type="button" aria-label="关闭模块说明">关闭</button></div>
+    <div class="dialog-body" id="port-module-dialog-body"></div>
+  </dialog>
+      </section>
+    </main>
+  </div>
+  <script>
+    function switchView(viewName) {
+      document.querySelectorAll("[data-view-tab]").forEach((tab) => {
+        const active = tab.dataset.viewTab === viewName;
+        tab.classList.toggle("is-active", active);
+        tab.setAttribute("aria-selected", String(active));
+        tab.tabIndex = active ? 0 : -1;
+      });
+      document.querySelectorAll(".view-panel").forEach((panel) => {
+        const active = panel.id === "view-" + viewName;
+        panel.hidden = !active;
+        panel.classList.toggle("is-active", active);
+      });
+    }
+
+    document.querySelectorAll("[data-view-tab]").forEach((tab) => {
+      tab.addEventListener("click", () => switchView(tab.dataset.viewTab));
+      tab.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+          event.preventDefault();
+          const tabs = [...document.querySelectorAll("[data-view-tab]")];
+          const nextIndex = (tabs.indexOf(tab) + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+          const next = tabs[nextIndex];
+          switchView(next.dataset.viewTab);
+          next.focus();
+        }
+      });
+    });
+
+    window.PACKET_MERGE = { switchView };
+  </script>
+  <script>
+(function () {
+  const root = document.getElementById("view-bypass");
+(() => {
+      "use strict";
+
+      const REF = {
+        design: "pzz_chip_html/pzz_design.md",
+        bypass: "mermaid_code/packet_bypass_hardware_path.md",
+        hpp: "pzz_chip_html/hpp-packet-forwarding.html",
+        parser: "ref_md/pzz_chip_ref/parser_ingress_parser.md",
+        pitx: "ref_md/pzz_chip_ref/pitx.md",
+        xmmu: "ref_md/pzz_chip_ref/xmmu_gnoc.md",
+        mce: "ref_md/pzz_chip_ref/mce.md",
+        tm: "ref_md/pzz_chip_ref/tm_sch.md",
+        perx: "ref_md/pzz_chip_ref/pirx_perx.md",
+        petx: "ref_md/pzz_chip_ref/petx.md",
+        egrVlan: "ref_md/pzz_chip_ref/egress_vlan_vxlan.md",
+        egrNh: "ref_md/pzz_chip_ref/egr_nexthop.md"
+      };
+
+      const MODULES = {
+        parser: {
+          label: "Parser", stage: "ingress",
+          role: "解析报文头部并生成后级使用的 metadata；清晰图中所有 10 类报文都从这里开始。",
+          inputs: ["MACI/PIRX FLIT", "前 256B 报文头", "Port / UDF / GPU ID"],
+          outputs: ["协议类型", "UDF / tunnel 字段", "转发与控制 metadata"],
+          signals: ["parser_meta_valid", "SOP/EOP", "UDF / GPUID"], refs: [REF.parser, REF.design]
+        },
+        vfp: {
+          label: "VFP", stage: "ingress",
+          role: "入口过滤和分类，结合 Port、UDF 与 VFP action 决定后续 VLAN/查表方向。",
+          inputs: ["Parser metadata", "Port / UDF 字段"], outputs: ["过滤结果", "分类/动作 metadata"],
+          signals: ["vfp_hit", "drop/action"], refs: [REF.design]
+        },
+        "ing-vlan": {
+          label: "ING VLAN", stage: "ingress",
+          role: "执行 VLAN/XLATE、SVP、MYMAC 和隧道终结前的入口分类。",
+          inputs: ["VFP result", "VLAN / XLATE 配置", "隧道字段"], outputs: ["SVP", "VFI/PHB", "L2/L3 进入方向"],
+          signals: ["vlan_emf_svp", "vlan_emf_tnltype", "vlan_emf_sim"], refs: [REF.bypass, "ref_md/pzz_chip_ref/ingress_vlan_vxlan.md"]
+        },
+        emf: {
+          label: "EMF", stage: "lookup",
+          role: "根据 MAC、DIP 或 MC 类型进行二层、路由或二层组播查表，给出初始转发类型。",
+          inputs: ["SMAC/DMAC", "DIP/VRF", "MC 类型"], outputs: ["L2EIF/DVP", "LPM/MC 结果", "FWD_TYPE"],
+          signals: ["emf_hit", "fwd_type", "class_id"], refs: ["ref_md/pzz_chip_ref/emf.md", REF.design]
+        },
+        "l3-path": {
+          label: "L3 path", stage: "lookup",
+          role: "把报文送入三层转发路径，串起 LPM、ACL、ECMP、NEXTHOP 等路由动作。",
+          inputs: ["L3 enable", "DIP / VRF", "LIF MAC"], outputs: ["L3 转发结论", "下一跳上下文"],
+          signals: ["l3_en", "route/host result"], refs: [REF.bypass, REF.hpp]
+        },
+        acl: {
+          label: "ACL", stage: "lookup",
+          role: "对入口或三层路径做过滤、动作、class 和 To Host 等策略判决。",
+          inputs: ["Parser metadata", "L2/L3 lookup result"], outputs: ["permit/drop", "class/action"],
+          signals: ["iACL hit", "class_id", "drop"], refs: ["ref_md/pzz_chip_ref/acl.md", REF.design]
+        },
+        lpm: {
+          label: "LPM", stage: "lookup",
+          role: "根据 DIP 与 VRF/VFI 查询主机或路由前缀，得到下一跳或 ECMP 组。",
+          inputs: ["DIP", "VRF/VFI"], outputs: ["NEXTHOP index", "ECMP group"],
+          signals: ["lpm_hit", "route result"], refs: ["ref_md/pzz_chip_ref/l3_lpm.md"]
+        },
+        ecmp: {
+          label: "ECMP", stage: "lookup",
+          role: "在等价路径中选择下一跳；VXLAN overlay/underlay 场景可能需要二次选择。",
+          inputs: ["ECMP group", "hash fields"], outputs: ["NEXTHOP index"],
+          signals: ["ecmp_id", "hash result"], refs: ["ref_md/pzz_chip_ref/ecmp.md"]
+        },
+        nexthop: {
+          label: "NEXTHOP", stage: "lookup",
+          role: "把路由或 ECMP 结果展开为出口、DVP、TRUNK 和改包所需的下一跳属性。",
+          inputs: ["NEXTHOP index", "ECMP result"], outputs: ["L2EIF/DVP", "出口属性"],
+          signals: ["nh_id", "dvp", "oif"], refs: [REF.egrNh, REF.design]
+        },
+        "l2-eif": {
+          label: "L2EIF", stage: "lookup",
+          role: "把二层或三层决策落到逻辑出口接口，为 TRUNK 和下游 PITX 提供出口上下文。",
+          inputs: ["EMF/LPM/NEXTHOP result"], outputs: ["逻辑出口", "端口/队列上下文"],
+          signals: ["l2_eif", "queue_id"], refs: [REF.bypass, REF.design]
+        },
+        "ing-trunk": {
+          label: "ING TRUNK", stage: "lookup",
+          role: "入口侧聚合/端口选择；对 Scale Up、L2 和 VXLAN 路径提供统一的 ingress trunk 结果。",
+          inputs: ["L2EIF/DVP", "TRUNK 配置"], outputs: ["端口集合", "出口选择上下文"],
+          signals: ["trunk_id", "port bitmap"], refs: ["ref_md/pzz_chip_ref/trunk.md"]
+        },
+        pitx: {
+          label: "PITX", stage: "mmu",
+          role: "等待并对齐 payload 与 HPP metadata，把入口数据交给 XMMU；SOP 需要等 metadata 有效。",
+          inputs: ["PIRX payload", "HPP metadata", "SOP/EOP"], outputs: ["metadata + payload", "FD/入队上下文"],
+          signals: ["SOP/EOP", "meta_valid", "channel_id"], refs: [REF.pitx, REF.design]
+        },
+        xmmu: {
+          label: "XMMU", stage: "mmu",
+          role: "管理共享 buffer、FD、跨 pipe/跨 die 互联；Scale Up 可走 bypass TM 的快速通路。",
+          inputs: ["FLIT + metadata", "buffer/credit"], outputs: ["FD", "buffer 链", "TM/跨 Die 流量"],
+          signals: ["fd_valid", "ucie_dst_die", "bypass", "pass_through"], refs: [REF.xmmu, REF.design]
+        },
+        mce: {
+          label: "MCE", stage: "mmu",
+          role: "承接组播、广播、Mirror 等复制动作，必要时构造多个 replica FD。",
+          inputs: ["复制 metadata", "原始 FD", "目的集合"], outputs: ["replica FD", "复制后的出口集合"],
+          signals: ["mce_copy_valid", "replica FD", "MC group"], refs: [REF.mce, REF.design]
+        },
+        "mc-trunk": {
+          label: "MC TRUNK", stage: "mmu",
+          role: "复制后的组播/广播报文选择聚合出口；只在 MC 或相关复制路径出现。",
+          inputs: ["MC group", "replica FD"], outputs: ["成员端口/出口 trunk"],
+          signals: ["mc_trunk_id", "member bitmap"], refs: ["ref_md/pzz_chip_ref/trunk.md", REF.mce]
+        },
+        tm: {
+          label: "TM", stage: "mmu",
+          role: "执行队列准入、拥塞、整形和调度；快速 bypass TM 路径会通过 annotation 标出。",
+          inputs: ["FD", "queue_id", "credit", "AQM/POL state"], outputs: ["dequeue", "ECN/drop/trim", "MITX context"],
+          signals: ["queue_id", "ECN/WRED", "credit", "FLUSH"], refs: [REF.tm, REF.design]
+        },
+        mitx: {
+          label: "MITX", stage: "mmu",
+          role: "接收 TM/XMMU 出队结果，把 payload 交给出口侧 PERX。",
+          inputs: ["FD/出队数据", "出口 metadata"], outputs: ["egress FLIT", "出口通道"],
+          signals: ["TX buffer", "SOP/EOP"], refs: [REF.bypass, REF.design]
+        },
+        perx: {
+          label: "PERX", stage: "egress",
+          role: "提取出口 header/metadata，对齐并处理 VXLAN 终结后的外层无效字节。",
+          inputs: ["MITX 128B FLIT", "I2E/MMU header"], outputs: ["Egress metadata", "PETX payload"],
+          signals: ["Cut TUL", "meta_valid", "SOP/EOP"], refs: [REF.perx, REF.design]
+        },
+        "egr-parser": {
+          label: "EGR.parser", stage: "egress",
+          role: "按出口业务重新解析报文并把 NEXTHOP、L3OIF、隧道封装信息交给出口 VLAN/Modify。",
+          inputs: ["PERX metadata", "出口报文头"], outputs: ["EGR nexthop/L3OIF", "tunnel context"],
+          signals: ["egr_meta_valid", "L3 out"], refs: ["ref_md/pzz_chip_ref/parser_egress_parser.md", REF.hpp]
+        },
+        "egr-nexthop": {
+          label: "EGR.nexthop", stage: "egress",
+          role: "展开出口下一跳的端口、隧道和改写上下文，供 L3OIF 与 EGR.VLAN 使用。",
+          inputs: ["EGR metadata", "NEXTHOP context"], outputs: ["EGR port", "DVP/L3OIF", "modify context"],
+          signals: ["EGR_NH_IDX", "EGR.port"], refs: [REF.egrNh]
+        },
+        l3oif: {
+          label: "L3OIF", stage: "egress",
+          role: "路由出口接口处理，提供外层 MAC、TTL、VLAN 和隧道改写所需的出口属性。",
+          inputs: ["EGR nexthop", "OIF context"], outputs: ["egress OIF", "rewrite plan"],
+          signals: ["l3_oif", "egress port"], refs: [REF.egrNh, REF.design]
+        },
+        "egr-vlan": {
+          label: "EGR.VLAN", stage: "egress",
+          role: "出口 VLAN/XLATE、tag/untag、STG 和隧道出口动作聚合；实际字节修改在 PETX。",
+          inputs: ["PERX/EGR metadata", "OIF/tunnel context"], outputs: ["OTAG", "EGR class/drop", "modify metadata"],
+          signals: ["VLAN.XLATE", "STG.Check", "OTAG"], refs: [REF.egrVlan, REF.design]
+        },
+        "egr-acl": {
+          label: "ACL", stage: "egress",
+          role: "出口策略和 drop/class 判定，决定报文是否进入最终改包。",
+          inputs: ["EGR.VLAN result", "出口 metadata"], outputs: ["permit/drop", "class/action"],
+          signals: ["egr_acl_hit", "drop", "class_id"], refs: ["ref_md/pzz_chip_ref/acl.md", REF.egrVlan]
+        },
+        "tunnel-start": {
+          label: "Tunnel Start1", stage: "special",
+          role: "为 VXLAN-start 或 DCI 出口建立第一层隧道外层封装。",
+          inputs: ["DVP/SVP", "outer DIP/SIP", "VNI"], outputs: ["outer tunnel metadata"],
+          signals: ["tunnel_start", "VNI", "DVP"], refs: ["ref_md/pzz_chip_ref/egress_vlan_vxlan.md", REF.design]
+        },
+        "tunnel-start2": {
+          label: "Tunnel Start2", stage: "special",
+          role: "在需要二次封装或 DCI 重入时补齐第二层隧道处理。",
+          inputs: ["Tunnel Start1 result", "DCI context"], outputs: ["final tunnel header plan"],
+          signals: ["tunnel2", "DCI", "VNI"], refs: ["ref_md/pzz_chip_ref/egress_vlan_vxlan.md"]
+        },
+        dvp: {
+          label: "DVP", stage: "special",
+          role: "VxLAN/隧道终结或开始时的虚拟端口上下文，连接 overlay 与 underlay 路径。",
+          inputs: ["SVP/VNI", "tunnel lookup"], outputs: ["DVP", "underlay NEXTHOP context"],
+          signals: ["dvp", "ucie/pass-through"], refs: ["ref_md/pzz_chip_ref/egress_vlan_vxlan.md", "ref_md/pzz_chip_ref/ecmp.md"]
+        },
+        svp: {
+          label: "SVP", stage: "special",
+          role: "VXLAN-end 入口识别到的源虚拟端口，用于判断隧道终结和内层转发方向。",
+          inputs: ["VLAN/XLATE", "VNI/SIP/DIP"], outputs: ["SVP", "tunnel termination context"],
+          signals: ["svp", "tnltype"], refs: ["ref_md/pzz_chip_ref/ingress_vlan_vxlan.md"]
+        },
+        mymac: {
+          label: "MYMAC", stage: "special",
+          role: "识别本地 MAC/三层接口，决定隧道终结后进入 L2 还是内层 L3 路径。",
+          inputs: ["inner DMAC", "LIF MAC", "SVP"], outputs: ["L2/L3 branch"],
+          signals: ["mymac", "lif_mac"], refs: ["ref_md/pzz_chip_ref/emf.md", REF.design]
+        },
+        tecmp: {
+          label: "TECMP", stage: "special",
+          role: "VXLAN-end 终结后的二次 ECMP/隧道查表，确定 DCI 或 underlay 方向。",
+          inputs: ["DVP", "inner/outer route context"], outputs: ["TNEXTHOP", "L2EIF/route action"],
+          signals: ["TECMP", "AC=1/AC=0"], refs: ["ref_md/pzz_chip_ref/ecmp.md", REF.design]
+        },
+        tnexthop: {
+          label: "TNEXTHOP", stage: "special",
+          role: "隧道终结后的下一跳展开，连接内层路由结果与 ingress trunk。",
+          inputs: ["TECMP/DVP result"], outputs: ["L2EIF", "ING TRUNK", "DCI context"],
+          signals: ["TNEXTHOP", "L2TNL"], refs: ["ref_md/pzz_chip_ref/ecmp.md", REF.design]
+        },
+        petx: {
+          label: "PETX", stage: "egress",
+          role: "出口最终落笔：VLAN、MAC、TTL、checksum、隧道、ECN、TRIM/DROP/MOD 和 FLIT 对齐。",
+          inputs: ["PERX FLIT", "Egress metadata", "Modify plan"], outputs: ["最终报文", "MACI TX"],
+          signals: ["modify", "trim/drop", "checksum", "EOP length"], refs: [REF.petx, REF.design]
+        }
+      };
+
+      const PACKETS = [
+        {
+          id: "scale-up-simple", number: 1, label: "Scale Up 极简", groups: ["Scale Up"], badges: ["bypass", "UCIe"],
+          summary: "面向智算 Scale Up 的极简低时延路径，重点提取 GPU ID / outport 并减少通用查表开销。",
+          stages: {
+            ingress: ["parser", "vfp", "ing-vlan", "emf", "ing-trunk"],
+            mmu: ["pitx", "xmmu", "mce", "mc-trunk", "tm"],
+            egress: ["mitx", "perx", "egr-parser", "petx"]
+          },
+          annotations: ["Port, UDF", "GPU id?outport", "bypass", "UCIe", "copy?", "TRUNK?", "Modify", "Bypass?"],
+          notes: ["极简路径以低延迟为优先，Scale Up 同 pipe 内与非极简模式互斥。", "XMMU 可采用 bypass TM 或保留 TM 的快速通路，需结合 credit/反压配置确认。"],
+          refs: [REF.design, REF.hpp, REF.xmmu]
+        },
+        {
+          id: "scale-up-l2", number: 2, label: "Scale Up L2", groups: ["Scale Up", "L2"], badges: ["bypass", "L2"],
+          summary: "Scale Up 二层单播路径，使用 MAC(S,D) 相关查表结果完成快速二层转发。",
+          stages: {
+            ingress: ["parser", "vfp", "ing-vlan", "emf", "ing-trunk"],
+            mmu: ["pitx", "xmmu", "mce", "mc-trunk", "tm"],
+            egress: ["mitx", "perx", "egr-parser", "petx"]
+          },
+          annotations: ["MAC(S,D)", "bypass", "UCIe", "copy?", "TRUNK?", "Modify"],
+          notes: ["EMF 负责二层 MAC 方向判断，正常情况下不进入完整 L3 LPM/ECMP 路径。", "出口仍需要 PERX/EGR.parser/PETX 对齐和最终改包。"],
+          refs: [REF.design, "ref_md/pzz_chip_ref/emf.md", REF.petx]
+        },
+        {
+          id: "scale-up-l3-ipv4", number: 3, label: "Scale Up L3 IPv4 Route", groups: ["Scale Up", "L3"], badges: ["bypass", "IPv4"],
+          summary: "Scale Up 场景下的 IPv4 路由极简路径，以 ROUTE(DIP) 得到目标方向后快速出队。",
+          stages: {
+            ingress: ["parser", "vfp", "ing-vlan", "emf", "ing-trunk"],
+            mmu: ["pitx", "xmmu", "mce", "mc-trunk", "tm"],
+            egress: ["mitx", "perx", "egr-parser", "petx"]
+          },
+          annotations: ["ROUTE(DIP)", "bypass", "UCIe", "copy?", "TRUNK?", "Modify"],
+          notes: ["图中把 IPv4 route 结果压缩在 Scale Up 快速处理链中；与完整 Scale Out L3 路径区分。", "IPv4 路由的字段解释和出口修改仍依赖对应 metadata。"],
+          refs: [REF.design, "ref_md/pzz_chip_ref/l3_lpm.md", REF.hpp]
+        },
+        {
+          id: "l2-uc-mc", number: 4, label: "L2：UC、MC", groups: ["L2", "MC/MIRROR"], badges: ["UC", "MC"],
+          summary: "普通二层单播与组播共用入口分类，依据 EMF / L3 path / ACL 结果进入对应出口和复制路径。",
+          stages: {
+            ingress: ["parser", "vfp", "ing-vlan", "emf", "l3-path", "acl", "l2-eif", "ing-trunk", "pitx"],
+            mmu: ["xmmu", "mce", "mc-trunk", "tm"],
+            egress: ["mitx", "perx", "egr-parser", "l3-path", "egr-vlan", "egr-acl", "petx"]
+          },
+          annotations: ["MAC(S,D), MC", "Ingress ACL?", "TRUNK?", "copy?", "MC TRUNK", "Modify"],
+          notes: ["UC 和 MC 在 EMF/ACL 后分叉；MC 需要 MCE 复制并通过 MC TRUNK 选择成员。", "二层路径也可能在出口侧出现 L3 path 标签，需按 egress metadata 判断。"],
+          refs: [REF.design, REF.mce, REF.tm, REF.egrVlan]
+        },
+        {
+          id: "l3-uc", number: 5, label: "L3：UC", groups: ["L3"], badges: ["UC", "ECMP"],
+          summary: "完整三层单播转发，经过 LPM、ACL、ECMP、NEXTHOP 和 L3OIF 后由出口 VLAN/ACL/PETX 定稿。",
+          stages: {
+            ingress: ["parser", "vfp", "ing-vlan", "emf", "lpm", "acl", "ecmp", "nexthop", "l2-eif", "ing-trunk", "pitx"],
+            mmu: ["xmmu", "mce", "mc-trunk", "tm"],
+            egress: ["mitx", "perx", "egr-parser", "egr-nexthop", "l3oif", "egr-vlan", "egr-acl", "petx"]
+          },
+          annotations: ["LIF MAC", "LPM", "Ingress ACL?", "ECMP?", "NEXTHOP", "L2EIF", "Modify"],
+          notes: ["LPM 决定路由前缀，ECMP/NEXTHOP 共同决定下一跳，错误出端口不能只看 LPM。", "PETX 负责 DMAC/SMAC、TTL、checksum、VLAN 和出口长度等最终修改。"],
+          refs: [REF.design, "ref_md/pzz_chip_ref/l3_lpm.md", "ref_md/pzz_chip_ref/ecmp.md", REF.egrNh, REF.petx]
+        },
+        {
+          id: "l3-mc", number: 6, label: "L3：MC", groups: ["L3", "MC/MIRROR"], badges: ["MC", "copy"],
+          summary: "三层组播路径，入口完成 L3 path/ACL，MMU 侧由 MCE 复制，出口继续执行 L3 path 与改写。",
+          stages: {
+            ingress: ["parser", "vfp", "ing-vlan", "emf", "l3-path", "acl", "l2-eif", "pitx"],
+            mmu: ["xmmu", "mce", "mc-trunk", "tm"],
+            egress: ["mitx", "perx", "egr-parser", "l3-path", "egr-vlan", "egr-acl", "petx"]
+          },
+          annotations: ["MC", "Ingress ACL?", "L2EIF", "copy?", "MC TRUNK", "Modify"],
+          notes: ["复制发生在 MCE/XMMU 相关路径，replica 仍需分别进入 TM 队列并受出口拥塞约束。", "MC TRUNK 成员选择和出口 L3 path 是排查组播出端口的关键。"],
+          refs: [REF.design, REF.mce, REF.tm, "ref_md/pzz_chip_ref/l3_lpm.md"]
+        },
+        {
+          id: "vxlan-end", number: 7, label: "VXLAN-end", groups: ["VXLAN", "L2", "L3"], badges: ["Tunnel", "DCI", "Gateway"],
+          summary: "VXLAN 隧道终结路径，先由 SVP/MYMAC 识别外层，再对内层 L2 或 L3 重新查表。",
+          stages: {
+            ingress: ["parser", "vfp", "ing-vlan", "svp", "mymac", "emf", "acl", "dvp", "l2-eif", "ing-trunk", "pitx"],
+            mmu: ["xmmu", "mce", "mc-trunk", "tm"],
+            egress: ["mitx", "perx", "egr-parser", "egr-vlan", "egr-acl", "petx"]
+          },
+          annotations: ["vlan.XLATE", "SVP", "MYMAC", "外层L2/L3", "内层 L2/L3", "AC=1/AC=0", "L2TNL", "Modify"],
+          branches: [
+            {
+              label: "DCI", trigger: "隧道终结后需要重新进入 VXLAN-DCI 方向",
+              stages: { ingress: ["dvp", "tecmp", "tnexthop", "ing-trunk", "pitx"], mmu: ["xmmu", "mce", "mc-trunk", "tm"], egress: ["mitx", "perx", "egr-parser", "tunnel-start", "egr-vlan", "egr-acl", "petx"] },
+              note: "DCI 分支把内层结果重新带入隧道出口封装。"
+            },
+            {
+              label: "VXLAN IP 网关", trigger: "内层报文进入 L3/IP gateway",
+              stages: { ingress: ["lpm", "acl", "ecmp", "nexthop", "dvp", "l2-eif", "pitx"], mmu: ["xmmu", "mce", "mc-trunk", "tm"], egress: ["mitx", "perx", "egr-parser", "egr-nexthop", "l3oif", "egr-vlan", "egr-acl", "petx"] },
+              note: "内层 L3 需要完整 LPM/ACL/ECMP/NEXTHOP，并可能再次经过 DVP。"
+            }
+          ],
+          notes: ["VXLAN-end 的关键不是单纯剥头，而是终结后内层 L2/L3 的再次判决。", "外层隧道字段命中不完整时，可能转入隧道报文三层转发路径。"],
+          refs: [REF.design, "ref_md/pzz_chip_ref/ingress_vlan_vxlan.md", "ref_md/pzz_chip_ref/ecmp.md", REF.egrVlan]
+        },
+        {
+          id: "vxlan-start", number: 8, label: "VXLAN-start", groups: ["VXLAN", "L2", "L3"], badges: ["Tunnel", "DCI", "Gateway"],
+          summary: "VXLAN 隧道开始路径，出口侧从 DVP/SVP 和路由结果生成一层或两层外部隧道头。",
+          stages: {
+            ingress: ["parser", "vfp", "ing-vlan", "mymac", "l3-path", "acl", "l2-eif", "ing-trunk"],
+            mmu: ["pitx", "xmmu", "mce", "mc-trunk", "tm"],
+            egress: ["mitx", "perx", "egr-parser", "tunnel-start", "tunnel-start2", "egr-vlan", "egr-acl", "petx"]
+          },
+          annotations: ["XLATE", "MYMAC", "L2 同", "L3 同", "DVP/SVP", "Tunnel Start1", "Tunnel Start2", "VLAN.XLATE, STG.Check", "Modify"],
+          branches: [
+            {
+              label: "DCI", trigger: "出口需要 VXLAN-DCI 双层/重入封装",
+              stages: { ingress: ["l3-path", "acl", "nexthop", "dvp"], mmu: ["pitx", "xmmu", "mce", "mc-trunk", "tm"], egress: ["mitx", "perx", "egr-parser", "tunnel-start", "tunnel-start2", "egr-vlan", "egr-acl", "petx"] },
+              note: "DCI 可能出现 Tunnel Start1 与 Tunnel Start2 两级外层封装。"
+            },
+            {
+              label: "VXLAN IP 网关", trigger: "出口为 VXLAN overlay IP gateway",
+              stages: { ingress: ["lpm", "acl", "ecmp", "nexthop", "dvp"], mmu: ["pitx", "xmmu", "mce", "mc-trunk", "tm"], egress: ["mitx", "perx", "egr-parser", "egr-nexthop", "l3oif", "tunnel-start", "egr-vlan", "egr-acl", "petx"] },
+              note: "先完成 overlay/underlay 下一跳选择，再由出口模块生成隧道封装。"
+            }
+          ],
+          notes: ["VXLAN-start 的核心差异在 egress Tunnel Start，而不是入口 Parser。", "EGR.VLAN、ACL 和 PETX 共同完成外层 VLAN、策略与最终字节修改。"],
+          refs: [REF.design, REF.egrVlan, REF.egrNh, "ref_md/pzz_chip_ref/ecmp.md"]
+        },
+        {
+          id: "vxlan-outer-mc", number: 9, label: "VXLAN 外层 MC 场景", groups: ["VXLAN", "MC/MIRROR"], badges: ["Tunnel", "MC", "规格限制"],
+          summary: "VXLAN 外层组播场景，强调组播隧道与核心复制能力；图中同时保留 MC/MIRROR 能力限制提示。",
+          stages: {
+            ingress: ["parser", "vfp", "ing-vlan", "emf", "ing-trunk", "pitx"],
+            mmu: ["xmmu", "mce", "mc-trunk", "tm"],
+            egress: ["mitx", "perx", "egr-parser", "tunnel-start", "egr-vlan", "egr-acl", "petx"]
+          },
+          annotations: ["组播隧道", "核心复制功能", "MC", "MIRROR?", "规格不支持?"],
+          notes: ["此行保留源图中的‘规格不支持 MC/MIRROR?’疑问，不把它解释为已经确认的硬件结论。", "MCE、MC TRUNK 和 TM 是该场景的重点观察模块。"],
+          refs: [REF.design, REF.mce, REF.tm, REF.egrVlan]
+        },
+        {
+          id: "simple-mc-mirror", number: 10, label: "极简模式 MC/MIRROR", groups: ["Scale Up", "MC/MIRROR"], badges: ["bypass", "MC", "MIRROR"],
+          summary: "极简模式下的组播/镜像相关路径，保留统一的 Parser/VFP/ING VLAN 与复制链。",
+          stages: {
+            ingress: ["parser", "vfp", "ing-vlan", "emf", "ing-trunk", "pitx"],
+            mmu: ["xmmu", "mce", "mc-trunk", "tm"],
+            egress: ["mitx", "perx", "egr-parser", "petx"]
+          },
+          annotations: ["MC", "MIRROR", "bypass", "UCIe", "copy?", "MC TRUNK", "Modify"],
+          notes: ["极简 MC/MIRROR 仍需单独关注复制和出口带宽保护，不能只按普通 Scale Up bypass 路径理解。", "Egress mirror 可能通过 HPP MACI_NOC 回到 CPP MACI，跨 die 场景还需看 spare UCIe。"],
+          refs: [REF.design, REF.mce, "ref_md/pzz_chip_ref/cpp_maci.md", "ref_md/pzz_chip_ref/hpp_maci.md"]
+        }
+      ];
+
+      const STAGE_LABELS = {
+        ingress: "Ingress · 解析 / 分类 / 查表",
+        mmu: "MMU · Buffer / Copy / 调度",
+        egress: "Egress · 解析 / 封装 / 改写"
+      };
+
+      const state = {
+        query: "",
+        filters: new Set(["all"]),
+        selectedPacketId: PACKETS[0].id
+      };
+
+      const $ = (selector) => root.querySelector(selector);
+      const packetPicker = $("#bypass-packet-picker");
+      const comparisonRows = $("#bypass-comparison-rows");
+      const detailPanel = $("#bypass-detail-panel");
+      const compareCount = $("#bypass-compare-count");
+      const validationStatus = $("#bypass-validation-status");
+      const moduleDialog = $("#bypass-module-dialog");
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function moduleLabel(moduleId) {
+        return MODULES[moduleId]?.label ?? moduleId;
+      }
+
+      function moduleStage(moduleId) {
+        return MODULES[moduleId]?.stage ?? "special";
+      }
+
+      function packetSearchText(packet) {
+        const stageIds = Object.values(packet.stages).flat();
+        const branchText = (packet.branches ?? []).flatMap((branch) => [
+          branch.label, branch.trigger, branch.note,
+          ...Object.values(branch.stages).flat().map(moduleLabel)
+        ]);
+        return [
+          packet.label, packet.summary, ...packet.groups, ...packet.badges,
+          ...stageIds.map(moduleLabel), ...(packet.annotations ?? []),
+          ...(packet.notes ?? []), ...branchText
+        ].join(" ").toLowerCase();
+      }
+
+      function renderBadges(values = []) {
+        return values.map((value) => {
+          const cls = /MC|MIRROR|copy|规格|Tunnel|DCI|Gateway|bypass/i.test(value) ? "tag special" : "tag green";
+          return `<span class="${cls}">${escapeHtml(value)}</span>`;
+        }).join("");
+      }
+
+      function renderNode(moduleId, compact = false) {
+        const module = MODULES[moduleId];
+        if (!module) return `<span class="module-node stage-special" data-module-id="${escapeHtml(moduleId)}">${escapeHtml(moduleId)}</span>`;
+        const sizeClass = compact ? " compact" : "";
+        return `<button class="module-node stage-${escapeHtml(module.stage)}${sizeClass}" type="button" data-module-id="${escapeHtml(moduleId)}" title="点击查看 ${escapeHtml(module.label)}">${escapeHtml(module.label)}</button>`;
+      }
+
+      function renderPath(stageIds, compact = false) {
+        return stageIds.map((moduleId, index) => `${index ? '<span class="stage-arrow" aria-hidden="true">→</span>' : ""}${renderNode(moduleId, compact)}`).join("");
+      }
+
+      function renderStageGroup(stageKey, stageIds, compact = true) {
+        return `<div class="row-stage stage-${escapeHtml(stageKey)}"><div class="stage-nodes">${renderPath(stageIds, compact)}</div></div>`;
+      }
+
+      function renderPacketList(packets) {
+        if (!packets.length) {
+          packetPicker.innerHTML = `<div class="empty-state"><strong>没有匹配的报文</strong>请清除搜索或筛选条件。</div>`;
+          return;
+        }
+        packetPicker.innerHTML = packets.map((packet) => `
+          <button class="packet-choice${packet.id === state.selectedPacketId ? " selected" : ""}" type="button" data-packet-id="${packet.id}" aria-selected="${packet.id === state.selectedPacketId}">
+            <span class="packet-num">${packet.number}</span>
+            <span><span class="packet-name">${escapeHtml(packet.label)}</span><span class="packet-meta">${renderBadges(packet.badges)}</span></span>
+          </button>
+        `).join("");
+      }
+
+      function renderComparison(packets) {
+        if (!packets.length) {
+          comparisonRows.innerHTML = `<div class="empty-state"><strong>当前筛选没有结果</strong>尝试搜索 Parser、XMMU、Tunnel 或重置筛选。</div>`;
+          return;
+        }
+        comparisonRows.innerHTML = packets.map((packet) => `
+          <article class="path-row${packet.id === state.selectedPacketId ? " selected" : ""}" data-packet-id="${packet.id}" tabindex="0" aria-label="${escapeHtml(packet.label)}">
+            <div class="row-label" data-packet-id="${packet.id}">
+              <div class="row-title"><span class="row-number">${packet.number}</span><span class="row-name">${escapeHtml(packet.label)}</span></div>
+              <div class="row-badges">${renderBadges(packet.badges)}</div>
+              <span class="row-annotation">${escapeHtml(packet.annotations.slice(0, 2).join(" · "))}</span>
+            </div>
+            <div class="row-track">
+              ${renderStageGroup("ingress", packet.stages.ingress)}
+              ${renderStageGroup("mmu", packet.stages.mmu)}
+              ${renderStageGroup("egress", packet.stages.egress)}
+            </div>
+          </article>
+        `).join("");
+      }
+
+      function renderDetailStage(stageKey, stageIds) {
+        return `<div class="detail-stage"><div class="detail-stage-label">${escapeHtml(STAGE_LABELS[stageKey])}</div><div class="detail-path">${renderPath(stageIds)}</div></div>`;
+      }
+
+      function renderBranch(branch) {
+        return `<article class="branch-card">
+          <div class="branch-title"><span>${escapeHtml(branch.label)}</span><span class="branch-trigger">${escapeHtml(branch.trigger)}</span></div>
+          ${renderDetailStage("ingress", branch.stages.ingress)}
+          ${renderDetailStage("mmu", branch.stages.mmu)}
+          ${renderDetailStage("egress", branch.stages.egress)}
+          <p class="branch-note">${escapeHtml(branch.note)}</p>
+        </article>`;
+      }
+
+      function renderDetails(packet) {
+        if (!packet) {
+          detailPanel.innerHTML = `<div class="detail-head"><h2>暂无选择</h2><p>请从左侧或横向路径中选择报文。</p></div>`;
+          return;
+        }
+
+        const refs = packet.refs.map((ref) => `<li><code>${escapeHtml(ref)}</code></li>`).join("");
+        const notes = packet.notes.map((note) => `<li>${escapeHtml(note)}</li>`).join("");
+        detailPanel.innerHTML = `
+          <div class="detail-head">
+            <span class="detail-number">${packet.number}</span>
+            <div class="detail-title"><h2>${escapeHtml(packet.label)}</h2><p>${escapeHtml(packet.summary)}</p><div class="detail-tags">${renderBadges([...packet.groups, ...packet.badges])}</div></div>
+          </div>
+          <div class="detail-body">
+            <section class="detail-section"><h3>FULL PATH</h3>${renderDetailStage("ingress", packet.stages.ingress)}${renderDetailStage("mmu", packet.stages.mmu)}${renderDetailStage("egress", packet.stages.egress)}</section>
+            <section class="detail-section"><h3>ANNOTATIONS</h3><div class="detail-annotations">${packet.annotations.map((item) => `<span class="detail-annotation">${escapeHtml(item)}</span>`).join("")}</div></section>
+            ${(packet.branches?.length ?? 0) ? `<section class="detail-section"><h3>BRANCHES · ${packet.branches.length}</h3>${packet.branches.map(renderBranch).join("")}</section>` : ""}
+            <section class="detail-section"><h3>ENGINEERING NOTES</h3><ul class="note-list">${notes}</ul></section>
+            ${packet.id === "vxlan-outer-mc" ? `<section class="detail-section"><div class="limitation">源图提示：VXLAN 外层 MC 场景的 MC/MIRROR 能力标注带有“规格不支持?”疑问。此页面保留原始不确定性，最终结论以规格文档为准。</div></section>` : ""}
+            <section class="detail-section"><h3>REFERENCES</h3><ul class="ref-list">${refs}</ul></section>
+          </div>
+        `;
+      }
+
+      function matchesFilters(packet) {
+        const query = state.query.trim().toLowerCase();
+        const groupFilters = [...state.filters].filter((value) => value !== "all");
+        const queryMatches = !query || packetSearchText(packet).includes(query);
+        const groupMatches = !groupFilters.length || groupFilters.some((filter) => packet.groups.includes(filter) || packet.badges.includes(filter));
+        return queryMatches && groupMatches;
+      }
+
+      function getVisiblePackets() {
+        return PACKETS.filter(matchesFilters);
+      }
+
+      function selectedPacket() {
+        return PACKETS.find((packet) => packet.id === state.selectedPacketId) ?? PACKETS[0];
+      }
+
+      function ensureSelection(visiblePackets) {
+        if (visiblePackets.length && !visiblePackets.some((packet) => packet.id === state.selectedPacketId)) {
+          state.selectedPacketId = visiblePackets[0].id;
+        }
+      }
+
+      function renderAll() {
+        const visiblePackets = getVisiblePackets();
+        ensureSelection(visiblePackets);
+        renderPacketList(visiblePackets);
+        renderComparison(visiblePackets);
+        renderDetails(visiblePackets.length ? selectedPacket() : null);
+        compareCount.textContent = `${visiblePackets.length} / ${PACKETS.length}`;
+        root.querySelectorAll("[data-filter]").forEach((button) => {
+          const filter = button.dataset.filter;
+          const active = state.filters.has(filter) || (filter === "all" && state.filters.has("all"));
+          button.classList.toggle("active", active);
+          button.setAttribute("aria-pressed", String(active));
+        });
+      }
+
+      function selectPacket(packetId, moveFocus = false) {
+        if (!PACKETS.some((packet) => packet.id === packetId)) return;
+        state.selectedPacketId = packetId;
+        renderAll();
+        const row = root.querySelector(`.path-row[data-packet-id="${CSS.escape(packetId)}"]`);
+        if (row) {
+          row.scrollIntoView({ block: "nearest", inline: "nearest" });
+          if (moveFocus) row.focus({ preventScroll: true });
+        }
+      }
+
+      function openModuleInspector(moduleId) {
+        const module = MODULES[moduleId];
+        if (!module) return;
+        $("#bypass-module-dialog-title").textContent = module.label;
+        $("#bypass-module-dialog-stage").textContent = `${module.stage.toUpperCase()} · 点击页面节点可继续查看当前模块`;
+        $("#bypass-module-dialog-body").innerHTML = `
+          <div class="info-block"><h3>ROLE</h3><p>${escapeHtml(module.role)}</p></div>
+          <div class="dialog-grid"><div class="info-block"><h3>INPUTS</h3><ul>${module.inputs.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div><div class="info-block"><h3>OUTPUTS</h3><ul>${module.outputs.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div></div>
+          <div class="info-block"><h3>SIGNALS / FIELDS</h3><p class="mono">${module.signals.map(escapeHtml).join(" · ")}</p></div>
+          <div class="info-block"><h3>REFERENCES</h3><ul class="dialog-refs">${module.refs.map((ref) => `<li>${escapeHtml(ref)}</li>`).join("")}</ul></div>
+        `;
+        if (typeof moduleDialog.showModal === "function") moduleDialog.showModal();
+        else moduleDialog.setAttribute("open", "");
+      }
+
+      function closeModuleInspector() {
+        if (typeof moduleDialog.close === "function" && moduleDialog.open) moduleDialog.close();
+        else moduleDialog.removeAttribute("open");
+      }
+
+      function validatePacketData() {
+        const errors = [];
+        if (PACKETS.length !== 10) errors.push(`主路径数量为 ${PACKETS.length}，应为 10`);
+        const ids = PACKETS.map((packet) => packet.id);
+        if (new Set(ids).size !== ids.length) errors.push("存在重复 packet id");
+        PACKETS.forEach((packet) => {
+          for (const stageKey of ["ingress", "mmu", "egress"]) {
+            if (!packet.stages[stageKey]?.length) errors.push(`${packet.id} 缺少 ${stageKey} 路径`);
+          }
+          if (packet.stages.ingress[0] !== "parser") errors.push(`${packet.id} 未从 Parser 开始`);
+          if (packet.stages.egress.at(-1) !== "petx") errors.push(`${packet.id} 未以 PETX 结束`);
+          Object.values(packet.stages).flat().forEach((moduleId) => {
+            if (!MODULES[moduleId]) errors.push(`${packet.id} 引用了未知模块 ${moduleId}`);
+          });
+          if (!packet.refs?.length) errors.push(`${packet.id} 缺少参考资料`);
+          (packet.branches ?? []).forEach((branch) => {
+            if (!branch.label || !branch.trigger || !branch.note) errors.push(`${packet.id} 存在不完整分支`);
+            for (const stageKey of ["ingress", "mmu", "egress"]) {
+              if (!branch.stages[stageKey]?.length) errors.push(`${packet.id}/${branch.label} 缺少 ${stageKey} 路径`);
+              Object.values(branch.stages).flat().forEach((moduleId) => {
+                if (!MODULES[moduleId]) errors.push(`${packet.id}/${branch.label} 引用了未知模块 ${moduleId}`);
+              });
+            }
+          });
+        });
+        const result = errors.length ? { ok: false, errors } : { ok: true, errors: [] };
+        validationStatus.innerHTML = result.ok
+          ? `<div class="validation-bar"><span class="status-dot"></span> 10 类报文 · 数据校验通过 · ${Object.keys(MODULES).length} 个模块字典项</div>`
+          : `<div class="validation-bar error">数据校验失败：\n${errors.map((error) => `· ${error}`).join("\n")}</div>`;
+        return result;
+      }
+
+      function setFilter(filter) {
+        if (filter === "all") {
+          state.filters = new Set(["all"]);
+        } else {
+          state.filters.delete("all");
+          if (state.filters.has(filter)) state.filters.delete(filter);
+          else state.filters.add(filter);
+          if (!state.filters.size) state.filters.add("all");
+        }
+        renderAll();
+      }
+
+      function resetFilters() {
+        state.query = "";
+        state.filters = new Set(["all"]);
+        $("#bypass-packet-search").value = "";
+        renderAll();
+      }
+
+      root.addEventListener("click", (event) => {
+        const moduleButton = event.target.closest("[data-module-id]");
+        if (moduleButton) {
+          event.stopPropagation();
+          openModuleInspector(moduleButton.dataset.moduleId);
+          return;
+        }
+        const packetTrigger = event.target.closest("[data-packet-id]");
+        if (packetTrigger) selectPacket(packetTrigger.dataset.packetId, packetTrigger.classList.contains("packet-choice"));
+        const filterButton = event.target.closest("[data-filter]");
+        if (filterButton) setFilter(filterButton.dataset.filter);
+        if (event.target.closest("#bypass-reset-filters")) resetFilters();
+        if (event.target.closest("#bypass-module-dialog-close")) closeModuleInspector();
+      });
+
+      $("#bypass-packet-search").addEventListener("input", (event) => {
+        state.query = event.target.value;
+        renderAll();
+      });
+
+      root.addEventListener("keydown", (event) => {
+        const activeTag = document.activeElement?.tagName?.toLowerCase();
+        if (event.key === "/" && activeTag !== "input" && activeTag !== "textarea") {
+          event.preventDefault();
+          $("#bypass-packet-search").focus();
+          return;
+        }
+        if (event.key === "Escape") {
+          closeModuleInspector();
+          return;
+        }
+        if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
+        if (!document.activeElement?.closest("#bypass-packet-list, #bypass-comparison-canvas")) return;
+        const visible = getVisiblePackets();
+        if (!visible.length) return;
+        const index = Math.max(0, visible.findIndex((packet) => packet.id === state.selectedPacketId));
+        const nextIndex = event.key === "ArrowDown" ? Math.min(visible.length - 1, index + 1) : Math.max(0, index - 1);
+        event.preventDefault();
+        selectPacket(visible[nextIndex].id, true);
+      });
+
+      moduleDialog.addEventListener("click", (event) => {
+        if (event.target === moduleDialog) closeModuleInspector();
+      });
+
+      window.PACKET_BYPASS = { PACKETS, MODULES, validatePacketData, selectPacket, openModuleInspector, closeModuleInspector, matchesFilters, getVisiblePackets };
+      renderAll();
+      validatePacketData();
+    })();
+})();
+(function () {
+  const root = document.getElementById("view-port");
+"use strict";
+
+    const MODULES = {
+      "aux-port": { label: "AUX 0/1", stage: "source", role: "AUX 物理入口", inputs: ["AUX Ethernet frame", "AUX0/AUX1"], outputs: ["CPP MACI"], facts: ["FEC: 支持", "CBFC/PFC/1588: 不支持"], refs: ["ref_md/pzz_chip_ref/cpp_hpp.md"] },
+      "hpp-port": { label: "HPP / Line MAC", stage: "source", role: "HPP / Line 物理入口", inputs: ["Line MAC / SerDes", "1024-bit MACI"], outputs: ["HPP MACI RX"], facts: ["Port 0~7: Line", "按 HPP slice 映射"], refs: ["mermaid_code/cpp_pic.md"] },
+      "cpis-host": { label: "CPIS / Host", stage: "source", role: "控制面或 Host 入口", inputs: ["CPIS", "Host CPU / PCIe"], outputs: ["CPP MACI"], facts: ["CPU code", "DMA channel / QID"], refs: ["ref_md/pzz_chip_ref/cpp_hpp.md"] },
+      "ucie-ingress": { label: "Other DIE UCIE", stage: "cross", role: "其他 DIE 输入边界", inputs: ["UCIe / BWLI", "SPARE UCIE"], outputs: ["Remote XMMU / pass-through"], facts: ["检查目的 DIE", "本 DIE 命中后下发"], refs: ["ref_md/pzz_chip_ref/cpp_hpp.md", "ref_md/pzz_chip_ref/ucie_rx.md"] },
+      "cpp-maci": { label: "CPP MACI", stage: "ingress", role: "CPP 入口聚合", inputs: ["2 AUX + CPIS + HPP MACI NOC + IPFIX"], outputs: ["CPP ingress / MACI NOC"], facts: ["5 ingress ports", "整包调度，不是 cut-through"], refs: ["ref_md/pzz_chip_ref/cpp_hpp.md"] },
+      "cpp-ingress": { label: "CPP Ingress", stage: "ingress", role: "控制面解析与整包调度", inputs: ["CPP MACI"], outputs: ["CPP MIRX / CPP TM / HPP MACI NOC"], facts: ["保序处理", "CPU / CPIS / To Host"], refs: ["mermaid_code/cpp_pic.md"] },
+      "cpp-maci-noc": { label: "CPP MACI NOC", stage: "ingress", role: "把 AUX 普通业务或特殊流量注入 HPP", inputs: ["CPP MACI", "AUX0/AUX1 VC"], outputs: ["HPP MACI RX"], facts: ["VC 区分入口身份", "AUX 普通业务进入数据面"], refs: ["tools/packet_module.html", "ref_md/pzz_chip_ref/hpp_maci.md"] },
+      "hpp-maci-rx": { label: "HPP MACI RX", stage: "ingress", role: "HPP 通道适配、缓存和初步分类", inputs: ["MACW / MACI NOC / Loopback"], outputs: ["PIRX"], facts: ["channel 0~8", "AUX 预留独立通道"], refs: ["ref_md/pzz_chip_ref/hpp_maci.md"] },
+      "pirx": { label: "PIRX / PI RX", stage: "ingress", role: "接收 FLIT 并拆分 header 与 payload", inputs: ["HPP MACI RX", "1024-bit FLIT"], outputs: ["Parser metadata", "PITX payload"], facts: ["SOP/EOP", "128B / FLIT 对齐"], refs: ["ref_md/pzz_chip_ref/pirx_perx.md"] },
+      "parser": { label: "Parser", stage: "ingress", role: "识别报文头部并生成 metadata", inputs: ["前 256B", "Port / UDF"], outputs: ["L2/L3 HPP metadata"], facts: ["Port、VLAN、Tunnel、CPU code", "决定后续分支"], refs: ["ref_md/pzz_chip_ref/parser_ingress_parser.md"] },
+      "l2-hpp": { label: "L2 HPP", stage: "ingress", role: "二层 VLAN / MAC / EMF 查表", inputs: ["Parser metadata", "VLAN / SVP / MY MAC"], outputs: ["L2 port / route decision"], facts: ["EMF / fast table", "可转入 L3 / tunnel"], refs: ["tools/packet_module.html"] },
+      "l3-hpp": { label: "L3 HPP + SPP", stage: "ingress", role: "路由、ECMP、NEXTHOP 与隧道决策", inputs: ["LPM / ACL / ECMP"], outputs: ["DVP / L3OIF / destination DIE"], facts: ["LPM → NEXTHOP", "可设置 ucie_dst_die"], refs: ["ref_md/pzz_chip_ref/l3_lpm.md", "ref_md/pzz_chip_ref/egr_nexthop.md"] },
+      "pitx": { label: "PITX", stage: "local", role: "把 metadata 与 payload 对齐后送入 Fabric", inputs: ["Parser metadata", "payload / SOP/EOP"], outputs: ["FD + payload", "route context"], facts: ["metadata join", "支持 IPFIX / trace 旁路信息"], refs: ["ref_md/pzz_chip_ref/pitx.md"] },
+      "xmmu": { label: "XMMU / TMMU", stage: "local", role: "本 DIE buffer、FD、跨 Pipe / DIE 路由", inputs: ["FD + payload", "destination / credit"], outputs: ["TM / MCE / UCIe"], facts: ["local vs remote DIE", "buffer / credit / FD"], refs: ["ref_md/pzz_chip_ref/xmmu_gnoc.md", "pzz_chip_html/xmmu-tm-buffer.html"] },
+      "tm": { label: "TM / AQM", stage: "local", role: "本 DIE 单播队列与拥塞调度", inputs: ["FD", "queue / port / global watermarks"], outputs: ["PERX"], facts: ["队列、整形、WRED / PFC 关联", "AUX 有独立出口队列"], refs: ["ref_md/pzz_chip_ref/tm_sch.md"] },
+      "mce": { label: "MCE", stage: "local", role: "组播、Mirror 或复制资源", inputs: ["replica request", "MC group / mirror"], outputs: ["TM / Spare UCIe"], facts: ["跨 DIE Mirror 先本 DIE 复制", "复制后每个 replica 再入队"], refs: ["ref_md/pzz_chip_ref/mce.md", "ref_md/pzz_chip_ref/cpp_hpp.md"] },
+      "cpp-mce": { label: "CPP MCE", stage: "local", role: "CPP 侧 Mirror 复制", inputs: ["Egress Mirror", "source port"], outputs: ["CPP TM / Spare UCIe"], facts: ["镜像资源不足可丢弃", "共享 800G 控制通路"], refs: ["ref_md/pzz_chip_ref/cpp_hpp.md"] },
+      "cpp-mirx": { label: "CPP MIRX", stage: "cross", role: "根据出端口决定本 DIE 或跨 DIE", inputs: ["CPP pipeline", "egress port"], outputs: ["XMMU / Spare UCIe"], facts: ["EAST / NORTH Spare UCIe", "保序、单源端口"], refs: ["ref_md/pzz_chip_ref/cpp_hpp.md"] },
+      "ucie-bwli": { label: "UCIe / BWLI", stage: "cross", role: "跨 DIE 主数据通路", inputs: ["FDI / BWLI word", "destination DIE"], outputs: ["Remote DIE ingress"], facts: ["FDI → Adapter → RDI", "UCIe mainband / sideband"], refs: ["ref_md/pzz_chip_ref/ucie_tx.md", "ref_md/pzz_chip_ref/ucie_rx.md"] },
+      "spare-ucie": { label: "SPARE UCIE E/N", stage: "cross", role: "低速控制、Mirror 和跨 DIE 过路通路", inputs: ["CPP MIRX / CPP MCE", "other DIE"], outputs: ["destination DIE / next Spare UCIe"], facts: ["每侧一个 AP、每 DIE 两个 AP", "支持跨 DIE 直连过路"], refs: ["ref_md/pzz_chip_ref/cpp_hpp.md"] },
+      "remote-xmmu": { label: "Remote XMMU", stage: "cross", role: "远端 DIE 接收并恢复本地 Fabric 上下文", inputs: ["UCIe / Spare UCIe", "remote FD"], outputs: ["PERX / local output"], facts: ["目的 DIE 命中才下发", "pass_through 可继续转交"], refs: ["tools/packet_module.html"] },
+      "perx": { label: "PERX", stage: "egress", role: "出队后接收核心报文并对齐出口", inputs: ["TM / MCE / Remote XMMU"], outputs: ["Egress HPP"], facts: ["payload 与 egress metadata 对齐", "关注 remote PERX count"], refs: ["ref_md/pzz_chip_ref/pirx_perx.md"] },
+      "egress-hpp": { label: "Egress HPP", stage: "egress", role: "下一跳、L3OIF、VLAN、EACL 与隧道出口处理", inputs: ["PERX metadata", "NEXTHOP / DVP"], outputs: ["PETX"], facts: ["EGR parser / EGR VLAN / EGR NH", "决定最终 port"], refs: ["ref_md/pzz_chip_ref/egr_nexthop.md", "ref_md/pzz_chip_ref/egress_vlan_vxlan.md"] },
+      "petx": { label: "PETX / PI TX", stage: "egress", role: "最终修改、裁剪、丢弃并发送到 MACI", inputs: ["Egress metadata", "payload"], outputs: ["HPP MACI TX / CPP MACI"], facts: ["DMAC / SMAC / TTL / VLAN", "drop / trim / mirror metadata"], refs: ["ref_md/pzz_chip_ref/petx.md"] },
+      "hpp-maci-tx": { label: "HPP MACI TX", stage: "egress", role: "把出口报文分发到 Line、AUX 或 CPP MACI", inputs: ["PETX 1024-bit"], outputs: ["Line MAC / CPP MACI / MACI NOC"], facts: ["channel 0~8", "Mirror 可回 CPP MACI"], refs: ["ref_md/pzz_chip_ref/hpp_maci.md"] },
+      "hpp-egress": { label: "HPP / Line OUT", stage: "output", role: "HPP 普通物理出口", inputs: ["HPP MACI TX"], outputs: ["Line MAC / SerDes"], facts: ["本 DIE 或远端 DIE 端口", "受端口 backpressure 影响"], refs: ["mermaid_code/cpp_pic.md"] },
+      "aux-egress": { label: "AUX / CPP MACI OUT", stage: "output", role: "AUX 物理口或 CPP MACI 出口", inputs: ["CPP Egress / HPP MACI TX"], outputs: ["AUX MAC / AUX CPU"], facts: ["AUX 与 CPP 流量互斥 MUX", "AUX 每口 8 队列"], refs: ["ref_md/pzz_chip_ref/cpp_hpp.md"] },
+      "cpis-egress": { label: "CPIS / HOST OUT", stage: "output", role: "CPU / Host 出口", inputs: ["CPP TM / CPP Egress"], outputs: ["CPIS / PCIe DMA"], facts: ["FW/HOST 共 32 队列", "CPP TM 共 48 队列"], refs: ["ref_md/pzz_chip_ref/cpp_hpp.md"] },
+      "cpp-tm": { label: "CPP TM", stage: "local", role: "To Host / CPU 报文调度", inputs: ["XMMU / CPP MCE"], outputs: ["CPP MITX"], facts: ["AUX 2×8 + FW/HOST 32", "CPU code 限速"], refs: ["ref_md/pzz_chip_ref/cpp_hpp.md"] },
+      "cpp-mitx": { label: "CPP MITX", stage: "egress", role: "CPP 出口 PI TX", inputs: ["CPP TM"], outputs: ["CPP Egress"], facts: ["CPU / I2E message 封装", "保留业务扩展"], refs: ["mermaid_code/cpp_pic.md"] },
+      "cpp-egress": { label: "CPP Egress", stage: "output", role: "CPP 控制面出口聚合", inputs: ["CPP MITX", "SP HPP Egress"], outputs: ["AUX / CPIS"], facts: ["AUX 与 CPP MACI 做 MUX", "出口资源共享 800G"], refs: ["ref_md/pzz_chip_ref/cpp_hpp.md"] }
+    };
+
+    const ROUTES = [
+      { id: "hpp-local", label: "HPP / Line → 本 DIE → HPP / Line", category: "本 DIE · HPP", filters: ["local", "hpp"], tags: ["HPP", "本 DIE"], source: ["HPP / Line MAC"], stages: [
+        { stage: "source", label: "入口身份", modules: ["hpp-port"], note: "Line MAC 接收" },
+        { stage: "ingress", label: "Ingress HPP", modules: ["hpp-maci-rx", "pirx", "parser", "l2-hpp", "l3-hpp", "pitx"], note: "L3 / tunnel 为条件分支" },
+        { stage: "local", label: "本 DIE Fabric", modules: ["xmmu", "tm"], note: "local destination" },
+        { stage: "egress", label: "Egress HPP", modules: ["perx", "egress-hpp", "petx", "hpp-maci-tx"] },
+        { stage: "output", label: "出口", modules: ["hpp-egress"], note: "HPP / Line port" }
+      ], conditions: ["目的端口在本 DIE", "普通单播或 L2/L3 业务"], outputs: ["HPP / Line OUT"], signals: ["SOP/EOP", "fd_valid", "port bitmap"], notes: ["普通 HPP/Line 单播在本 DIE 内完成查表、入队和出口改写。", "如果目的端口被解析为其他 DIE，则切换到跨 DIE 路径。"], refs: ["mermaid_code/cpp_pic.md", "ref_md/pzz_chip_ref/hpp_maci.md"] },
+      { id: "aux-local", label: "AUX 标准二三层 → 本 DIE → HPP / Line", category: "本 DIE · AUX", filters: ["local", "aux"], tags: ["AUX", "本 DIE"], source: ["AUX 0/1"], stages: [
+        { stage: "source", label: "入口身份", modules: ["aux-port"], note: "AUX 普通业务口" },
+        { stage: "ingress", label: "CPP → Ingress HPP", modules: ["cpp-maci", "cpp-maci-noc", "hpp-maci-rx", "pirx", "parser", "l2-hpp", "l3-hpp", "pitx"], note: "AUX0/AUX1 VC 注入 HPP" },
+        { stage: "local", label: "本 DIE Fabric", modules: ["xmmu", "tm"], note: "local destination" },
+        { stage: "egress", label: "Egress HPP", modules: ["perx", "egress-hpp", "petx", "hpp-maci-tx"] },
+        { stage: "output", label: "出口", modules: ["hpp-egress"], note: "HPP / Line port" }
+      ], conditions: ["AUX 配置为普通业务口", "不是 AUX CPU / CPIS 控制流"], outputs: ["HPP / Line OUT"], signals: ["AUX0/AUX1 VC", "target HPP", "hash result"], notes: ["AUX 普通业务口先经 CPP MACI/MACI_NOC，再像普通 L2/L3 业务进入 HPP。", "AUX 支持 FEC，但不支持 CBFC/PFC/1588。"], refs: ["tools/packet_module.html", "ref_md/pzz_chip_ref/cpp_hpp.md"] },
+      { id: "cpp-control", label: "AUX 0/1 → CPIS / Host 两种去向", category: "CPP / 控制", filters: ["aux", "cpp"], tags: ["CPP", "AUX / CPIS"], source: ["AUX 0/1 / CPIS / Host"], stages: [
+        { stage: "source", label: "控制入口", modules: ["aux-port", "cpis-host"], note: "AUX 0/1 · CPU / CPIS" },
+        { stage: "ingress", label: "CPP Ingress", modules: ["cpp-maci", "cpp-ingress"], note: "整包、保序处理" },
+        { stage: "local", label: "两种去向", modules: ["cpp-maci-noc"], branches: [["1 · HPP data plane", ["hpp-maci-rx", "pirx", "parser"]], ["2 · CPIS / Host", ["cpp-tm", "cpp-mitx", "cpp-egress"]]] },
+        { stage: "egress", label: "CPP / HPP 出口", modules: ["perx", "egress-hpp", "petx", "hpp-maci-tx"], note: "仅数据面分支经过 HPP" },
+        { stage: "output", label: "出口", modules: ["hpp-egress", "cpis-egress"], note: "HPP / CPIS / Host" }
+      ], conditions: ["CPU/CPIS 下发、To Host、AUX CPU 或控制面报文", "需要数据面处理时注入 HPP MACI NOC"], outputs: ["HPP / Line OUT", "CPIS / HOST OUT"], signals: ["CPU mode", "CPIS source", "QID", "DMA channel"], notes: ["CPP ingress 只做整包调度；需要进入数据面时通过 HPP MACI_NOC 注入 HPP。", "To Host 报文进入 CPP TM，再经 CPP MITX / Egress 输出。"], refs: ["mermaid_code/cpp_pic.md", "ref_md/pzz_chip_ref/cpp_hpp.md"] },
+      { id: "hpp-cross-die", label: "HPP / Line → 跨 DIE → 远端 HPP / Line", category: "跨 DIE · HPP", filters: ["cross", "hpp"], tags: ["HPP", "跨 DIE"], source: ["HPP / Line MAC"], stages: [
+        { stage: "source", label: "入口身份", modules: ["hpp-port"], note: "本端 HPP / Line" },
+        { stage: "ingress", label: "Ingress HPP", modules: ["hpp-maci-rx", "pirx", "parser", "l2-hpp", "l3-hpp", "pitx"], note: "生成 destination DIE" },
+        { stage: "local", label: "本 DIE Fabric", modules: ["xmmu"], note: "FD 携带 ucie_dst_die" },
+        { stage: "cross", label: "Cross-DIE", modules: ["ucie-bwli", "remote-xmmu"], note: "UCIe / BWLI → remote DIE" },
+        { stage: "egress", label: "远端 Egress HPP", modules: ["perx", "egress-hpp", "petx", "hpp-maci-tx"] },
+        { stage: "output", label: "远端出口", modules: ["hpp-egress"], note: "remote HPP / Line port" }
+      ], conditions: ["目的端口在其他 DIE", "UCIe / BWLI 链路与 remote DIE 可用"], outputs: ["Remote HPP / Line OUT"], signals: ["ucie_dst_die", "pass_through", "remote PERX count"], notes: ["本端完成入口识别和目的 DIE 判定，UCIe/BWLI 送达远端后由远端 Egress HPP/PETX 发出。", "UCIe TX 通过 FDI、Adapter、RDI 与 PHY 发送到对端。"], refs: ["tools/packet_module.html", "ref_md/pzz_chip_ref/ucie_tx.md", "ref_md/pzz_chip_ref/ucie_rx.md"] },
+      { id: "mirror-cross-die", label: "Egress Mirror → MCE → AUX / CPIS 或 Spare UCIe", category: "跨 DIE · Mirror", filters: ["cross", "cpp", "aux"], tags: ["Mirror", "Spare UCIe"], source: ["HPP Egress Mirror"], stages: [
+        { stage: "source", label: "复制触发", modules: ["hpp-egress"], note: "Egress Mirror / MOD" },
+        { stage: "ingress", label: "CPP Mirror", modules: ["cpp-mce", "cpp-mirx"], note: "按出端口判定 DIE" },
+        { stage: "local", label: "本 DIE 资源", modules: ["cpp-tm"], note: "镜像后 To Host / AUX" },
+        { stage: "cross", label: "条件跨 DIE", modules: ["spare-ucie"], note: "其他 DIE 目的端口" },
+        { stage: "egress", label: "CPP Egress", modules: ["cpp-mitx", "cpp-egress"] },
+        { stage: "output", label: "出口", modules: ["aux-egress", "cpis-egress", "spare-ucie"], note: "AUX / CPIS / Spare UCIe" }
+      ], conditions: ["Mirror 复制资源与 800G 共享通路", "目的端口决定本 DIE 或 Spare UCIe"], outputs: ["AUX OUT", "CPIS / HOST OUT", "SPARE UCIE OUT"], signals: ["mirror enable", "mce_copy_valid", "CPP bandwidth"], notes: ["跨 DIE Mirror 先由本 DIE CPP MCE 复制；目的端口在其他 DIE 时走 Spare UCIe。", "AUX/CPIS 报文优先级高于 IPFIX，IPFIX 高于 Mirror。"], refs: ["ref_md/pzz_chip_ref/cpp_hpp.md", "ref_md/pzz_chip_ref/hpp_maci.md"] },
+      { id: "remote-pass-through", label: "其他 DIE → 本 DIE 出口 / 再跨 DIE", category: "跨 DIE · 过路", filters: ["cross", "hpp"], tags: ["Other DIE", "pass-through"], source: ["Other DIE UCIe"], stages: [
+        { stage: "source", label: "远端输入", modules: ["ucie-ingress"], note: "N/E DATA UCIE 或 Spare UCIE" },
+        { stage: "ingress", label: "本 DIE 接收", modules: ["ucie-bwli", "remote-xmmu"], note: "恢复 FD / destination" },
+        { stage: "local", label: "目的判定", modules: ["xmmu"], note: "本 DIE 命中则下发" },
+        { stage: "cross", label: "过路选择", modules: ["spare-ucie"], note: "非本 DIE → 另一侧 Spare UCIe" },
+        { stage: "egress", label: "本 DIE Egress", modules: ["perx", "egress-hpp", "petx", "hpp-maci-tx"] },
+        { stage: "output", label: "出口", modules: ["hpp-egress", "spare-ucie"], note: "本地输出或继续跨 DIE" }
+      ], conditions: ["目的 DIE 是本 DIE、或需要继续过路", "Spare UCIe 输入方向与 credit 正常"], outputs: ["HPP / Line OUT", "SPARE UCIE OUT"], signals: ["dest die", "pass_through", "Spare UCIe credit"], notes: ["本 DIE Spare UCIe 接收其他 DIE 流量后，目的为本 DIE 时进入 XMMU，否则经另一侧 Spare UCIe 继续转发。", "过路报文不应在错误 DIE 上进入最终出口处理。"], refs: ["ref_md/pzz_chip_ref/cpp_hpp.md", "tools/packet_module.html"] }
+    ];
+
+    const state = { selectedRouteId: ROUTES[0].id, filter: "all", query: "" };
+    const $ = (selector) => root.querySelector(selector);
+    const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
+    const routeById = (id) => ROUTES.find((route) => route.id === id);
+
+    function moduleLabel(moduleId) { return MODULES[moduleId]?.label || moduleId; }
+    function moduleButton(moduleId, stage) {
+      const module = MODULES[moduleId];
+      if (!module) return `<span class="module-node stage-${escapeHtml(stage)}">${escapeHtml(moduleId)}</span>`;
+      return `<button class="module-node stage-${escapeHtml(stage)}" type="button" data-module-id="${escapeHtml(moduleId)}" aria-label="打开 ${escapeHtml(module.label)} 模块说明">${escapeHtml(module.label)}</button>`;
+    }
+    function tagClass(tag) {
+      const value = tag.toLowerCase();
+      if (value.includes("跨") || value.includes("spare") || value.includes("other") || value.includes("pass")) return "cross";
+      if (value.includes("aux")) return "aux";
+      if (value.includes("cpp") || value.includes("mirror")) return "cpp";
+      if (value.includes("本")) return "local";
+      return "";
+    }
+    function tagsMarkup(tags) { return tags.map((tag) => `<span class="tag ${tagClass(tag)}">${escapeHtml(tag)}</span>`).join(""); }
+    function routeSearchText(route) {
+      const stageText = route.stages.flatMap((stage) => [stage.label, stage.note || "", ...stage.modules.flatMap((id) => [id, moduleLabel(id)]), ...(stage.branches || []).flatMap((branch) => [branch[0], ...branch[1], ...branch[1].map(moduleLabel)])]).join(" ");
+      return [route.label, route.category, ...route.tags, ...route.conditions, ...route.outputs, ...route.signals, ...route.notes, ...route.refs, stageText].join(" ").toLowerCase();
+    }
+    function matchesFilters(route) {
+      const queryOk = !state.query || routeSearchText(route).includes(state.query.toLowerCase());
+      const filterOk = state.filter === "all" || route.filters.includes(state.filter);
+      return queryOk && filterOk;
+    }
+    function getVisibleRoutes() { return ROUTES.filter(matchesFilters); }
+
+    function renderRoutePicker() {
+      const visible = getVisibleRoutes();
+      $("#port-route-picker-list").innerHTML = visible.length ? visible.map((route, index) => `<button class="route-choice${route.id === state.selectedRouteId ? " selected" : ""}" type="button" data-route-id="${route.id}" aria-selected="${route.id === state.selectedRouteId}"><span class="route-index">${ROUTES.indexOf(route) + 1}</span><span class="route-name">${escapeHtml(route.label)}</span><span class="route-tags">${tagsMarkup(route.tags)}</span></button>`).join("") : `<div class="empty-state">没有匹配路径</div>`;
+    }
+    function stageMarkup(stage) {
+      const nodes = stage.modules.map((id, index) => `${index ? '<span class="stage-arrow">→</span>' : ""}${moduleButton(id, stage.stage)}`).join("");
+      const branches = (stage.branches || []).map(([label, modules]) => `<div class="stage-line"><span class="branch-label">${escapeHtml(label)}</span>${modules.map((id, index) => `${index ? '<span class="stage-arrow">→</span>' : ""}${moduleButton(id, stage.stage)}`).join("")}</div>`).join("");
+      return `<div class="stage-cell ${escapeHtml(stage.stage)}"><p class="stage-label">${escapeHtml(stage.label)}</p><div class="stage-line">${nodes}</div>${branches ? `<div class="stage-branches">${branches}</div>` : ""}${stage.note ? `<p class="stage-note">${escapeHtml(stage.note)}</p>` : ""}</div>`;
+    }
+    function renderComparisonRows() {
+      const visible = getVisibleRoutes();
+      $("#port-compare-count").textContent = `${visible.length} / ${ROUTES.length}`;
+      $("#port-comparison-rows").innerHTML = visible.length ? visible.map((route) => `<article class="path-row${route.id === state.selectedRouteId ? " selected" : ""}" data-route-id="${route.id}"><button class="row-label" type="button" data-route-id="${route.id}"><strong>${escapeHtml(route.label)}</strong><small>${escapeHtml(route.category)}</small><span class="route-tags">${tagsMarkup(route.tags)}</span></button><div class="row-body">${route.stages.map(stageMarkup).join("")}</div></article>`).join("") : `<div class="empty-state">没有匹配路径，请调整搜索或筛选条件。</div>`;
+    }
+    function renderDetailPanel() {
+      const route = routeById(state.selectedRouteId) || ROUTES[0];
+      $("#port-detail-panel").innerHTML = `<div class="detail-head"><p class="detail-kicker">Selected Route · ${escapeHtml(route.category)}</p><h2>${escapeHtml(route.label)}</h2><p>${escapeHtml(route.source.join(" · "))}</p></div><div class="detail-body"><p class="detail-summary">${escapeHtml(route.notes[0])}</p><section class="detail-section"><h3>阶段链</h3><div class="detail-stage-list">${route.stages.map((stage) => `<div class="detail-stage"><span class="detail-stage-label">${escapeHtml(stage.label)}</span><span class="detail-stage-modules">${stage.modules.map(moduleLabel).join(" → ")}${stage.branches ? ` · ${stage.branches.map((branch) => branch[0] + ": " + branch[1].map(moduleLabel).join(" → ")).join(" / ")}` : ""}</span></div>`).join("")}</div></section><section class="detail-section"><h3>进入这条路径的条件</h3><ul>${route.conditions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></section><section class="detail-section"><h3>出口与关键信号</h3><p>${escapeHtml(route.outputs.join(" · "))}</p><ul>${route.signals.map((item) => `<li><code>${escapeHtml(item)}</code></li>`).join("")}</ul></section><section class="detail-section"><h3>阅读提示</h3><ul>${route.notes.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></section><section class="detail-section"><h3>参考</h3><div class="ref-list">${route.refs.map((ref) => `<span class="ref">${escapeHtml(ref)}</span>`).join("")}</div></section></div>`;
+    }
+    function renderModuleDialog(moduleId) {
+      const module = MODULES[moduleId];
+      if (!module) return;
+      $("#port-module-dialog-title").textContent = module.label;
+      $("#port-module-dialog-stage").textContent = `${module.role} · ${module.stage.toUpperCase()}`;
+      $("#port-module-dialog-body").innerHTML = `<div class="module-grid"><div class="module-fact"><span>输入边界</span><strong>${escapeHtml(module.inputs.join(" · "))}</strong></div><div class="module-fact"><span>输出边界</span><strong>${escapeHtml(module.outputs.join(" · "))}</strong></div></div><div class="detail-section"><h3>模块职责</h3><p>${escapeHtml(module.role)}。</p></div><div class="detail-section"><h3>关键事实</h3><ul>${module.facts.map((fact) => `<li>${escapeHtml(fact)}</li>`).join("")}</ul></div><div class="detail-section"><h3>参考</h3><div class="ref-list">${module.refs.map((ref) => `<span class="ref">${escapeHtml(ref)}</span>`).join("")}</div></div>`;
+      $("#port-module-dialog").showModal();
+    }
+    function openModuleInspector(moduleId) { renderModuleDialog(moduleId); }
+    function closeModuleInspector() { const dialog = $("#port-module-dialog"); if (dialog.open) dialog.close(); }
+    function selectRoute(routeId) {
+      if (!routeById(routeId)) return;
+      state.selectedRouteId = routeId;
+      renderRoutePicker(); renderComparisonRows(); renderDetailPanel();
+    }
+    function validatePortData() {
+      const errors = [];
+      if (ROUTES.length !== 6) errors.push(`expected 6 routes, got ${ROUTES.length}`);
+      for (const route of ROUTES) {
+        if (!route.stages.length) errors.push(`${route.id}: empty stages`);
+        if (!route.outputs.length) errors.push(`${route.id}: missing outputs`);
+        for (const stage of route.stages) for (const moduleId of stage.modules) if (!MODULES[moduleId]) errors.push(`${route.id}: unknown ${moduleId}`);
+        for (const stage of route.stages) for (const [, modules] of stage.branches || []) for (const moduleId of modules) if (!MODULES[moduleId]) errors.push(`${route.id}: unknown branch ${moduleId}`);
+      }
+      const status = $("#port-validation-status");
+      if (errors.length) { status.className = "invalid"; status.textContent = `数据校验失败 · ${errors.join("；")}`; return { ok: false, errors }; }
+      status.className = ""; status.textContent = `${ROUTES.length} 条端到端路径 · 数据校验通过 · ${Object.keys(MODULES).length} 个模块字典项`;
+      return { ok: true, errors: [] };
+    }
+    function refresh() { renderRoutePicker(); renderComparisonRows(); renderDetailPanel(); validatePortData(); }
+
+    root.addEventListener("click", (event) => {
+      const moduleButtonElement = event.target.closest("[data-module-id]");
+      if (moduleButtonElement) { openModuleInspector(moduleButtonElement.dataset.moduleId); }
+      const routeButton = event.target.closest("[data-route-id]");
+      if (routeButton) { selectRoute(routeButton.dataset.routeId); }
+    });
+    $("#port-port-search").addEventListener("input", (event) => { state.query = event.target.value.trim(); refresh(); });
+    root.querySelectorAll("[data-filter]").forEach((button) => button.addEventListener("click", () => {
+      state.filter = button.dataset.filter;
+      root.querySelectorAll("[data-filter]").forEach((item) => { const active = item === button; item.classList.toggle("active", active); item.setAttribute("aria-pressed", String(active)); });
+      refresh();
+    }));
+    $("#port-reset-filters").addEventListener("click", () => { state.filter = "all"; state.query = ""; $("#port-port-search").value = ""; root.querySelector('[data-filter="all"]').click(); });
+    $("#port-module-dialog-close").addEventListener("click", closeModuleInspector);
+    $("#port-module-dialog").addEventListener("click", (event) => { if (event.target === $("#port-module-dialog")) closeModuleInspector(); });
+    root.addEventListener("keydown", (event) => {
+      if (event.key === "/" && document.activeElement?.tagName !== "INPUT") { event.preventDefault(); $("#port-port-search").focus(); }
+      if (event.key === "Escape") closeModuleInspector();
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        const visible = getVisibleRoutes(); const index = visible.findIndex((route) => route.id === state.selectedRouteId); if (!visible.length) return;
+        const nextIndex = event.key === "ArrowDown" ? Math.min(index + 1, visible.length - 1) : Math.max(index - 1, 0); if (visible[nextIndex]) { event.preventDefault(); selectRoute(visible[nextIndex].id); }
+      }
+    });
+
+    window.PACKET_PORT = { MODULES, ROUTES, state, matchesFilters, getVisibleRoutes, validatePortData, selectRoute, openModuleInspector, closeModuleInspector };
+    refresh();
+})();
+  </script>
+</body>
+</html>

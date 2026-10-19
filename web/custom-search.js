@@ -772,6 +772,8 @@
   }
 
   function buildPageToc() {
+    normalizePageAnchors();
+    restorePageAnchor();
     var toc = ensurePageToc();
     if (!toc) {
       return;
@@ -802,7 +804,7 @@
     var stack = [];
     headings.forEach(function (heading) {
       var level = parseInt(heading.tagName.slice(1), 10);
-      var href = base + '?id=' + encodeURIComponent(heading.id);
+      var href = pageDocumentUrl() + base + '?id=' + encodeURIComponent(heading.id);
       var number = '';
       if (level >= 2 && level <= 4) {
         counters[level] += 1;
@@ -967,6 +969,9 @@
       return;
     }
     var link = event.target.closest && event.target.closest('a');
+    if (link && (link.hasAttribute('download') || (link.target && link.target !== '_self'))) {
+      return;
+    }
     var id = link && link.getAttribute('data-page-toc-id');
     if (!id && link && link.closest('.markdown-section')) {
       id = localHeadingId(link.getAttribute('href'));
@@ -976,10 +981,72 @@
       return;
     }
 
-    // Chrome blocks Docsify's location.replace hash normalization for file:// pages.
+    // Use the actual page URL (not <base>) and preserve a shareable history entry.
     event.preventDefault();
     event.stopPropagation();
+    var hash = currentRouteBase() + '?id=' + encodeURIComponent(id);
+    if (window.location.hash !== hash) {
+      window.history.pushState(window.history.state, '', window.location.href.split('#')[0] + hash);
+      window.dispatchEvent(new Event('hashchange'));
+    }
+    restoredAnchor = window.location.hash;
+    restoredHeading = heading;
     scrollToHeadingEl(heading);
+    settlePageAnchor(heading);
+  }
+
+  function normalizePageAnchors() {
+    var section = document.querySelector('.markdown-section');
+    if (!section) { return; }
+    Array.prototype.forEach.call(section.querySelectorAll('a[href]'), function (link) {
+      var id = localHeadingId(link.getAttribute('href'));
+      if (id) { link.setAttribute('href', pageDocumentUrl() + currentRouteBase() + '?id=' + encodeURIComponent(id)); }
+    });
+  }
+
+  var restoredAnchor = null;
+  var restoredHeading = null;
+  var anchorSettleTimer = 0;
+  function cancelAnchorSettle() {
+    window.clearTimeout(anchorSettleTimer);
+  }
+
+  function settlePageAnchor(heading) {
+    cancelAnchorSettle();
+    var hash = window.location.hash;
+    // Docsify animates for 500ms; a prior animation can outlive hash normalization.
+    // Correct once after it settles, unless the user has started interacting.
+    anchorSettleTimer = window.setTimeout(function () {
+      if (window.location.hash === hash && document.getElementById(heading.id) === heading) {
+        scrollToHeadingEl(heading);
+      }
+    }, 600);
+  }
+
+  function restorePageAnchor() {
+    var hash = window.location.hash;
+    var id = localHeadingId(hash);
+    var heading = id && document.getElementById(id);
+    if (!heading) {
+      cancelAnchorSettle();
+      if (restoredAnchor && restoredAnchor.split('?id=')[0] === hash) {
+        window.scrollTo(0, 0);
+      }
+      restoredAnchor = hash;
+      restoredHeading = null;
+      return;
+    }
+    if (hash === restoredAnchor && heading === restoredHeading) { return; }
+    var canonical = currentRouteBase() + '?id=' + encodeURIComponent(id);
+    if (hash !== canonical) {
+      window.history.replaceState(window.history.state, '', window.location.href.split('#')[0] + canonical);
+      // Tell Docsify to replace any in-flight animation for the previous section.
+      window.dispatchEvent(new Event('hashchange'));
+    }
+    restoredAnchor = window.location.hash;
+    restoredHeading = heading;
+    scrollToHeadingEl(heading);
+    settlePageAnchor(heading);
   }
 
   function markdownHeadingSlug(text) {
@@ -988,8 +1055,14 @@
       .replace(/\s/g, '-');
   }
 
+  function pageDocumentUrl() {
+    return String(window.location.href || '').split('#')[0];
+  }
+
   function localHeadingId(href) {
     var value = String(href || '');
+    var page = pageDocumentUrl();
+    if (page && value.indexOf(page + '#') === 0) { value = value.slice(page.length); }
     var prefix = currentRouteBase() + '?id=';
     if (value.indexOf(prefix) === 0) {
       value = value.slice(prefix.length).split('&')[0];
@@ -1061,17 +1134,11 @@
   }
 
   function schedulePageTocBuild() {
-    if (!tocConfig.enabled) {
-      return;
-    }
     clearTimeout(state.tocTimer);
     state.tocTimer = setTimeout(buildPageToc, 80);
   }
 
   function observePageContent() {
-    if (!tocConfig.enabled) {
-      return;
-    }
     window.addEventListener('hashchange', function () {
       schedulePageTocBuild();
       syncRepoFilterUI();
@@ -2853,6 +2920,9 @@
 
   function init() {
     loadRepoFilter();
+    ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach(function (name) {
+      window.addEventListener(name, cancelAnchorSettle, { capture: true, passive: true });
+    });
     document.addEventListener('click', function (event) {
       // 点击仓库过滤菜单外部时收起
       [state.sidebar, state.dialog].forEach(function (view) {
@@ -2904,8 +2974,17 @@
     });
   }
 
+  // Run after Docsify's initial auto2top as well as DOM changes.
+  window.$docsify.plugins = (window.$docsify.plugins || []).concat(function (hook) {
+    hook.doneEach(function () {
+      restoredHeading = null;
+      schedulePageTocBuild();
+    });
+  });
+
   if (window.__CUSTOM_SEARCH_TEST__) {
     window.__CUSTOM_SEARCH_TEST_API__ = {
+      normalizePageAnchors: normalizePageAnchors,
       localHeadingId: localHeadingId,
       scheduleActiveToc: scheduleActiveToc,
       fetchLiveSnapshot: fetchLiveSnapshot,

@@ -26,6 +26,20 @@ test('scrolling the TOC does not schedule a scroll back to the active heading', 
   assert.doesNotThrow(() => api.scheduleActiveToc({type: 'scroll', target: {}}));
 });
 
+test('rendered manual links are canonical before modified clicks or copying', () => {
+  const headings = [{id: '_1-target', textContent: '1. Target'}];
+  const links = ['#/md/guide/a.md?id=1-target', '#/md/other?id=1-target', 'https://example.com/#1-target']
+    .map(href => ({href, getAttribute() {return this.href;}, setAttribute(name, value) {this.href = value;}}));
+  const api = loadSearch(undefined, {document: {
+    readyState: 'loading', addEventListener() {},
+    querySelector() {return {querySelectorAll(selector) {return selector === 'a[href]' ? links : headings;}};}
+  }});
+  api.normalizePageAnchors();
+  assert.equal(links[0].href, '#/md/guide/a.md?id=_1-target');
+  assert.equal(links[1].href, '#/md/other?id=1-target');
+  assert.equal(links[2].href, 'https://example.com/#1-target');
+});
+
 function loadSearch(pathname = '/html/index_all.html', overrides = {}) {
   const source = fs.readFileSync(path.join(__dirname, '..', 'web', 'custom-search.js'), 'utf8');
   const window = {

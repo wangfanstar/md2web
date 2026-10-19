@@ -26,6 +26,7 @@ from . import database, documents, folder_sources
 from .drafts import unified_diff as documents_diff
 from .svn import SvnError
 from .content_lock import serialized
+from .file_transaction import rollback_paths, database_transaction
 
 
 @contextmanager
@@ -90,7 +91,7 @@ def _ensure_local_binding(conn, binding, config):
             cursor = conn.execute(
                 "INSERT INTO repo_bindings (repository_id, mount_path, credential_group, config_version,"
                 " source_mode, sync_state, created_at, updated_at) VALUES (?, ?, ?, ?, 'local', 'idle', ?, ?)",
-                (binding["id"], binding["mount"], binding["credential_group"],
+                (binding["id"], binding["mount"], binding.get("credential_group", "default"),
                  str(config.get("path", "")), now, now),
             )
         row = conn.execute("SELECT * FROM repo_bindings WHERE id = ?", (cursor.lastrowid,)).fetchone()
@@ -203,13 +204,13 @@ def _local_publish(conn, md_dir, binding, binding_row, rel, content, old_hash, u
     target = documents.resolve_md_file(md_dir, rel)
     before = documents.read_md_text(target) if target.is_file() else None
     try:
-        with conn:
+        with rollback_paths([target]), database_transaction(conn):
             conn.execute(
                 "INSERT OR REPLACE INTO repository_documents"
                 " (id, binding_id, path, content, content_hash, eol, source_revision, state, updated_at)"
                 " VALUES ((SELECT id FROM repository_documents WHERE binding_id = ? AND path = ?), ?, ?, ?, ?, ?, ?, 'published', ?)",
                 (binding_row["id"], rel, binding_row["id"], rel, text, new_hash,
-                 documents.detect_eol(text), revision, now),
+                 documents.detect_eol(before or text), revision, now),
             )
             rows = conn.execute("SELECT path, content_hash, state FROM repository_documents WHERE binding_id = ?",
                                 (binding_row["id"],)).fetchall()
@@ -223,9 +224,14 @@ def _local_publish(conn, md_dir, binding, binding_row, rel, content, old_hash, u
                          " VALUES (?, ?, 'local', 'local_publish', ?, ?, ?, ?, ?, ?, ?)",
                          (binding_row["id"], operation_id, rel, old_hash, new_hash,
                           binding_row.get("source_revision"), revision, user_id, now))
-            _materialize_repository(conn, md_dir, binding_row["id"], binding["mount"])
+            # A single-document save must never overwrite unrelated disk edits.
+            if before is None:
+                documents._write_blob(target.parent, target.name, text.encode('utf-8'))
+            else:
+                documents.save_md(md_dir, rel, text, base_hash=documents.text_hash(before))
             local_history.record(conn, rel, before, text, user_id)
-        _set_state(conn, operation_id, "published", finished_at=database.now_iso())
+            conn.execute("UPDATE operations SET state='published', finished_at=? WHERE id=?",
+                         (database.now_iso(), operation_id))
     except Exception as error:
         _set_state(conn, operation_id, "failed", error_code="local_publish_failed", finished_at=database.now_iso())
         raise OperationError(500, "本地发布失败：%s" % error)
@@ -303,11 +309,16 @@ def publish_file(conn, md_dir, user_id, document_path, content, base_hash=None):
     from . import local_history
     target = documents.resolve_md_file(md_dir, rel)
     before = documents.read_md_text(target) if target.is_file() else None
-    documents.save_md(md_dir, rel, content, base_hash=base_hash)
     text = documents.normalize_eol(content)
-    with conn:
-        local_history.record(conn, rel, before, text, user_id)
-        database.audit(conn, "file_publish", "ok", actor_id=user_id, resource=rel)
+    try:
+        with rollback_paths([target]), database_transaction(conn):
+            documents.save_md(md_dir, rel, content, base_hash=base_hash)
+            local_history.record(conn, rel, before, text, user_id)
+            database.audit(conn, "file_publish", "ok", actor_id=user_id, resource=rel)
+    except (documents.MdSaveError, OperationError):
+        raise
+    except Exception as error:
+        raise OperationError(500, '文件保存失败：%s' % error)
     return {"state": "published", "path": rel, "hash": documents.text_hash(text), "mode": "file"}
 
 
@@ -1020,52 +1031,17 @@ def create_entry(md_dir, parent, kind, name):
     return {"path": "md/" + _lexical_relative(md_dir, target), "kind": "document"}
 
 
-def rename_local_entry(conn, md_dir, binding, relative, name):
-    """同步移动本地仓库的文件与 SQLite 路径，避免后续物化复活旧名称。"""
-    row = _binding_row(conn, binding)
-    if row is None:
-        return rename_entry(md_dir, relative, name)
+def rename_local_entry(conn, md_dir, binding, relative, name, config=None, confirm=None):
+    """本地重命名共用文件操作事务，也迁移未绑定文档的历史。"""
+    from . import local_entries
     source = _managed_path(md_dir, relative)
-    result = None
-    try:
-        with conn:
-            result = rename_entry(md_dir, relative, name)
-            destination = result['path']
-            versions = conn.execute('SELECT id, path FROM local_document_versions').fetchall()
-            for version in versions:
-                if version['path'] == relative or version['path'].startswith(relative + '/'):
-                    conn.execute('UPDATE local_document_versions SET path=? WHERE id=?',
-                                 (destination + version['path'][len(relative):], version['id']))
-            rows = conn.execute('SELECT id, path FROM repository_documents WHERE binding_id = ?',
-                                (row['id'],)).fetchall()
-            now = database.now_iso()
-            revision = int(row.get('source_revision') or 0) + 1
-            for item in rows:
-                old_path = item['path']
-                if old_path != relative and not old_path.startswith(relative + '/'):
-                    continue
-                new_path = destination + old_path[len(relative):]
-                # 历史删除记录可被重新占用；有效记录冲突由唯一约束拒绝。
-                conn.execute("DELETE FROM repository_documents WHERE binding_id=? AND path=? AND state='deleted'",
-                             (row['id'], new_path))
-                conn.execute('UPDATE repository_documents SET path=?, source_revision=?, updated_at=? WHERE id=?',
-                             (new_path, revision, now, item['id']))
-            current = conn.execute("SELECT path, content_hash FROM repository_documents WHERE binding_id=? AND state!='deleted'",
-                                   (row['id'],)).fetchall()
-            digest = _manifest_hash({item['path']: {'hash': item['content_hash']} for item in current})
-            conn.execute('UPDATE repo_bindings SET source_revision=?, source_hash=?, updated_at=? WHERE id=?',
-                         (revision, digest, now, row['id']))
-    except Exception:
-        if result is not None:
-            renamed = _managed_path(md_dir, result['path'])
-            if source.exists():
-                raise OperationError(500, '重命名数据库更新失败，原路径已被占用；请核对新旧路径，未覆盖任何文件')
-            try:
-                renamed.rename(source)
-            except OSError:
-                raise OperationError(500, '重命名数据库更新失败且文件回滚失败，请核对：' + relative + ' → ' + result['path'])
-        raise
-    return result
+    safe = _safe_name(name)
+    if not source.is_dir() and not safe.lower().endswith('.md'):
+        safe += '.md'
+    destination = source.parent / safe
+    return local_entries.apply(conn, config or {}, md_dir, binding, 'rename', relative,
+                               destination, {}, lambda: rename_entry(md_dir, relative, safe),
+                               confirm or (lambda result: None))
 
 
 def rename_entry(md_dir, relative, name):
