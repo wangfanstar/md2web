@@ -723,6 +723,26 @@
   }
   .view-port .path-row.selected .row-index { background: var(--blue); color: #fff; }
 
+  /* Port Forwarding Path：路径卡片化，拉开行间层次，便于逐条阅读 */
+  .view-port #port-comparison-rows { padding: 10px 0 2px; background: #f4f7fa; }
+  .view-port .path-row {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    margin-bottom: 10px;
+    min-height: 0;
+    overflow: hidden;
+    transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+  }
+  .view-port .path-row:last-child { margin-bottom: 0; }
+  .view-port .path-row:not(.selected):hover { border-color: #b9d3e6; box-shadow: 0 2px 8px rgba(28, 44, 60, .06); }
+  .view-port .path-row.selected {
+    border-color: #8fbdd9;
+    box-shadow: 0 0 0 2px rgba(44, 109, 159, .12);
+  }
+  .view-port .row-label { background: #f8fbfd; }
+  .view-port .path-row.selected .row-label { background: #eef7fc; }
+
 </style>
 </head>
 <body>
