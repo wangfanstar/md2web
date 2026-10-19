@@ -169,3 +169,18 @@ test('sidebar reserves a fixed leading marker so same-level items align', () => 
   assert.match(css, /\.sidebar-nav \.workspace-folder-toggle \{[^}]*margin-right: 4px/);
   assert.match(css, /\.sidebar-nav \.workspace-tree-marker \{[^}]*width: 16px/);
 });
+
+test('copied links keep readable Chinese and leave ASCII escapes alone', () => {
+  const api = loadWorkspace({});
+  assert.equal(
+    api.readableLink('file:///C:/x/html/index_%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.html#/'),
+    'file:///C:/x/html/index_使用说明.html#/'
+  );
+  assert.equal(
+    api.readableLink('http://h/html/index_%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.html'
+      + '#/md/%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E/%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B'),
+    'http://h/html/index_使用说明.html#/md/使用说明/快速开始'
+  );
+  assert.equal(api.readableLink('http://h/a%20b%23c'), 'http://h/a%20b%23c');
+  assert.equal(api.readableLink('http://h/a%E4'), 'http://h/a%E4');
+});

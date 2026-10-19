@@ -317,12 +317,8 @@
       var numbersHidden = document.body.classList.contains('hide-heading-numbers');
       actions.innerHTML = '<button type="button" data-workspace-copy-path title="复制当前页面链接（含 #/ 路由，可直接分享）">复制链接</button><button type="button" data-workspace-export>下载本页</button><button type="button" data-workspace-numbers>' + (numbersHidden ? '显示序号' : '隐藏序号') + '</button>';
       actions.querySelector('[data-workspace-copy-path]').addEventListener('click', function () {
-        // 复制当前链接地址（浏览器地址栏里的完整 URL，含 #/ 路由），方便直接分享
-        var link = window.location.href;
-        if (route && window.location.hash.indexOf('#/' + route) === -1) {
-          link = window.location.origin + window.location.pathname + '#/' + route;
-        }
-        copyText(link, this);
+        // 复制当前链接地址（含 #/ 路由，可直接分享）；中文保持可读，file:// 也能正确拼接
+        copyText(readableLink(shareLink()), this);
       });
       actions.querySelector('[data-workspace-export]').addEventListener('click', function () { if (window.PageExport) { window.PageExport.download(); } });
       actions.querySelector('[data-workspace-numbers]').addEventListener('click', function () { var hidden = document.body.classList.toggle('hide-heading-numbers'); try { localStorage.setItem(STORAGE.numbers, hidden ? '0' : '1'); } catch (_) {} this.textContent = hidden ? '显示序号' : '隐藏序号'; });
@@ -409,6 +405,29 @@
   }
   document.addEventListener('siteauth:change', function () { updateEditLabel(); });
   function escape(value) { return String(value).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
+  // 复制出来的链接保留中文：只解码包含非 ASCII 字符的 %XX 片段，%20 等 ASCII 转义保持不变
+  function readableLink(value) {
+    return String(value || '').replace(/(?:%[0-9A-Fa-f]{2})+/g, function (match) {
+      try {
+        var decoded = decodeURIComponent(match);
+        return /[^\x00-\x7F]/.test(decoded) ? decoded : match;
+      } catch (_) {
+        return match;
+      }
+    });
+  }
+  // 当前页面的分享链接：不依赖 location.origin（file:// 下为 "null"），并补齐 #/ 路由
+  function shareLink() {
+    var href = String(window.location.href || '');
+    var hashAt = href.indexOf('#');
+    var base = hashAt === -1 ? href : href.slice(0, hashAt);
+    var hash = hashAt === -1 ? '' : href.slice(hashAt);
+    var route = currentRoute();
+    if (!route) return href;
+    var encoded = '#/' + route.split('/').map(function (part) { return encodeURIComponent(part); }).join('/');
+    if (hash.indexOf('#/' + route) !== -1 || hash.indexOf(encoded) !== -1) return href;
+    return base + encoded;
+  }
   function copyText(value, button) {
     var done = function () { if (button) { var old = button.textContent; button.textContent = '已复制'; setTimeout(function () { button.textContent = old; }, 1200); } };
     if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(value).then(done, function () { fallback(value, done); }); } else fallback(value, done);
@@ -728,6 +747,7 @@
       isSvnDocumentPage: isSvnDocumentPage,
       isDocumentView: isDocumentView,
       addTreeNumbers: addTreeNumbers,
+      readableLink: readableLink,
       syncDescription: syncDescription
     };
   }
