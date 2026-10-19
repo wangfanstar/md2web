@@ -347,12 +347,17 @@
         radial-gradient(circle at 100% 0, rgba(70, 137, 92, .10), transparent 28rem),
         var(--bg);
     }.view-port button,.view-port input { font: inherit; }.view-port button { color: inherit; }.view-port .page { width: min(1920px, calc(100% - 28px)); margin: 0 auto; padding: 14px 0 24px; }.view-port .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
       display: grid;
       grid-template-columns: minmax(360px, 1fr) auto;
       gap: 22px;
       align-items: end;
       padding: 4px 3px 14px;
       border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, .94);
+      backdrop-filter: blur(14px);
     }.view-port .eyebrow,.view-port .kicker,.view-port .stage-label,.view-port .column-title {
       margin: 0;
       color: var(--muted);
