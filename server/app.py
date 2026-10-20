@@ -660,6 +660,11 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             }
         return metrics
 
+    @app.get('/__site/repositories')
+    def homepage_repositories():
+        from .site_catalog import repository_catalog
+        return jsonify(ok=True, repositories=repository_catalog(docs_root, config))
+
     @app.get("/__folders")
     def list_folders():
         """列出 docs/md 下所有文件夹及其仓库配置（公开只读，供仓库配置页默认展示）。"""

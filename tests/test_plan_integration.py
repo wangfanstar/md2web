@@ -74,6 +74,15 @@ class PlanIntegrationTests(ServerTestBase):
         self.assertEqual(self.client.get('/__auth/login-hint').get_json()['username'],'alice')
         self.assertEqual(self.app.test_client().get('/__auth/login-hint').get_json()['username'],'')
 
+    def test_home_catalog_uses_server_folders_without_login(self):
+        (self.docs / 'md' / 'another').mkdir()
+        response = self.client.get('/__site/repositories')
+        self.assertEqual(response.status_code, 200)
+        items = response.get_json()['repositories']
+        self.assertEqual({item['mount'] for item in items}, {'md/old', 'md/another'})
+        self.assertEqual(next(item for item in items if item['id'] == 'stable')['display_name'], 'Display')
+        self.assertNotIn('credentials', response.get_data(as_text=True))
+
     def test_compare_path_validation_and_private_cache(self):
         with self.conn:
             local_history.record(self.conn,'md/old/a.md','before','current',None)

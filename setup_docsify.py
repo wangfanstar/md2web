@@ -620,6 +620,7 @@ def generate_custom_search_assets():
     (LIB_DIR / "custom-search.css").write_text(CUSTOM_SEARCH_CSS, encoding="utf-8")
     for name in (
         "workspace.js",
+        "home-repositories.js",
         "workspace.css",
         "mermaid-init.js",
         "media-viewer.js",
@@ -1663,6 +1664,12 @@ MASTER_SCRIPT = """
   var repoFilterMode = 'all';
   var modeSelect = document.querySelector('[data-master-mode]');
   var results = document.querySelector('[data-master-results]');
+  window.addEventListener('md2web:repositories', function (event) {
+    repos = event.detail;
+    window.__MD2WEB_REPOS__ = repos;
+    renderRepoMenu();
+    if (input && input.value) search(input.value);
+  });
   function load() {
     if (index) { return Promise.resolve(index); }
     return fetch('html/search-index.json').then(function (r) { return r.json(); }).then(function (data) {
@@ -2103,7 +2110,7 @@ def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.h
     </div>
     <p class="hint">当前搜索范围：<strong>全部仓库</strong>；默认模式：<strong>文档名和全文</strong>，结果按两类分组显示。</p>
     <div class="results" data-master-results></div>
-    {''.join(sections)}
+    <div data-master-repositories>{''.join(sections)}</div>
     <h2>参考文献</h2>
     {''.join(reference_cards)}
     <h2>参考网页</h2>
@@ -2111,13 +2118,14 @@ def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.h
   </div>
   <script>window.__MD2WEB_REPOS__ = {json.dumps(repos, ensure_ascii=False)};</script>
   <script>{MASTER_SCRIPT}</script>
+  <script src="lib/home-repositories.js"></script>
   <script src="lib/auth.js"></script>
   <script src="lib/md2web-feedback.js"></script>
 </body>
 </html>
 """
     index_path = DOCS_DIR / "index.html"
-    index_path.write_text(page, encoding="utf-8")
+    index_path.write_text(version_asset_urls(page), encoding="utf-8")
     print(f"  [生成] index.html（总览：{len(repos)} 个仓库 / {len(groups)} 个分组）")
 
 

@@ -519,6 +519,17 @@ class PreviewHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         rel = urllib.parse.unquote(urllib.parse.urlparse(self.path).path).lstrip("/")
+        if rel == '__site/repositories':
+            from server.site_catalog import repository_catalog
+            from server.config import load_config
+            try:
+                docs = self._directory or Path.cwd()
+                config_path = docs.parent / 'config' / 'server.local.json'
+                config = load_config(config_path, docs, allow_incomplete=True) if config_path.is_file() else {}
+                self._send_json(200, {'ok': True, 'repositories': repository_catalog(docs, config)})
+            except (OSError, ValueError) as error:
+                self._send_json(500, {'ok': False, 'error': str(error)})
+            return
         if rel == "__reference-web/list":
             from setup_docsify import scan_reference_web
             try:

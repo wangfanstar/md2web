@@ -6,7 +6,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>GT文档知识库</title>
-  <link rel="stylesheet" href="lib/auth.css">
+  <link rel="stylesheet" href="lib/auth.css?v=8000d31cec">
   <style>
   :root { color-scheme: light; }
   body { background: #f7f9fb; color: #1f2a37; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 28px 20px 60px; }
@@ -79,7 +79,7 @@
     </div>
     <p class="hint">当前搜索范围：<strong>全部仓库</strong>；默认模式：<strong>文档名和全文</strong>，结果按两类分组显示。</p>
     <div class="results" data-master-results></div>
-    <h2>默认</h2><div class="cards"><a class="card" href="html/index_使用说明.html"><strong>使用说明<span class="badge local">本地文件夹</span></strong><span>目录：md/使用说明</span><span>本地文件夹（不连接 SVN）</span></a></div>
+    <div data-master-repositories><h2>默认</h2><div class="cards"><a class="card" href="html/index_使用说明.html"><strong>使用说明<span class="badge local">本地文件夹</span></strong><span>目录：md/使用说明</span><span>本地文件夹（不连接 SVN）</span></a></div></div>
     <h2>参考文献</h2>
     <a class="card" href="html/reference_library.html"><strong>参考文献库</strong><span>PDF、Word、Excel、PPT 统一管理与预览</span></a>
     <h2>参考网页</h2>
@@ -99,6 +99,12 @@
   var repoFilterMode = 'all';
   var modeSelect = document.querySelector('[data-master-mode]');
   var results = document.querySelector('[data-master-results]');
+  window.addEventListener('md2web:repositories', function (event) {
+    repos = event.detail;
+    window.__MD2WEB_REPOS__ = repos;
+    renderRepoMenu();
+    if (input && input.value) search(input.value);
+  });
   function load() {
     if (index) { return Promise.resolve(index); }
     return fetch('html/search-index.json').then(function (r) { return r.json(); }).then(function (data) {
@@ -282,7 +288,8 @@
   }
   if (modeSelect) { modeSelect.addEventListener('change', function () { search(input && input.value); }); }
 </script>
-  <script src="lib/auth.js"></script>
-  <script src="lib/md2web-feedback.js"></script>
+  <script src="lib/home-repositories.js?v=bdd64bef32"></script>
+  <script src="lib/auth.js?v=c47d2a6966"></script>
+  <script src="lib/md2web-feedback.js?v=d905adefde"></script>
 </body>
 </html>
