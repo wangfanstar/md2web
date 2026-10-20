@@ -1064,6 +1064,13 @@ body.hide-page-toc .docs-page-toc-restore {
   min-width: 0;
 }
 
+/* 文档一级标题：# 也进入本文目录，作为根节点 */
+.docs-page-toc-link.level-1 {
+  color: #2c3e50;
+  font-weight: 700;
+  margin-top: 2px;
+}
+
 .docs-page-toc-link.is-active {
   background: #eef4fd;
   border-radius: 4px;

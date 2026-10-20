@@ -1696,6 +1696,21 @@ class MultiRepoTests(TempDirTestCase):
         self.assertIn("routeSidebar: true", html)
         self.assertIn("folderView: true", html)
 
+    def test_page_toc_includes_level_one_heading(self):
+        """一级标题 # 也进入本文目录（minLevel=1），并有一级样式。"""
+        lib = self.docs / "lib"
+        lib.mkdir(parents=True, exist_ok=True)
+        for name in ("custom-search.js", "workspace.js", "settings.js"):
+            (lib / name).write_text("// " + name + "\n", encoding="utf-8")
+        page = self.docs / "page.html"
+        self.module.generate_index_html("测试站", path=page, page_name="page.html",
+                                        route_sidebar=True, repos=self.REPOS, home_link="index.html")
+        html = page.read_text(encoding="utf-8")
+        self.assertIn("minLevel: 1", html)
+        self.assertIn("maxLevel: 4", html)
+        css = (ROOT / "web" / "custom-search.css").read_text(encoding="utf-8")
+        self.assertIn(".docs-page-toc-link.level-1", css)
+
 
 class FolderSourceBuildTests(TempDirTestCase):
     """未配置文件夹的来源探测：软链接/失效链接/普通目录与循环安全。"""

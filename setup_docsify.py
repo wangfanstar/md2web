@@ -621,6 +621,7 @@ def generate_custom_search_assets():
     for name in (
         "workspace.js",
         "home-repositories.js",
+        "config-draft.js", "config-layout.js", "md2web-config.css",
         "workspace.css",
         "mermaid-init.js",
         "media-viewer.js",
@@ -1551,7 +1552,7 @@ def generate_index_html(title=DEFAULT_TITLE, path=None, page_name="index.html", 
       }},
       customToc: {{
         enabled: true,
-        minLevel: 2,
+        minLevel: 1,
         maxLevel: 4,
         title: '本文目录',
       }},
