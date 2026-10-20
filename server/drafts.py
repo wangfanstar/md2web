@@ -213,22 +213,24 @@ def diff_documents(conn, user_id, md_dir, document_path, from_ref, to_ref):
     }
 
 
-def list_history(conn, user_id, md_dir, document_path, limit=HISTORY_LIMIT):
+def list_history(conn, user_id, md_dir, document_path, limit=HISTORY_LIMIT, cursor=None):
     rel = documents.normalize_md_path(document_path)
     rows = conn.execute(
         "SELECT r.id, r.after_hash, r.before_hash, r.created_at, LENGTH(r.content) AS size, r.base_svn_revision,"
-        " d.version, d.updated_at"
+        " d.version, d.updated_at, u.svn_username AS author"
         " FROM revisions r JOIN drafts d ON d.id = r.draft_id"
-        " WHERE d.user_id = ? AND d.document_path = ? ORDER BY r.id DESC LIMIT ?",
-        (user_id, rel, int(limit)),
+        " JOIN users u ON u.id=r.actor_id WHERE d.user_id = ? AND d.document_path = ? AND r.id < ? ORDER BY r.id DESC LIMIT ?",
+        (user_id, rel, int(cursor) if cursor else 9223372036854775807, int(limit)),
     ).fetchall()
     published = published_text(md_dir, rel)
     return {
         "path": rel,
+        "nextCursor": rows[-1]['id'] if len(rows) == int(limit) else None,
         "publishedHash": documents.text_hash(published) if published is not None else None,
         "revisions": [
             {
                 "id": row["id"],
+                "author": row['author'],
                 "hash": row["after_hash"],
                 "beforeHash": row["before_hash"],
                 "createdAt": row["created_at"],

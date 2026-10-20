@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 DEFAULT_NAME = 'md2web_config.json'
-FIELDS = ('auth', 'sync', 'repositories', 'folderGroups', 'siteBackup', 'ai', 'credentials')
+FIELDS = ('auth', 'sync', 'repositories', 'folderGroups', 'siteBackup', 'ai', 'credentials',
+          'authorization', 'cache', 'historyCompare', 'pathAliases', 'entryAliases', 'configSchemaVersion')
 # 配置页固定可选的三套配置：主配置、默认配置、备份配置
 PRESETS = (
     ('md2web_config.json', '主配置'),
@@ -162,11 +163,19 @@ def validate_data(data):
     from .config import ConfigError
     if not isinstance(data, dict):
         raise ConfigError('方案必须是 JSON 对象')
+    data = dict(data)
+    for key in ('authorization', 'cache', 'historyCompare', 'pathAliases', 'entryAliases'):
+        data.setdefault(key, {})
+    data.setdefault('configSchemaVersion', 2)
     if set(data) - set(FIELDS) - {'schemaVersion'} or data.get('schemaVersion', 1) != 1:
         raise ConfigError('方案格式无效；只能包含仓库、认证、分组、同步、备份和 AI 设置，不能导入服务密钥或数据库位置')
     if set(FIELDS) - set(data):
         raise ConfigError('方案内容不完整，请从配置页「另存为新方案」创建')
     for key in FIELDS:
+        if key == 'configSchemaVersion':
+            if data[key] != 2:
+                raise ConfigError('不支持的配置版本')
+            continue
         if key == 'credentials' and data[key] is None:
             continue  # 升级旧方案时允许从本机加密数据库迁移。
         if not isinstance(data[key], list if key == 'repositories' else dict):

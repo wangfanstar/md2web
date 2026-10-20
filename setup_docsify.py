@@ -629,6 +629,7 @@ def generate_custom_search_assets():
         "plot-playground.html",
         "text-find.js",
         "md-editor.js",
+        "diff-view.js", "diff-view.css", "diff-worker.js",
         "math-init.js",
         "prism-init.js",
         "ai-retrieval.js",
@@ -683,6 +684,8 @@ def load_repositories():
                 continue
             repos.append({
                 "id": repo_id,
+                "display_name": str(item.get('displayName') or repo_id),
+                "entry_slug": str(item.get('entrySlug') or repo_id),
                 "mount": mount,
                 "url": str(item.get("url") or "").strip(),
                 "source_mode": str(item.get("sourceMode", item.get("source_mode", "svn")) or "svn").strip().lower(),
@@ -1571,6 +1574,9 @@ def generate_index_html(title=DEFAULT_TITLE, path=None, page_name="index.html", 
   <script src="lib/katex/auto-render.min.js"></script>
   <script src="lib/math-init.js"></script>
   <script src="lib/custom-search.js"></script>
+  <script src="lib/navigation-data.js"></script>
+  <link rel="stylesheet" href="lib/diff-view.css">
+  <script src="lib/diff-view.js"></script>
   <script src="lib/workspace.js"></script>
   <script src="lib/mermaid.min.js"></script>
   <script src="lib/mermaid-init.js"></script>
@@ -2016,7 +2022,7 @@ def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.h
                 note = "本地文件夹（不连接 SVN）"
             cards.append(
                 '<a class="card" href="' + HTML_PREFIX + repo_page_name(repo["id"]) + '">'
-                + '<strong>' + html.escape(str(repo["id"])) + badges + '</strong>'
+                + '<strong>' + html.escape(str(repo.get('display_name') or repo["id"])) + badges + '</strong>'
                 + '<span>目录：' + html.escape(str(repo["mount"])) + '</span>'
                 + '<span>' + html.escape(str(note)) + '</span>'
                 + '</a>'
@@ -2145,6 +2151,57 @@ def generate_reference_pages():
             page.write_text('<!doctype html><html><head><meta charset="utf-8"><base href="../"><meta http-equiv="refresh" content="0;url=%s"></head><body>正在打开参考文献…</body></html>' % href, encoding="utf-8")
 
 
+def navigation_data(pages, repos):
+    by_mount = {repo['mount']: repo for repo in repos}
+    folders = {}
+    for relative, page in pages.items():
+        mount = 'md/' + relative
+        repo = by_mount.get(mount, {})
+        folders[mount] = {'href': 'html/' + page,
+                          'label': repo.get('display_name') or relative.split('/')[-1],
+                          'repositoryId': repo.get('id', '')}
+    return {'folders': folders}
+
+
+def publish_navigation(pages, repos):
+    payload = navigation_data(pages, repos)
+    for path in config_candidates():
+        if path.is_file():
+            payload['pathAliases'] = json.loads(path.read_text(encoding='utf-8')).get('pathAliases', {})
+            break
+    data = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    (HTML_DIR / 'navigation-map.json').write_text(data, encoding='utf-8')
+    (LIB_DIR / 'navigation-data.js').write_text(
+        'window.MD2WEB_NAVIGATION=' + data.replace('</', '<\\/') + ';\n'
+        '(function(){var aliases=window.MD2WEB_NAVIGATION.pathAliases||{};'
+        'var hash=location.hash;try{hash=decodeURIComponent(hash);}catch(e){}'
+        'Object.keys(aliases).sort(function(a,b){return b.length-a.length;}).some(function(old){'
+        'if(hash.indexOf("#/"+old+"/")===0){location.replace(location.pathname+location.search+"#/"+aliases[old]+hash.slice(old.length+2));return true;}'
+        'return false;});})();', encoding='utf-8')
+
+
+def publish_site_version(root):
+    import hashlib
+    import os
+    def digest(paths):
+        value = hashlib.sha256()
+        for path in sorted(paths):
+            value.update(str(path.relative_to(root)).encode('utf-8'))
+            value.update(path.read_bytes())
+        return value.hexdigest()[:20]
+    html_dir = root / 'html'
+    data = {'searchVersion': digest(html_dir.glob('search-index*.json')),
+            'navigationVersion': digest(list(html_dir.glob('_sidebar*.md')) +
+                                        list(html_dir.glob('navigation-map.json'))),
+            'contentVersion': digest((root / 'md').rglob('*.md'))}
+    data['buildId'] = hashlib.sha256(json.dumps(data, sort_keys=True).encode('utf-8')).hexdigest()[:20]
+    target = html_dir / 'site-version.json'
+    temporary = target.with_suffix('.tmp')
+    temporary.write_text(json.dumps(data, sort_keys=True), encoding='utf-8')
+    os.replace(str(temporary), str(target))
+    return data
+
+
 def main(argv=None):
     global CONFIG_PATH
     args = parse_args(argv)
@@ -2190,6 +2247,8 @@ def main(argv=None):
                                       homepage=(HTML_PREFIX + repo_home_name(repo["id"])) if not repo_files else None,
                                       contents=contents,
                                       extra_pages=folder_extras_for(md_dirs, pages, sub))
+            publish_navigation(pages, repos)
+            publish_site_version(DOCS_DIR)
             print("\n=== 索引刷新完成 ===")
             return
 
@@ -2205,6 +2264,7 @@ def main(argv=None):
         md_dirs = scan_directories(MD_DIR)
         pages = folder_page_map(md_dirs, repos)
         HTML_DIR.mkdir(parents=True, exist_ok=True)
+        publish_navigation(pages, repos)
         generate_sidebar(md_files, path=HTML_DIR / "_sidebar.md", link_first_level=True,
                          dir_paths=md_dirs, folder_pages=pages)
         generate_readme(md_files, args.title, repos=repos, path=HTML_DIR / "README.md")
@@ -2253,7 +2313,7 @@ def main(argv=None):
             # 统一使用全站索引：仓库入口页的「全部文档」范围也能搜到其他仓库的内容
             search_index = "search-index.json"
             offline_data = f"lib/offline-data_{repo['id']}.js"
-            generate_sidebar(repo_files, path=HTML_DIR / sidebar, heading=repo["id"],
+            generate_sidebar(repo_files, path=HTML_DIR / sidebar, heading=repo.get('display_name') or repo["id"],
                              top_link=HTML_PREFIX + page,
                              dir_paths=dirs_for_mount(md_dirs, repo["mount"]),
                              folder_pages=pages)
@@ -2304,6 +2364,7 @@ def main(argv=None):
         folders = ['md/' + path for path in scan_directories(MD_DIR)]
         (LIB_DIR / 'source-folders.json').write_text(json.dumps({'folders': folders}, ensure_ascii=False), encoding='utf-8')
 
+        publish_site_version(DOCS_DIR)
         print("\n=== 构建完成 ===")
         print("\n启动本地预览: python serve.py")
         print("本机打开: http://localhost:8882")

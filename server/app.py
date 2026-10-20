@@ -25,6 +25,7 @@ from .paths import is_blocked_static_path
 from . import repositories
 from . import config_profiles
 from .content_lock import serialized
+from . import policy
 
 
 def server_documents_error():
@@ -40,6 +41,10 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
     auth_service.enable_config_profiles(docs_root)
     app = Flask(__name__, static_folder=None)
     app.config["MAX_CONTENT_LENGTH"] = MAX_BODY
+    from .cache import MetadataCache
+    cache_settings = config.get('cache', {})
+    folder_cache = MetadataCache(cache_settings.get('maxEntries', 256), cache_settings.get('maxBytes', 33554432),
+                                 cache_settings.get('metadataTtlSeconds', 60))
     if hasattr(app, "json"):
         app.json.ensure_ascii = False
         app.json.sort_keys = False
@@ -59,11 +64,11 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         response.status_code = status
         return response
 
-    def set_session_cookie(response, token):
+    def set_session_cookie(response, token, remember=False):
         response.set_cookie(
             COOKIE_NAME,
             token,
-            max_age=int(float(config["auth"]["session_hours"]) * 3600),
+            max_age=int(config['auth'].get('rememberSessionDays', 30) * 86400 if remember else float(config["auth"]["session_hours"]) * 3600),
             httponly=True,
             samesite="Lax",
             secure=bool(config["server"].get("secure_cookies")),
@@ -96,10 +101,18 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
 
     @app.after_request
     def security_headers(response):
+        if request.method in ('POST', 'PUT', 'DELETE') and response.status_code < 400:
+            folder_cache.clear()
+            document_meta_cache.clear()
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["Referrer-Policy"] = "same-origin"
-        response.headers["Cache-Control"] = response.headers.get("Cache-Control", "no-store")
+        response.headers["Cache-Control"] = 'private, no-store' if request.path.startswith('/__') else response.headers.get("Cache-Control", "no-cache")
+        if not request.path.startswith('/__') and response.status_code in (200, 304):
+            from .cache import static_policy
+            candidate = (docs_root / request.path.lstrip('/')).resolve()
+            if docs_root in candidate.parents and not is_blocked_static_path(request.path.lstrip('/')):
+                response.headers['Cache-Control'] = static_policy(candidate, request.args.get('v'))
         return response
 
     # ---- 错误处理（不泄漏堆栈/秘密） ----
@@ -143,7 +156,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             "features": FEATURES,
             "site": site,
             "serverManaged": True,
-            "svnCredential": bool(session) and auth_service.has_credential(session["sessionId"]),
+            "svnCredential": bool(session) and bool(auth_service.has_credential(session["sessionId"]) or auth_service.stored_credential(session['user'])),
         })
 
     @app.post("/__auth/login")
@@ -158,6 +171,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 payload.get("password"),
                 request.remote_addr or "",
                 request.headers.get("User-Agent", ""),
+                remember=payload.get('rememberSession') is True,
             )
         else:
             result = auth_service.login(
@@ -165,9 +179,58 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 payload.get("password"),
                 request.remote_addr or "",
                 request.headers.get("User-Agent", ""),
+                remember=payload.get('rememberSession') is True,
             )
         response = jsonify({"ok": True, "user": result["user"], "csrfToken": result["csrfToken"]})
-        return set_session_cookie(response, result["token"])
+        old_token = request.cookies.get(COOKIE_NAME)
+        if old_token:
+            auth_service.logout(old_token)
+        if payload.get('rememberUsername') is True and config['auth'].get('rememberUsername', True):
+            import secrets
+            from .auth import _digest
+            device = secrets.token_urlsafe(32)
+            source = auth_service.resolve(result['token'], touch=False)['user']['authSourceId']
+            with auth_service._db_lock, conn:
+                conn.execute('DELETE FROM device_hints WHERE expires_at < ? OR token_hash = ?',
+                             (auth_service._stamp(), _digest(request.cookies.get('md2web_device', ''))))
+                expiry = (auth_service._moment() + timedelta(days=config['auth'].get('deviceHintDays', 30))).strftime('%Y-%m-%dT%H:%M:%SZ')
+                conn.execute('INSERT INTO device_hints VALUES (?, ?, ?, ?, ?, ?)',
+                             (_digest(device), source, result['user']['username'], request.remote_addr,
+                              auth_service._stamp(), expiry))
+            response.set_cookie('md2web_device', device, max_age=int(config['auth'].get('deviceHintDays', 30) * 86400),
+                                httponly=True, samesite='Lax', secure=config['server'].get('secure_cookies', False))
+        else:
+            response.delete_cookie('md2web_device')
+        return set_session_cookie(response, result["token"], payload.get('rememberSession') is True)
+
+    @app.get('/__auth/login-hint')
+    def login_hint():
+        from .auth import _digest
+        with auth_service._db_lock:
+            row = conn.execute('SELECT * FROM device_hints WHERE token_hash = ? AND expires_at > ?',
+                               (_digest(request.cookies.get('md2web_device', '')), auth_service._stamp())).fetchone()
+        valid = row and row['auth_source_id'] in ('local-admin', auth_service.auth_source_id)
+        return jsonify(ok=True, username=row['username'] if valid else '')
+
+    @app.post('/__auth/forget-device')
+    def forget_device():
+        rejected = require_same_origin()
+        if rejected:
+            return rejected
+        session = current_session()
+        if session:
+            rejected = require_csrf(session)
+            if rejected:
+                return rejected
+        from .auth import _digest
+        with auth_service._db_lock, conn:
+            conn.execute('DELETE FROM device_hints WHERE token_hash = ?',
+                         (_digest(request.cookies.get('md2web_device', '')),))
+        auth_service.logout(request.cookies.get(COOKIE_NAME, ''))
+        response = jsonify(ok=True)
+        response.delete_cookie('md2web_device')
+        response.delete_cookie(COOKIE_NAME)
+        return response
 
     @app.post("/__auth/logout")
     def logout():
@@ -196,7 +259,72 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         """配置视图：剥离 security.secretKey（网页端不应接触本机加密密钥）。"""
         data = config_to_json(config)
         data.pop("security", None)
+        data['expectedConfigVersion'] = policy.version(config_to_json(config))
         return data
+
+    @app.get('/__admin/users')
+    def list_users():
+        _, rejected = require_admin()
+        if rejected:
+            return rejected
+        try:
+            limit = max(1, min(100, int(request.args.get('limit', 50))))
+            cursor = max(0, int(request.args.get('cursor', 0)))
+        except ValueError:
+            return json_error(400, 'invalid_request', '分页参数无效')
+        with auth_service._db_lock:
+            rows = conn.execute('SELECT * FROM users WHERE id > ? AND svn_username LIKE ? ORDER BY id LIMIT ?',
+                                (cursor, '%' + request.args.get('query', '')[:100] + '%', limit)).fetchall()
+            result = []
+            for row in rows:
+                role, enabled = policy.effective(row, config)
+                count = conn.execute('SELECT COUNT(*) FROM sessions WHERE user_id=? AND revoked_at IS NULL AND expires_at > ?',
+                                     (row['id'], auth_service._stamp())).fetchone()[0]
+                result.append(dict(id=row['id'], authSourceId=row['auth_source_id'], username=row['svn_username'],
+                                   displayName=row['display_name'], role=role, enabled=enabled,
+                                   lastLoginAt=row['last_login_at'], sessionCount=count))
+        return jsonify(ok=True, users=result, nextCursor=rows[-1]['id'] if len(rows) == limit else None,
+                       expectedConfigVersion=policy.version(config_to_json(config)))
+
+    @app.post('/__admin/users/permission')
+    @app.post('/__admin/users/revoke-sessions')
+    @serialized
+    def manage_user():
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        rejected = require_csrf(session)
+        if rejected:
+            return rejected
+        payload = request.get_json(silent=True) or {}
+        with auth_service._db_lock:
+            user = database.find_user(conn, payload.get('authSourceId'), payload.get('username'))
+        if user is None:
+            return json_error(404, 'not_found', '用户不存在')
+        if request.path.endswith('/permission'):
+            if payload.get('expectedConfigVersion') != policy.version(config_to_json(config)):
+                return json_error(409, 'config_conflict', '配置已变化，请刷新后重试')
+            data = config_to_json(config)
+            before = policy.effective(user, config)
+            users = data['authorization'].get('users', [])
+            data['authorization']['users'] = [item for item in users if
+                (item['authSourceId'], item['username']) != (user['auth_source_id'], user['svn_username'])]
+            data['authorization']['users'].append(dict(authSourceId=user['auth_source_id'], username=user['svn_username'],
+                                                       role=payload.get('role'), enabled=payload.get('enabled')))
+            loaded = save_config(config['path'], data, docs_root, create_mounts=False)
+            config.clear()
+            config.update(loaded)
+            auth_service.on_config_changed()
+            outcome = '{} -> {}'.format(before, policy.effective(user, config))
+        else:
+            outcome = 'revoke'
+        with auth_service._db_lock, conn:
+            if outcome == 'revoke' or not policy.effective(user, config)[1]:
+                conn.execute('UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL',
+                             (auth_service._stamp(), user['id']))
+            database.audit(conn, 'user_permission', outcome, actor_id=session['user']['id'],
+                           resource=user['auth_source_id'] + ':' + user['svn_username'], client_ip=request.remote_addr)
+        return jsonify(ok=True, expectedConfigVersion=policy.version(config_to_json(config)))
 
     @app.get('/__config/profiles')
     def read_profiles():
@@ -328,6 +456,12 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         if csrf_error:
             return csrf_error
         payload = request.get_json(silent=True)
+        if isinstance(payload, dict):
+            old_mounts = {r['id']: r['mount'] for r in config['repositories']}
+            if any(r.get('id') in old_mounts and r.get('mount') != old_mounts[r['id']] for r in payload.get('repositories', [])):
+                return json_error(409, 'rename_required', '修改已有挂载目录请使用“重命名文件夹”')
+        if isinstance(payload, dict) and payload.get('expectedConfigVersion') and payload['expectedConfigVersion'] != policy.version(config_to_json(config)):
+            return json_error(409, 'config_conflict', '配置已变化，请重新读取后保存')
         if isinstance(payload, dict) and payload.get('profileName', config.get('profile_name')) != config.get('profile_name'):
             return json_error(409, 'profile_changed', '默认配置方案已变化，请重新读取配置后再保存')
         try:
@@ -343,6 +477,25 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             except Exception:
                 pass
         return jsonify({"ok": True, "config": public_config_json(), "authConfigured": bool(config["auth"]["url"])})
+
+    @app.post('/__admin/repository-rename')
+    @serialized
+    def rename_repository():
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        rejected = require_csrf(session)
+        if rejected:
+            return rejected
+        from .repository_rename import rename
+        try:
+            result = rename(config, conn, auth_service._db_lock, docs_root, request.get_json(silent=True) or {})
+        except operations.OperationError as error:
+            return json_error(error.status, 'rename_failed', str(error))
+        auth_service.on_config_changed()
+        document_meta_cache.clear()
+        rebuilt = rebuild_repository_pages()
+        return jsonify(ok=True, result=result, rebuilt=rebuilt, config=public_config_json())
 
     @app.post("/__admin/verify-account")
     def verify_account_endpoint():
@@ -540,13 +693,16 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         """文件夹信息（公开只读）：当前文件夹下的文档与子文件夹列表。"""
         path = request.args.get("path") or "md"
         try:
-            listing = operations.folder_listing(md_dir(), path, recursive=request.args.get('recursive') == '1',
-                                                config=config)
+            recursive = request.args.get('recursive') == '1'
+            compute = lambda: operations.folder_listing(md_dir(), path, recursive=recursive, config=config)
+            listing = (folder_cache.get_or_compute((path, recursive), compute)
+                       if config.get('cache', {}).get('enabled', True) else compute())
         except operations.OperationError as error:
             return json_error(error.status, "folder_error", error.message)
         return jsonify({"ok": True, "folder": listing})
 
-    document_meta_cache = {}
+    document_meta_cache = MetadataCache(cache_settings.get('maxEntries', 256), cache_settings.get('maxBytes', 33554432),
+                                       cache_settings.get('metadataTtlSeconds', 60))
 
     def file_updated_at(path):
         try:
@@ -556,11 +712,14 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         return datetime.fromtimestamp(stamp, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def svn_document_meta(binding, path, target):
+        signature = target.stat()
+        key = (binding['id'], path, signature.st_mtime, signature.st_size)
+        return document_meta_cache.get_or_compute(key, lambda: compute_svn_document_meta(binding, path, target))
+
+    def compute_svn_document_meta(binding, path, target):
         """SVN 库文档的最后提交时间：优先网页提交记录，其次 svn log（带 10 分钟缓存）。"""
-        cached = document_meta_cache.get(path)
-        if cached and cached[0] > time.time():
-            return cached[1]
-        record = database.document_last_update(conn, path)
+        with auth_service._db_lock:
+            record = database.document_last_update(conn, path)
         if record is not None:
             meta = {"path": path, "updatedAt": record.get("lastAt"), "source": "svn",
                     "revision": record.get("lastRevision")}
@@ -583,7 +742,6 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             if not meta["updatedAt"]:
                 meta["updatedAt"] = file_updated_at(target)
                 meta["source"] = "file"
-        document_meta_cache[path] = (time.time() + 600, meta)
         return meta
 
     @app.get("/__doc-meta")
@@ -1300,6 +1458,60 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         binding = server_config.match_repository(config, path)
         return path if not binding or binding.get('source_mode') == 'local' else None
 
+    @app.get('/__md/compare')
+    def compare_versions():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        from . import local_history
+        from .svn import SvnError
+        try:
+            path = server_documents.normalize_md_path(request.args.get('path', ''))
+            binding = server_config.match_repository(config, path)
+            def resolve(ref):
+                if ref == 'published':
+                    text = drafts.published_text(md_dir(), path)
+                    if text is None:
+                        raise drafts.DraftError(404, '文档不存在')
+                    result = {'content': text}
+                elif ref.startswith('local:'):
+                    if local_history_path(path) is None:
+                        raise drafts.DraftError(404, '不是本地文档')
+                    with auth_service._db_lock:
+                        result = local_history.get_revision(conn, path, ref)
+                elif ref.startswith('draft:'):
+                    with auth_service._db_lock:
+                        row = conn.execute('SELECT r.*, u.svn_username AS author FROM revisions r JOIN drafts d ON d.id=r.draft_id JOIN users u ON u.id=r.actor_id WHERE r.id=? AND d.user_id=? AND d.document_path=?',
+                                           (int(ref[6:]), session['user']['id'], path)).fetchone()
+                    if row is None:
+                        raise drafts.DraftError(404, '版本不存在或无权访问')
+                    result = dict(content=row['content'], createdAt=row['created_at'], author=row['author'])
+                elif ref.startswith('svn:r') and ref[5:].isdigit() and int(ref[5:]) > 0:
+                    if not binding or binding.get('source_mode', 'svn') != 'svn':
+                        raise drafts.DraftError(400, '不是 SVN 文档')
+                    from urllib.parse import quote
+                    relative = path[len(binding['mount']):].lstrip('/')
+                    url = binding['url'].rstrip('/') + '/' + quote(relative)
+                    credential = credential_of(session) or (None, None)
+                    directory = tempfile.mkdtemp(prefix='md2web-compare-')
+                    try:
+                        text = auth_service.svn.cat(url, revision=int(ref[5:]), config_dir=directory,
+                                                   username=credential[0], password=credential[1])
+                    finally:
+                        shutil.rmtree(directory, ignore_errors=True)
+                    result = {'content': text}
+                else:
+                    raise drafts.DraftError(400, '无效的版本引用')
+                result.update(ref=ref, label=ref, hash=server_documents.text_hash(result['content']),
+                              size=len(result['content'].encode('utf-8')))
+                return result
+            return jsonify(ok=True, left=resolve(request.args.get('left', 'published')),
+                           right=resolve(request.args.get('right', 'published')), options=config.get('historyCompare', {}))
+        except (drafts.DraftError, MdSaveError) as error:
+            return json_error(error.status, 'compare_failed', str(error))
+        except (ValueError, SvnError) as error:
+            return json_error(400, 'compare_failed', str(error))
+
     @app.get("/__md/revision")
     def read_revision():
         session, rejected = require_session()
@@ -1340,13 +1552,17 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             from . import local_history
             path = local_history_path(request.args.get('path') or '')
             with auth_service._db_lock:
-                history = (local_history.list_history(conn, md_dir(), path) if path else
-                           drafts.list_history(conn, session['user']['id'], md_dir(), request.args.get('path') or ''))
+                limit = min(200, max(1, int(request.args.get('limit', 50))))
+                cursor = int(request.args['cursor']) if request.args.get('cursor') else None
+                history = (local_history.list_history(conn, md_dir(), path, cursor=cursor, limit=limit) if path else
+                           drafts.list_history(conn, session['user']['id'], md_dir(), request.args.get('path') or '', limit=limit, cursor=cursor))
                 # 兼容旧客户端对未绑定文档显式保存的个人草稿；新版本地编辑器明确请求 mode=local。
                 if path and not history['revisions'] and request.args.get('mode') != 'local':
                     history = drafts.list_history(conn, session['user']['id'], md_dir(), path)
         except server_documents_error() as error:
             return json_error(error.status, "invalid_path", error.message)
+        except ValueError:
+            return json_error(400, 'invalid_request', '分页参数无效')
         return jsonify({"ok": True, "history": history})
 
     @app.get("/__md/diff")

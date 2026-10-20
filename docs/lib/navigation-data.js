@@ -1,0 +1,2 @@
+window.MD2WEB_NAVIGATION={"folders": {"md/使用说明": {"href": "html/index_使用说明.html", "label": "使用说明", "repositoryId": "使用说明"}}, "pathAliases": {}};
+(function(){var aliases=window.MD2WEB_NAVIGATION.pathAliases||{};var hash=location.hash;try{hash=decodeURIComponent(hash);}catch(e){}Object.keys(aliases).sort(function(a,b){return b.length-a.length;}).some(function(old){if(hash.indexOf("#/"+old+"/")===0){location.replace(location.pathname+location.search+"#/"+aliases[old]+hash.slice(old.length+2));return true;}return false;});})();

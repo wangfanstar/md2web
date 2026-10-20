@@ -17,6 +17,7 @@ from . import database, documents, operations, passwords
 from .secrets import decrypt, encrypt
 from .svn import SvnError
 from .content_lock import serialized
+from . import policy
 
 RATE_LIMIT_MAX = 5
 RATE_LIMIT_WINDOW = 300.0
@@ -104,7 +105,7 @@ class AuthService:
             self._credentials = {}
         with self._db_lock, self.conn:
             self.conn.execute(
-                "UPDATE sessions SET revoked_at = ? WHERE revoked_at IS NULL",
+                "UPDATE sessions SET revoked_at = ? WHERE revoked_at IS NULL AND persistent = 0",
                 (self._stamp(),),
             )
             database.audit(self.conn, "session_reset", "ok", resource="startup")
@@ -137,10 +138,12 @@ class AuthService:
 
     # ---- 登录/退出 ----
 
-    def _insert_session(self, user_id, moment, user_agent):
+    def _insert_session(self, user_id, moment, user_agent, remember=False):
         token = secrets.token_urlsafe(32)
         csrf_token = secrets.token_urlsafe(24)
         expires_at = moment + timedelta(hours=float(self.config["auth"]["session_hours"]))
+        if remember:
+            expires_at = moment + timedelta(days=self.config['auth'].get('rememberSessionDays', 30))
         self.conn.execute(
             "INSERT INTO sessions (token_hash, user_id, csrf_token, created_at, last_seen_at,"
             " expires_at, process_epoch, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -155,6 +158,8 @@ class AuthService:
                 str(user_agent or "")[:200],
             ),
         )
+        self.conn.execute('UPDATE sessions SET persistent = ? WHERE token_hash = ?',
+                          (int(bool(remember)), _digest(token)))
         return token, csrf_token, expires_at
 
     def configured(self):
@@ -226,7 +231,7 @@ class AuthService:
         return {"username": username, "uuid": (info or {}).get("uuid", ""),
                 "message": "账号验证通过：用户名与密码正确"}
 
-    def login_admin(self, username, password, client_ip, user_agent=""):
+    def login_admin(self, username, password, client_ip, user_agent="", remember=False):
         username = str(username or "").strip()
         if not username or password is None or password == "":
             raise AuthError("invalid_request")
@@ -247,7 +252,7 @@ class AuthService:
         moment = self._moment()
         with self._db_lock, self.conn:
             self.conn.execute("UPDATE users SET last_login_at = ? WHERE id = ?", (_iso(moment), row["id"]))
-            token, csrf_token, expires_at = self._insert_session(row["id"], moment, user_agent)
+            token, csrf_token, expires_at = self._insert_session(row["id"], moment, user_agent, remember)
             database.audit(self.conn, "admin_login", "ok", actor_id=row["id"], resource=username, client_ip=client_ip)
         return {
             "token": token,
@@ -262,7 +267,7 @@ class AuthService:
             raise AuthError("invalid_request", "新密码至少 5 位")
         with self._db_lock:
             row = self.conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-        if row is None or row["role"] != "admin":
+        if row is None or row['auth_source_id'] != database.LOCAL_ADMIN_SOURCE:
             raise AuthError("forbidden")
         if not passwords.verify_password(current, row["password_hash"]):
             raise AuthError("auth_failed", "当前密码不正确")
@@ -270,7 +275,7 @@ class AuthService:
             database.set_admin_password(self.conn, user_id, new_password)
         return True
 
-    def login(self, username, password, client_ip, user_agent=""):
+    def login(self, username, password, client_ip, user_agent="", remember=False):
         username = str(username or "").strip()
         if not username or password is None or password == "":
             raise AuthError("invalid_request")
@@ -278,7 +283,7 @@ class AuthService:
         with self._db_lock:
             admin_row = database.find_user(self.conn, database.LOCAL_ADMIN_SOURCE, username)
         if admin_row is not None:
-            return self.login_admin(username, password, client_ip, user_agent)
+            return self.login_admin(username, password, client_ip, user_agent, remember)
         if not self.configured():
             raise AuthError("not_configured")
         key = self._rate_key(client_ip, username)
@@ -296,7 +301,7 @@ class AuthService:
                 "SELECT * FROM users WHERE auth_source_id = ? AND svn_username = ?",
                 (self.auth_source_id, username),
             ).fetchone()
-            if row is not None and row["disabled"]:
+            if row is not None and not policy.effective(row, self.config)[1]:
                 database.audit(self.conn, "login", "failed:disabled", actor_id=row["id"], resource=username, client_ip=client_ip)
                 raise AuthError("disabled")
             if row is None:
@@ -312,7 +317,7 @@ class AuthService:
                     "UPDATE users SET last_login_at = ? WHERE id = ?",
                     (_iso(moment), user_id),
                 )
-            token, csrf_token, expires_at = self._insert_session(user_id, moment, user_agent)
+            token, csrf_token, expires_at = self._insert_session(user_id, moment, user_agent, remember)
             self._store_credential_locked(username, password)
             database.audit(self.conn, "login", "ok", actor_id=user_id, resource=username, client_ip=client_ip)
             session_row = self.conn.execute(
@@ -324,7 +329,7 @@ class AuthService:
         return {
             "token": token,
             "csrfToken": csrf_token,
-            "user": {"id": user_id, "username": username, "displayName": username, "role": "user"},
+            "user": self.resolve(token, touch=False)['user'],
             "expiresAt": _iso(expires_at),
         }
 
@@ -340,12 +345,14 @@ class AuthService:
         if row is None:
             return None
         now = self._moment()
-        if row["process_epoch"] != self.process_epoch:
+        if not row['persistent'] and row["process_epoch"] != self.process_epoch:
             return None
         if now >= _parse(row["expires_at"]):
             self._revoke(row["token_hash"], "expired")
             return None
         idle_seconds = float(self.config["auth"]["idle_minutes"]) * 60
+        if row['persistent']:
+            idle_seconds = self.config['auth'].get('rememberIdleDays', 7) * 86400
         if (now - _parse(row["last_seen_at"])).total_seconds() > idle_seconds:
             self._revoke(row["token_hash"], "idle")
             return None
@@ -353,7 +360,7 @@ class AuthService:
             user = self.conn.execute(
                 "SELECT * FROM users WHERE id = ?", (row["user_id"],)
             ).fetchone()
-        if user is None or user["disabled"]:
+        if user is None or not policy.effective(user, self.config)[1]:
             self._revoke(row["token_hash"], "disabled")
             return None
         if user["auth_source_id"] != database.LOCAL_ADMIN_SOURCE and user["auth_source_id"] != self.auth_source_id:
@@ -368,7 +375,8 @@ class AuthService:
                 "id": user["id"],
                 "username": user["svn_username"],
                 "displayName": user["display_name"] or user["svn_username"],
-                "role": user["role"] or "user",
+                "role": policy.effective(user, self.config)[0],
+                "authSourceId": user['auth_source_id'],
             },
         }
 
@@ -570,7 +578,7 @@ class AuthService:
             return None
         username = str(self._user_field(user, "svn_username", "")
                        or self._user_field(user, "username", "")).strip()
-        source = self._user_field(user, "auth_source_id", None)
+        source = self._user_field(user, "auth_source_id", self._user_field(user, 'authSourceId', None))
         if source is None and str(self._user_field(user, "role", "user")) == "admin":
             return None  # 本机管理员必须显式提供 SVN 账号
         source = str(source or self.auth_source_id).strip()
@@ -591,7 +599,7 @@ class AuthService:
             return False
         username = str(self._user_field(user, "svn_username", "")
                        or self._user_field(user, "username", "")).strip()
-        source = self._user_field(user, "auth_source_id", None)
+        source = self._user_field(user, "auth_source_id", self._user_field(user, 'authSourceId', None))
         if source is None and str(self._user_field(user, "role", "user")) == "admin":
             return False
         source = str(source or self.auth_source_id).strip()
@@ -681,7 +689,7 @@ class AuthService:
         with self._db_lock, self.conn:
             self.conn.execute(
                 "UPDATE sessions SET revoked_at = ? WHERE revoked_at IS NULL AND user_id IN"
-                " (SELECT id FROM users WHERE role != 'admin')",
+                " (SELECT id FROM users WHERE auth_source_id != 'local-admin')",
                 (self._stamp(),),
             )
             database.audit(self.conn, "session_reset", f"ok:{reason}")

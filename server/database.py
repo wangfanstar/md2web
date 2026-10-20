@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .passwords import hash_password
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 # 兼容目标：RHEL7 自带 SQLite 3.7.17（Python 3.6 的 sqlite3）。
 # Windows 端也必须只写这些版本能解析的对象，保证 data/ 数据库可在两个平台间直接共用。
@@ -346,6 +346,10 @@ def migrate(conn, logger=None):
             if version < 11:
                 conn.execute('CREATE TABLE IF NOT EXISTS local_document_versions (id INTEGER PRIMARY KEY, path TEXT NOT NULL, content TEXT NOT NULL, actor_id INTEGER, created_at TEXT NOT NULL)')
                 conn.execute('CREATE INDEX IF NOT EXISTS idx_local_versions_path ON local_document_versions (path, id)')
+            if version < 12:
+                if 'persistent' not in [row[1] for row in conn.execute('PRAGMA table_info(sessions)')]:
+                    conn.execute('ALTER TABLE sessions ADD COLUMN persistent INTEGER NOT NULL DEFAULT 0')
+                conn.execute('CREATE TABLE IF NOT EXISTS device_hints (token_hash TEXT PRIMARY KEY, auth_source_id TEXT NOT NULL, username TEXT NOT NULL, client_ip TEXT, updated_at TEXT NOT NULL, expires_at TEXT NOT NULL)')
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     sanitize_schema(conn, logger)
     return SCHEMA_VERSION

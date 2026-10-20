@@ -77,7 +77,7 @@
     state.features = payload.features || state.features;
     state.site = payload.site || state.site;
     state.ai = (payload.site && payload.site.ai) || null;
-    state.svnCredential = !!payload.svnCredential || (payload.user && payload.user.role !== 'admin' && !!payload.authenticated);
+    state.svnCredential = !!payload.svnCredential;
   }
 
   function refresh() {
@@ -99,11 +99,12 @@
     });
   }
 
-  function login(username, password, mode) {
+  function login(username, password, mode, preferences) {
     return request('__auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: username, password: password, mode: mode || '' })
+      body: JSON.stringify({ username: username, password: password, mode: mode || '',
+        rememberSession: !!(preferences && preferences.rememberSession), rememberUsername: !!(preferences && preferences.rememberUsername) })
     }).then(function (payload) {
       state.authenticated = true;
       state.user = payload.user;
@@ -144,6 +145,9 @@
       '<p class="site-auth-hint">普通用户用 SVN 账号登录：口令先经 SVN 验证，成功后以本机密钥加密保存在服务端数据库，供后续提交复用（换密码后重新登录会自动更新）。管理员可用本机账号（默认 <b>admin / admin</b>），仅本地编辑与保存草稿，合入 SVN 时需再提供 SVN 账号。</p>',
       '<label>用户名<input type="text" name="username" autocomplete="username" required></label>',
       '<label>密码<input type="password" name="password" autocomplete="current-password" required></label>',
+      '<label><input type="checkbox" name="rememberSession">保持登录</label>',
+      '<label><input type="checkbox" name="rememberUsername" checked>记住此设备的用户名</label>',
+      '<button type="button" data-forget-device>忘记此设备</button>',
       '<p class="site-auth-error" data-auth-error></p>',
       '<div class="site-auth-actions">',
       '<button type="submit" class="is-primary">登录</button>',
@@ -153,6 +157,12 @@
     ].join('');
     document.body.appendChild(overlay);
     state.overlay = overlay;
+    overlay.querySelector('[data-forget-device]').addEventListener('click', function () {
+      request('__auth/forget-device', {method: 'POST', headers: {'X-CSRF-Token': state.csrfToken || ''}}).then(function () {
+        overlay.querySelector('[name="username"]').value = '';
+        return refresh();
+      }).catch(function (error) { overlay.querySelector('[data-auth-error]').textContent = error.message; });
+    });
     overlay.addEventListener('click', function (event) {
       if (event.target.hasAttribute && event.target.hasAttribute('data-auth-close')) {
         closeLogin();
@@ -165,7 +175,7 @@
       var password = form.password.value;
       var errorEl = overlay.querySelector('[data-auth-error]');
       errorEl.textContent = '正在验证…';
-      login(username, password).then(function () {
+      login(username, password, '', {rememberSession: form.rememberSession.checked, rememberUsername: form.rememberUsername.checked}).then(function () {
         closeLogin();
       }).catch(function (error) {
         errorEl.textContent = error && error.message ? error.message : '登录失败';
@@ -188,6 +198,7 @@
     state.overlay.classList.add('is-open');
     var input = state.overlay.querySelector('input[name="username"]');
     if (input) {
+      request('__auth/login-hint').then(function (data) { if (!input.value) input.value = data.username || ''; }).catch(function () {});
       input.focus();
     }
   }

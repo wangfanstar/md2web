@@ -243,6 +243,8 @@ def load_config(path, docs_dir, allow_incomplete=False, create_mounts=False):
             read_only = bool(item.get("readOnly", False))
         repositories.append({
             "id": repo_id,
+            "display_name": str(item.get('displayName') or '').strip()[:120],
+            "entry_slug": str(item.get('entrySlug') or repo_id).strip(),
             "mount": mount,
             "source_mode": source_mode,
             "link_target": link_target,
@@ -281,7 +283,17 @@ def load_config(path, docs_dir, allow_incomplete=False, create_mounts=False):
     if ai["baseUrl"]:
         ai["baseUrl"] = _check_url(ai["baseUrl"], "ai.baseUrl")
 
-    return {
+    from . import policy
+    try:
+        authorization = policy.normalize(raw)
+        cache = policy.options(raw.get('cache') or {}, policy.CACHE_DEFAULTS)
+        compare = policy.options(raw.get('historyCompare') or {}, policy.COMPARE_DEFAULTS)
+        auth_options = policy.options(auth_raw, policy.AUTH_DEFAULTS)
+    except (ValueError, TypeError, AttributeError) as error:
+        raise ConfigError(str(error))
+    result = {
+        "authorization": authorization, "cache": cache, "historyCompare": compare,
+        "pathAliases": raw.get('pathAliases') or {}, "entryAliases": raw.get('entryAliases') or {},
         "path": config_path.resolve(),
         "profile_name": raw.get("profileName", "md2web_config.json"),
         "credentials": credentials,
@@ -309,6 +321,8 @@ def load_config(path, docs_dir, allow_incomplete=False, create_mounts=False):
         "site_backup": site_backup,
         "ai": ai,
     }
+    result['auth'].update(auth_options)
+    return result
 
 
 def ensure_secret_key(config, docs_dir):
@@ -352,6 +366,7 @@ def config_to_json(config):
         },
         "repositories": [
             {"id": repo["id"], "mount": repo["mount"], "sourceMode": repo.get("source_mode", "svn"),
+             "displayName": repo.get('display_name', ''), "entrySlug": repo.get('entry_slug', repo['id']),
              "linkTarget": repo.get("link_target", ""),
              "url": repo["url"],
              "credential_group": repo["credential_group"], "group": repo.get("group") or "默认",
@@ -363,6 +378,12 @@ def config_to_json(config):
     }
     if config.get("security", {}).get("secretKey"):
         data["security"] = {"secretKey": config["security"]["secretKey"]}
+    from . import policy
+    data['configSchemaVersion'] = 2
+    for key in ('authorization', 'cache', 'historyCompare', 'pathAliases', 'entryAliases'):
+        data[key] = config.get(key, {})
+    for key, value in policy.AUTH_DEFAULTS.items():
+        data['auth'][key] = config['auth'].get(key, value)
     return data
 
 

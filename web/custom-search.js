@@ -1314,12 +1314,15 @@
 
   var liveSidebarText = null;
   var liveSyncBusy = false;
+  var liveVersion = null;
+  var liveDelay = 30000;
+  var nextLiveCheck = 0;
 
   function fetchLiveSnapshot() {
     var aliases = (window.$docsify || {}).alias || {};
     var sidebarPath = aliases['/_sidebar.md'] || 'html/_sidebar.md';
     function read(path, json) {
-      return fetch(path + (path.indexOf('?') < 0 ? '?' : '&') + '_sync=' + Date.now(), { cache: 'no-store' })
+      return fetch(path, { cache: 'no-cache' })
         .then(function (response) {
           if (!response.ok) throw new Error('HTTP ' + response.status + ': ' + path);
           return json ? response.json() : response.text();
@@ -1340,17 +1343,36 @@
   function syncLiveSnapshot() {
     if (liveSyncBusy || document.hidden || window.location.protocol === 'file:') return;
     liveSyncBusy = true;
-    return fetchLiveSnapshot().then(function (snapshot) {
-      updateLiveSidebar(snapshot);
-      if (JSON.stringify(snapshot.index) !== JSON.stringify(state.index)) applySearchIndex(snapshot.index);
-    }).catch(function () { /* 自动检查失败保留当前页面，手动更新时显示具体错误。 */ })
-      .then(function () { liveSyncBusy = false; });
+    return fetch('html/site-version.json', {cache: 'no-cache'}).then(function (response) {
+      if (!response.ok) throw new Error('版本检查失败');
+      return response.json();
+    }).then(function (version) {
+      var tasks = [];
+      function read(path, json) { return fetch(path, {cache: 'no-cache'}).then(function (r) {
+        if (!r.ok) throw new Error('读取失败'); return json ? r.json() : r.text();
+      }); }
+      if (!liveVersion || version.searchVersion !== liveVersion.searchVersion) {
+        tasks.push(read(config.indexPath, true).then(applySearchIndex));
+      }
+      if (!liveVersion || version.navigationVersion !== liveVersion.navigationVersion) {
+        var sidebar = ((window.$docsify || {}).alias || {})['/_sidebar.md'] || 'html/_sidebar.md';
+        tasks.push(read(sidebar.replace(/^\//, ''), false).then(function (text) { updateLiveSidebar({sidebar: text}); }));
+        tasks.push(read('html/navigation-map.json', true).then(function (data) { window.MD2WEB_NAVIGATION = data; }));
+      }
+      return Promise.all(tasks).then(function () { liveVersion = version; liveDelay = 30000; });
+    }).catch(function () { liveDelay = Math.min(120000, liveDelay * 2); })
+      .then(function () { liveSyncBusy = false; nextLiveCheck = Date.now() + liveDelay; });
   }
 
   window.MD2WEB_SYNC_SITE = function () {
     liveSidebarText = null;
+    liveVersion = null;
+    try { localStorage.setItem('md2web:content-changed', String(Date.now())); } catch (_) {}
     return syncLiveSnapshot();
   };
+  window.addEventListener('storage', function (event) {
+    if (event.key === 'md2web:content-changed') { liveVersion = null; syncLiveSnapshot(); }
+  });
 
   function refreshSearchIndex(sourceView) {
     var sidebarButton = state.sidebar && state.sidebar.refreshButton;
@@ -2967,7 +2989,7 @@
       loadIndex();
       if (window.location.protocol !== 'file:') {
         syncLiveSnapshot();
-        window.setInterval(syncLiveSnapshot, 3000);
+        window.setInterval(function () { if (Date.now() >= nextLiveCheck) syncLiveSnapshot(); }, 1000);
         window.addEventListener('focus', syncLiveSnapshot);
       }
       renderAll();

@@ -302,12 +302,15 @@
     var crumb = section.querySelector(':scope > .workspace-breadcrumb');
     if (!crumb) { crumb = document.createElement('nav'); crumb.className = 'workspace-breadcrumb'; crumb.setAttribute('aria-label', '当前位置'); section.insertBefore(crumb, section.firstChild); }
     var labels = ['首页'].concat(parts);
-    if (crumb.getAttribute('data-route') !== route) {
+    {
       crumb.innerHTML = labels.map(function (part, index) {
         var label = part.replace(/\.md$/i, '');
         if (index === labels.length - 1) return '<span aria-current="page">' + escape(label) + '</span>';
-        if (index === 0) return '<a href="#/">' + escape(label) + '</a><span class="workspace-breadcrumb-sep">/</span>';
-        return '<span>' + escape(label) + '</span><span class="workspace-breadcrumb-sep">/</span>';
+        var folders = (window.MD2WEB_NAVIGATION || {}).folders || {};
+        var item = folders[parts.slice(0, index).join('/')];
+        var href = index === 0 ? 'index.html' : (index === 1 && part === 'md' ? 'html/index_all.html' : item && item.href);
+        if (item && item.label) label = item.label;
+        return (href ? '<a href="' + escape(href) + '">' + escape(label) + '</a>' : '<span>' + escape(label) + '</span>') + '<span class="workspace-breadcrumb-sep">/</span>';
       }).join('');
       crumb.setAttribute('data-route', route);
     }

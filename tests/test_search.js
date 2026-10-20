@@ -278,7 +278,7 @@ test('live refresh replaces renamed routes and reads the current repository side
     },
     fetch: async (url, options) => {
       requests.push(url);
-      assert.equal(options.cache, 'no-store');
+      assert.equal(options.cache, 'no-cache');
       return { ok: true, json: async () => latest, text: async () => '- [new](md/repo/new.md)' };
     }
   });
@@ -286,7 +286,7 @@ test('live refresh replaces renamed routes and reads the current repository side
   const result = await api.fetchLiveSnapshot();
   assert.deepEqual(Object.keys(result.index), ['/md/repo/new.md']);
   assert.equal(requests.length, 2);
-  assert.match(requests[1], /^html\/_sidebar_repo.md\?/);
+  assert.equal(requests[1], 'html/_sidebar_repo.md');
   assert.ok(requests.every(url => !url.includes('old.md')));
 });
 

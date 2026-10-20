@@ -70,6 +70,72 @@
     });
   }
 
+  var managementInstalled = false;
+  function renderPolicyFields() {
+    var host=query('[data-policy-fields]');if(!host||!state.config)return;
+    var fields=[['auth','rememberSessionDays','保持登录天数',30],['auth','rememberIdleDays','闲置有效天数',7],
+      ['cache','metadataTtlSeconds','元数据缓存秒数',60],['cache','maxEntries','缓存条目上限',256],
+      ['cache','maxBytes','缓存字节上限',33554432],['cache','versionPollSeconds','版本检查秒数',30]];
+    host.innerHTML=fields.map(function(f){return '<label>'+f[2]+'<input type="number" min="1" data-policy="'+f[0]+'.'+f[1]+'" value="'+
+      escapeHtml((state.config[f[0]]||{})[f[1]]||f[3])+'"></label>';}).join('')+'<button type="button" data-action="save">保存配置</button>';
+  }
+  function installManagement() {
+    if (managementInstalled) return;
+    managementInstalled = true;
+    var panel = document.createElement('section');
+    panel.className = 'panel';
+    panel.setAttribute('data-config-main', '');
+    panel.innerHTML = '<h2>用户与权限</h2><p>网站管理员权限不改变 SVN 服务端权限；本地恢复管理员保持启用。</p>'
+      + '<input data-user-query placeholder="搜索用户名"><button type="button" data-users-refresh>查询</button>'
+      + '<div data-users-list></div><button type="button" data-users-next hidden>下一页</button>'
+      + '<h2>登录与缓存</h2><p>以下参数随当前 JSON 方案保存。</p><div data-policy-fields></div>';
+    var container = query('[data-config-main]');
+    if (container) container.parentNode.appendChild(panel);
+    var cursor = 0, version = '';
+    function users() {
+      api('__admin/users?cursor=' + cursor + '&query=' + encodeURIComponent(query('[data-user-query]', panel).value)).then(function (data) {
+        version = data.expectedConfigVersion;
+        query('[data-users-list]', panel).innerHTML = data.users.map(function (user, index) {
+          return '<p data-user-index="' + index + '"><strong>' + escapeHtml(user.username) + '</strong> · '
+            + escapeHtml(user.authSourceId) + ' · 最近登录 ' + escapeHtml(user.lastLoginAt || '—')
+            + ' · 会话 ' + user.sessionCount + ' <select data-user-role><option value="user"' + (user.role === 'user' ? ' selected' : '')
+            + '>普通用户</option><option value="admin"' + (user.role === 'admin' ? ' selected' : '') + '>管理员</option></select>'
+            + ' <label><input type="checkbox" data-user-enabled' + (user.enabled ? ' checked' : '') + '>启用</label>'
+            + ' <button type="button" data-user-save>保存权限</button> <button type="button" data-user-revoke>强制退出</button></p>';
+        }).join('') || '没有匹配用户';
+        query('[data-users-next]', panel).hidden = !data.nextCursor;
+        query('[data-users-next]', panel).onclick = function () { cursor = data.nextCursor; users(); };
+        all('[data-user-index]', panel).forEach(function (row) {
+          var user = data.users[Number(row.getAttribute('data-user-index'))];
+          function save(revoke) {
+            api('__admin/users/' + (revoke ? 'revoke-sessions' : 'permission'), {method: 'POST', body: JSON.stringify({
+              authSourceId: user.authSourceId, username: user.username, expectedConfigVersion: version,
+              role: query('[data-user-role]', row).value, enabled: query('[data-user-enabled]', row).checked
+            })}).then(function () { setStatus('已保存到当前 JSON 方案'); users(); }).catch(function (error) { setStatus(error.message, true); });
+          }
+          query('[data-user-save]', row).onclick = function () { save(false); };
+          query('[data-user-revoke]', row).onclick = function () { save(true); };
+        });
+      }).catch(function (error) { setStatus(error.message, true); });
+    }
+    query('[data-users-refresh]', panel).onclick = function () { cursor = 0; users(); };
+    document.addEventListener('click', function (event) {
+      var button = event.target.closest('[data-rename-repository]');
+      if (!button) return;
+      var repo = (state.config.repositories || []).filter(function (r) { return r.id === button.getAttribute('data-rename-repository'); })[0];
+      if (!repo) return;
+      var name = button.parentNode.querySelector('[data-rename-name]').value.trim();
+      if (!name || name === repo.mount.split('/').pop()) return;
+      if (!window.confirm(repo.mount + ' → ' + repo.mount.slice(0, repo.mount.lastIndexOf('/') + 1) + name + '\n将同步更新文档历史与旧链接。继续？')) return;
+      var bytes = new Uint8Array(16); window.crypto.getRandomValues(bytes);
+      api('__admin/repository-rename', {method: 'POST', body: JSON.stringify({repositoryId: repo.id,
+        newName: name, expectedMount: repo.mount, expectedConfigVersion: state.config.expectedConfigVersion,
+        requestId: Array.prototype.map.call(bytes, function (x) { return ('0' + x.toString(16)).slice(-2); }).join('')
+      })}).then(function (data) { setStatus(data.rebuilt ? '文件夹已重命名' : '名称已修改，页面待重建；请保存配置重建'); window.location.reload(); })
+        .catch(function (error) { setStatus(error.message, true); });
+    });
+  }
+
   function formatBytes(bytes) {
     var value = Number(bytes) || 0;
     if (value < 1024) {
@@ -271,7 +337,9 @@
           + '</code><input type="hidden" data-repo="mount" value="' + escapeHtml(mount) + '">')
         + (item.id || folder ? ' <button type="button" class="danger" data-action="delete-repo" data-repo-id="'
           + escapeHtml(item.id || '') + '" data-repo-mount="' + escapeHtml(mount) + '"'
-          + disabled + '>删除仓库</button>' : '') + '</td>',
+          + disabled + '>删除仓库</button>' : '')
+        + '<label>显示名称<input data-repo="displayName" value="' + escapeHtml(item.displayName || '') + '"' + disabled + '></label>'
+        + (item.id ? '<input data-rename-name aria-label="新的文件夹名称" value="' + escapeHtml(mount.split('/').pop()) + '"' + disabled + '><button type="button" data-rename-repository="' + escapeHtml(item.id) + '"' + disabled + '>重命名文件夹</button>' : '') + '</td>',
       '<td data-entry-cell>' + (linkKey
         ? '<a class="entry-link" href="' + escapeHtml(entryPage(linkKey)) + '" target="_blank"'
           + ' rel="noopener" title="打开该文件夹的入口页">' + escapeHtml(entryPage(linkKey)) + '</a>'
@@ -392,6 +460,7 @@
 
   function pairField(entry, name) {
     var input = entry && entry.detail ? entry.detail.querySelector('[data-repo="' + name + '"]') : null;
+    if (!input && entry && entry.summary) input = entry.summary.querySelector('[data-repo="' + name + '"]');
     return input ? input.value.trim() : '';
   }
 
@@ -494,6 +563,8 @@
       }
       var repo = {
         id: repoId,
+        displayName: pairField(entry, 'displayName'),
+        entrySlug: ((state.config.repositories || []).filter(function (item) { return item.id === repoId; })[0] || {}).entrySlug || repoId,
         mount: mount,
         group: groupInput ? (groupInput.value.trim() || '默认') : (folderGroup(mount) || '默认'),
         sourceMode: sourceMode,
@@ -1040,6 +1111,8 @@
       }
       return api('__config').then(function (configPayload) {
         state.config = configPayload.config || {};
+        installManagement();
+        renderPolicyFields();
         state.editable = true;
         renderAiPanel();
         loadProfiles().catch(function (error) { setStatus(error.message, true); });
@@ -1115,6 +1188,7 @@
       return;
     }
     var payload = JSON.parse(JSON.stringify(state.config));
+    all('[data-policy]').forEach(function(input){var keys=input.getAttribute('data-policy').split('.');payload[keys[0]]=payload[keys[0]]||{};payload[keys[0]][keys[1]]=Number(input.value);});
     payload.siteBackup = readSiteBackup();
     var authUrl = query('[data-auth="url"]');
     if (authUrl) payload.auth = Object.assign({}, payload.auth || {}, { url: authUrl.value.trim() });
@@ -1127,6 +1201,7 @@
     payload.repositories = repos.map(function (repo) {
       var item = {
         id: repo.id, mount: repo.mount, group: repo.group,
+        displayName: repo.displayName, entrySlug: repo.entrySlug,
         sourceMode: repo.sourceMode, url: repo.url,
         linkTarget: repo.sourceMode === 'symlink' ? (repo.linkTarget || '') : ''
       };

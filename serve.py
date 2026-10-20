@@ -472,6 +472,35 @@ class PreviewHandler(http.server.SimpleHTTPRequestHandler):
             resolved = os.path.join(resolved, word)
         return resolved
 
+    def end_headers(self):
+        from server.cache import static_policy
+        parsed = urllib.parse.urlparse(self.path)
+        if not parsed.path.startswith('/__'):
+            version = urllib.parse.parse_qs(parsed.query).get('v', [None])[0]
+            self.send_header('Cache-Control', static_policy(Path(self.translate_path(self.path)), version))
+        super().end_headers()
+
+    def send_head(self):
+        import hashlib
+        target = Path(self.translate_path(self.path))
+        if target.is_file():
+            info = target.stat()
+            etag = '"' + hashlib.sha256((str(info.st_mtime_ns) + ':' + str(info.st_size)).encode('ascii')).hexdigest()[:24] + '"'
+            if self.headers.get('If-None-Match') == etag:
+                self.send_response(304)
+                self.send_header('ETag', etag)
+                self.end_headers()
+                return None
+            self._static_etag = etag
+        else:
+            self._static_etag = None
+        return super().send_head()
+
+    def send_response(self, code, message=None):
+        super().send_response(code, message)
+        if code == 200 and getattr(self, '_static_etag', None):
+            self.send_header('ETag', self._static_etag)
+
     def _send_json(self, status, payload):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -891,8 +920,8 @@ def run_authenticated_service(args, directory):
     auth_service = AuthService(conn, svn_client, config)
     auth_service.on_startup()
     auth_service.enable_config_profiles(directory)
-    if auth_service.auth_source_changed():
-        auth_service.revoke_all("auth_source_changed")
+    # resolve() checks each persisted identity against the current authentication source.
+    # A local recovery administrator is not evidence of a changed SVN source.
 
     docs_dir = directory if (directory / "index.html").exists() else ROOT / "docs"
     rebuild_lock = threading.Lock()

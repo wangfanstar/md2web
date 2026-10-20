@@ -486,6 +486,7 @@
   }
 
   function diffWith(reference) {
+    if (window.DiffView && reference !== 'previous') return showComparison(reference);
     setStatus('正在生成差异…');
     return authApi('__md/diff?path=' + encodeURIComponent(state.resource)
       + '&from=' + encodeURIComponent(reference) + '&to=' + (isLocalDocument() ? 'published' : 'draft')).then(function (payload) {
@@ -496,6 +497,25 @@
     }).catch(function (error) {
       showDiffPanel('生成差异失败：' + error.message);
     });
+  }
+
+  function showComparison(reference) {
+    var currentText = state.textarea.value;
+    function ref(value) { return String(value).indexOf(':') >= 0 ? String(value) : 'draft:' + value; }
+    function load(left, right) {
+      return authApi('__md/compare?path=' + encodeURIComponent(state.resource) + '&left=' + encodeURIComponent(left === 'editing' ? 'published' : left)
+        + '&right=' + encodeURIComponent(right === 'editing' ? 'published' : right)).then(function (data) {
+          if (left === 'editing') data.left = {ref:'editing',label:'当前编辑内容（未保存）',content:currentText};
+          if (right === 'editing') data.right = {ref:'editing',label:'当前编辑内容（未保存）',content:currentText};
+          return data;
+        });
+    }
+    return Promise.all([load(ref(reference), 'editing'), authApi('__md/history?path=' + encodeURIComponent(state.resource) + (isLocalDocument() ? '&mode=local' : ''))])
+      .then(function (values) {
+        var data=values[0], versions=[{ref:'published',label:'当前已保存版本'},{ref:'editing',label:'当前编辑内容（未保存）'}];
+        ((values[1].history || {}).revisions || []).forEach(function (v) { versions.push({ref:ref(v.id),label:'#'+v.id+' · '+(v.author || '')+' '+v.createdAt}); });
+        window.DiffView.open(data.left,data.right,Object.assign({},data.options,{versions:versions,load:load}));
+      }).catch(function(error){setStatus('读取对比失败：'+error.message);});
   }
 
   function loadRevisionContent(revisionId) {
