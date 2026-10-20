@@ -2757,6 +2757,10 @@
 
   // 站内入口（例如“所有文档”、仓库入口和反馈页）是明确的用户导航动作，
   // 不应被全站草稿提醒拦截；编辑器内真正的刷新、关闭标签页仍继续保护。
+  document.addEventListener('md2web:internal-navigation', function () {
+    state.allowInternalNavigation = true;
+    window.setTimeout(function () { state.allowInternalNavigation = false; }, 1500);
+  });
   document.addEventListener('click', function (event) {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey
         || event.shiftKey || event.altKey) {

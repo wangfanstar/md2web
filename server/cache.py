@@ -4,6 +4,7 @@ import json
 import threading
 import time
 from collections import OrderedDict
+from functools import lru_cache
 
 
 class MetadataCache:
@@ -43,8 +44,15 @@ class MetadataCache:
             return value
 
 
+@lru_cache(maxsize=512)
+def _asset_digest(path, modified, size):
+    with open(path, 'rb') as handle:
+        return hashlib.sha1(handle.read()).hexdigest()[:10]
+
+
 def static_policy(path, version=None):
     if version and path.is_file() and path.suffix.lower() in ('.js', '.css', '.woff2', '.woff'):
-        if hashlib.sha1(path.read_bytes()).hexdigest()[:10] == version:
+        info = path.stat()
+        if _asset_digest(str(path), info.st_mtime_ns, info.st_size) == version:
             return 'public, max-age=31536000, immutable'
     return 'no-cache'

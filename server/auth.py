@@ -175,6 +175,11 @@ class AuthService:
             self._attempts = {}
         if previous != self.auth_source_id:
             self.revoke_svn_sessions("auth_source_changed")
+        with self._db_lock, self.conn:
+            for user in self.conn.execute('SELECT * FROM users').fetchall():
+                if not policy.effective(user, self.config)[1]:
+                    self.conn.execute('UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL',
+                                      (self._stamp(), user['id']))
         return previous != self.auth_source_id
 
     def test_auth_url(self, url):
@@ -317,6 +322,9 @@ class AuthService:
                     "UPDATE users SET last_login_at = ? WHERE id = ?",
                     (_iso(moment), user_id),
                 )
+            current_user = self.conn.execute('SELECT * FROM users WHERE id=?', (user_id,)).fetchone()
+            if not policy.effective(current_user, self.config)[1]:
+                raise AuthError('disabled')
             token, csrf_token, expires_at = self._insert_session(user_id, moment, user_agent, remember)
             self._store_credential_locked(username, password)
             database.audit(self.conn, "login", "ok", actor_id=user_id, resource=username, client_ip=client_ip)

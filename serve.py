@@ -482,6 +482,10 @@ class PreviewHandler(http.server.SimpleHTTPRequestHandler):
 
     def send_head(self):
         import hashlib
+        rel = urllib.parse.unquote(urllib.parse.urlparse(self.path).path).lstrip('/')
+        if (rel and is_blocked_static_path(rel)) or (rel and rel.endswith('/')):
+            self.send_error(404, 'Not Found')
+            return None
         target = Path(self.translate_path(self.path))
         if target.is_file():
             info = target.stat()

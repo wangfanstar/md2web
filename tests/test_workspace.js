@@ -192,7 +192,10 @@ test('static entry-page links bypass the docsify router', () => {
     assert.equal(api.isStaticPageHref(href), true, href);
   }
   for (const href of ['#/md/使用说明/快速开始', 'md/使用说明/快速开始.md', '',
-    'https://example.com/a.html', 'http://h/html/index_all.html']) {
+    'https://example.com/a.html', 'http://h/html/index_all.html', '//other.example/a.html', '#/md/a.html']) {
     assert.equal(api.isStaticPageHref(href), false, href);
   }
+  const source = fs.readFileSync(path.join(__dirname, '..', 'web', 'workspace.js'), 'utf8');
+  assert.match(source, /window\.addEventListener\('click', handleStaticPageClick, true\)/);
+  assert.match(source, /window\.location\.href = anchor\.href/);
 });

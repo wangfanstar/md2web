@@ -302,8 +302,7 @@
     var crumb = section.querySelector(':scope > .workspace-breadcrumb');
     if (!crumb) { crumb = document.createElement('nav'); crumb.className = 'workspace-breadcrumb'; crumb.setAttribute('aria-label', '当前位置'); section.insertBefore(crumb, section.firstChild); }
     var labels = ['首页'].concat(parts);
-    {
-      crumb.innerHTML = labels.map(function (part, index) {
+    var breadcrumbHtml = labels.map(function (part, index) {
         var label = part.replace(/\.md$/i, '');
         if (index === labels.length - 1) return '<span aria-current="page">' + escape(label) + '</span>';
         var folders = (window.MD2WEB_NAVIGATION || {}).folders || {};
@@ -312,6 +311,10 @@
         if (item && item.label) label = item.label;
         return (href ? '<a href="' + escape(href) + '">' + escape(label) + '</a>' : '<span>' + escape(label) + '</span>') + '<span class="workspace-breadcrumb-sep">/</span>';
       }).join('');
+    // Do not replace clickable nodes on every MutationObserver pass. Replacing
+    // them between pointerdown and pointerup cancels clicks and schedules a loop.
+    if (crumb.innerHTML !== breadcrumbHtml) {
+      crumb.innerHTML = breadcrumbHtml;
       crumb.setAttribute('data-route', route);
     }
     var actions = section.querySelector(':scope > .workspace-page-actions');
@@ -715,7 +718,33 @@
   // 指向独立页面（index_*.html、lib/*.html 等）的相对链接：交给浏览器正常跳转，
   // 不能被 docsify 的路由点击处理拦截（否则点入口页链接不会跳转）。
   function isStaticPageHref(href) {
-    return /\.html(?:[?#]|$)/i.test(href) && !/^[a-z][a-z0-9+.-]*:/i.test(href);
+    return /\.html(?:[?#]|$)/i.test(href) && !/^(?:#|\/\/|[a-z][a-z0-9+.-]*:)/i.test(href);
+  }
+
+  // 独立页面（index_*.html、lib/*.html 等）不经过 docsify 路由：
+  // 在 window 捕获阶段显式跳转，避免被 docsify 的点击处理 preventDefault 后不跳转。
+  function handleStaticPageClick(event) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return;
+    }
+    var target = event.target;
+    if (target && target.closest && target.closest('.workspace-folder-toggle')) {
+      // 侧栏目录的展开/折叠按钮：不触发入口页跳转
+      return;
+    }
+    var anchor = target && target.closest ? target.closest('a[href]') : null;
+    if (!anchor || (anchor.target && anchor.target !== '_self') || anchor.hasAttribute('download')) {
+      return;
+    }
+    var href = anchor.getAttribute('href') || '';
+    if (!isStaticPageHref(href)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    document.dispatchEvent(new CustomEvent('md2web:internal-navigation'));
+    window.location.href = anchor.href;
   }
 
   // 页面带 <base href="../"> 时，纯 hash 链接（#/md/...、#id）会被浏览器解析到站点根，
@@ -730,9 +759,6 @@
     }
     var href = anchor.getAttribute('href') || '';
     if (href.charAt(0) !== '#' || href === '#') {
-      if (isStaticPageHref(href)) {
-        event.stopPropagation();
-      }
       return;
     }
     event.preventDefault();
@@ -743,6 +769,7 @@
 
   function init() {
     try { if (localStorage.getItem(STORAGE.numbers) === '0') document.body.classList.add('hide-heading-numbers'); } catch (_) {}
+    window.addEventListener('click', handleStaticPageClick, true);
     document.addEventListener('click', handleHashLinkClick, true);
     enhance();
     state.observer = new MutationObserver(schedule);

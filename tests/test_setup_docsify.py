@@ -1072,6 +1072,15 @@ class ServeTests(unittest.TestCase):
             try:
                 with opener.open(f"http://127.0.0.1:{port}/md/a.md") as response:
                     self.assertEqual(response.status, 200)
+                    etag = response.headers['ETag']
+                    self.assertEqual(response.headers['Cache-Control'], 'no-cache')
+                with self.assertRaises(urllib.error.HTTPError) as unchanged:
+                    opener.open(urllib.request.Request(f"http://127.0.0.1:{port}/md/a.md",
+                                headers={'If-None-Match': etag}))
+                self.assertEqual(unchanged.exception.code, 304)
+                with self.assertRaises(urllib.error.HTTPError) as hidden_head:
+                    opener.open(urllib.request.Request(f"http://127.0.0.1:{port}/.svn/entries", method='HEAD'))
+                self.assertEqual(hidden_head.exception.code, 404)
                 ref = tmp / 'html' / 'ref'
                 ref.mkdir(parents=True)
                 (ref / 'page.html').write_text('<title>Reference</title>', encoding='utf-8')
