@@ -2020,7 +2020,8 @@ class HtmlLayoutTests(unittest.TestCase):
         """文档中心搜索默认全仓库，并按文档名/全文分组展示。"""
         source = (ROOT / "setup_docsify.py").read_text(encoding="utf-8")
         for needle in ("data-master-mode", "data-master-repo-list", "masterRepoFilter", "全部仓库",
-                       "文档名匹配", "全文匹配", "master-search-mode", "master-search-repo"):
+                       "文档名匹配", "全文匹配", "master-search-mode", "master-search-repo",
+                       "function documentFileName", "seenFiles"):
             self.assertIn(needle, source, needle)
         self.assertIn("master-search-repo-actions button.is-selected", source)
         page = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")

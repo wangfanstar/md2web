@@ -114,10 +114,12 @@
     var hits = [];
     Object.keys(data || {}).forEach(function (routeKey) {
       var page = data[routeKey] || {};
-      Object.keys(page).forEach(function (slug) {
-        var entry = page[slug] || {};
+      Object.keys(page).forEach(function (slugKey) {
+        if (slugKey === 'site') { return; }
+        var entry = page[slugKey] || {};
         if (!entry.route && routeKey === '/') { return; }
         hits.push({
+          slug: entry.slug || slugKey,
           route: entry.route || routeKey,
           title: entry.headingTitle || entry.title || entry.pageTitle || routeKey,
           pageTitle: entry.pageTitle || entry.title || routeKey,
@@ -127,6 +129,13 @@
       });
     });
     return hits;
+  }
+  // 文档名只取实际路由的末级文件名（解码并保留 .md），与 docsify 搜索保持一致
+  function documentFileName(hit) {
+    var route = String(hit.route || '').split('?')[0].replace(/\/+$/, '');
+    var name = route.split('/').pop() || 'README.md';
+    try { name = decodeURIComponent(name); } catch (error) { /* 保留原值 */ }
+    return /\.md$/i.test(name) ? name : name + '.md';
   }
   function repoNames() {
     return repos.map(function (repo) { return String(repo.id || repo.mount || ''); }).filter(Boolean);
@@ -188,11 +197,30 @@
       if (!keyword || (keyword.length < 2 && !/[一-鿿]/.test(keyword))) { results.innerHTML = ''; return; }
       var modes = modeSelect && modeSelect.value === 'both' ? ['file', 'full'] : [modeSelect ? modeSelect.value : 'both'];
       var flattened = flatten(data).filter(repoMatches);
+      // 文档名匹配：只看末级文件名，按文档去重（同名文档的多个章节只保留一条）
+      var seenFiles = {};
+      var fileHits = [];
+      flattened.forEach(function (hit) {
+        var name = documentFileName(hit);
+        if (name.toLowerCase().indexOf(keyword) === -1) { return; }
+        var key = String(hit.route || '').replace(/\/+$/, '');
+        if (seenFiles[key]) { return; }
+        seenFiles[key] = true;
+        fileHits.push({
+          route: hit.route,
+          slug: hit.route,
+          site: hit.site,
+          title: name,
+          pageTitle: name,
+          body: ''
+        });
+      });
+      // 全文匹配：只匹配正文，与文档名结果分开
+      var fullHits = flattened.filter(function (hit) {
+        return String(hit.body || '').toLowerCase().indexOf(keyword) !== -1;
+      });
       var html = modes.map(function (mode) {
-        return renderMode(mode, flattened.filter(function (hit) {
-          var fileText = [hit.route, hit.pageTitle, hit.title].join(' ').toLowerCase();
-          return (mode === 'file' ? fileText : String(hit.body || '').toLowerCase()).indexOf(keyword) !== -1;
-        }));
+        return renderMode(mode, mode === 'file' ? fileHits : fullHits);
       }).join('');
       results.innerHTML = html || '<p class="empty">没有匹配的文档，请尝试更换关键词、仓库或搜索模式。</p>';
     });
