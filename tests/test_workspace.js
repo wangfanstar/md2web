@@ -184,3 +184,15 @@ test('copied links keep readable Chinese and leave ASCII escapes alone', () => {
   assert.equal(api.readableLink('http://h/a%20b%23c'), 'http://h/a%20b%23c');
   assert.equal(api.readableLink('http://h/a%E4'), 'http://h/a%E4');
 });
+
+test('static entry-page links bypass the docsify router', () => {
+  const api = loadWorkspace({});
+  for (const href of ['html/index_使用说明.html', 'html/index_使用说明_子目录.html#/',
+    'html/index_使用说明_子目录.html#repository-trash', 'lib/plot-playground.html', '/html/index_all.html']) {
+    assert.equal(api.isStaticPageHref(href), true, href);
+  }
+  for (const href of ['#/md/使用说明/快速开始', 'md/使用说明/快速开始.md', '',
+    'https://example.com/a.html', 'http://h/html/index_all.html']) {
+    assert.equal(api.isStaticPageHref(href), false, href);
+  }
+});

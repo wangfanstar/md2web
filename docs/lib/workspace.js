@@ -712,6 +712,12 @@
   function enhance() { decorateTree(); addBreadcrumb(); addUpdatedMeta(); addSvnControls(); addCodeButtons(); resolveRelativeImages(); }
   function schedule() { clearTimeout(state.timer); state.timer = setTimeout(enhance, 40); }
 
+  // 指向独立页面（index_*.html、lib/*.html 等）的相对链接：交给浏览器正常跳转，
+  // 不能被 docsify 的路由点击处理拦截（否则点入口页链接不会跳转）。
+  function isStaticPageHref(href) {
+    return /\.html(?:[?#]|$)/i.test(href) && !/^[a-z][a-z0-9+.-]*:/i.test(href);
+  }
+
   // 页面带 <base href="../"> 时，纯 hash 链接（#/md/...、#id）会被浏览器解析到站点根，
   // 导致点击侧栏/目录时整页跳走；这里改为只改当前文档的 hash（docsify 路由仍能收到 hashchange）。
   function handleHashLinkClick(event) {
@@ -724,6 +730,9 @@
     }
     var href = anchor.getAttribute('href') || '';
     if (href.charAt(0) !== '#' || href === '#') {
+      if (isStaticPageHref(href)) {
+        event.stopPropagation();
+      }
       return;
     }
     event.preventDefault();
@@ -751,6 +760,7 @@
       isDocumentView: isDocumentView,
       addTreeNumbers: addTreeNumbers,
       readableLink: readableLink,
+      isStaticPageHref: isStaticPageHref,
       syncDescription: syncDescription
     };
   }
