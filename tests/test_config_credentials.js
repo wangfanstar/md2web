@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const test = require('node:test');
 
 for (const action of ['save', 'check']) {
-test('new credentials replace the old error after ' + action, async () => {
+test(action === 'save' ? 'saving new credentials refreshes the previous error' : 'checking status does not silently save pending credentials', async () => {
   const calls = [];
   const events = {};
   const status = {};
@@ -25,8 +25,8 @@ test('new credentials replace the old error after ' + action, async () => {
   } };
   const window = { setInterval() {}, addEventListener() {} };
   let source = fs.readFileSync(path.join(__dirname, '../web/md2web-config.js'), 'utf8').replace(/\r\n/g, '\n');
-  source = source.replace('  showPanels();\n  loadConfig();',
-    '  window.testApi = { state: state, save: saveRepoCredential };');
+  source = source.replace(/  showPanels\(\);\n  if\(window.ConfigLayout\)[\s\S]*\n  loadConfig\(\);\n\}\(\)\);\s*$/,
+    '  window.testApi = { state: state, save: saveRepoCredential };\n}());');
   vm.runInNewContext(source, { window, document, fetch: async (url, options) => {
     calls.push({ url, body: JSON.parse(options.body) });
     return { ok: true, json: async () => url.endsWith('repo-health')
@@ -39,10 +39,11 @@ test('new credentials replace the old error after ' + action, async () => {
     events.click({ target: { closest: () => button } });
     await new Promise(resolve => setImmediate(resolve));
   }
-  assert.deepEqual(calls.map(item => item.url), ['__admin/repo-credential', '__admin/repo-health']);
-  assert.equal(calls[0].body.password, ' pass & word ');
+  assert.deepEqual(calls.map(item => item.url), action === 'save' ? ['__admin/repo-credential', '__admin/repo-health'] : ['__admin/repo-health']);
+  if (action === 'save') assert.equal(calls[0].body.password, ' pass & word ');
   assert.equal(inputs.credPassword.value, ' pass & word '); // JSON 保存后按产品约定回显
-  assert.equal(window.testApi.state.config.credentials.repo.password, ' pass & word ');
+  if (action === 'save') assert.equal(window.testApi.state.config.credentials.repo.password, ' pass & word ');
+  else assert.equal(window.testApi.state.config.credentials, undefined);
   assert.match(badge.textContent, /正常/);
   assert.doesNotMatch(badge.textContent, /认证失败/);
 });

@@ -46,7 +46,7 @@ function page(items, repositories = []) {
   const loginPanel = { hidden: true };
   const context = vm.createContext({ document, window: { setInterval() {}, addEventListener() {}, location: { protocol: 'http:' }, confirm: () => true }, console });
   const source = fs.readFileSync(path.join(__dirname, '../web/md2web-config.js'), 'utf8');
-  vm.runInContext(source.replace(/  showPanels\(\);\r?\n  loadConfig\(\);\r?\n\}\(\)\);/,
+  vm.runInContext(source.replace(/  loadConfig\(\);\r?\n\}\(\)\);\s*$/,
     '  globalThis.subject = { state, readRepos, pairField, repoRow, validateRepos, updateSummary, collectFolderGroups, showPanels };\r\n}());'), context);
   const subject = context.subject;
   subject.state.config = { repositories };
@@ -64,13 +64,15 @@ test('new manual repository reads mount from summary and derives ID', () => {
   assert.equal(repo.id, '新目录');
 });
 
-test('local repository deletion is visible in the summary row', () => {
+test('repository deletion is kept in advanced details rather than the summary row', () => {
   const p = page([]);
   const html = p.repoRow({ id: 'test', mount: 'md/test', sourceMode: 'local' }, null, 0);
   const summary = html.split('</tr>')[0];
-  assert.match(summary, /data-action="delete-repo"/);
-  assert.match(summary, /data-repo-id="test"/);
-  assert.match(summary, /data-repo-mount="md\/test"/);
+  assert.doesNotMatch(summary, /data-action="delete-repo"/);
+  assert.match(summary, /data-edit-repo/);
+  assert.match(html, /data-action="delete-repo"/);
+  assert.match(html, /data-repo-id="test"/);
+  assert.match(html, /data-repo-mount="md\/test"/);
 });
 
 test('automatic IDs avoid saved IDs, normalized entry names and backup reserved ID', () => {

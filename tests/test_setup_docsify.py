@@ -1992,7 +1992,8 @@ class HtmlLayoutTests(unittest.TestCase):
         # 本地模式与 SVN 模式都按文件夹名生成
         self.assertIn("repoId = folderName ? slugId(folderName) : '';", script)
         page = (ROOT / "web" / "md2web_config.html").read_text(encoding="utf-8")
-        self.assertIn(".repo-id-auto", page, "自动生成的 ID 需要只读样式")
+        self.assertIn("lib/md2web-config.css", page, "配置页通过独立样式表管理只读与详情样式")
+        self.assertIn('data-repo-drawer', page, '稳定 ID 放在仓库详情的高级维护中')
         # 默认同步凭据保留 ID：自动生成的仓库 ID 不能占用它
         self.assertIn("usedIds['__default__'] = true", script, "默认同步凭据的保留 ID 应避开自动生成")
         self.assertIn("default-credential", page, "配置页需要默认同步凭据面板")

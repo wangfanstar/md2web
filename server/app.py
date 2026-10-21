@@ -343,6 +343,8 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         if rejected:
             return rejected
         payload = request.get_json(silent=True) or {}
+        if payload.get('expectedConfigVersion') and payload['expectedConfigVersion'] != policy.version(config_to_json(config)):
+            return json_error(409, 'config_conflict', '配置已变化，请重新读取并比较后再应用方案')
         try:
             action = payload.get('action')
             if action == 'restore':
@@ -368,7 +370,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         if rejected:
             return rejected
         try:
-            data = config_profiles.read_profile(docs_root, config.get('profile_name', config_profiles.DEFAULT_NAME))
+            data = config_profiles.read_profile(docs_root, request.args.get('name') or config.get('profile_name', config_profiles.DEFAULT_NAME))
         except server_config.ConfigError as error:
             return json_error(400, 'profile_invalid', str(error))
         response = jsonify(ok=True, data=data)
@@ -471,12 +473,8 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         config.clear()
         config.update(loaded)
         auth_service.on_config_changed()
-        if on_config_changed is not None:
-            try:
-                on_config_changed()
-            except Exception:
-                pass
-        return jsonify({"ok": True, "config": public_config_json(), "authConfigured": bool(config["auth"]["url"])})
+        rebuilt = rebuild_repository_pages()
+        return jsonify({"ok": True, "config": public_config_json(), "authConfigured": bool(config["auth"]["url"]), "rebuilt": rebuilt})
 
     @app.post('/__admin/repository-rename')
     @serialized

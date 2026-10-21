@@ -3,6 +3,7 @@
 
   var state = { config: null, csrf: '', authenticated: false, editable: false, busy: false, user: null,
     credentials: {}, defaultCredential: { configured: false, username: '' }, authFingerprint: '', dirty: false, jsonDirty: false, syncStatus: {} };
+  function layout(method) { if (window.ConfigLayout && window.ConfigLayout[method]) return window.ConfigLayout[method].apply(null, Array.prototype.slice.call(arguments, 1)); }
 
   function query(selector, root) {
     return (root || document).querySelector(selector);
@@ -19,6 +20,7 @@
   }
 
   function setStatus(text, isError) {
+    if(window.ConfigLayout){layout('notify',text,isError);return;}
     var node = query('[data-status]');
     if (!node) {
       return;
@@ -35,16 +37,25 @@
   }
 
   function api(path, options) {
+    var requestIdentity=state.authFingerprint;
     var headers = Object.assign({ 'Content-Type': 'application/json' }, (options && options.headers) || {});
     if (state.csrf) {
       headers['X-CSRF-Token'] = state.csrf;
     }
     return fetch(path, Object.assign({}, options, { headers: headers })).then(function (response) {
       return response.json().catch(function () { return {}; }).then(function (payload) {
+        if((path.indexOf('__config')===0||path.indexOf('__admin/')===0)&&requestIdentity!==state.authFingerprint){var stale=new Error('登录身份已变化，忽略旧请求结果');stale.stale=true;throw stale;}
         if (!response.ok || payload.ok === false) {
           var error = new Error(payload.error || ('HTTP ' + response.status));
           error.status = response.status;
+          if((response.status===401||response.status===403)&&path.indexOf('__auth/')!==0&&window.SiteAuth)window.SiteAuth.refresh();
           throw error;
+        }
+        if (options && /POST|PUT|DELETE/.test(options.method || '') && path.indexOf('__admin/') === 0) {
+          return fetch('__config', {cache:'no-store', headers:headers}).then(function(r){return r.ok?r.json():null;}).then(function(fresh){
+            if(fresh&&fresh.config&&state.editable&&state.authFingerprint===requestIdentity){state.config=fresh.config;if(state.draft){state.draft.base.authorization=fresh.config.authorization;state.draft.base.credentials=fresh.config.credentials;state.draft.base.expectedConfigVersion=fresh.config.expectedConfigVersion;captureDraft();}}
+            return payload;
+          }).catch(function(){return payload;});
         }
         return payload;
       });
@@ -68,32 +79,27 @@
       + ' [data-action="verify-account"], [data-action="verify-switch"]').forEach(function (button) {
       button.disabled = !state.editable;
     });
+    layout('refresh');
   }
 
   var managementInstalled = false;
   function renderPolicyFields() {
-    var host=query('[data-policy-fields]');if(!host||!state.config)return;
+    if(!state.config)return;
     var fields=[['auth','rememberSessionDays','保持登录天数',30],['auth','rememberIdleDays','闲置有效天数',7],
       ['cache','metadataTtlSeconds','元数据缓存秒数',60],['cache','maxEntries','缓存条目上限',256],
-      ['cache','maxBytes','缓存字节上限',33554432],['cache','versionPollSeconds','版本检查秒数',30]];
-    host.innerHTML=fields.map(function(f){return '<label>'+f[2]+'<input type="number" min="1" data-policy="'+f[0]+'.'+f[1]+'" value="'+
-      escapeHtml((state.config[f[0]]||{})[f[1]]||f[3])+'"></label>';}).join('')+'<button type="button" data-action="save">保存配置</button>';
+      ['cache','maxBytes','缓存容量上限（MiB）',33554432]];
+    all('[data-policy-fields]').forEach(function(host){host.innerHTML=fields.filter(function(f){return f[0]===host.getAttribute('data-policy-fields');}).map(function(f){var value=(state.config[f[0]]||{})[f[1]]||f[3];if(f[1]==='maxBytes')value=value/1048576;return '<label>'+f[2]+'<input type="number" min="1" data-policy="'+f[0]+'.'+f[1]+'" value="'+escapeHtml(value)+'"></label>';}).join('');});
   }
   function installManagement() {
     if (managementInstalled) return;
     managementInstalled = true;
-    var panel = document.createElement('section');
-    panel.className = 'panel';
-    panel.setAttribute('data-config-main', '');
-    panel.innerHTML = '<h2>用户与权限</h2><p>网站管理员权限不改变 SVN 服务端权限；本地恢复管理员保持启用。</p>'
-      + '<input data-user-query placeholder="搜索用户名"><button type="button" data-users-refresh>查询</button>'
-      + '<div data-users-list></div><button type="button" data-users-next hidden>下一页</button>'
-      + '<h2>登录与缓存</h2><p>以下参数随当前 JSON 方案保存。</p><div data-policy-fields></div>';
-    var container = query('[data-config-main]');
-    if (container) container.parentNode.appendChild(panel);
+    var panel = query('[data-user-panel]');
+    if(!panel)return;
     var cursor = 0, version = '';
     function users() {
+      var identity=state.authFingerprint;
       api('__admin/users?cursor=' + cursor + '&query=' + encodeURIComponent(query('[data-user-query]', panel).value)).then(function (data) {
+        if(!state.editable||identity!==state.authFingerprint)return;
         version = data.expectedConfigVersion;
         query('[data-users-list]', panel).innerHTML = data.users.map(function (user, index) {
           return '<p data-user-index="' + index + '"><strong>' + escapeHtml(user.username) + '</strong> · '
@@ -111,7 +117,7 @@
             api('__admin/users/' + (revoke ? 'revoke-sessions' : 'permission'), {method: 'POST', body: JSON.stringify({
               authSourceId: user.authSourceId, username: user.username, expectedConfigVersion: version,
               role: query('[data-user-role]', row).value, enabled: query('[data-user-enabled]', row).checked
-            })}).then(function () { setStatus('已保存到当前 JSON 方案'); users(); }).catch(function (error) { setStatus(error.message, true); });
+            })}).then(function () { setStatus('已保存到当前 JSON 方案，权限立即生效'); users(); if(window.SiteAuth)window.SiteAuth.refresh(); }).catch(function (error) { setStatus(error.message, true); });
           }
           query('[data-user-save]', row).onclick = function () { save(false); };
           query('[data-user-revoke]', row).onclick = function () { save(true); };
@@ -119,6 +125,7 @@
       }).catch(function (error) { setStatus(error.message, true); });
     }
     query('[data-users-refresh]', panel).onclick = function () { cursor = 0; users(); };
+    state.loadUsers = function(){cursor=0;return users();};
     document.addEventListener('click', function (event) {
       var button = event.target.closest('[data-rename-repository]');
       if (!button) return;
@@ -216,11 +223,17 @@
 
   function changeProfile(action) {
     if (!state.editable || state.busy) return;
+    if(action==='preview'){
+      var selected=query('[data-profile-select]').value;
+      return api('__config/profile-content?name='+encodeURIComponent(selected)).then(function(result){layout('preview',result.data,selected);}).catch(function(error){setStatus('预览失败：'+error.message,true);});
+    }
     if (action === 'read') {
+      if(state.dirty||state.pendingCredentials){setStatus('普通表单或同步凭据仍有待保存修改，请先保存或放弃，再进入 JSON 编辑。',true);return;}
       if (state.jsonDirty && !window.confirm('重新读取将替换编辑框中未保存的 JSON，继续？')) return;
       api('__config/profile-content').then(function (result) {
         query('[data-profile-json]').value = JSON.stringify(result.data, null, 2);
         state.jsonDirty = false;
+        layout('jsonMode', true);
         setStatus('已读取当前 JSON；编辑后点击「保存 JSON 并应用」。');
       }).catch(function (error) { setStatus(error.message, true); });
       return;
@@ -229,8 +242,8 @@
     if (state.jsonDirty && action !== 'write') { setStatus('请先保存 JSON 编辑框中的修改，或重新读取后再切换。', true); return; }
     var name = query(action === 'create' ? '[data-profile-name]' : '[data-profile-select]').value.trim();
     if (action === 'create' && name && name.indexOf('md2web_config') !== 0) name = 'md2web_config_' + name.replace(/\.json$/i, '') + '.json';
-    var payload = { action: action, name: name };
-    if (action === 'reload') payload = { action: 'select', name: state.config.profileName };
+    var payload = { action: action, name: name, expectedConfigVersion: (state.config || {}).expectedConfigVersion };
+    if (action === 'reload') payload = { action: 'select', name: state.config.profileName, expectedConfigVersion: state.config.expectedConfigVersion };
     if (action === 'write') {
       try { payload.data = JSON.parse(query('[data-profile-json]').value); }
       catch (error) { setStatus('JSON 格式错误：' + error.message, true); return; }
@@ -330,37 +343,22 @@
     var allow = !(item.allowCommit === false || item.readOnly);
     return [
       '<tr data-repo-row data-pair="' + pair + '" data-mount="' + escapeHtml(mount) + '"'
-        + ' data-name="' + escapeHtml((folder && folder.name) || '') + '">',
-      '<td>' + (manual
-        ? '<input type="text" data-repo="mount" value="' + escapeHtml(item.mount || '') + '" placeholder="md/文件夹名"' + disabled + '>'
-        : '<code>' + escapeHtml((folder && folder.name) || mount.replace(/^md\//, ''))
-          + '</code><input type="hidden" data-repo="mount" value="' + escapeHtml(mount) + '">')
-        + (item.id || folder ? ' <button type="button" class="danger" data-action="delete-repo" data-repo-id="'
-          + escapeHtml(item.id || '') + '" data-repo-mount="' + escapeHtml(mount) + '"'
-          + disabled + '>删除仓库</button>' : '')
-        + '<label>显示名称<input data-repo="displayName" value="' + escapeHtml(item.displayName || '') + '"' + disabled + '></label>'
-        + (item.id ? '<input data-rename-name aria-label="新的文件夹名称" value="' + escapeHtml(mount.split('/').pop()) + '"' + disabled + '><button type="button" data-rename-repository="' + escapeHtml(item.id) + '"' + disabled + '>重命名文件夹</button>' : '') + '</td>',
-      '<td data-entry-cell>' + (linkKey
-        ? '<a class="entry-link" href="' + escapeHtml(entryPage(linkKey)) + '" target="_blank"'
-          + ' rel="noopener" title="打开该文件夹的入口页">' + escapeHtml(entryPage(linkKey)) + '</a>'
-        : '<span class="hint">—</span>') + '</td>',
-      '<td><input type="text" class="folder-group-input" data-folder-group="' + escapeHtml(mount)
-        + '" value="' + escapeHtml(folderGroup(mount)) + '" placeholder="默认"' + disabled + '></td>',
-      '<td>' + latestUpdateCell(folder) + '</td>',
-      '<td>' + sizeCell(folder) + '</td>',
-      '<td><span class="repo-health" data-health-badge>' + initialBadge(item, svnEnabled) + '</span>'
-        + '<br><span class="hint" data-mode-cell>'
-        + (!svnEnabled && (item.id || autoRepoId(folder, item))
-          ? (sourceMode === 'symlink' ? '软链接：' : '本地模式：') + escapeHtml(item.id || autoRepoId(folder, item)) : '') + '</span>'
-        + (allow ? '' : '<br><span class="repo-readonly">只读：由服务器自动更新</span>') + '</td>',
-      '<td' + (svnEnabled ? ' data-sync-id="' + escapeHtml(item.id) + '"' : '') + '>' + (svnEnabled ? syncCell(item.id) : '—') + '</td>',
-      '<td><label class="repo-source-label"><span>来源类型</span><select data-repo="sourceMode"' + disabled + '>'
-        + '<option value="svn"' + (sourceMode === 'svn' ? ' selected' : '') + '>SVN 库</option>'
-        + '<option value="symlink"' + (sourceMode === 'symlink' ? ' selected' : '') + '>软链接（只读）</option>'
-        + '<option value="local"' + (sourceMode === 'local' ? ' selected' : '') + '>本地文件夹</option></select></label></td>',
+        + ' data-name="' + escapeHtml((folder && folder.name) || '') + '" data-source-mode="' + sourceMode + '" data-saved-id="' + escapeHtml(item.id || '') + '">',
+      '<td><a data-repo-label href="' + escapeHtml(entryPage(linkKey || item.id || 'all')) + '">' + escapeHtml(item.displayName || (folder && folder.name) || item.id || '新仓库') + '</a><code class="repo-path">' + escapeHtml(mount) + '</code></td>',
+      '<td data-source-label>' + (sourceMode === 'svn' ? 'SVN 库' : sourceMode === 'symlink' ? '软链接' : '本地文件夹') + '</td>',
+      '<td data-group-label>' + escapeHtml(folderGroup(mount)) + '</td>',
+      '<td><span class="repo-health" data-health-badge>' + initialBadge(item, svnEnabled) + '</span></td>',
+      '<td class="repo-stat">' + latestUpdateCell(folder) + '</td>',
+      '<td class="repo-stat">' + sizeCell(folder) + '</td>',
+      '<td><button type="button" data-edit-repo>编辑</button></td>',
       '</tr>',
-      '<tr data-pair-detail="' + pair + '"' + (sourceMode === 'local' ? ' hidden' : '') + '>',
-      '<td colspan="8"><div class="repo-detail">',
+      '<tr data-pair-detail="' + pair + '" hidden><td colspan="7"><div class="repo-detail">',
+      '<h3>基本设置</h3>',
+      '<label class="repo-field">实际目录<input type="text" data-repo="mount" value="' + escapeHtml(mount) + '" placeholder="md/文件夹名"' + (item.id || folder ? ' readonly' : '') + disabled + '></label>',
+      '<label class="repo-field">显示名称<input data-repo="displayName" value="' + escapeHtml(item.displayName || '') + '"' + disabled + '></label>',
+      '<label class="repo-field">分组<input data-folder-group="' + escapeHtml(mount) + '" value="' + escapeHtml(folderGroup(mount)) + '"' + disabled + '></label>',
+      '<label class="repo-field">来源类型<select data-repo="sourceMode" data-previous-mode="' + sourceMode + '"' + disabled + '><option value="svn"' + (sourceMode === 'svn' ? ' selected' : '') + '>SVN 库</option><option value="local"' + (sourceMode === 'local' ? ' selected' : '') + '>本地文件夹</option><option value="symlink"' + (sourceMode === 'symlink' ? ' selected' : '') + '>软链接</option></select></label>',
+      '<p class="hint"><a href="#tab=accounts&section=default-credential">管理全站默认同步账号</a> · 普通字段待全局保存</p>',
       '<input type="hidden" data-repo="id" value="' + escapeHtml(item.id || '') + '">',
       '<label class="repo-field repo-field-url" data-source-field="svn"' + (svnEnabled ? '' : ' hidden')
         + '><span>SVN 地址</span><input type="text" data-repo="url" value="' + escapeHtml(item.url)
@@ -404,17 +402,24 @@
           : '未勾选：网页为只读，内容由服务器自动更新')) + '</span>',
       '</div>',
       '</div>',
+      '<h3>运行状态</h3><p data-sync-id="' + escapeHtml(item.id || '') + '">' + (svnEnabled ? syncCell(item.id) : '本地文件夹不连接 SVN') + '</p>',
+      '<details class="repo-maintenance"><summary>高级与维护</summary><p>稳定 ID：<code>' + escapeHtml(item.id || '保存后生成') + '</code></p>',
       '<div class="actions">'
         + '<button type="button" data-source-field="svn"' + (svnEnabled ? '' : ' hidden') + ' data-action="health"' + disabled + '>检查</button>'
         + '<button type="button" data-source-field="svn"' + (svnEnabled ? '' : ' hidden') + ' data-action="repair"' + disabled + '>修复</button>'
         + '<button type="button" data-source-field="svn"' + (svnEnabled ? '' : ' hidden') + ' data-action="recreate"' + disabled + '>删除重建</button>'
         + '<button type="button" data-source-field="svn"' + (svnEnabled ? '' : ' hidden') + ' data-action="provision"' + disabled + '>创建并拉取</button>'
         + '<button type="button" class="danger" data-action="remove-repo"' + disabled + '>移除映射</button>'
-        + '</div></td></tr>'
+        + '</div>'
+        + (item.id ? '<label>新的文件夹名称<input data-rename-name value="' + escapeHtml(mount.split('/').pop()) + '"' + disabled + '><button type="button" data-rename-repository="' + escapeHtml(item.id) + '"' + disabled + '>执行文件夹重命名</button></label>' : '')
+        + (item.id || folder ? '<button type="button" class="danger" data-action="delete-repo" data-repo-id="' + escapeHtml(item.id || '') + '" data-repo-mount="' + escapeHtml(mount) + '"' + disabled + '>删除仓库（移入回收站）</button>' : '')
+        + '</details></td></tr>'
     ].join('');
   }
 
   function renderRepos() {
+    if((state.dirty||state.pendingCredentials) && state.draft)return;
+    layout('beforeRender');
     var body = query('[data-repo-rows]');
     if (!body) {
       return;
@@ -444,6 +449,7 @@
     });
     body.innerHTML = rows.join('')
       || '<tr><td colspan="8" class="hint">docs/md 下还没有文件夹，可先用编辑器右键新建文件夹。</td></tr>';
+    layout('repositoriesRendered');
   }
 
   function pairOf(node) {
@@ -480,7 +486,11 @@
       return;
     }
     var id = pairField(entry, 'id') || entry.summary.getAttribute('data-name') || '';
-    var toggle = entry.summary.querySelector('[data-repo="sourceMode"]');
+    var toggle = (entry.detail && entry.detail.querySelector('[data-repo="sourceMode"]')) || entry.summary.querySelector('[data-repo="sourceMode"]');
+    var label=entry.summary.querySelector('[data-repo-label]'),source=entry.summary.querySelector('[data-source-label]'),group=entry.summary.querySelector('[data-group-label]');
+    if(label)label.textContent=pairField(entry,'displayName')||entry.summary.getAttribute('data-name')||pairField(entry,'mount')||'新仓库';
+    if(toggle){entry.summary.setAttribute('data-source-mode',toggle.value);if(source)source.textContent=toggle.value==='svn'?'SVN 库':toggle.value==='symlink'?'软链接':'本地文件夹';}
+    var groupField=entry.detail&&entry.detail.querySelector('[data-folder-group]');if(group&&groupField)group.textContent=groupField.value||'默认';
     var linkCell = entry.summary.querySelector('[data-entry-cell]');
     if (linkCell) {
       linkCell.innerHTML = id
@@ -514,7 +524,7 @@
       if (!mount || mount === 'md' || mount.indexOf('md/') !== 0) {
         return;
       }
-      var groupInput = row.querySelector('[data-folder-group]');
+      var groupInput = row.querySelector('[data-folder-group]') || (entry.detail && entry.detail.querySelector('[data-folder-group]'));
       groups[mount] = (groupInput ? groupInput.value.trim() : '') || '默认';
     });
     return groups;
@@ -529,7 +539,7 @@
     existing.forEach(function (item) { if (item.id) { usedIds[item.id] = true; } });
     return all('[data-repo-row]').map(function (row) {
       var entry = pairOf(row);
-      var sourceField = row.querySelector('[data-repo="sourceMode"]');
+      var sourceField = row.querySelector('[data-repo="sourceMode"]') || (entry.detail && entry.detail.querySelector('[data-repo="sourceMode"]'));
       var sourceMode = sourceField ? sourceField.value : 'local';
       var svnEnabled = sourceMode === 'svn';
       var interval = pairField(entry, 'syncIntervalSeconds');
@@ -542,7 +552,7 @@
         mount = row.getAttribute('data-mount') || '';
       }
       mount = normalizeMount(mount);
-      var groupInput = row.querySelector('[data-folder-group]');
+      var groupInput = row.querySelector('[data-folder-group]') || (entry.detail && entry.detail.querySelector('[data-folder-group]'));
       // 仓库 ID 一律由系统生成：既有仓库沿用保存的 ID，新文件夹按名称生成（本地/SVN 一致）
       var repoId = pairField(entry, 'id');
       if (row.getAttribute('data-repo-removed') === '1') {
@@ -885,6 +895,7 @@
         passwordInput.value = '';
       }
       updateCredentialStatus(entry);
+      layout('credentialSaved',entry.detail);
       setStatus('已保存 ' + label + ' 的同步凭据：' + username + '，正在检查连接…');
       return checkHealth(repoId, false);
     }).catch(function (error) {
@@ -915,6 +926,7 @@
         passwordNode.value = '';
       }
       renderSiteCredentialStatus();
+      layout('credentialSaved',query('[data-site-credential="password"]').closest('section'));
       setStatus('已保存网站备份凭据：' + username);
     }).catch(function (error) {
       setStatus('保存备份凭据失败：' + error.message, true);
@@ -993,6 +1005,7 @@
       renderDefaultCredentialPanel();
       renderAuthPanel();
       refreshCredentialStatuses();
+      layout('credentialSaved',query('[data-default="password"]').closest('section'));
       setStatus(payload.message || ('默认同步凭据已保存：' + state.defaultCredential.username));
     }).catch(function (error) {
       setStatus('保存默认同步凭据失败：' + error.message, true);
@@ -1073,15 +1086,20 @@
   }
 
   function authFingerprint(user, authenticated) {
-    return (authenticated ? '1' : '0') + '|' + ((user && user.username) || '') + '|' + ((user && user.role) || '');
+    return (authenticated ? '1' : '0') + '|' + ((user && user.username) || '') + '|' + ((user && user.role) || '') + '|' + ((user && user.authSourceId) || '');
   }
 
   function loadConfig() {
+    var generation=(state.loadGeneration||0)+1;state.loadGeneration=generation;
+    function current(){if(generation!==state.loadGeneration){var error=new Error('过期的配置读取');error.stale=true;throw error;}}
+
+    layout('beforeRender');layout('jsonMode', false);layout('clearStatus');
+    if(window.location.protocol==='file:'){state.editable=false;state.config={};state.draft=null;layout('clearPrivate');showPanels();return Promise.resolve();}
     state.dirty = false;
     state.jsonDirty = false;
     var jsonEditor = query('[data-profile-json]');
     if (jsonEditor) jsonEditor.value = '';
-    return api('__auth/session').then(function (payload) {
+    return api('__auth/session').then(function (payload) { current();
       state.user = payload.user || null;
       state.authenticated = !!payload.authenticated && !!(payload.user && payload.user.role === 'admin');
       state.csrf = payload.csrfToken || '';
@@ -1094,12 +1112,13 @@
         state.defaultCredential = { configured: false, username: '' };
         state.config = { repositories: (payload.site && payload.site.repositories) || [] };
         renderAiPanel();
-        return loadFolders().then(function () {
+        return loadFolders().then(function () { current();
           renderRepos();
           renderSiteBackup();
           renderAuthPanel();
           renderDefaultCredentialPanel();
           showPanels();
+          state.draft=null;layout('clearPrivate');layout('refresh');
           var siteBadge = query('[data-site-health]');
           if (siteBadge) {
             siteBadge.textContent = '（登录管理员后自动检查）';
@@ -1109,7 +1128,7 @@
           return state.config;
         });
       }
-      return api('__config').then(function (configPayload) {
+      return api('__config').then(function (configPayload) { current();
         state.config = configPayload.config || {};
         installManagement();
         renderPolicyFields();
@@ -1117,22 +1136,25 @@
         renderAiPanel();
         loadProfiles().catch(function (error) { setStatus(error.message, true); });
         refreshSyncStatus();
-        return loadFolders().then(function () {
+        return loadFolders().then(function () { current();
           return loadCredentials();
-        }).then(function () {
+        }).then(function () { current();
           return loadDefaultCredential();
-        }).then(function () {
+        }).then(function () { current();
           renderRepos();
           renderSiteBackup();
           renderAuthPanel();
           renderDefaultCredentialPanel();
+          layout('jsonMode',false);
+          layout('credentialSaved');
           showPanels();
-          checkHealth(null, true);
+          initializeDraft();layout('refresh');
           if (window.location.hash === '#repository-trash') loadRepoTrash();
           return state.config;
         });
       });
     }).catch(function (error) {
+      if(error.stale)return;
       setStatus(error.status === 404
         ? '当前服务未启用配置接口（只读预览）：请用 python serve.py 启动认证服务后再打开本页。'
         : '读取配置失败：' + error.message, true);
@@ -1171,24 +1193,10 @@
     });
   }
 
-  function save() {
-    if (state.jsonDirty) { setStatus('JSON 编辑框有未保存修改，请先保存 JSON 或重新读取。', true); return; }
-    if (!state.config) {
-      return;
-    }
+  function serializeForm() {
     var repos = readRepos();
-    var problem = validateRepos(repos);
-    if (problem) {
-      setStatus(problem, true);
-      return;
-    }
-    var switched = switchedToLocal(repos);
-    if (switched.length && !window.confirm('以下仓库将不再从 SVN 同步（地址会被清空）：'
-        + switched.map(function (repo) { return repo.id; }).join('、') + '。确定继续？')) {
-      return;
-    }
     var payload = JSON.parse(JSON.stringify(state.config));
-    all('[data-policy]').forEach(function(input){var keys=input.getAttribute('data-policy').split('.');payload[keys[0]]=payload[keys[0]]||{};payload[keys[0]][keys[1]]=Number(input.value);});
+    all('[data-policy]').forEach(function(input){var keys=input.getAttribute('data-policy').split('.');payload[keys[0]]=payload[keys[0]]||{};payload[keys[0]][keys[1]]=Number(input.value)*(keys[1]==='maxBytes'?1048576:1);});
     payload.siteBackup = readSiteBackup();
     var authUrl = query('[data-auth="url"]');
     if (authUrl) payload.auth = Object.assign({}, payload.auth || {}, { url: authUrl.value.trim() });
@@ -1217,6 +1225,38 @@
       }
       return item;
     });
+    return payload;
+  }
+  function captureDraft() {
+    if(!state.editable || !state.draft || state.jsonDirty)return;
+    try { state.draft.update(serializeForm());state.dirty=state.draft.dirty(); } catch(error) { state.dirty=true; }
+    layout('update');
+  }
+  function initializeDraft() {
+    if(window.ConfigDraft && state.editable)state.draft=new window.ConfigDraft(serializeForm());
+    state.dirty=false;layout('update');
+  }
+
+  function save() {
+    if (state.jsonDirty) { setStatus('JSON 编辑框有未保存修改，请先保存 JSON 或重新读取。', true); return; }
+    if (!state.config) {
+      return;
+    }
+    var invalid=all('[data-policy]').filter(function(input){return !input.checkValidity()||!isFinite(Number(input.value));})[0];
+    if(invalid){layout('navigate',invalid.closest('[data-config-tab-panel]').getAttribute('data-config-tab-panel'));invalid.reportValidity();invalid.focus();setStatus('请检查参数范围与单位。',true);return Promise.resolve(false);}
+    var repos = readRepos();
+    var problem = validateRepos(repos);
+    if (problem) {
+      setStatus(problem, true);
+      return;
+    }
+    var switched = switchedToLocal(repos);
+    if (switched.length && !window.confirm('以下仓库将不再从 SVN 同步（地址会被清空）：'
+        + switched.map(function (repo) { return repo.id; }).join('、') + '。确定继续？')) {
+      return;
+    }
+    var payload = state.draft ? state.draft.value() : serializeForm();
+    var pendingCredentials=layout('snapshotCredentials');
     var seenIds = {};
     var seenMounts = {};
     for (var index = 0; index < payload.repositories.length; index += 1) {
@@ -1233,19 +1273,27 @@
       seenMounts[item.mount] = true;
     }
     setStatus('正在保存配置…');
-    api('__config', { method: 'PUT', body: JSON.stringify(payload) }).then(function (result) {
+    layout('saving',true);
+    return api('__config', { method: 'PUT', body: JSON.stringify(payload) }).then(function (result) {
       state.config = result.config || state.config;
       state.dirty = false;
+      state.rebuilt = result.rebuilt;
       loadProfiles().catch(function (error) { setStatus(error.message, true); });
       return loadFolders();
     }).then(function () {
+      state.pendingCredentials=false;
       renderRepos();
       renderSiteBackup();
-      setStatus('配置和当前 JSON 方案已保存并完成备份，站点正在按新仓库重建。');
-      checkHealth(null, true);
+      renderAuthPanel();renderDefaultCredentialPanel();renderAiPanel();renderPolicyFields();
+      initializeDraft();
+      layout('restoreCredentials',pendingCredentials);
+      setStatus(state.rebuilt===false?'配置已保存，页面更新失败；请检查服务端日志后重试重建。':'全部配置已保存到当前 JSON 方案，站点页面已更新。',state.rebuilt===false);
+      return true;
     }).catch(function (error) {
-      setStatus('保存失败：' + error.message, true);
-    });
+      if(error.status===409)layout('navigate','profiles');
+      setStatus('保存失败（修改仍保留）：' + error.message, true);
+      return false;
+    }).then(function(ok){layout('saving',false);return ok;});
   }
 
   function provision(button) {
@@ -1372,10 +1420,7 @@
     return api('__folders').then(function (payload) {
       state.folders = payload.folders || [];
       renderRepos();
-      setStatus('文件夹信息已更新（大小/文件数/最新更新）。');
-      if (state.editable) {
-        checkHealth(null, true);
-      }
+      setStatus(state.dirty?'目录统计已更新；未保存的仓库编辑已保留，保存后刷新列表。':'文件夹信息已更新（大小/文件数/最新更新）。');
     }).catch(function (error) {
       setStatus('刷新失败：' + error.message, true);
     });
@@ -1409,7 +1454,7 @@
       list.innerHTML = '<p>仓库回收站需要管理员登录后才能查看和恢复。</p>'
         + '<p><a href="#admin-login">前往管理员登录</a></p>';
       setStatus('请先登录管理员账号后查看仓库回收站。', true);
-      panel.scrollIntoView({ block: 'nearest' });
+      if(window.location.hash.indexOf('repository-trash')>=0)panel.scrollIntoView({ block: 'nearest' });
       return;
     }
     list.innerHTML = '<p>正在读取仓库回收站…</p>';
@@ -1473,8 +1518,8 @@
     }
     var svnToggle = target.closest ? target.closest('[data-repo="sourceMode"]') : null;
     if (svnToggle) {
-      var pair = svnToggle.closest('[data-repo-row]');
-      var detail = document.querySelector('[data-pair-detail="' + (pair ? pair.getAttribute('data-pair') : '') + '"]');
+      var sourceEntry = pairOf(svnToggle);
+      var detail = sourceEntry && sourceEntry.detail;
       syncPermLabel(detail, svnToggle.value);
     }
   });
@@ -1494,9 +1539,11 @@
       var body = query('[data-repo-rows]');
       var nextIndex = all('[data-repo-row]').length;
       body.insertAdjacentHTML('beforeend', repoRow({ group: '默认', allowCommit: true }, null, nextIndex));
+      captureDraft();layout('repositoriesRendered');layout('openNew');
     } else if (action === 'delete-repo' || action === 'restore-repo') {
       changeRepository(action === 'delete-repo' ? 'delete' : 'restore', target);
     } else if (action === 'repo-trash') {
+      layout('navigate','backup','repository-trash');
       loadRepoTrash();
     } else if (action === 'remove-repo') {
       var entry = pairOf(target);
@@ -1509,7 +1556,7 @@
         if (urlInput) {
           urlInput.value = '';
         }
-        var toggle = entry.summary ? entry.summary.querySelector('[data-repo="sourceMode"]') : null;
+        var toggle = entry.detail.querySelector('[data-repo="sourceMode"]') || (entry.summary ? entry.summary.querySelector('[data-repo="sourceMode"]') : null);
         if (toggle) {
           toggle.value = 'local';
         }
@@ -1519,6 +1566,7 @@
           entry.summary.setAttribute('data-repo-removed', '1');
         }
         updateSummary(entry);
+        captureDraft();layout('beforeRender');
         setStatus('已移除该文件夹的仓库配置（点「保存配置并重建站点」后生效）。');
       }
     } else if (action === 'auth-save') {
@@ -1565,7 +1613,7 @@
             : '未建立链接';
         }
         if (link.sourceMode === 'symlink') {
-          var select = linkEntry.summary.querySelector('[data-repo="sourceMode"]');
+          var select = linkEntry.detail.querySelector('[data-repo="sourceMode"]') || linkEntry.summary.querySelector('[data-repo="sourceMode"]');
           if (select && select.value !== 'symlink') {
             select.value = 'symlink';
             select.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1587,9 +1635,7 @@
       }
       if (action === 'health') {
         var healthEntry = pairOf(target);
-        var pendingPassword = healthEntry.detail.querySelector('[data-repo="credPassword"]');
-        if (pendingPassword && pendingPassword.value) saveRepoCredential(target);
-        else checkHealth(targetId, false);
+        checkHealth(targetId, false);
       } else {
         repairRepo(targetId, action === 'recreate');
       }
@@ -1624,7 +1670,11 @@
       return;
     }
     if (name === 'sourceMode') {
-      entry.detail.hidden = target.value === 'local';
+      var previous=target.getAttribute('data-previous-mode');
+      if(previous&&previous!==target.value&&!window.confirm('将来源类型从 '+previous+' 改为 '+target.value+'？相关地址与权限将在保存配置后更新。'))target.value=previous;
+      if(previous&&previous!==target.value&&target.value==='symlink'){var permission=entry.detail.querySelector('[data-repo="allowCommit"]');if(permission)permission.checked=false;}
+      target.setAttribute('data-previous-mode',target.value);
+      if(!window.ConfigLayout)entry.detail.hidden = target.value === 'local';
       var detail = entry.detail;
       all('[data-source-field]', detail).forEach(function (field) {
         field.hidden = field.getAttribute('data-source-field') !== target.value;
@@ -1640,7 +1690,7 @@
       } else if (target.value === 'symlink') {
         var targetInput = detail.querySelector('[data-repo="linkTarget"]');
         if (targetInput && !targetInput.value.trim()) { targetInput.focus(); }
-        setStatus('软链接只读：填写目标目录并保存后，可点「创建链接」建立引用。');
+        setStatus('软链接默认只读；填写目标目录并保存后，可创建链接。开启在线修改会直接写入目标目录。');
       } else if (pairField(entry, 'id')) {
         setStatus('本地模式不连接 SVN，SVN 地址会被清空。');
       }
@@ -1664,6 +1714,7 @@
       return;
     }
     state.authFingerprint = next;
+    if(!info.authenticated||!info.user||info.user.role!=='admin'){state.editable=false;state.draft=null;state.config=null;state.credentials={};state.defaultCredential={};state.dirty=false;state.jsonDirty=false;layout('clearPrivate');layout('refresh');}
     loadConfig();
   });
 
@@ -1673,16 +1724,22 @@
     if (event.target.matches && event.target.matches('[data-auth="url"], [data-default="url"]')) {
       all('[data-auth="url"], [data-default="url"]').forEach(function (node) { node.value = event.target.value; });
     }
+    if(event.target.closest&&event.target.closest('[data-pair-detail]'))updateSummary(pairOf(event.target));
   });
   window.setInterval(function () { if (!document.hidden) refreshSyncStatus(); }, 15000);
   // 从其它页面带 #repository-trash 进来，或在页内点击该锚点时都能打开仓库回收站
   window.addEventListener('hashchange', function () {
-    if (window.location.hash === '#repository-trash') loadRepoTrash();
+    if (!window.ConfigLayout && window.location.hash === '#repository-trash') loadRepoTrash();
   });
   window.addEventListener('beforeunload', function (event) {
-    if (!state.dirty && !state.jsonDirty) return;
+    if (!state.dirty && !state.jsonDirty && !state.pendingCredentials) return;
     event.preventDefault(); event.returnValue = '';
   });
   showPanels();
+  if(window.ConfigLayout)window.ConfigLayout.connect({state:state,capture:captureDraft,save:save,
+    discard:function(){state.dirty=false;state.jsonDirty=false;layout('jsonMode',false);return loadConfig();},
+    loadUsers:function(){if(state.loadUsers)state.loadUsers();},loadTrash:loadRepoTrash,
+    latest:function(){return api('__config').then(function(data){layout('preview',data.config,'服务器最新配置',true);});},
+    changePassword:function(current,password){return api('__admin/password',{method:'POST',body:JSON.stringify({current:current,password:password})});}});
   loadConfig();
 }());
