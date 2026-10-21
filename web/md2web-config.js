@@ -62,6 +62,37 @@
     });
   }
 
+  var recordsData=null, recordsIdentity='', recordsPending=false, recordsGeneration=0;
+  function clearRecords(){recordsGeneration++;recordsData=null;recordsIdentity='';recordsPending=false;var host=query('[data-records-content]');if(host)host.textContent='';}
+  function renderRecords() {
+    var host=query('[data-records-content]');
+    if(!state.editable || recordsIdentity!==state.authFingerprint){host.textContent='';return;}
+    if(!recordsData)return;
+    var filter=query('[data-records-query]').value.trim().toLowerCase();
+    function table(title, columns, rows){
+      var filtered=rows.filter(function(row){return !filter || JSON.stringify(row).toLowerCase().indexOf(filter)>=0;});
+      var page=0, section=document.createElement('section'), heading=document.createElement('h3'), body=document.createElement('div'), more=document.createElement('button');
+      heading.textContent=title+'（'+filtered.length+'）';body.className='table-scroll';more.type='button';
+      function draw(){var part=filtered.slice(page*100,(page+1)*100);body.innerHTML='<table><thead><tr>'+columns.map(function(c){return '<th>'+escapeHtml(c[1])+'</th>';}).join('')+'</tr></thead><tbody>'+part.map(function(row){return '<tr>'+columns.map(function(c){return '<td>'+escapeHtml(row[c[0]])+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table>';more.textContent='第 '+(page+1)+' / '+Math.max(1,Math.ceil(filtered.length/100))+' 页 · 下一页';more.disabled=filtered.length<=100;}
+      more.onclick=function(){page=(page+1)%Math.ceil(filtered.length/100);draw();};section.appendChild(heading);section.appendChild(body);section.appendChild(more);host.appendChild(section);draw();
+    }
+    host.textContent='';var key=query('[data-records-sort]').value;
+    var users=recordsData.users.slice().sort(function(a,b){return b[key]-a[key] || a.id-b.id;}).map(function(u,i){return Object.assign({rank:i+1},u);});
+    table('用户排行榜',[['rank','排名'],['username','用户'],['source','认证源'],['logins','登录次数'],['visits','访问次数'],['articles','文章总数'],['last_at','最近活动']],users);
+    table('全部 IP 与用户记录',[['client_ip','IP 地址'],['username','用户'],['source','认证源'],['action','事件'],['result','结果'],['count','次数'],['last_at','最近时间']],recordsData.ips);
+    table('文章访问排行',[['path','文章'],['visits','访问次数'],['readers','阅读人数'],['last_at','最近阅读']],recordsData.articles);
+  }
+  function loadRecords(force){
+    if(!state.editable)return;
+    if(!force&&recordsIdentity===state.authFingerprint&&recordsData){renderRecords();return;}
+    if(recordsPending)return;recordsPending=true;recordsData=null;var generation=recordsGeneration;
+    query('[data-records-content]').textContent='正在加载…';
+    api('__admin/user-records',{cache:'no-store'}).then(function(data){if(generation!==recordsGeneration)return;recordsIdentity=state.authFingerprint;recordsData=data;renderRecords();}).catch(function(e){if(!e.stale&&generation===recordsGeneration){query('[data-records-content]').textContent='加载失败：'+e.message;}}).finally(function(){if(generation===recordsGeneration)recordsPending=false;});
+  }
+  if(query('[data-records-refresh]'))query('[data-records-refresh]').onclick=function(){loadRecords(true);};
+  if(query('[data-records-query]'))query('[data-records-query]').oninput=renderRecords;
+  if(query('[data-records-sort]'))query('[data-records-sort]').onchange=renderRecords;
+
   function showPanels() {
     var fileMode = window.location.protocol === 'file:';
     query('[data-config-file]').hidden = !fileMode;
@@ -1738,7 +1769,7 @@
   showPanels();
   if(window.ConfigLayout)window.ConfigLayout.connect({state:state,capture:captureDraft,save:save,
     discard:function(){state.dirty=false;state.jsonDirty=false;layout('jsonMode',false);return loadConfig();},
-    loadUsers:function(){if(state.loadUsers)state.loadUsers();},loadTrash:loadRepoTrash,
+    loadRecords:loadRecords,clearRecords:clearRecords,loadUsers:function(){if(state.loadUsers)state.loadUsers();},loadTrash:loadRepoTrash,
     latest:function(){return api('__config').then(function(data){layout('preview',data.config,'服务器最新配置',true);});},
     changePassword:function(current,password){return api('__admin/password',{method:'POST',body:JSON.stringify({current:current,password:password})});}});
   loadConfig();

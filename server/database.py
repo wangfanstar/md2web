@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .passwords import hash_password
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 # 兼容目标：RHEL7 自带 SQLite 3.7.17（Python 3.6 的 sqlite3）。
 # Windows 端也必须只写这些版本能解析的对象，保证 data/ 数据库可在两个平台间直接共用。
@@ -350,6 +350,9 @@ def migrate(conn, logger=None):
                 if 'persistent' not in [row[1] for row in conn.execute('PRAGMA table_info(sessions)')]:
                     conn.execute('ALTER TABLE sessions ADD COLUMN persistent INTEGER NOT NULL DEFAULT 0')
                 conn.execute('CREATE TABLE IF NOT EXISTS device_hints (token_hash TEXT PRIMARY KEY, auth_source_id TEXT NOT NULL, username TEXT NOT NULL, client_ip TEXT, updated_at TEXT NOT NULL, expires_at TEXT NOT NULL)')
+            if version < 13:
+                conn.execute('CREATE INDEX IF NOT EXISTS idx_audit_actor_action ON audit_events (actor_id, action)')
+                conn.execute('CREATE INDEX IF NOT EXISTS idx_audit_action_resource ON audit_events (action, resource)')
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     sanitize_schema(conn, logger)
     return SCHEMA_VERSION
@@ -919,3 +922,33 @@ def folder_latest_updates(conn, limit=1000):
         latest[key] = {"author": row["author"] or "", "at": row["finished_at"] or row["created_at"],
                        "path": path}
     return latest
+
+
+def user_records(conn):
+    """All retained login IPs and authenticated reading statistics; no arbitrary row cap."""
+    relevant = "a.action IN ('login','admin_login','article_visit')"
+    users = conn.execute("""
+        SELECT u.id, u.svn_username AS username, u.auth_source_id AS source,
+        SUM(CASE WHEN a.action IN ('login','admin_login') AND a.result='ok' THEN 1 ELSE 0 END) AS logins,
+        SUM(CASE WHEN a.action='article_visit' THEN 1 ELSE 0 END) AS visits,
+        COUNT(DISTINCT CASE WHEN a.action='article_visit' THEN a.resource END) AS articles,
+        MAX(a.created_at) AS last_at
+        FROM users u LEFT JOIN audit_events a ON a.actor_id=u.id AND """ + relevant + """
+        GROUP BY u.id ORDER BY visits DESC, logins DESC, u.id
+    """).fetchall()
+    ips = conn.execute("""
+        SELECT a.client_ip, COALESCE(u.svn_username, a.resource) AS username,
+        u.auth_source_id AS source, a.action, a.result, COUNT(*) AS count,
+        MAX(a.created_at) AS last_at
+        FROM audit_events a LEFT JOIN users u ON u.id=a.actor_id
+        WHERE """ + relevant + """
+        GROUP BY a.client_ip, username, source, a.action, a.result
+        ORDER BY last_at DESC
+    """).fetchall()
+    articles = conn.execute("""
+        SELECT a.resource AS path, COUNT(*) AS visits, COUNT(DISTINCT a.actor_id) AS readers,
+        MAX(a.created_at) AS last_at FROM audit_events a
+        WHERE a.action='article_visit' GROUP BY a.resource ORDER BY visits DESC, path
+    """).fetchall()
+    return dict(users=[dict(r) for r in users], ips=[dict(r) for r in ips],
+                articles=[dict(r) for r in articles])

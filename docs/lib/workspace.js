@@ -495,6 +495,7 @@
   }
 
   // 文档正文顶部显示最后更新日期：SVN 库用 SVN 上的时间，其余用文件时间（需认证服务）
+  var lastVisitRoute = '';
   function addUpdatedMeta() {
     var section = document.querySelector('.markdown-section');
     if (!section) return;
@@ -503,6 +504,7 @@
     // docsify 路由会去掉 .md 后缀（如 md/使用说明/快速开始），接口侧会补回扩展名
     var isDocument = route && route.indexOf('md/') === 0 && route.charAt(route.length - 1) !== '/';
     if (!isDocument) {
+      lastVisitRoute = '';
       if (box && box.parentNode) box.parentNode.removeChild(box);
       return;
     }
@@ -516,6 +518,15 @@
     box.setAttribute('data-route', route);
     box.textContent = '最后更新：读取中…';
     if (!window.fetch) { box.textContent = ''; return; }
+    if (window.SiteAuth && location.protocol !== 'file:' && lastVisitRoute !== route) {
+      lastVisitRoute = route;
+      window.SiteAuth.refresh().then(function () {
+        if (!window.SiteAuth.isAuthenticated() || box.getAttribute('data-route') !== route) return;
+        return fetch('__md/visit', {method:'POST', credentials:'same-origin',
+          headers:{'Content-Type':'application/json','X-CSRF-Token':window.SiteAuth.csrfToken()},
+          body:JSON.stringify({path:route})});
+      }).catch(function () {});
+    }
     fetch('__doc-meta?path=' + encodeURIComponent(route), { credentials: 'same-origin' })
       .then(function (response) { return response.ok ? response.json() : null; })
       .then(function (payload) {

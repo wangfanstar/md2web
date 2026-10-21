@@ -19,10 +19,11 @@
   }
   function activate(){
     if(!bridge)return;var r=route(),allowed=bridge.state.editable;
-    if(['repositories','accounts','backup','ai','performance','profiles'].indexOf(r.tab)<0||(!allowed&&r.tab!=='repositories'))r.tab='repositories';
+    if(['repositories','accounts','records','backup','ai','performance','profiles'].indexOf(r.tab)<0||(!allowed&&r.tab!=='repositories'))r.tab='repositories';
     if(active!==r.tab)closeDrawer();active=r.tab;
     all('[data-config-tab]').forEach(function(b){var selected=b.dataset.configTab===active;b.hidden=!allowed&&b.dataset.configTab!=='repositories';b.setAttribute('aria-selected',String(selected));b.tabIndex=selected?0:-1;});
     all('[data-config-tab-panel]').forEach(function(p){p.hidden=p.dataset.configTabPanel!==active;});
+    if(allowed&&active==='records'&&bridge.loadRecords)bridge.loadRecords();
     if(allowed&&active==='accounts'&&!loadedUsers&&bridge.loadUsers){loadedUsers=true;bridge.loadUsers();}
     if(allowed&&active==='backup'&&r.section==='repository-trash'&&bridge.loadTrash&&!loadedTrash){loadedTrash=true;bridge.loadTrash();}
     if(r.section){var anchor=document.getElementById(r.section);if(anchor)setTimeout(function(){anchor.scrollIntoView({block:'start'});},0);}
@@ -53,7 +54,7 @@
   }
   function review(){var host=q('[data-config-review-content]');host.textContent='';var changes=bridge.state.draft?bridge.state.draft.changes():[];changes.forEach(function(c){var p=document.createElement('p');p.textContent=c.path+'：'+(c.before||'未设置')+' → '+(c.after||'移除');host.appendChild(p);});if(!changes.length)host.textContent='没有普通表单修改。';q('[data-config-review-dialog]').showModal();}
   function synchronize(){if(!bridge||!bridge.state.editable||bridge.state.jsonDirty)return;bridge.capture();update();}
-  function clearPrivate(){all('input[type="password"], [data-profile-json], [data-users-list], [data-config-review-content]').forEach(function(n){if('value' in n)n.value='';else n.textContent='';});credentialFields().forEach(function(n){n.dataset.credentialInitial=n.value;});bridge.state.pendingCredentials=false;loadedUsers=false;loadedTrash=false;closeDrawer();if(q('[data-config-review-dialog]').open)q('[data-config-review-dialog]').close();}
+  function clearPrivate(){if(bridge.clearRecords)bridge.clearRecords();all('input[type="password"], [data-profile-json], [data-users-list], [data-records-content], [data-config-review-content]').forEach(function(n){if('value' in n)n.value='';else n.textContent='';});credentialFields().forEach(function(n){n.dataset.credentialInitial=n.value;});bridge.state.pendingCredentials=false;loadedUsers=false;loadedTrash=false;closeDrawer();if(q('[data-config-review-dialog]').open)q('[data-config-review-dialog]').close();}
   function connect(value){bridge=value;
     all('[data-config-tab]').forEach(function(button){button.onclick=function(){navigate(button.dataset.configTab);};button.onkeydown=function(e){var list=all('[data-config-tab]').filter(function(b){return !b.hidden;}),i=list.indexOf(button),next=e.key==='Home'?0:e.key==='End'?list.length-1:e.key==='ArrowRight'?(i+1)%list.length:e.key==='ArrowLeft'?(i+list.length-1)%list.length:-1;if(next<0)return;e.preventDefault();list[next].focus();navigate(list[next].dataset.configTab);};});
     all('[data-drawer-close]').forEach(function(b){b.onclick=function(){closeDrawer();history.replaceState(null,'','#tab=repositories');};});q('[data-repo-drawer]').addEventListener('cancel',function(e){e.preventDefault();closeDrawer();history.replaceState(null,'','#tab=repositories');});

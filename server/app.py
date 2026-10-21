@@ -521,6 +521,34 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         result = auth_service.test_auth_url(payload.get("url"))
         return jsonify({"ok": True, "result": result})
 
+    @app.post('/__md/visit')
+    def record_article_visit():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        rejected = require_same_origin() or require_csrf(session)
+        if rejected:
+            return rejected
+        payload = request.get_json(silent=True) or {}
+        try:
+            path = server_documents.normalize_md_path(payload.get('path', ''))
+            if not server_documents.resolve_md_file(md_dir(), path).is_file():
+                return json_error(404, 'not_found', 'Document not found')
+        except MdSaveError as error:
+            return json_error(400, 'invalid_path', str(error))
+        with auth_service._db_lock, conn:
+            database.audit(conn, 'article_visit', 'ok', actor_id=session['user']['id'],
+                           resource=path, client_ip=request.remote_addr or '')
+        return jsonify(ok=True)
+
+    @app.get('/__admin/user-records')
+    def user_records():
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        with auth_service._db_lock:
+            return jsonify(ok=True, **database.user_records(conn))
+
     @app.get("/__admin/usage")
     def admin_usage():
         """管理员查看登录与使用情况：按 IP/账号聚合的登录记录、账号活动、最近提交、在线会话。"""

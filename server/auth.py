@@ -244,6 +244,15 @@ class AuthService:
         self._check_rate(key)
         with self._db_lock:
             row = database.find_user(self.conn, database.LOCAL_ADMIN_SOURCE, username)
+        if row is None:
+            with self._db_lock:
+                promoted = database.find_user(self.conn, self.auth_source_id, username)
+            if promoted is not None and policy.effective(promoted, self.config) == ('admin', True):
+                result = self.login(username, password, client_ip, user_agent, remember)
+                if result['user']['role'] != 'admin':
+                    self.logout(result['token'])
+                    raise AuthError('auth_failed')
+                return result
         if row is None or row["role"] != "admin" or row["disabled"]:
             self._record_attempt(key)
             with self._db_lock, self.conn:

@@ -1332,6 +1332,47 @@ class AdminConfigTests(ServerTestBase):
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         return response.get_json()["csrfToken"]
 
+    def test_promoted_svn_admin_login(self):
+        first = self.auth.login('alice', 'good', '127.0.0.1')
+        self.config['authorization'] = {'users': [dict(authSourceId=self.auth.auth_source_id,
+            username='alice', role='admin', enabled=True)]}
+        result = self.auth.login_admin('alice', 'good', '127.0.0.1')
+        self.assertEqual(result['user']['role'], 'admin')
+        self.svn.error = server_svn.SvnError('auth_failed')
+        with self.assertRaises(server_auth.AuthError):
+            self.auth.login_admin('alice', 'bad', '127.0.0.1')
+        self.svn.error = None
+        self.config['authorization']['users'][0]['role'] = 'user'
+        with self.assertRaises(server_auth.AuthError):
+            self.auth.login_admin('alice', 'good', '127.0.0.1')
+        self.config['authorization']['users'][0].update(role='admin', enabled=False)
+        with self.assertRaises(server_auth.AuthError):
+            self.auth.login_admin('alice', 'good', '127.0.0.1')
+
+    def test_user_records_and_article_visit(self):
+        self.assertEqual(self.client.get('/__admin/user-records').status_code, 401)
+        csrf = self.admin_login()
+        self.docs.joinpath('md').mkdir(exist_ok=True)
+        self.docs.joinpath('md/read.md').write_text('# Reading', encoding='utf-8')
+        path = 'md/read.md'
+        self.assertEqual(self.client.post('/__md/visit', json={'path': path}).status_code, 403)
+        for unused in range(2):
+            response = self.client.post('/__md/visit', json={'path': path}, headers={'X-CSRF-Token': csrf})
+            self.assertEqual(response.status_code, 200)
+        data = self.client.get('/__admin/user-records', headers={'X-CSRF-Token': csrf}).get_json()
+        self.assertEqual(data['users'][0]['visits'], 2)
+        self.assertEqual(data['users'][0]['articles'], 1)
+        self.assertEqual(data['ips'][0]['client_ip'], '127.0.0.1')
+        for i in range(205):
+            server_database.audit(self.conn, 'login', 'failed:auth_failed', resource='unknown', client_ip='10.0.0.'+str(i))
+        self.conn.commit()
+        data = self.client.get('/__admin/user-records').get_json()
+        self.assertEqual(len(data['ips']), 207)
+        self.assertEqual(data['users'][0]['logins'], 1)
+        self.assertEqual(self.client.post('/__md/visit', json={'path': 'md/missing.md'}, headers={'X-CSRF-Token': csrf}).status_code, 404)
+        self.client.post('/__auth/login', json={'username': 'alice', 'password': 'good'})
+        self.assertEqual(self.client.get('/__admin/user-records').status_code, 403)
+
     def test_schema_v2_adds_admin_columns_and_seed(self):
         columns = {row[1] for row in self.conn.execute("PRAGMA table_info(users)")}
         self.assertIn("role", columns)
