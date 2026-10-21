@@ -37,6 +37,7 @@
     return fetch(path, Object.assign({}, options, { headers: headers })).then(function (response) {
       return response.json().catch(function () { return {}; }).then(function (payload) {
         if (!response.ok || payload.ok === false) {
+          if (window.SiteAuth && window.SiteAuth.handleResponse) window.SiteAuth.handleResponse(response, payload);
           var error = new Error(payload.error || ('HTTP ' + response.status));
           error.status = response.status;
           throw error;
@@ -644,6 +645,15 @@
   }
 
   function refreshSession() {
+    if (window.SiteAuth && window.SiteAuth.refresh) {
+      return window.SiteAuth.refresh().then(function (info) {
+        state.user = info.authenticated ? info.user : null;
+        state.isAdmin = !!(state.user && state.user.role === 'admin');
+        state.csrf = info.authenticated ? window.SiteAuth.csrfToken() || '' : '';
+        renderUser();
+        return state.user;
+      });
+    }
     return api('__auth/session').then(function (payload) {
       state.user = payload.authenticated ? payload.user : null;
       state.isAdmin = !!(state.user && state.user.role === 'admin');
@@ -652,9 +662,19 @@
       return state.user;
     }).catch(function () {
       state.user = null;
+      state.isAdmin = false;
+      state.csrf = '';
       renderUser();
     });
   }
+
+  document.addEventListener('siteauth:change', function (event) {
+    var info = event.detail || {};
+    state.user = info.authenticated ? info.user : null;
+    state.isAdmin = !!(state.user && state.user.role === 'admin');
+    state.csrf = state.user && window.SiteAuth ? window.SiteAuth.csrfToken() || '' : '';
+    if (state.root) { renderUser(); renderList(); }
+  });
 
   function doLogin() {
     var usernameInput = query('[data-login-username]');

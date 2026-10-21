@@ -28,6 +28,7 @@
     return fetch(path, Object.assign({}, options, { headers: headers })).then(function (response) {
       return response.json().catch(function () { return {}; }).then(function (payload) {
         if (!response.ok || payload.ok === false) {
+          if (siteAuth && siteAuth.handleResponse) siteAuth.handleResponse(response, payload);
           var error = new Error(payload.error || ('HTTP ' + response.status));
           error.status = response.status;
           throw error;

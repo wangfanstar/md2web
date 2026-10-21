@@ -1,0 +1,42 @@
+const {chromium}=require('playwright');
+const {spawn}=require('node:child_process');
+const readline=require('node:readline');
+const assert=require('node:assert/strict');
+(async()=>{
+  const server=spawn(process.env.MD2WEB_PYTHON||'C:/Users/wangfan/AppData/Local/Temp/md2web-py368/python.exe',['tests/browser/site-math-server.py'],{env:{...process.env,MD2WEB_MATH_SOURCE:'# Session test\n\nContent',MD2WEB_STALE_FRONTEND:'1'},stdio:['pipe','pipe','pipe']});
+  let stderr='';server.stderr.on('data',d=>stderr+=d);const listeners=[];
+  readline.createInterface({input:server.stdout}).on('line',line=>{try{const data=JSON.parse(line);listeners.slice().forEach(f=>f(data));}catch{}});
+  const base=await new Promise((resolve,reject)=>{listeners.push(d=>{if(d.url)resolve(d.url);});server.on('exit',()=>reject(new Error(stderr)));});
+  const reset=()=>new Promise(resolve=>{const f=d=>{if(d.reset){listeners.splice(listeners.indexOf(f),1);resolve();}};listeners.push(f);server.stdin.write('restart-auth\n');});
+  const browser=await chromium.launch({headless:true,executablePath:process.env.MD2WEB_BROWSER});
+  try{
+    const context=await browser.newContext();const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+    await context.request.post(base+'/__auth/login',{data:{username:'alice',password:'good'}});
+    await page.goto(base+'/html/index_server_only.html#/md/old/math');
+    await page.waitForFunction(()=>SiteAuth.isAuthenticated());
+    await page.getByRole('button',{name:'复制本页内容',exact:true}).waitFor({state:'visible'});
+    await reset();
+    await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+    await page.waitForFunction(()=>!SiteAuth.isAuthenticated());
+    assert.equal(await page.evaluate(()=>SiteAuth.csrfToken()),null);
+    assert.equal(await page.locator('.site-auth-user').count(),0);
+    await page.evaluate(()=>SiteAuth.login('alice','good','',{rememberSession:true}));
+    await reset();await page.evaluate(()=>SiteAuth.refresh());
+    assert.equal(await page.evaluate(()=>SiteAuth.isAuthenticated()),true,'remembered sessions survive restart');
+    await page.route('**/__auth/session',route=>route.abort());
+    await page.evaluate(()=>SiteAuth.refresh());
+    assert.equal(await page.evaluate(()=>SiteAuth.isAuthenticated()),false,'network failure cannot keep stale login');
+    await page.unroute('**/__auth/session');await page.evaluate(()=>SiteAuth.refresh());
+    assert.equal(await page.evaluate(()=>SiteAuth.isAuthenticated()),true);
+    await page.evaluate(()=>SiteAuth.logout());
+    await page.evaluate(()=>SiteAuth.login('alice','good'));
+    await page.evaluate(()=>MdEditor.open());
+    await page.waitForFunction(()=>document.querySelector('.md-editor-text').value.includes('Content'));
+    await page.locator('.md-editor-text').fill('# Session test\n\nUnsaved text preserved');
+    await reset();await page.evaluate(()=>MdEditor.save());
+    await page.waitForFunction(()=>!SiteAuth.isAuthenticated());
+    assert.match(await page.locator('.md-editor-text').inputValue(),/Unsaved text preserved/);
+    assert.deepEqual(errors,[]);
+    console.log('stale deployment asset sync / restart expiry / remembered session / network loss / 401 clears login without losing edits: PASS');
+  }finally{await browser.close();const exited=new Promise(resolve=>server.on('exit',resolve));server.stdin.end('\n');assert.equal(await exited,0,stderr);}
+})().catch(e=>{console.error(e);process.exitCode=1;});

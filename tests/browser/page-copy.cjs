@@ -44,7 +44,9 @@ const source='# 复制格式测试\n\n正文 **加粗**、*斜体*、[文档链�
     await button.click();
     await page.waitForFunction(()=>document.querySelector('[data-workspace-copy-content]').textContent.includes('复制失败'));
     await page.goto(base+'/html/index_server_only.html');
-    await page.waitForTimeout(200);assert.equal(await page.locator('[data-workspace-copy-content]').count(),0);
+    await page.waitForFunction(()=>document.querySelector('.folder-view'));
+    await page.getByRole('button',{name:'复制本页内容',exact:true}).waitFor({state:'visible'});
+    assert.equal(await page.locator('[data-workspace-copy-content]').count(),1,'copy available on repository overview, unlike document edit actions');
     const insecure=await context.newPage();
     await insecure.route('http://copy.test/**',async route=>{const url=new URL(route.request().url());const response=await context.request.get(base+url.pathname+url.search);await route.fulfill({response});});
     await insecure.goto('http://copy.test/html/index_server_only.html#/md/old/math');

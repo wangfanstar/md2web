@@ -6,15 +6,24 @@ import shutil
 import sys
 import threading
 from pathlib import Path
+from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from test_plan_integration import PlanIntegrationTests
 from waitress import create_server
+import serve
 
 fixture = PlanIntegrationTests()
 fixture.setUp()
 try:
     root = Path(__file__).resolve().parents[2]
     shutil.copytree(str(root / 'docs/lib'), str(fixture.docs / 'lib'))
+    if os.environ.get('MD2WEB_STALE_FRONTEND'):
+        (fixture.tmp / 'web').mkdir()
+        for name in ('workspace.js', 'page-export.js', 'auth.js'):
+            shutil.copyfile(str(root / 'web' / name), str(fixture.tmp / 'web' / name))
+            (fixture.docs / 'lib' / name).write_bytes(b'/* stale deployed asset */')
+        with mock.patch.object(serve, 'ROOT', fixture.tmp):
+            assert len(serve.sync_frontend_assets(fixture.docs)) == 3
     for name in ('_sidebar.md', 'search-index.json'):
         shutil.copyfile(str(root / 'docs/html' / name), str(fixture.docs / 'html' / name))
     html = (root / 'docs/html/index_all.html').read_text(encoding='utf-8')
@@ -30,7 +39,13 @@ try:
     thread.start()
     print(json.dumps({'url': 'http://127.0.0.1:' + str(server.effective_port)}))
     sys.stdout.flush()
-    sys.stdin.readline()
+    for command in sys.stdin:
+        if command.strip() == 'restart-auth':
+            fixture.auth.on_startup()
+            print(json.dumps({'reset': True}))
+            sys.stdout.flush()
+        else:
+            break
     assert page.read_text(encoding='utf-8') == html, 'serving must not rewrite repository pages'
     server.close()
     server.task_dispatcher.shutdown()

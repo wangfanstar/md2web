@@ -18,6 +18,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -104,7 +105,7 @@ def parse_args(argv=None):
     parser.add_argument(
         "--no-build",
         action="store_true",
-        help="不自动重建，直接预览现有产物",
+        help="禁用文档自动构建（启动时仍同步前端 JS/CSS）",
     )
     parser.add_argument(
         "--config", type=Path, default=ROOT / "config" / "server.local.json",
@@ -220,6 +221,36 @@ def lan_ip():
             return sock.getsockname()[0]
     except OSError:
         return None
+
+
+def sync_frontend_assets(directory):
+    """Refresh shipped JS/CSS on restart without rebuilding server-only repos."""
+    docs = Path(directory).resolve()
+    source = ROOT / 'web'
+    if docs != (ROOT / 'docs').resolve() or not source.is_dir():
+        return []
+    target = docs / 'lib'
+    target.mkdir(parents=True, exist_ok=True)
+    changed = []
+    for path in sorted(source.iterdir()):
+        if not path.is_file() or path.suffix not in ('.js', '.css'):
+            continue
+        destination = target / path.name
+        content = path.read_bytes()
+        if destination.is_file() and destination.read_bytes() == content:
+            continue
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=str(target), prefix='.frontend-', delete=False) as handle:
+                temporary = Path(handle.name)
+                handle.write(content)
+            os.chmod(str(temporary), (destination.stat().st_mode if destination.exists() else path.stat().st_mode) & 0o777)
+            os.replace(str(temporary), str(destination))
+            changed.append(path.name)
+        finally:
+            if temporary is not None and temporary.exists():
+                temporary.unlink()
+    return changed
 
 
 def needs_rebuild(directory, config_path=None):
@@ -1071,6 +1102,12 @@ def main(argv=None):
         print("进程名: " + PROCESS_TITLE + "（Linux 下可用 pgrep -af md2web 或 ps -ef | grep md2web 查找）")
 
     manage_instance(args.pidfile)
+    try:
+        updated = sync_frontend_assets(directory)
+    except OSError as error:
+        raise SystemExit('前端资源同步失败，请检查 docs/lib 写权限：' + str(error))
+    if updated:
+        print('已更新前端资源：' + '、'.join(updated), flush=True)
     write_pidfile(args.pidfile, os.getpid())
 
     if not args.preview:

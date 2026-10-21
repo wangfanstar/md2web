@@ -2,6 +2,7 @@
   'use strict';
 
   var STORAGE_MARKER = 'md2web:auth:hint';
+  var generation = 0, authBusy = false, refreshPending = null;
   var state = {
     loaded: false,
     available: false,
@@ -55,7 +56,7 @@
   }
 
   function request(path, options) {
-    return fetch(assetBase() + path, options).then(function (response) {
+    return fetch(assetBase() + path, Object.assign({cache:'no-store', credentials:'same-origin'}, options)).then(function (response) {
       return response.json().catch(function () { return {}; }).then(function (payload) {
         if (!response.ok) {
           var error = new Error(payload.error || ('HTTP ' + response.status));
@@ -71,63 +72,99 @@
   function applySession(payload) {
     state.loaded = true;
     state.available = true;
-    state.authenticated = !!payload.authenticated;
-    state.user = payload.user || null;
-    state.csrfToken = payload.csrfToken || null;
-    state.features = payload.features || state.features;
-    state.site = payload.site || state.site;
-    state.ai = (payload.site && payload.site.ai) || null;
-    state.svnCredential = !!payload.svnCredential;
+    state.authenticated = !!(payload.authenticated && payload.user && payload.csrfToken);
+    state.user = state.authenticated ? payload.user : null;
+    state.csrfToken = state.authenticated ? payload.csrfToken : null;
+    state.features = state.authenticated ? (payload.features || {}) : {editDraft:false, svnCommit:false, localPublish:false};
+    state.site = payload.site || {repositories:[]};
+    state.ai = state.authenticated ? ((payload.site && payload.site.ai) || null) : null;
+    state.svnCredential = state.authenticated && !!payload.svnCredential;
+  }
+
+  function clearSession() {
+    state.authenticated = false;
+    state.user = null;
+    state.csrfToken = null;
+    state.features = {editDraft:false, svnCommit:false, localPublish:false};
+    state.ai = null;
+    state.svnCredential = false;
+    state.site = {repositories:[]};
   }
 
   function refresh() {
+    if (authBusy) return Promise.resolve(snapshot());
+    if (refreshPending && refreshPending.version === generation) return refreshPending.promise;
+    var version = ++generation;
     if (isFileMode()) {
+      clearSession();
       state.loaded = true;
       state.available = false;
       emit();
       return Promise.resolve(snapshot());
     }
-    return request('__auth/session').then(function (payload) {
+    var timer;
+    var timeout = new Promise(function (resolve, reject) {
+      timer = window.setTimeout(function () { reject(new Error('会话校验超时')); }, 10000);
+    });
+    var promise = Promise.race([request('__auth/session'), timeout]).then(function (payload) {
+      if (version !== generation) return snapshot();
       applySession(payload);
       emit();
       return snapshot();
-    }).catch(function () {
+    }).catch(function (error) {
+      if (version !== generation) return snapshot();
+      clearSession();
       state.loaded = true;
-      state.available = false;
+      state.available = error.status === 401 || error.status === 403;
       emit();
       return snapshot();
     });
+    var pending = {version:version, promise:promise};
+    refreshPending = pending;
+    promise.then(function () { window.clearTimeout(timer); if (refreshPending === pending) refreshPending = null; });
+    return promise;
   }
 
   function login(username, password, mode, preferences) {
+    var version = ++generation;
+    refreshPending = null;
+    authBusy = true;
     return request('__auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: username, password: password, mode: mode || '',
         rememberSession: !!(preferences && preferences.rememberSession), rememberUsername: !!(preferences && preferences.rememberUsername) })
     }).then(function (payload) {
-      state.authenticated = true;
-      state.user = payload.user;
-      state.csrfToken = payload.csrfToken;
+      if (version !== generation) return snapshot();
+      authBusy = false;
       try { localStorage.setItem(STORAGE_MARKER, payload.user && payload.user.username || ''); } catch (error) {}
-      emit();
-      return refresh();
+      return refresh().then(function (info) {
+        if (!info.authenticated) throw new Error('登录会话未能确认，请检查网络和浏览器 Cookie 后重试');
+        return info;
+      });
+    }).catch(function (error) {
+      if (version === generation) { authBusy = false; clearSession(); emit(); }
+      throw error;
     });
   }
 
   function logout() {
+    var version = ++generation;
+    refreshPending = null;
+    var token = state.csrfToken;
     if (!state.authenticated) {
+      authBusy = false;
+      clearSession(); emit();
       return Promise.resolve();
     }
+    authBusy = true;
+    clearSession(); emit();
     return request('__auth/logout', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': state.csrfToken || '' },
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token || '' },
       body: '{}'
     }).catch(function () { /* 即使失败也清理前端状态 */ }).then(function () {
-      state.authenticated = false;
-      state.user = null;
-      state.csrfToken = null;
-      emit();
+      if (version === generation) { authBusy = false; emit(); }
     });
   }
 
@@ -189,8 +226,10 @@
       return;
     }
     if (state.loaded && !state.available) {
-      alert('当前是只读预览模式：请使用 python serve.py --config config/server.local.json 启动认证编辑服务后再登录。');
-      return;
+      return refresh().then(function (info) {
+        if (info.available) openLogin();
+        else alert('暂时无法连接认证服务，或当前为只读预览。请确认认证服务已启动后重试。');
+      });
     }
     if (!state.overlay) {
       buildOverlay();
@@ -318,8 +357,12 @@
   function init() {
     refresh();
     window.addEventListener('hashchange', function () {
-      window.setTimeout(renderIndicator, 0);
+      refresh();
     });
+    window.addEventListener('focus', refresh);
+    window.addEventListener('pageshow', refresh);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(); });
+    if (!isFileMode()) window.setInterval(function () { if (!document.hidden) refresh(); }, 30000);
     document.addEventListener('keydown', function (event) {
       if (event.key === 'Escape' && state.overlay && state.overlay.classList.contains('is-open')) {
         closeLogin();
@@ -335,6 +378,13 @@
 
   window.SiteAuth = {
     refresh: refresh,
+    handleResponse: function (response) {
+      if (response.status !== 401 && response.status !== 403) return Promise.resolve(snapshot());
+      // A response from an older write must not cancel a login/logout in flight.
+      if (authBusy) return Promise.resolve(snapshot());
+      if (response.status === 401) { generation++; clearSession(); emit(); }
+      return refresh();
+    },
     login: login,
     logout: logout,
     openLogin: openLogin,

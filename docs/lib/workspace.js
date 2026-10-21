@@ -329,6 +329,17 @@
       actions.querySelector('[data-workspace-export]').addEventListener('click', function () { if (window.PageExport) { window.PageExport.download(); } });
       actions.querySelector('[data-workspace-numbers]').addEventListener('click', function () { var hidden = document.body.classList.toggle('hide-heading-numbers'); try { localStorage.setItem(STORAGE.numbers, hidden ? '0' : '1'); } catch (_) {} this.textContent = hidden ? '显示序号' : '隐藏序号'; });
     }
+    // Copy the rendered page like "下载本页", independently of whether the
+    // current route is an editable Markdown document, overview or folder view.
+    if (!actions.querySelector('[data-workspace-copy-content]')) {
+      var copy = document.createElement('button');
+      copy.type = 'button';
+      copy.setAttribute('data-workspace-copy-content', '');
+      copy.textContent = '复制本页内容';
+      copy.title = '复制正文及格式，粘贴到 Word 时选择“保留源格式”';
+      copy.addEventListener('click', function () { if (window.PageCopy) window.PageCopy.copy(this); });
+      actions.insertBefore(copy, actions.querySelector('[data-workspace-export]'));
+    }
     updateSvnCopyAction(actions, route);
     addSvnDocumentUpdateAction(actions, route);
     updateDocActions(actions, route);
@@ -372,27 +383,17 @@
 
   function updateDocActions(actions, route) {
     var section = document.querySelector('.markdown-section');
-    var names = ['source', 'edit', 'download', 'copy'];
+    var names = ['source', 'edit', 'download'];
     var buttons = {
       source: actions.querySelector('[data-workspace-source]'),
       edit: actions.querySelector('[data-workspace-edit]'),
-      download: actions.querySelector('[data-workspace-download-md]'),
-      copy: actions.querySelector('[data-workspace-copy-content]')
+      download: actions.querySelector('[data-workspace-download-md]')
     };
     if (!isDocumentView(route, section)) {
       names.forEach(function (name) { if (buttons[name]) buttons[name].remove(); });
       return;
     }
     var exportButton = actions.querySelector('[data-workspace-export]');
-    if (!buttons.copy) {
-      buttons.copy = document.createElement('button');
-      buttons.copy.type = 'button';
-      buttons.copy.setAttribute('data-workspace-copy-content', '');
-      buttons.copy.textContent = '复制本页内容';
-      buttons.copy.title = '复制正文及格式，粘贴到 Word 时选择“保留源格式”';
-      buttons.copy.addEventListener('click', function () { if (window.PageCopy) window.PageCopy.copy(this); });
-      actions.insertBefore(buttons.copy, exportButton || null);
-    }
     if (!buttons.source) {
       buttons.source = document.createElement('button');
       buttons.source.type = 'button';
