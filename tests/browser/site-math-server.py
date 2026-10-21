@@ -16,6 +16,7 @@ fixture = PlanIntegrationTests()
 fixture.setUp()
 try:
     root = Path(__file__).resolve().parents[2]
+    shutil.copyfile(str(root / 'docs/index.html'), str(fixture.docs / 'index.html'))
     shutil.copytree(str(root / 'docs/lib'), str(fixture.docs / 'lib'))
     if os.environ.get('MD2WEB_STALE_FRONTEND'):
         (fixture.tmp / 'web').mkdir()
