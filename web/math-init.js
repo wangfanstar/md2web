@@ -13,6 +13,21 @@
     { left: '\\(', right: '\\)', display: false }
   ];
 
+  // Chinese labels often end in punctuation immediately followed by CJK text,
+  // or contain a space before **. Both are rejected by standard emphasis rules.
+  // Normalize only these plain-text labels; leave code, raw HTML and URLs alone.
+  function prepareStrong(source) {
+    var pattern = /(^(?: {0,3}> ?)* {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^(?: {0,3}> ?)* {0,3}\2[~`]*[ \t]*(?:\n|$)|(?![\s\S])))|(^[ \t]{4}[^\n]*|^\t[^\n]*)|(`+)[\s\S]*?\4(?!`)|<(pre|code|script|style|textarea)\b[^>]*>[\s\S]*?<\/\5\s*>|<[^>\n]*>|\]\([^\n]*?\)|^ {0,3}\[[^\]\n]+\]:[^\n]*|\\[\s\S]|\*\*([^*<>`\n]+)\*\*/gmi;
+    return source.replace(pattern, function (whole, fence, fenceMark, indent, ticks, tag, label, offset) {
+      if (label === undefined || source.charAt(offset - 1) === '*' || source.charAt(offset + whole.length) === '*') return whole;
+      var text = label.trim();
+      if (!text || !/[\u3400-\u9fff]/.test(text)) return whole;
+      var next = source.charAt(offset + whole.length);
+      if (text === label && !(/[：，。！？；、）】》」』]$/.test(text) && /[\u3400-\u9fffA-Za-z0-9]/.test(next))) return whole;
+      return '<strong>' + text + '</strong>';
+    });
+  }
+
   // Hide TeX from the Markdown parser: blank lines and backslash escapes belong
   // to TeX, not Markdown. Restore escaped text only after Markdown has rendered.
   function prepare(source) {
@@ -41,7 +56,7 @@
     }
     output += source.slice(cursor);
     return {
-      markdown: output,
+      markdown: prepareStrong(output),
       restore: function (html) {
         return html.replace(new RegExp(prefix + '(\\d+)END', 'g'), function (token, index) {
           if (values[index] === undefined) return token;
