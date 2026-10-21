@@ -2006,6 +2006,20 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         except (OSError, BuildError) as error:
             return json_error(500, "reference_web_error", "更新参考网页索引失败：" + str(error))
 
+    @app.get('/__md/internal-files')
+    def internal_file_search():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        from . import internal_files
+        query = str(request.args.get('q') or '')[:200]
+        try:
+            offset = max(0, int(request.args.get('offset') or 0))
+        except ValueError:
+            offset = 0
+        rows = internal_files.search(docs_root, query)
+        return jsonify(ok=True, items=rows[offset:offset + 50], total=len(rows))
+
     @app.get("/__references/list")
     def reference_list():
         try:

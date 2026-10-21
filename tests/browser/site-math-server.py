@@ -34,6 +34,10 @@ try:
     page = fixture.docs / 'html/index_server_only.html'
     page.write_text(html, encoding='utf-8')
     (fixture.docs / 'md/old/math.md').write_text(os.environ['MD2WEB_MATH_SOURCE'], encoding='utf-8')
+    if os.environ.get('MD2WEB_INTERNAL_FILES'):
+        (fixture.docs / 'pdf').mkdir(exist_ok=True)
+        (fixture.docs / 'pdf/协议 #1.pdf').write_bytes(b'%PDF-1.4 fixture')
+        (fixture.docs / 'html/internal-report.html').write_text('<h1>Internal report</h1>', encoding='utf-8')
     server = create_server(fixture.app, host='127.0.0.1', port=0, threads=4)
     thread = threading.Thread(target=server.run)
     thread.daemon = True

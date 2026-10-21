@@ -1025,6 +1025,44 @@
     insertBlock('![' + (altText || '图片') + '](' + relativePath + ')\n');
   }
 
+  var internalPicker = null;
+  function pickInternalFile() {
+    if (internalPicker) return;
+    if (location.protocol === 'file:' || !window.SiteAuth || !window.SiteAuth.isAuthenticated()) {
+      setStatus('请通过网站服务登录后搜索站内文件。', true); return;
+    }
+    var selection = [state.textarea.selectionStart, state.textarea.selectionEnd];
+    var dialog = document.createElement('dialog'), serial = 0, offset = 0, timer;
+    internalPicker = dialog; dialog.className = 'md-internal-picker';
+    dialog.setAttribute('aria-label', '引用站内文件');
+    dialog.innerHTML = '<header><h3>引用站内文件</h3><button type="button" data-close>关闭</button></header><p>搜索 docs 中的 PDF、演示文稿、网页等文件。选择后插入链接，在新标签页打开。</p><input type="search" aria-label="搜索站内文件" placeholder="输入文件名或路径…"><div role="status" data-info></div><div class="md-internal-results"></div><footer><button type="button" data-prev>上一页</button><button type="button" data-next>下一页</button></footer>';
+    document.body.appendChild(dialog);
+    var input = dialog.querySelector('input'), list = dialog.querySelector('.md-internal-results'), info = dialog.querySelector('[data-info]');
+    function finish(){serial++;clearTimeout(timer);dialog.close();dialog.remove();internalPicker=null;state.textarea.focus();state.textarea.setSelectionRange(selection[0],selection[1]);}
+    dialog.querySelector('[data-close]').onclick=finish;
+    dialog.addEventListener('cancel',function(e){e.preventDefault();finish();});
+    dialog.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();e.stopPropagation();finish();}});
+    function load(){
+      var request=++serial;info.textContent='正在搜索…';list.textContent='';
+      dialog.querySelector('[data-prev]').disabled=true;dialog.querySelector('[data-next]').disabled=true;
+      authApi('__md/internal-files?q='+encodeURIComponent(input.value)+'&offset='+offset).then(function(data){
+        if(request!==serial||internalPicker!==dialog)return;
+        info.textContent=data.total?'共 '+data.total+' 个文件 · 第 '+(Math.floor(offset/50)+1)+' 页':'没有匹配的文件';
+        dialog.querySelector('[data-prev]').disabled=offset===0;
+        dialog.querySelector('[data-next]').disabled=offset+50>=data.total;
+        (data.items||[]).forEach(function(item){
+          var button=document.createElement('button'),title=document.createElement('strong'),detail=document.createElement('span');
+          button.type='button';title.textContent=item.name;detail.textContent=item.path+' · '+Math.ceil(item.size/1024)+' KB';button.appendChild(title);button.appendChild(detail);
+          button.onclick=function(){finish();insertBlock('<a href="'+escapeHtml(item.href)+'" target="_blank" rel="noopener noreferrer" data-site-file="true">'+escapeHtml(item.name)+'</a>\n');};list.appendChild(button);
+        });
+      }).catch(function(error){if(request===serial&&internalPicker===dialog)info.textContent=error.message||'搜索失败，请重试';});
+    }
+    input.oninput=function(){serial++;clearTimeout(timer);offset=0;list.textContent='';info.textContent='正在搜索…';dialog.querySelector('[data-prev]').disabled=true;dialog.querySelector('[data-next]').disabled=true;timer=setTimeout(load,250);};
+    dialog.querySelector('[data-prev]').onclick=function(){offset=Math.max(0,offset-50);load();};
+    dialog.querySelector('[data-next]').onclick=function(){offset+=50;load();};
+    dialog.showModal();input.focus();load();
+  }
+
   function attachmentLinkTarget(relativePath) {
     return String(relativePath || '').replace(/ /g, '%20');
   }
@@ -1439,6 +1477,10 @@
     Array.prototype.forEach.call(nodes, function (node) {
       var attribute = node.tagName === 'IMG' ? 'src' : 'href';
       var value = node.getAttribute(attribute) || '';
+      if (node.hasAttribute('data-site-file')) {
+        node.setAttribute(attribute, new URL(value, document.baseURI).href);
+        return;
+      }
       if (!value || /^([a-z][a-z0-9+.-]*:|\/\/|#|\/)/i.test(value)) {
         return;
       }
@@ -1906,6 +1948,7 @@
       table: function () { openTablePicker(); },
       'upload-image': function () { pickLocalImages(); },
       'upload-attachment': function () { pickLocalAttachments(); },
+      'internal-file': pickInternalFile,
       color: function () { openColorPicker(); },
       hr: function () { insertBlock('---\n'); },
       save: function () { save(); },
@@ -1937,6 +1980,7 @@
     { action: 'image', label: '图片', title: '插入图片引用' },
     { action: 'upload-image', label: '上传图片', title: '上传本地图片（保存到文档同级 images/ 并插入引用）' },
     { action: 'upload-attachment', label: '上传附件', title: '上传附件（保存到文档同级 附件/ 并插入链接）' },
+    { action: 'internal-file', label: '引用站内文件', title: '搜索并引用站内文件（Ctrl+Alt+L）' },
     { action: 'color', label: 'A 颜色', title: '设置文字颜色（Ctrl+Alt+K）' },
     { divider: true },
     { action: 'h1', label: 'H1', title: '一级标题（Ctrl+Alt+1）' },
@@ -1968,6 +2012,7 @@
   ];
 
   var SHORTCUTS = [
+    { key: 'l', ctrl: true, alt: true, action: 'internal-file' },
     { key: 'b', ctrl: true, action: 'bold' },
     { key: 'i', ctrl: true, action: 'italic' },
     { key: 'x', ctrl: true, shift: true, action: 'strike' },
@@ -2178,6 +2223,7 @@
     });
 
     document.addEventListener('keydown', function (event) {
+      if (internalPicker) return;
       if (!state.overlay.classList.contains('is-open')) {
         return;
       }
@@ -2571,6 +2617,7 @@
       '<li><code>Tab</code> / <code>Shift+Tab</code> 缩进 · <code>Alt+↑/↓</code> 移动行</li>',
       '<li><code>Ctrl+S</code> 保存（无 SVN 库=保存到服务器；有 SVN 库=本地暂存） · <code>Ctrl+Shift+S</code> 另存为 · <code>Esc</code> 关闭</li>',
       '<li><code>Ctrl+Shift+T</code> 表格行列选择 · <code>Ctrl+Alt+K</code> 文字颜色 · 工具栏可上传本地图片与附件</li>',
+      '<li><code>Ctrl+Alt+L</code> 引用站内文件：搜索并插入新标签页链接</li>',
       '<li><code>Ctrl+Z</code> 撤销 · <code>Ctrl+Y</code>/<code>Ctrl+Shift+Z</code> 恢复 · <code>Ctrl+Shift+H</code> 大纲导航</li>',
       '<li><code>Ctrl+F</code> 查找 · <code>Ctrl+H</code> 查找替换 · <code>Enter</code>/<code>F3</code> 下一个 · <code>Shift+Enter</code>/<code>Shift+F3</code> 上一个</li>',
       '<li>直接粘贴或拖入图片会自动上传到文档同级 <code>images/</code>，拖入其他文件会上传到 <code>附件/</code> 并插入链接</li>',

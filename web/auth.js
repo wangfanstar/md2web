@@ -174,23 +174,24 @@
     var overlay = document.createElement('div');
     overlay.className = 'site-auth';
     overlay.setAttribute('role', 'dialog');
-    overlay.setAttribute('aria-label', '登录 SVN 账号');
+    overlay.setAttribute('aria-label', '登录知识库');
+    overlay.setAttribute('aria-modal', 'true');
     overlay.innerHTML = [
       '<div class="site-auth-backdrop" data-auth-close></div>',
       '<form class="site-auth-panel">',
-      '<h3>登录 SVN 账号</h3>',
-      '<p class="site-auth-hint">普通用户用 SVN 账号登录：口令先经 SVN 验证，成功后以本机密钥加密保存在服务端数据库，供后续提交复用（换密码后重新登录会自动更新）。管理员可用本机账号（默认 <b>admin / admin</b>），仅本地编辑与保存草稿，合入 SVN 时需再提供 SVN 账号。</p>',
+      '<span class="site-auth-eyebrow">文档知识库</span><h3>欢迎回来</h3>',
+      '<p class="site-auth-hint">登录后编辑文档、保存修改，与团队共享知识。</p>',
       '<label>用户名<input type="text" name="username" autocomplete="username" required></label>',
       '<label>密码<input type="password" name="password" autocomplete="current-password" required></label>',
-      '<label><input type="checkbox" name="rememberSession">保持登录</label>',
-      '<label><input type="checkbox" name="rememberUsername" checked>记住此设备的用户名</label>',
+      '<div class="site-auth-preferences"><label><input type="checkbox" name="rememberSession">保持登录</label>',
+      '<label><input type="checkbox" name="rememberUsername" checked>记住用户名</label></div>',
       '<button type="button" data-forget-device>忘记此设备</button>',
-      '<p class="site-auth-error" data-auth-error></p>',
+      '<p class="site-auth-error" data-auth-error role="status" aria-live="polite"></p>',
       '<div class="site-auth-actions">',
       '<button type="submit" class="is-primary">登录</button>',
       '<button type="button" data-auth-close>取消</button>',
       '</div>',
-      '</form>'
+      '<p class="site-auth-footnote">使用 SVN 账号或本地管理员账号登录。已提升权限的用户仍使用原 SVN 密码。</p></form>'
     ].join('');
     document.body.appendChild(overlay);
     state.overlay = overlay;

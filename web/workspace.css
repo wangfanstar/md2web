@@ -1608,3 +1608,16 @@ body.folder-view-active .docs-page-toc {
   .workspace-svn-actions input { flex-basis: 100%; }
   .workspace-svn-actions button { flex: 1 1 auto; }
 }
+/* Search existing site documents from the Markdown editor. */
+.md-internal-picker {box-sizing:border-box;width:min(720px,94vw);max-height:85vh;border:1px solid var(--docs-border,#dfe7ef);border-radius:16px;padding:24px;background:var(--docs-bg,#fff);color:var(--docs-ink,#1f2a37);box-shadow:0 24px 80px #0f172a33;}
+.md-internal-picker::backdrop {background:#0f172a66;}
+.md-internal-picker header,.md-internal-picker footer {display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.md-internal-picker h3 {margin:0;}
+.md-internal-picker p,.md-internal-picker [data-info] {font-size:13px;color:var(--docs-muted,#6b7a8d);line-height:1.6;margin:12px 0;}
+.md-internal-picker input {box-sizing:border-box;width:100%;padding:12px;border:1px solid var(--docs-border,#dfe7ef);border-radius:8px;font:inherit;}
+.md-internal-picker button {padding:8px 12px;border:1px solid var(--docs-border,#dfe7ef);border-radius:8px;background:var(--docs-bg,#fff);color:inherit;cursor:pointer;font:inherit;}
+.md-internal-picker button:disabled {opacity:.45;cursor:default;}
+.md-internal-results {display:grid;gap:8px;max-height:45vh;overflow:auto;margin:12px 0;}
+.md-internal-results button {text-align:left;display:flex;flex-direction:column;gap:5px;overflow-wrap:anywhere;}
+.md-internal-results span {font:12px/1.5 var(--docs-mono,monospace);color:var(--docs-muted,#6b7a8d);}
+.md-internal-picker :focus-visible {outline:2px solid var(--docs-accent,#1f6feb);outline-offset:2px;}
