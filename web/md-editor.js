@@ -1516,7 +1516,10 @@
     state.previewToken = token;
     var html;
     try {
-      html = window.marked.parse(state.textarea.value, { gfm: true, breaks: false, async: false });
+      var math = window.MathRender && window.MathRender.prepare
+        ? window.MathRender.prepare(state.textarea.value) : null;
+      html = window.marked.parse(math ? math.markdown : state.textarea.value, { gfm: true, breaks: false, async: false });
+      if (math) html = math.restore(html);
     } catch (error) {
       state.preview.innerHTML = '<p class="md-editor-preview-hint">渲染失败：' + escapeHtml(message(error)) + '</p>';
       return;
