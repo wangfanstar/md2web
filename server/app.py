@@ -101,7 +101,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
 
     @app.after_request
     def security_headers(response):
-        if request.method in ('POST', 'PUT', 'DELETE') and response.status_code < 400:
+        if request.method in ('POST', 'PUT', 'DELETE') and response.status_code < 400 and request.path != '/__md/visit':
             folder_cache.clear()
             document_meta_cache.clear()
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -113,6 +113,15 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             candidate = (docs_root / request.path.lstrip('/')).resolve()
             if docs_root in candidate.parents and not is_blocked_static_path(request.path.lstrip('/')):
                 response.headers['Cache-Control'] = static_policy(candidate, request.args.get('v'))
+        page_path = request.path.lstrip('/') or 'index.html'
+        if (request.method == 'GET' and response.status_code in (200, 304)
+                and page_path.lower().endswith(('.html', '.htm'))
+                and not page_path.startswith(('__', 'lib/'))
+                and not is_blocked_static_path(page_path)):
+            session = current_session()
+            with auth_service._db_lock, conn:
+                database.audit(conn, 'site_visit', 'ok', actor_id=session['user']['id'] if session else None,
+                               resource=request.path, client_ip=request.remote_addr or '')
         return response
 
     # ---- 错误处理（不泄漏堆栈/秘密） ----
@@ -523,12 +532,12 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
 
     @app.post('/__md/visit')
     def record_article_visit():
-        session, rejected = require_session()
+        session = current_session()
+        rejected = require_same_origin() or (require_csrf(session) if session else None)
         if rejected:
             return rejected
-        rejected = require_same_origin() or require_csrf(session)
-        if rejected:
-            return rejected
+        if not request.is_json:
+            return json_error(415, 'json_required', '请使用 JSON 请求')
         payload = request.get_json(silent=True) or {}
         try:
             path = server_documents.normalize_md_path(payload.get('path', ''))
@@ -537,7 +546,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         except MdSaveError as error:
             return json_error(400, 'invalid_path', str(error))
         with auth_service._db_lock, conn:
-            database.audit(conn, 'article_visit', 'ok', actor_id=session['user']['id'],
+            database.audit(conn, 'article_visit', 'ok', actor_id=session['user']['id'] if session else None,
                            resource=path, client_ip=request.remote_addr or '')
         return jsonify(ok=True)
 

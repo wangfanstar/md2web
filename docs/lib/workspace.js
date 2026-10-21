@@ -521,11 +521,11 @@
     if (window.SiteAuth && location.protocol !== 'file:' && lastVisitRoute !== route) {
       lastVisitRoute = route;
       window.SiteAuth.refresh().then(function () {
-        if (!window.SiteAuth.isAuthenticated() || box.getAttribute('data-route') !== route) return;
+        if (box.getAttribute('data-route') !== route) return;
         return fetch('__md/visit', {method:'POST', credentials:'same-origin',
           headers:{'Content-Type':'application/json','X-CSRF-Token':window.SiteAuth.csrfToken()},
           body:JSON.stringify({path:route})});
-      }).catch(function () {});
+      }).then(function(response){if(response&&!response.ok&&lastVisitRoute===route)lastVisitRoute='';}).catch(function () {if(lastVisitRoute===route)lastVisitRoute='';});
     }
     fetch('__doc-meta?path=' + encodeURIComponent(route), { credentials: 'same-origin' })
       .then(function (response) { return response.ok ? response.json() : null; })

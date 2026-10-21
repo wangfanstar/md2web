@@ -20,6 +20,15 @@ const assert=require('node:assert/strict');
     await page.reload();assert.equal((await next).status(),200);
     data=await (await page.request.get(base+'/__admin/user-records')).json();
     assert.equal(data.users[0].visits,2);assert.equal(data.users[0].articles,1);
+    const visitor=await browser.newPage();
+    const anonymousVisit=visitor.waitForResponse(r=>r.url().endsWith('/__md/visit')&&r.request().method()==='POST');
+    await visitor.goto(base+'/html/index_server_only.html#/md/old/math');
+    assert.equal((await anonymousVisit).status(),200);
+    data=await (await page.request.get(base+'/__admin/user-records')).json();
+    assert.equal(data.articles[0].visits,3);
+    assert.ok(data.ips.some(r=>r.username==='未登录访客'&&r.action==='article_visit'));
+    assert.ok(data.ips.some(r=>r.username==='未登录访客'&&r.action==='site_visit'));
+    await visitor.close();
     assert.deepEqual(errors,[]);
     console.log('actual article open/reload: visits=2, distinct articles=1, no duplicate render events: PASS');
   }finally{

@@ -23,7 +23,7 @@
     if(active!==r.tab)closeDrawer();active=r.tab;
     all('[data-config-tab]').forEach(function(b){var selected=b.dataset.configTab===active;b.hidden=!allowed&&b.dataset.configTab!=='repositories';b.setAttribute('aria-selected',String(selected));b.tabIndex=selected?0:-1;});
     all('[data-config-tab-panel]').forEach(function(p){p.hidden=p.dataset.configTabPanel!==active;});
-    if(allowed&&active==='records'&&bridge.loadRecords)bridge.loadRecords();
+    if(allowed&&active==='records'&&bridge.loadRecords)bridge.loadRecords(true);
     if(allowed&&active==='accounts'&&!loadedUsers&&bridge.loadUsers){loadedUsers=true;bridge.loadUsers();}
     if(allowed&&active==='backup'&&r.section==='repository-trash'&&bridge.loadTrash&&!loadedTrash){loadedTrash=true;bridge.loadTrash();}
     if(r.section){var anchor=document.getElementById(r.section);if(anchor)setTimeout(function(){anchor.scrollIntoView({block:'start'});},0);}

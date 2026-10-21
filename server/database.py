@@ -925,8 +925,8 @@ def folder_latest_updates(conn, limit=1000):
 
 
 def user_records(conn):
-    """All retained login IPs and authenticated reading statistics; no arbitrary row cap."""
-    relevant = "a.action IN ('login','admin_login','article_visit')"
+    """All retained login/page IPs, including anonymous visits; no arbitrary row cap."""
+    relevant = "a.action IN ('login','admin_login','article_visit','site_visit')"
     users = conn.execute("""
         SELECT u.id, u.svn_username AS username, u.auth_source_id AS source,
         SUM(CASE WHEN a.action IN ('login','admin_login') AND a.result='ok' THEN 1 ELSE 0 END) AS logins,
@@ -937,16 +937,17 @@ def user_records(conn):
         GROUP BY u.id ORDER BY visits DESC, logins DESC, u.id
     """).fetchall()
     ips = conn.execute("""
-        SELECT a.client_ip, COALESCE(u.svn_username, a.resource) AS username,
+        SELECT a.client_ip, COALESCE(u.svn_username, CASE WHEN a.action IN ('login','admin_login') THEN a.resource ELSE '未登录访客' END) AS username,
+        CASE WHEN a.action IN ('article_visit','site_visit') THEN a.resource ELSE '' END AS path,
         u.auth_source_id AS source, a.action, a.result, COUNT(*) AS count,
         MAX(a.created_at) AS last_at
         FROM audit_events a LEFT JOIN users u ON u.id=a.actor_id
         WHERE """ + relevant + """
-        GROUP BY a.client_ip, username, source, a.action, a.result
+        GROUP BY a.client_ip, username, source, a.action, a.result, path
         ORDER BY last_at DESC
     """).fetchall()
     articles = conn.execute("""
-        SELECT a.resource AS path, COUNT(*) AS visits, COUNT(DISTINCT a.actor_id) AS readers,
+        SELECT a.resource AS path, COUNT(*) AS visits, COUNT(DISTINCT CASE WHEN a.actor_id IS NOT NULL THEN 'user:' || a.actor_id ELSE 'ip:' || a.client_ip END) AS readers,
         MAX(a.created_at) AS last_at FROM audit_events a
         WHERE a.action='article_visit' GROUP BY a.resource ORDER BY visits DESC, path
     """).fetchall()

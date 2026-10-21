@@ -1373,6 +1373,32 @@ class AdminConfigTests(ServerTestBase):
         self.client.post('/__auth/login', json={'username': 'alice', 'password': 'good'})
         self.assertEqual(self.client.get('/__admin/user-records').status_code, 403)
 
+    def test_anonymous_other_ip_visits_are_visible_to_admin(self):
+        self.docs.joinpath('index.html').write_text('<h1>Home</h1>', encoding='utf-8')
+        self.docs.joinpath('md').mkdir(exist_ok=True)
+        self.docs.joinpath('md/read.md').write_text('# Read', encoding='utf-8')
+        other = self.app.test_client()
+        self.assertEqual(other.get('/', environ_overrides={'REMOTE_ADDR': '10.2.3.4'}).status_code, 200)
+        response = other.post('/__md/visit', json={'path': 'md/read.md'}, environ_overrides={'REMOTE_ADDR': '10.2.3.5'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(other.post('/__md/visit', json={'path': 'md/read.md'}, headers={'Origin': 'https://other.example'}).status_code, 403)
+        self.assertEqual(other.post('/__md/visit', data={'path': 'md/read.md'}).status_code, 415)
+        self.docs.joinpath('html').mkdir(exist_ok=True)
+        self.docs.joinpath('html/reference_library.html').write_text('<h1>Library</h1>', encoding='utf-8')
+        self.assertEqual(other.get('/html/reference_library.html', environ_overrides={'REMOTE_ADDR': '10.2.3.6'}).status_code, 200)
+        self.docs.joinpath('style.css').write_text('body {}', encoding='utf-8')
+        self.assertEqual(other.get('/style.css', environ_overrides={'REMOTE_ADDR': '10.2.3.7'}).status_code, 200)
+        self.assertEqual(other.get('/__admin/user-records').status_code, 401)
+        self.admin_login()
+        data = self.client.get('/__admin/user-records').get_json()
+        self.assertTrue({'10.2.3.4', '10.2.3.5'}.issubset({item['client_ip'] for item in data['ips']}))
+        self.assertIn('10.2.3.6', {item['client_ip'] for item in data['ips']})
+        self.assertNotIn('10.2.3.7', {item['client_ip'] for item in data['ips']})
+        visitor = next(item for item in data['ips'] if item['client_ip'] == '10.2.3.5')
+        self.assertEqual(visitor['username'], '未登录访客')
+        self.assertEqual(visitor['path'], 'md/read.md')
+        self.assertEqual(data['articles'][0]['visits'], 1)
+
     def test_schema_v2_adds_admin_columns_and_seed(self):
         columns = {row[1] for row in self.conn.execute("PRAGMA table_info(users)")}
         self.assertIn("role", columns)
