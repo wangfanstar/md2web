@@ -19,6 +19,8 @@ try:
         shutil.copyfile(str(root / 'docs/html' / name), str(fixture.docs / 'html' / name))
     html = (root / 'docs/html/index_all.html').read_text(encoding='utf-8')
     html = re.sub(r'(lib/(?:math-init|md-editor)\.js)\?v=[a-z0-9]+', r'\1?v=stale', html)
+    # Existing deployed repository pages cannot reference newly introduced files.
+    html = re.sub(r'\s*<script src="lib/page-copy\.js[^"<>]*"></script>', '', html)
     page = fixture.docs / 'html/index_server_only.html'
     page.write_text(html, encoding='utf-8')
     (fixture.docs / 'md/old/math.md').write_text(os.environ['MD2WEB_MATH_SOURCE'], encoding='utf-8')

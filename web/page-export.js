@@ -209,3 +209,228 @@
 
   window.PageExport = { download: download };
 }());
+
+// Formatted clipboard support shares this existing asset for deployed entry pages.
+(function () {
+  'use strict';
+
+  var CHROME = '.workspace-breadcrumb, .workspace-page-actions, .workspace-svn-controls, .workspace-doc-updated, .search-reading-toolbar, .workspace-copy-code, .search-section-arrow, .search-section-badge';
+  var STYLES = {
+    h1: 'font-size:26pt;font-weight:bold;margin:18pt 0 12pt;',
+    h2: 'font-size:20pt;font-weight:bold;margin:16pt 0 10pt;',
+    h3: 'font-size:16pt;font-weight:bold;margin:14pt 0 8pt;',
+    h4: 'font-size:14pt;font-weight:bold;margin:12pt 0 6pt;',
+    p: 'margin:0 0 10pt;line-height:1.6;',
+    table: 'border-collapse:collapse;margin:10pt 0;width:100%;',
+    th: 'border:1px solid #b8c2cc;padding:6pt 8pt;background-color:#f2f4f7;font-weight:bold;text-align:left;',
+    td: 'border:1px solid #b8c2cc;padding:6pt 8pt;vertical-align:top;',
+    pre: 'white-space:pre-wrap;background-color:#f6f8fa;padding:10pt;font-family:Consolas,monospace;',
+    code: 'font-family:Consolas,monospace;white-space:pre-wrap;',
+    blockquote: 'margin:8pt 0;padding-left:12pt;border-left:3px solid #c5cdd5;color:#506174;',
+    ul: 'margin:0 0 10pt;padding-left:24pt;',
+    ol: 'margin:0 0 10pt;padding-left:24pt;',
+    li: 'margin:3pt 0;',
+    a: 'color:#1f6feb;text-decoration:underline;',
+    img: 'max-width:100%;vertical-align:middle;'
+  };
+  function nodes(root, selector) { return Array.prototype.slice.call(root.querySelectorAll(selector)); }
+  function dataUrl(blob) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(reader.result); };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+  function imageFor(url, width, height, alt) {
+    var image = document.createElement('img');
+    image.src = url;
+    image.alt = alt || '图形';
+    if (width) image.width = Math.max(1, Math.round(width));
+    if (height) image.height = Math.max(1, Math.round(height));
+    image.style.cssText = STYLES.img;
+    return image;
+  }
+  function rasterMath(node) {
+    var math = node.querySelector('math');
+    if (!math) return Promise.reject(new Error('公式缺少 MathML'));
+    var copy = math.cloneNode(true), annotation = copy.querySelector('annotation');
+    var alt = annotation ? annotation.textContent : copy.textContent;
+    nodes(copy, 'annotation, annotation-xml').forEach(function (n) { n.remove(); });
+    copy.setAttribute('xmlns', 'http://www.w3.org/1998/Math/MathML');
+    // Native MathML keeps formula layout without depending on KaTeX web fonts
+    // in the receiving application. Copy the result as a high-resolution PNG.
+    var holder = document.createElement('div');
+    holder.style.cssText = 'position:fixed;left:-100000px;top:0;width:max-content;padding:4px;background:white;color:black;font-size:18px;';
+    holder.appendChild(copy);
+    document.body.appendChild(holder);
+    var box = holder.getBoundingClientRect(), width = Math.ceil(box.width), height = Math.ceil(box.height);
+    var markup = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:4px;background:white;color:black;font-size:18px;">' + new XMLSerializer().serializeToString(copy) + '</div></foreignObject></svg>';
+    holder.remove();
+    return new Promise(function (resolve, reject) {
+      var image = new Image();
+      image.onload = function () {
+        try {
+          var canvas = document.createElement('canvas');
+          canvas.width = width * 2; canvas.height = height * 2;
+          canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+          resolve(imageFor(canvas.toDataURL('image/png'), width, height, alt));
+        } catch (error) { reject(error); }
+      };
+      image.onerror = function () { reject(new Error('公式图片生成失败')); };
+      image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(markup);
+    });
+  }
+  function plainText(root) {
+    var copy = root.cloneNode(true);
+    nodes(copy, 'img').forEach(function (image) { image.replaceWith(document.createTextNode(image.alt || '')); });
+    copy.style.cssText += ';position:fixed;left:-100000px;top:0;width:900px;';
+    document.body.appendChild(copy);
+    var text = copy.innerText;
+    copy.remove();
+    return text;
+  }
+  function prepare() {
+    var section = document.querySelector('.markdown-section');
+    if (!section) return Promise.reject(new Error('当前没有可复制的正文'));
+    if (window.PacketDiagEnsureRendered) window.PacketDiagEnsureRendered(section);
+    var root = section.cloneNode(true), originals = nodes(section, '*'), copies = nodes(root, '*');
+    // Carry text colors (including syntax highlighting) without the site's
+    // layout, CSS variables, sticky controls or dark backgrounds.
+    copies.forEach(function (node, i) {
+      if (node.namespaceURI === 'http://www.w3.org/2000/svg') {
+        if (node.tagName.toLowerCase() === 'svg') {
+          var size = originals[i].getBoundingClientRect();
+          if (size.width) { node.setAttribute('width', size.width); node.setAttribute('height', size.height); }
+        }
+        return;
+      }
+      var style = getComputedStyle(originals[i]);
+      node.removeAttribute('style');
+      node.style.cssText = STYLES[node.tagName.toLowerCase()] || '';
+      if (node.classList.contains('katex-display')) node.style.cssText += 'display:block;text-align:center;margin:10pt 0;';
+      if (/^(SPAN|STRONG|EM|DEL|CODE)$/.test(node.tagName)) {
+        node.style.color = style.color;
+        node.style.fontWeight = style.fontWeight;
+        node.style.fontStyle = style.fontStyle;
+        node.style.textDecoration = style.textDecorationLine;
+      }
+      if (node.tagName === 'IMG') {
+        var rect = originals[i].getBoundingClientRect();
+        node.src = originals[i].src;
+        if (rect.width) { node.width = Math.round(rect.width); node.height = Math.round(rect.height); }
+      }
+    });
+    var jobs = [], warnings = 0;
+    nodes(root, 'canvas').forEach(function (canvas, i) {
+      try {
+        var original = section.querySelectorAll('canvas')[i];
+        canvas.replaceWith(imageFor(original.toDataURL('image/png'), original.clientWidth || original.width, original.clientHeight || original.height, original.getAttribute('aria-label')));
+      } catch (error) { warnings++; canvas.replaceWith(document.createTextNode('[画布无法复制]')); }
+    });
+    nodes(root, '.katex').forEach(function (math) {
+      jobs.push(rasterMath(math).then(function (image) { math.replaceWith(image); }).catch(function () {
+        var annotation = math.querySelector('annotation');
+        math.replaceWith(document.createTextNode(annotation ? annotation.textContent : math.textContent));
+        warnings++;
+      }));
+    });
+    nodes(root, 'svg').filter(function (svg) { return !svg.closest('.katex'); }).forEach(function (svg) {
+      if (!window.MediaViewer || !window.MediaViewer.svgToPngBlob) { warnings++; return; }
+      var box = svg.viewBox && svg.viewBox.baseVal;
+      var width = parseFloat(svg.getAttribute('width')) || (box && box.width) || 800;
+      var height = parseFloat(svg.getAttribute('height')) || (box && box.height) || 300;
+      width = Math.min(width, 900);
+      if (box && box.width) height = width * box.height / box.width;
+      jobs.push(window.MediaViewer.svgToPngBlob(svg, width, height, 2).then(dataUrl).then(function (url) {
+        svg.replaceWith(imageFor(url, width, height, '图表'));
+      }).catch(function () { warnings++; }));
+    });
+    nodes(root, CHROME + ', script, style, iframe, object, embed, button, textarea, select').forEach(function (n) { n.remove(); });
+    // Keep all paragraphs in collapsible sections, including collapsed ones.
+    nodes(root, '.search-section-body').forEach(function (wrapper) { wrapper.replaceWith.apply(wrapper, Array.prototype.slice.call(wrapper.childNodes)); });
+    nodes(root, 'input').forEach(function (input) { input.replaceWith(document.createTextNode(input.type === 'checkbox' ? (input.checked ? '☑ ' : '☐ ') : '')); });
+    nodes(root, 'h1 > a.anchor, h2 > a.anchor, h3 > a.anchor, h4 > a.anchor, h5 > a.anchor, h6 > a.anchor').forEach(function (anchor) { anchor.replaceWith.apply(anchor, Array.prototype.slice.call(anchor.childNodes)); });
+    if (!document.body.classList.contains('hide-heading-numbers')) {
+      var counts = [0, 0, 0];
+      nodes(root, 'h2, h3, h4').forEach(function (heading) {
+        var level = Number(heading.tagName.slice(1)) - 2;
+        counts[level]++;
+        for (var deeper = level + 1; deeper < 3; deeper++) counts[deeper] = 0;
+        heading.insertBefore(document.createTextNode(counts.slice(0, level + 1).join('.') + (level === 0 ? '. ' : ' ')), heading.firstChild);
+      });
+    }
+    nodes(root, 'a[href]').forEach(function (link) {
+      var value = link.getAttribute('href');
+      try { var url = new URL(value, document.baseURI); if (/^(https?:|file:|mailto:)$/.test(url.protocol)) link.href = url.href; else link.removeAttribute('href'); }
+      catch (error) { link.removeAttribute('href'); }
+    });
+    nodes(root, '*').forEach(function (node) {
+      Array.prototype.slice.call(node.attributes).forEach(function (attr) { if (/^(on|data-)/i.test(attr.name) || /^(id|class|hidden|contenteditable)$/.test(attr.name)) node.removeAttribute(attr.name); });
+    });
+    root.removeAttribute('id'); root.removeAttribute('class');
+    root.style.cssText = 'font-family:"Microsoft YaHei",Calibri,Arial,sans-serif;font-size:11pt;color:#1f2a37;background:white;line-height:1.6;';
+    return Promise.all(jobs).then(function () {
+      return Promise.all(nodes(root, 'img').map(function (image) {
+        if (!image.src || /^data:/i.test(image.src)) return;
+        return fetch(image.src).then(function (response) { if (!response.ok) throw new Error('图片读取失败'); return response.blob(); }).then(dataUrl).then(function (url) { image.src = url; }).catch(function () { warnings++; });
+      }));
+    }).then(function () {
+      return {html: '<html><head><meta charset="utf-8"></head><body><!--StartFragment-->' + root.outerHTML + '<!--EndFragment--></body></html>', text: plainText(root), warnings: warnings};
+    });
+  }
+  function legacyCopy(data) {
+    var selection = window.getSelection(), ranges = [], focus = document.activeElement;
+    if (selection) for (var i = 0; i < selection.rangeCount; i++) ranges.push(selection.getRangeAt(i).cloneRange());
+    var holder = document.createElement('div');
+    holder.contentEditable = 'true';
+    holder.style.cssText = 'position:fixed;left:-100000px;top:0;';
+    holder.innerHTML = data.html;
+    var handled = false;
+    function onCopy(event) {
+      if (!event.clipboardData) return;
+      event.clipboardData.setData('text/html', data.html);
+      event.clipboardData.setData('text/plain', data.text);
+      event.preventDefault(); handled = true;
+    }
+    try {
+      document.body.appendChild(holder);
+      var range = document.createRange(); range.selectNodeContents(holder);
+      selection.removeAllRanges(); selection.addRange(range);
+      document.addEventListener('copy', onCopy);
+      if (!document.execCommand('copy') || !handled) throw new Error('浏览器未允许复制，请选中正文后按 Ctrl+C');
+    } finally {
+      document.removeEventListener('copy', onCopy); holder.remove();
+      if (focus && focus.focus) focus.focus({preventScroll:true});
+      if (selection) { selection.removeAllRanges(); ranges.forEach(function (saved) { selection.addRange(saved); }); }
+    }
+    return data;
+  }
+  function copy(button) {
+    if (button && button.disabled) return Promise.resolve();
+    var label = '复制本页内容';
+    if (button) { clearTimeout(button._copyResetTimer); button.disabled = true; button.textContent = '正在复制…'; }
+    var prepared;
+    try { prepared = prepare(); } catch (error) { prepared = Promise.reject(error); }
+    var result;
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.write || !window.ClipboardItem) throw new Error('使用兼容复制');
+      var item = new window.ClipboardItem({
+        'text/html': prepared.then(function (data) { return new Blob([data.html], {type:'text/html'}); }),
+        'text/plain': prepared.then(function (data) { return new Blob([data.text], {type:'text/plain'}); })
+      });
+      result = navigator.clipboard.write([item]).then(function () { return prepared; }).catch(function () { return prepared.then(legacyCopy); });
+    } catch (error) { result = prepared.then(legacyCopy); }
+    return result.then(function (data) {
+      if (button) { button.textContent = data.warnings ? '已复制（部分图形未内嵌）' : '已复制，保留格式粘贴'; button.title = '在 Word 中粘贴时选择“保留源格式”'; }
+      return data;
+    }).catch(function (error) {
+      if (button) { button.textContent = '复制失败，请重试'; button.title = error.message; }
+      else throw error;
+    }).then(function (data) {
+      if (button) { button.disabled = false; button._copyResetTimer = setTimeout(function () { button.textContent = label; }, 4000); }
+      return data;
+    });
+  }
+  window.PageCopy = {copy:copy, prepare:prepare};
+}());
