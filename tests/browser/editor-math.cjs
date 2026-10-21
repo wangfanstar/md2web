@@ -7,7 +7,7 @@ const path = require('node:path');
     const page = await browser.newPage();
     await page.route('https://editor.test/**', route => route.fulfill({body:'<!doctype html><html><body></body></html>',contentType:'text/html'}));
     await page.goto('https://editor.test/#/md/local/a');
-    for (const file of ['docs/lib/marked.min.js','docs/lib/katex/katex.min.js','docs/lib/katex/auto-render.min.js','web/math-init.js','web/md-editor.js']) {
+    for (const file of ['docs/lib/marked.min.js','docs/lib/purify.min.js','web/sanitize.js','docs/lib/katex/katex.min.js','docs/lib/katex/auto-render.min.js','web/math-init.js','web/md-editor.js']) {
       await page.addScriptTag({path:path.resolve(file)});
     }
     await page.evaluate(() => {window.fetch = async () => ({ok:true,text:async () => '# Math'}); window.MdEditor.openLocal();});

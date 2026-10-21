@@ -1,6 +1,7 @@
 """Bounded public metadata cache; permissions and private content never belong here."""
 import hashlib
 import json
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -56,3 +57,25 @@ def static_policy(path, version=None):
         if _asset_digest(str(path), info.st_mtime_ns, info.st_size) == version:
             return 'public, max-age=31536000, immutable'
     return 'no-cache'
+
+
+def refresh_html_assets(html, docs_root):
+    """Refresh local asset versions on existing server-generated entry pages."""
+    root = (docs_root / 'lib').resolve()
+
+    def replace(match):
+        try:
+            path = (docs_root / match.group(3)).resolve()
+            if root not in path.parents or not path.is_file():
+                return match.group(0)
+            info = path.stat()
+            digest = _asset_digest(str(path), info.st_mtime_ns, info.st_size)
+        except OSError:
+            return match.group(0)
+        return match.group(1) + match.group(2) + match.group(3) + '?v=' + digest + match.group(2)
+
+    return re.sub(r'''((?:src|href)=)(["'])(lib/[^"'?#<>]+\.(?:js|css))(?:\?v=[\w-]+)?\2''', replace, html)
+
+
+def is_site_entry(filename):
+    return re.match(r'^(?:index\.html|html/(?:index[^/]*|md2web_[^/]*)\.html)$', filename) is not None

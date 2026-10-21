@@ -2067,9 +2067,22 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
 
     # ---- 静态站点（白名单，无目录列表） ----
 
+    def send_site_file(filename):
+        from .cache import is_site_entry, refresh_html_assets
+        if not is_site_entry(filename):
+            return send_from_directory(docs_root, filename)
+        # A deployed server may have repository pages that do not exist in Git.
+        # Refresh their asset URLs without rebuilding or replacing their catalog.
+        response = send_from_directory(docs_root, filename, conditional=False)
+        response.direct_passthrough = False
+        response.set_data(refresh_html_assets(response.get_data(as_text=True), docs_root))
+        response.headers.pop('ETag', None)
+        response.headers.pop('Last-Modified', None)
+        return response
+
     @app.get("/")
     def index():
-        return send_from_directory(docs_root, "index.html")
+        return send_site_file("index.html")
 
     @app.get("/<path:filename>")
     def static_file(filename):
@@ -2078,6 +2091,6 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         target = (docs_root / filename)
         if target.is_dir():
             return json_error(404, "not_found", "资源不存在")
-        return send_from_directory(docs_root, filename)
+        return send_site_file(filename)
 
     return app

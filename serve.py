@@ -482,11 +482,29 @@ class PreviewHandler(http.server.SimpleHTTPRequestHandler):
 
     def send_head(self):
         import hashlib
+        import io
+        from server.cache import is_site_entry, refresh_html_assets
         rel = urllib.parse.unquote(urllib.parse.urlparse(self.path).path).lstrip('/')
         if (rel and is_blocked_static_path(rel)) or (rel and rel.endswith('/')):
             self.send_error(404, 'Not Found')
             return None
         target = Path(self.translate_path(self.path))
+        entry = target / 'index.html' if not rel and target.is_dir() else target
+        if is_site_entry(rel or 'index.html') and entry.is_file():
+            root = Path(self.translate_path('/'))
+            body = refresh_html_assets(entry.read_text(encoding='utf-8'), root).encode('utf-8')
+            etag = '"' + hashlib.sha256(body).hexdigest()[:24] + '"'
+            if self.headers.get('If-None-Match') == etag:
+                self.send_response(304)
+                self.send_header('ETag', etag)
+                self.end_headers()
+                return None
+            self._static_etag = etag
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            return io.BytesIO(body)
         if target.is_file():
             info = target.stat()
             etag = '"' + hashlib.sha256((str(info.st_mtime_ns) + ':' + str(info.st_size)).encode('ascii')).hexdigest()[:24] + '"'
