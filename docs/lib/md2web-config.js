@@ -79,7 +79,10 @@
     host.textContent='';var key=query('[data-records-sort]').value;
     var users=recordsData.users.slice().sort(function(a,b){return b[key]-a[key] || a.id-b.id;}).map(function(u,i){return Object.assign({rank:i+1},u);});
     table('用户排行榜',[['rank','排名'],['username','用户'],['source','认证源'],['logins','登录次数'],['visits','访问次数'],['articles','文章总数'],['last_at','最近活动']],users);
-    table('全部 IP 与用户记录',[['client_ip','IP 地址'],['username','用户'],['source','认证源'],['path','访问页面 / 文章'],['action','事件'],['result','结果'],['count','次数'],['last_at','最近时间']],recordsData.ips);
+    var audience=query('[data-records-audience]'), scope=audience?audience.value:'all';
+    var ips=recordsData.ips.filter(function(row){return scope==='all'||(scope==='anonymous'?!!row.anonymous:!row.anonymous);});
+    var uniqueIps=new Set(ips.map(function(row){return row.client_ip;}));
+    table('全部 IP 与用户记录 · '+uniqueIps.size+' 个 IP',[['client_ip','IP 地址'],['username','用户'],['source','认证源'],['path','访问页面 / 文章'],['action','事件'],['result','结果'],['count','次数'],['last_at','最近时间']],ips);
     table('文章访问排行',[['path','文章'],['visits','访问次数'],['readers','阅读人数'],['last_at','最近阅读']],recordsData.articles);
   }
   function loadRecords(force){
@@ -92,6 +95,7 @@
   if(query('[data-records-refresh]'))query('[data-records-refresh]').onclick=function(){loadRecords(true);};
   if(query('[data-records-query]'))query('[data-records-query]').oninput=renderRecords;
   if(query('[data-records-sort]'))query('[data-records-sort]').onchange=renderRecords;
+  if(query('[data-records-audience]'))query('[data-records-audience]').onchange=renderRecords;
 
   function showPanels() {
     var fileMode = window.location.protocol === 'file:';

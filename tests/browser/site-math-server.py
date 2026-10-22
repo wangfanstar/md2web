@@ -38,6 +38,14 @@ try:
         (fixture.docs / 'pdf').mkdir(exist_ok=True)
         (fixture.docs / 'pdf/协议 #1.pdf').write_bytes(b'%PDF-1.4 fixture')
         (fixture.docs / 'html/internal-report.html').write_text('<h1>Internal report</h1>', encoding='utf-8')
+    if os.environ.get('MD2WEB_LINK_TARGETS'):
+        from setup_docsify import build_page_index
+        content = '# Link target\n\n## Duplicate\n\nFirst\n\n## Duplicate\n\nSecond'
+        (fixture.docs / 'md/old/target.md').write_text(content, encoding='utf-8')
+        route = '/md/old/target.md'
+        entries = build_page_index(route, content, 6, 'Link target')
+        entries['site'] = 'html/index_server_only.html'
+        (fixture.docs / 'html/search-index.json').write_text(json.dumps({route: entries}), encoding='utf-8')
     server = create_server(fixture.app, host='127.0.0.1', port=0, threads=4)
     thread = threading.Thread(target=server.run)
     thread.daemon = True

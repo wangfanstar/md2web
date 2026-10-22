@@ -939,6 +939,7 @@ def user_records(conn):
     ips = conn.execute("""
         SELECT a.client_ip, COALESCE(u.svn_username, CASE WHEN a.action IN ('login','admin_login') THEN a.resource ELSE '未登录访客' END) AS username,
         CASE WHEN a.action IN ('article_visit','site_visit') THEN a.resource ELSE '' END AS path,
+        CASE WHEN a.actor_id IS NULL AND a.action IN ('article_visit','site_visit') THEN 1 ELSE 0 END AS anonymous,
         u.auth_source_id AS source, a.action, a.result, COUNT(*) AS count,
         MAX(a.created_at) AS last_at
         FROM audit_events a LEFT JOIN users u ON u.id=a.actor_id

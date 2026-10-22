@@ -1396,6 +1396,7 @@ class AdminConfigTests(ServerTestBase):
         self.assertNotIn('10.2.3.7', {item['client_ip'] for item in data['ips']})
         visitor = next(item for item in data['ips'] if item['client_ip'] == '10.2.3.5')
         self.assertEqual(visitor['username'], '未登录访客')
+        self.assertEqual(visitor['anonymous'], 1)
         self.assertEqual(visitor['path'], 'md/read.md')
         self.assertEqual(data['articles'][0]['visits'], 1)
 

@@ -2026,7 +2026,11 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             offset = max(0, int(request.args.get('offset') or 0))
         except ValueError:
             offset = 0
-        rows = internal_files.search(docs_root, query)
+        try:
+            rows = (internal_files.markdown_links(docs_root, query, request.args.get('path') or '') if request.args.get('kind') == 'markdown'
+                    else internal_files.search(docs_root, query))
+        except (OSError, ValueError):
+            return json_error(503, 'index_unavailable', '文档索引暂不可用，请完成网站构建后重试')
         return jsonify(ok=True, items=rows[offset:offset + 50], total=len(rows))
 
     @app.get("/__references/list")

@@ -837,6 +837,7 @@
   function setStatus(text) {
     if (state.statusEl) {
       state.statusEl.textContent = text || '';
+      state.statusEl.title = text || '';
     }
   }
 
@@ -1026,18 +1027,28 @@
   }
 
   var internalPicker = null;
-  function pickInternalFile() {
+  function pickInternalFile(markdown) {
     if (internalPicker) return;
     if (location.protocol === 'file:' || !window.SiteAuth || !window.SiteAuth.isAuthenticated()) {
       setStatus('请通过网站服务登录后搜索站内文件。', true); return;
     }
     var selection = [state.textarea.selectionStart, state.textarea.selectionEnd];
     var dialog = document.createElement('dialog'), serial = 0, offset = 0, timer;
+    var selectedDoc = null, documentQuery = '', documentOffset = 0;
     internalPicker = dialog; dialog.className = 'md-internal-picker';
     dialog.setAttribute('aria-label', '引用站内文件');
     dialog.innerHTML = '<header><h3>引用站内文件</h3><button type="button" data-close>关闭</button></header><p>搜索 docs 中的 PDF、演示文稿、网页等文件。选择后插入链接，在新标签页打开。</p><input type="search" aria-label="搜索站内文件" placeholder="输入文件名或路径…"><div role="status" data-info></div><div class="md-internal-results"></div><footer><button type="button" data-prev>上一页</button><button type="button" data-next>下一页</button></footer>';
     document.body.appendChild(dialog);
+    if(markdown){dialog.setAttribute('aria-label','插入站内文档链接');dialog.querySelector('h3').textContent='选择文档';dialog.querySelector('p').textContent='先搜索并选择文档，再选择整篇文档或其中的章节标题。链接在新标签页打开。';}
     var input = dialog.querySelector('input'), list = dialog.querySelector('.md-internal-results'), info = dialog.querySelector('[data-info]');
+    var steps=document.createElement('div');steps.className='md-internal-steps';steps.hidden=true;
+    steps.innerHTML='<button type="button" data-back>← 返回文档列表</button><strong data-document-name></strong><button type="button" data-whole>插入整篇文档</button>';
+    dialog.insertBefore(steps,input);
+    if(markdown)input.placeholder='搜索文档名称或路径…';
+    function insertTarget(item){finish();insertBlock('<a href="'+escapeHtml(item.href)+'" target="_blank" rel="noopener noreferrer" data-site-file="true">'+escapeHtml(item.name)+'</a>\n');}
+    function selectDocument(item){documentQuery=input.value;documentOffset=offset;selectedDoc=item;offset=0;input.value='';input.placeholder='搜索本文章节标题…';steps.hidden=false;steps.querySelector('[data-document-name]').textContent=item.name+' · '+item.path;dialog.querySelector('h3').textContent='选择链接位置';clearTimeout(timer);load();input.focus();}
+    steps.querySelector('[data-back]').onclick=function(){selectedDoc=null;offset=documentOffset;input.value=documentQuery;input.placeholder='搜索文档名称或路径…';steps.hidden=true;dialog.querySelector('h3').textContent='选择文档';clearTimeout(timer);load();input.focus();};
+    steps.querySelector('[data-whole]').onclick=function(){if(selectedDoc)insertTarget(selectedDoc);};
     function finish(){serial++;clearTimeout(timer);dialog.close();dialog.remove();internalPicker=null;state.textarea.focus();state.textarea.setSelectionRange(selection[0],selection[1]);}
     dialog.querySelector('[data-close]').onclick=finish;
     dialog.addEventListener('cancel',function(e){e.preventDefault();finish();});
@@ -1045,15 +1056,16 @@
     function load(){
       var request=++serial;info.textContent='正在搜索…';list.textContent='';
       dialog.querySelector('[data-prev]').disabled=true;dialog.querySelector('[data-next]').disabled=true;
-      authApi('__md/internal-files?q='+encodeURIComponent(input.value)+'&offset='+offset).then(function(data){
+      authApi('__md/internal-files?kind='+(markdown?'markdown':'file')+'&q='+encodeURIComponent(input.value)+'&offset='+offset+(selectedDoc?'&path='+encodeURIComponent(selectedDoc.path):'')).then(function(data){
         if(request!==serial||internalPicker!==dialog)return;
-        info.textContent=data.total?'共 '+data.total+' 个文件 · 第 '+(Math.floor(offset/50)+1)+' 页':'没有匹配的文件';
+        var unit=markdown?(selectedDoc?'个章节':'篇文档'):'个文件';
+        info.textContent=data.total?'共 '+data.total+' '+unit+' · 第 '+(Math.floor(offset/50)+1)+' 页':selectedDoc?'没有匹配的章节，可清空搜索或插入整篇文档。':'没有匹配的文档或文件';
         dialog.querySelector('[data-prev]').disabled=offset===0;
         dialog.querySelector('[data-next]').disabled=offset+50>=data.total;
         (data.items||[]).forEach(function(item){
           var button=document.createElement('button'),title=document.createElement('strong'),detail=document.createElement('span');
-          button.type='button';title.textContent=item.name;detail.textContent=item.path+' · '+Math.ceil(item.size/1024)+' KB';button.appendChild(title);button.appendChild(detail);
-          button.onclick=function(){finish();insertBlock('<a href="'+escapeHtml(item.href)+'" target="_blank" rel="noopener noreferrer" data-site-file="true">'+escapeHtml(item.name)+'</a>\n');};list.appendChild(button);
+          button.type='button';title.textContent=item.name;detail.textContent=item.path+' · '+(markdown?(item.kind==='heading'?'章节标题':'整篇文档'):Math.ceil(item.size/1024)+' KB');button.appendChild(title);button.appendChild(detail);
+          button.onclick=function(){if(markdown&&!selectedDoc)selectDocument(item);else insertTarget(item);};list.appendChild(button);
         });
       }).catch(function(error){if(request===serial&&internalPicker===dialog)info.textContent=error.message||'搜索失败，请重试';});
     }
@@ -1949,6 +1961,7 @@
       'upload-image': function () { pickLocalImages(); },
       'upload-attachment': function () { pickLocalAttachments(); },
       'internal-file': pickInternalFile,
+      'internal-markdown': function(){pickInternalFile(true);},
       color: function () { openColorPicker(); },
       hr: function () { insertBlock('---\n'); },
       save: function () { save(); },
@@ -1981,6 +1994,7 @@
     { action: 'upload-image', label: '上传图片', title: '上传本地图片（保存到文档同级 images/ 并插入引用）' },
     { action: 'upload-attachment', label: '上传附件', title: '上传附件（保存到文档同级 附件/ 并插入链接）' },
     { action: 'internal-file', label: '引用站内文件', title: '搜索并引用站内文件（Ctrl+Alt+L）' },
+    { action: 'internal-markdown', label: '站内文档链接', title: '搜索 Markdown 文档与章节（Ctrl+Alt+Shift+L）' },
     { action: 'color', label: 'A 颜色', title: '设置文字颜色（Ctrl+Alt+K）' },
     { divider: true },
     { action: 'h1', label: 'H1', title: '一级标题（Ctrl+Alt+1）' },
@@ -2012,6 +2026,7 @@
   ];
 
   var SHORTCUTS = [
+    { key: 'l', ctrl: true, alt: true, shift: true, action: 'internal-markdown' },
     { key: 'l', ctrl: true, alt: true, action: 'internal-file' },
     { key: 'b', ctrl: true, action: 'bold' },
     { key: 'i', ctrl: true, action: 'italic' },
@@ -2547,6 +2562,7 @@
       '<div class="md-editor-backdrop" data-editor-close></div>',
       '<section class="md-editor-panel">',
       '<header class="md-editor-head">',
+      '<div class="md-editor-context">',
       '<strong class="md-editor-title" data-editor-title></strong>',
       '<span class="md-editor-mode" data-editor-mode></span>',
       '<span class="md-editor-binding" data-editor-binding></span>',
@@ -2556,8 +2572,7 @@
       '<button type="button" data-editor-action="svn-commit">提交 SVN…</button>',
       '<button type="button" data-editor-action="svn-log">SVN 日志</button>',
       '<button type="button" data-editor-action="remote-diff" hidden>远端差异</button>',
-      '<span class="md-editor-status" data-editor-status></span>',
-      '<span class="md-editor-spacer"></span>',
+      '</div><div class="md-editor-primary">',
       '<button type="button" data-editor-action="save">保存</button>',
       '<button type="button" data-editor-action="saveAs">另存为…</button>',
       '<button type="button" data-editor-action="download">下载 MD</button>',
@@ -2565,6 +2580,7 @@
       '<button type="button" data-editor-action="reload">重新加载</button>',
       '<button type="button" data-editor-action="revert">还原</button>',
       '<button type="button" data-editor-action="close">关闭</button>',
+      '</div><span class="md-editor-status" data-editor-status role="status"></span>',
       '</header>',
       '<div class="md-editor-toolbar">', toolbar, '</div>',
       '<div class="md-editor-body">',
@@ -2618,6 +2634,7 @@
       '<li><code>Ctrl+S</code> 保存（无 SVN 库=保存到服务器；有 SVN 库=本地暂存） · <code>Ctrl+Shift+S</code> 另存为 · <code>Esc</code> 关闭</li>',
       '<li><code>Ctrl+Shift+T</code> 表格行列选择 · <code>Ctrl+Alt+K</code> 文字颜色 · 工具栏可上传本地图片与附件</li>',
       '<li><code>Ctrl+Alt+L</code> 引用站内文件：搜索并插入新标签页链接</li>',
+      '<li><code>Ctrl+Alt+Shift+L</code> 站内文档链接：搜索文档名称、路径与章节标题</li>',
       '<li><code>Ctrl+Z</code> 撤销 · <code>Ctrl+Y</code>/<code>Ctrl+Shift+Z</code> 恢复 · <code>Ctrl+Shift+H</code> 大纲导航</li>',
       '<li><code>Ctrl+F</code> 查找 · <code>Ctrl+H</code> 查找替换 · <code>Enter</code>/<code>F3</code> 下一个 · <code>Shift+Enter</code>/<code>Shift+F3</code> 上一个</li>',
       '<li>直接粘贴或拖入图片会自动上传到文档同级 <code>images/</code>，拖入其他文件会上传到 <code>附件/</code> 并插入链接</li>',

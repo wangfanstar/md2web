@@ -462,11 +462,22 @@ body.media-viewer-open {
 .md-editor-head {
   align-items: center;
   border-bottom: 1px solid var(--workspace-line);
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "context primary" "status status";
+  flex-shrink: 0;
   gap: 6px;
   padding: 9px 12px;
 }
+
+.md-editor-context {grid-area:context;display:flex;align-items:center;gap:6px;min-width:0;overflow-x:auto;white-space:nowrap;}
+.md-editor-context > * {flex-shrink:0;}
+.md-editor-primary {grid-area:primary;display:flex;gap:6px;align-items:center;flex-wrap:nowrap;white-space:nowrap;overflow-x:auto;}
+.md-editor-primary button {flex:0 0 auto;white-space:nowrap;}
+.md-editor-primary [data-editor-action="save"] {width:110px;}
+.md-editor-primary [data-editor-action="close"] {position:sticky;right:0;z-index:1;box-shadow:-4px 0 6px #fff;}
+.md-editor-head .md-editor-status {grid-area:status;display:block;line-height:20px;height:20px;overflow:auto;white-space:nowrap;min-width:0;}
+@media(max-width:1100px){.md-editor-head{grid-template-columns:minmax(0,1fr);grid-template-areas:"primary" "context" "status";}.md-editor-primary{justify-content:safe flex-end;}}
 
 .md-editor-title {
   color: var(--workspace-ink);
@@ -1621,3 +1632,5 @@ body.folder-view-active .docs-page-toc {
 .md-internal-results button {text-align:left;display:flex;flex-direction:column;gap:5px;overflow-wrap:anywhere;}
 .md-internal-results span {font:12px/1.5 var(--docs-mono,monospace);color:var(--docs-muted,#6b7a8d);}
 .md-internal-picker :focus-visible {outline:2px solid var(--docs-accent,#1f6feb);outline-offset:2px;}
+.md-internal-steps:not([hidden]) {display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:12px 0;}
+.md-internal-steps strong {flex:1;min-width:120px;overflow-wrap:anywhere;font-size:13px;}
