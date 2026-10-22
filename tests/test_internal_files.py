@@ -22,7 +22,7 @@ class InternalFileTests(unittest.TestCase):
             self.assertEqual(internal_files.markdown_links(root, '重复'), [])
             self.assertEqual(internal_files.markdown_links(root, '', 'md/A/other.md'), [])
             self.assertEqual(internal_files.markdown_links(root, '重复', 'md/A/read.md')[0]['href'],
-                             'html/index_A.html#/md/A/read.md?id=%E9%87%8D%E5%A4%8D-1')
+                             'html/index_A.html#/md/A/read.md?id=重复-1')
             (root / 'md/A/read.md').unlink()
             self.assertEqual(internal_files.markdown_links(root, ''), [])
             self.assertEqual(internal_files.markdown_links(root, '', 'md/A/read.md'), [])
@@ -40,5 +40,10 @@ class InternalFileTests(unittest.TestCase):
             self.assertEqual(len(rows), 3)
             item = internal_files.search(root, '协议')[0]
             self.assertIn('%23', item['href'])
+            self.assertIn('协议', item['href'])
             ppt = internal_files.search(root, 'demo')[0]
             self.assertEqual(ppt['href'], 'html/reference_preview.html?kind=ppt&path=demo.pptx')
+
+    def test_readable_url_keeps_unicode_and_escapes_delimiters(self):
+        self.assertEqual(internal_files.readable_quote('中文/标题 #?%&"', safe='/'),
+                         '中文/标题%20%23%3F%25%26%22')

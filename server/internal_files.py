@@ -11,6 +11,11 @@ EXTENSIONS = {'.pdf', '.ppt', '.pptx', '.doc', '.docx', '.xls', '.xlsx',
 EXCLUDED = {'lib', 'reference-trash', '回收站', 'images', 'uploads'}
 
 
+def readable_quote(value, safe=''):
+    """Keep Unicode readable in editor source; escape ASCII URL delimiters."""
+    return ''.join(char if ord(char) > 127 else quote(char, safe=safe) for char in value)
+
+
 def markdown_links(root, query, selected_path=''):
     """Use the build's exact heading IDs, including duplicate-title suffixes."""
     root = Path(root)
@@ -29,7 +34,7 @@ def markdown_links(root, query, selected_path=''):
         site = page.get('site') or 'html/index_all.html'
         if not site.startswith('html/index_') or not site.endswith('.html') or is_blocked_static_path(site):
             site = 'html/index_all.html'
-        base = site + '#/' + quote(path, safe='/')
+        base = readable_quote(site, safe='/') + '#/' + readable_quote(path, safe='/')
         candidates = [] if selected_path else [dict(name=title, path=path, href=base, kind='document')]
         for entry in entries if selected_path else []:
             slug = entry.get('slug') or ''
@@ -37,7 +42,7 @@ def markdown_links(root, query, selected_path=''):
                 continue
             heading = entry.get('headingTitle') or entry.get('title') or ''
             candidates.append(dict(name=title + ' · ' + heading, path=path,
-                                   href=base + '?id=' + quote(slug.split('?id=', 1)[1], safe=''), kind='heading'))
+                                   href=base + '?id=' + readable_quote(slug.split('?id=', 1)[1]), kind='heading'))
         results.extend(item for item in candidates if all(word in (item['name']+' '+path).lower() for word in words))
     return results
 
@@ -61,9 +66,9 @@ def search(root, query):
                 size = target.stat().st_size
             except OSError:
                 continue
-            href = quote(rel, safe='/')
+            href = readable_quote(rel, safe='/')
             kind, _, path = rel.partition('/')
             if (kind, target.suffix.lower()) in {('ppt', '.pptx'), ('word', '.docx'), ('excel', '.xlsx')}:
-                href = 'html/reference_preview.html?kind=' + kind + '&path=' + quote(path, safe='')
+                href = 'html/reference_preview.html?kind=' + kind + '&path=' + readable_quote(path)
             result.append(dict(path=rel, name=name, href=href, size=size))
     return sorted(result, key=lambda item: item['path'].lower())

@@ -1065,7 +1065,13 @@
         (data.items||[]).forEach(function(item){
           var button=document.createElement('button'),title=document.createElement('strong'),detail=document.createElement('span');
           button.type='button';title.textContent=item.name;detail.textContent=item.path+' · '+(markdown?(item.kind==='heading'?'章节标题':'整篇文档'):Math.ceil(item.size/1024)+' KB');button.appendChild(title);button.appendChild(detail);
-          button.onclick=function(){if(markdown&&!selectedDoc)selectDocument(item);else insertTarget(item);};list.appendChild(button);
+          button.onclick=function(){
+            if(request!==serial||internalPicker!==dialog)return;
+            button.disabled=true;
+            if(!markdown){insertTarget(item);return;}
+            if(item.kind==='document'){selectDocument(item);return;}
+            if(item.kind==='heading'&&selectedDoc&&item.path===selectedDoc.path)insertTarget(item);
+          };list.appendChild(button);
         });
       }).catch(function(error){if(request===serial&&internalPicker===dialog)info.textContent=error.message||'搜索失败，请重试';});
     }
