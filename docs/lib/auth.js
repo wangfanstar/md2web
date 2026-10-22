@@ -396,6 +396,7 @@
     aiDefaults: function () { return state.ai; },
     csrfToken: function () { return state.csrfToken; },
     features: function () { return state.features; },
+    uploadLimitBytes: function () { return ((state.site.uploads || {}).maxFileMB || 500) * 1024 * 1024; },
     repositories: function () { return state.site.repositories || []; },
     loginRequired: function () {
       if (isFileMode()) {

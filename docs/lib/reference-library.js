@@ -24,6 +24,9 @@
 
   function esc(value) { return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
   function setStatus(message, error) { status.textContent = message || ''; status.className = 'status' + (error ? ' error' : ''); }
+  function uploadLimitBytes() {
+    return window.SiteAuth && SiteAuth.uploadLimitBytes ? SiteAuth.uploadLimitBytes() : 500 * 1048576;
+  }
   function renderAuth(event) {
     var snapshot = event && event.detail ? event.detail : (window.SiteAuth && SiteAuth.snapshot ? SiteAuth.snapshot() : {});
     var user = snapshot.user;
@@ -33,6 +36,7 @@
     authPassword.hidden = !!user;
     authLogin.hidden = !!user;
     authLogout.hidden = !user;
+    document.querySelector('[data-upload]').textContent = '上传文件（≤ ' + (uploadLimitBytes() / 1048576) + ' MB/个）';
   }
   function promptLogin() {
     setStatus('请先登录后再管理参考文献。', true);
@@ -87,23 +91,23 @@
     }).join('') || '<div class="empty"><strong>' + (searching ? '没有找到匹配的文件' : '这个文件夹还没有资料') + '</strong><span>' + (searching ? '请尝试文件名中的其他关键词。' : '可以上传文件，或先新建一个子文件夹。') + '</span></div>';
     stats.textContent = searching ? '找到 ' + items.length + ' 个文件 · 已按 PDF、Word、Excel、PPT 汇总' : items.length + ' 个项目 · 文件夹可继续展开，文件点击后在新窗口预览或下载';
   }
-  function searchReferences() {
+  function searchReferences(keepStatus) {
     var serial = ++searchSerial;
     var query = state.query.trim();
     searchClear.hidden = !query;
-    if (!query) { load(); return; }
+    if (!query) { load(keepStatus); return; }
     title.textContent = '搜索结果';
     crumb.textContent = '全部资料 · ' + query;
-    setStatus('正在搜索…');
-    if (offlineMode && offlineData) { render(localSearch(query), true); setStatus(''); return; }
-    api('__references/search?q=' + encodeURIComponent(query) + '&kind=all').then(function (payload) { if (serial !== searchSerial) return; render((payload.results || []).map(function (item) { item.referenceKind = item.kind; item.kind = 'file'; return item; }), true); setStatus(''); }).catch(function (error) { if (serial !== searchSerial) return; render([], true); setStatus(error.message, true); });
+    if (!keepStatus) setStatus('正在搜索…');
+    if (offlineMode && offlineData) { render(localSearch(query), true); if (!keepStatus) setStatus(''); return; }
+    api('__references/search?q=' + encodeURIComponent(query) + '&kind=all').then(function (payload) { if (serial !== searchSerial) return; render((payload.results || []).map(function (item) { item.referenceKind = item.kind; item.kind = 'file'; return item; }), true); if (!keepStatus) setStatus(''); }).catch(function (error) { if (serial !== searchSerial) return; render([], true); setStatus(error.message, true); });
   }
-  function load() {
-    if (state.query.trim()) { searchReferences(); return; }
+  function load(keepStatus) {
+    if (state.query.trim()) { searchReferences(keepStatus); return; }
     title.textContent = labels[state.kind];
     document.querySelectorAll('[data-kind-nav]').forEach(function (node) { node.classList.toggle('active', node.getAttribute('data-kind-nav') === state.kind); });
     crumb.textContent = state.path || '根目录';
-    setStatus('');
+    if (!keepStatus) setStatus('');
     if (offlineMode && offlineData) { render(localChildren(state.kind, state.path), false); setStatus('离线目录快照 · 管理操作需通过服务地址打开'); return; }
     api('__references/list?kind=' + encodeURIComponent(state.kind) + '&path=' + encodeURIComponent(state.path)).then(function (payload) { render(payload.listing.items || [], false); }).catch(function (error) { list.innerHTML = '<div class="empty"><strong>暂时无法读取资料</strong><span>' + esc(error.message) + '</span></div>'; setStatus(error.message, true); });
   }
@@ -119,7 +123,7 @@
   }
   document.querySelectorAll('[data-kind-nav]').forEach(function (node) { node.addEventListener('click', function () { state.kind = node.getAttribute('data-kind-nav'); state.path = ''; state.query = ''; searchInput.value = ''; updateUrl(); load(); }); });
   document.querySelector('[data-root]').addEventListener('click', function () { state.path = ''; state.query = ''; searchInput.value = ''; updateUrl(); load(); });
-  document.querySelector('[data-up]').addEventListener('click', load);
+  document.querySelector('[data-up]').addEventListener('click', function () { load(); });
   searchForm.addEventListener('submit', function (event) { event.preventDefault(); searchReferences(); });
   searchInput.addEventListener('input', function () { state.query = searchInput.value; searchReferences(); });
   searchForm.addEventListener('reset', function () { window.setTimeout(function () { state.query = ''; searchInput.value = ''; load(); }, 0); });
@@ -151,16 +155,34 @@
       input.value = '';
       return;
     }
-    var form = new FormData(); form.append('kind', state.kind); form.append('path', state.path);
-    files.forEach(function (file) { form.append('file', file, file.name); });
+    var batches = [], batch = [], size = 0, skipped = [], limit = uploadLimitBytes();
+    var kind = state.kind, path = state.path;
+    files.forEach(function (file) {
+      if (file.size > limit) { skipped.push({name:file.name,ok:false,error:'文件过大（上限 ' + (limit/1048576) + ' MB）'}); return; }
+      if (batch.length && size + file.size > limit) { batches.push(batch); batch=[]; size=0; }
+      batch.push(file); size+=file.size;
+    });
+    if(batch.length)batches.push(batch);
     setStatus('正在上传 ' + files.length + ' 个文件…');
     var headers = {}; if (window.SiteAuth && SiteAuth.csrfToken()) headers['X-CSRF-Token'] = SiteAuth.csrfToken();
-    fetch('__references/upload', { method: 'POST', headers: headers, body: form }).then(function (response) {
-      return response.json().catch(function () { return {}; }).then(function (payload) {
-        if (!response.ok || payload.ok === false) { throw new Error(payload.error || ('上传失败（HTTP ' + response.status + '）')); }
-        return payload;
+    var chain=Promise.resolve({results:skipped});
+    batches.forEach(function (group) {
+      chain=chain.then(function (accumulated) {
+        var form=new FormData();form.append('kind',kind);form.append('path',path);
+        group.forEach(function(file){form.append('file',file,file.name);});
+        return fetch('__references/upload', { method: 'POST', headers: headers, body: form }).then(function (response) {
+          return response.json().catch(function () { return {}; }).then(function (payload) {
+            if (!response.ok || payload.ok === false) { throw new Error(payload.error || ('上传失败（HTTP ' + response.status + '）')); }
+            return {results:accumulated.results.concat(payload.results || [])};
+          });
+        }).catch(function(error){
+          return {results:accumulated.results.concat(group.map(function(file){
+            return {name:file.name,ok:false,error:error.message || '上传失败'};
+          }))};
+        });
       });
-    }).then(function (payload) {
+    });
+    chain.then(function (payload) {
       var results = payload.results || [];
       var failed = results.filter(function (item) { return !item.ok; });
       if (failed.length) {
@@ -168,7 +190,7 @@
       } else {
         setStatus('已上传 ' + results.length + ' 个文件');
       }
-      load();
+      load(true);
     }).catch(function (error) { setStatus(error.message, true); }).then(function () { input.value = ''; });
   });
   document.addEventListener('click', function (event) {

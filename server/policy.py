@@ -53,3 +53,19 @@ COMPARE_DEFAULTS = dict(contextLines=3, maxInteractiveBytes=5242880,
                         maxInteractiveLines=50000, workerBudgetMs=1500)
 AUTH_DEFAULTS = dict(rememberSessionDays=30, rememberIdleDays=7,
                      rememberUsername=True, deviceHintDays=30)
+
+
+def upload_options(raw):
+    value = raw.get('maxFileMB', 500)
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 500:
+        raise ValueError('单文件上传上限必须为 1–500 MB 的整数')
+    return {'maxFileMB': value}
+
+
+def upload_bytes(config):
+    return config.get('uploads', {}).get('maxFileMB', 500) * 1024 * 1024
+
+
+def upload_request_bytes(config):
+    # JSON/base64 expansion plus headers and multipart/JSON fields.
+    return ((upload_bytes(config) + 2) // 3) * 4 + 1024 * 1024

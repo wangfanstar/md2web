@@ -494,7 +494,13 @@
     });
   }
 
-  // 文档正文顶部显示最后更新日期：SVN 库用 SVN 上的时间，其余用文件时间（需认证服务）
+  function updatedMetaText(meta) {
+    var date = String(meta.updatedAt || '').slice(0, 10);
+    return date ? '最后更新：' + date + ' · 作者：' + (meta.author || '未知')
+      + (meta.source === 'svn' ? '（SVN 库）' : '（本地文件）') : '';
+  }
+
+  // 文档正文顶部显示最后更新时间与作者（需认证服务）
   var lastVisitRoute = '';
   function addUpdatedMeta() {
     var section = document.querySelector('.markdown-section');
@@ -532,10 +538,7 @@
       .then(function (payload) {
         var meta = payload && payload.meta;
         if (!meta || box.getAttribute('data-route') !== route) return;
-        var date = String(meta.updatedAt || '').slice(0, 10);
-        box.textContent = date
-          ? '最后更新：' + date + (meta.source === 'svn' ? '（SVN 库）' : '（本地文件）')
-          : '';
+        box.textContent = updatedMetaText(meta);
       })
       .catch(function () { box.textContent = ''; });
   }
@@ -810,6 +813,7 @@
       addTreeNumbers: addTreeNumbers,
       readableLink: readableLink,
       isStaticPageHref: isStaticPageHref,
+      updatedMetaText: updatedMetaText,
       syncDescription: syncDescription
     };
   }

@@ -33,7 +33,7 @@ def server_documents_error():
 
 COOKIE_NAME = "md2web_session"
 FEATURES = {"editDraft": True, "svnCommit": False, "localPublish": True}
-MAX_BODY = 100 * 1024 * 1024
+MAX_BODY = policy.upload_request_bytes({})
 
 
 def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
@@ -63,6 +63,12 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         response = jsonify(payload)
         response.status_code = status
         return response
+
+    @app.before_request
+    def upload_request_limit():
+        if request.content_length is not None and request.content_length > policy.upload_request_bytes(config):
+            return json_error(413, 'too_large', '本次上传总量过大，单文件上限 %d MB，请分批上传' %
+                              (policy.upload_bytes(config) // (1024 * 1024)))
 
     def set_session_cookie(response, token, remember=False):
         response.set_cookie(
@@ -144,7 +150,8 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
 
     @app.errorhandler(413)
     def handle_too_large(error):
-        return json_error(413, "too_large", "请求体过大")
+        return json_error(413, "too_large", "本次上传总量过大，单文件上限 %d MB，请分批上传" %
+                          (policy.upload_bytes(config) // (1024 * 1024)))
 
     @app.errorhandler(Exception)
     def handle_error(error):
@@ -757,14 +764,14 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         return document_meta_cache.get_or_compute(key, lambda: compute_svn_document_meta(binding, path, target))
 
     def compute_svn_document_meta(binding, path, target):
-        """SVN 库文档的最后提交时间：优先网页提交记录，其次 svn log（带 10 分钟缓存）。"""
+        """SVN 文档最后提交时间与作者：优先网页提交记录，其次缓存的 svn log。"""
         with auth_service._db_lock:
             record = database.document_last_update(conn, path)
         if record is not None:
             meta = {"path": path, "updatedAt": record.get("lastAt"), "source": "svn",
-                    "revision": record.get("lastRevision")}
+                    "revision": record.get("lastRevision"), "author": record.get("author") or ""}
         else:
-            meta = {"path": path, "updatedAt": None, "source": "svn", "revision": None}
+            meta = {"path": path, "updatedAt": None, "source": "svn", "revision": None, "author": ""}
             config_dir = tempfile.mkdtemp(prefix="md2web-meta-")
             try:
                 relative = path[len(binding["mount"]):].lstrip("/")
@@ -775,6 +782,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 if entries:
                     meta["updatedAt"] = entries[0].get("date") or None
                     meta["revision"] = entries[0].get("revision")
+                    meta["author"] = entries[0].get("author") or ""
             except Exception:
                 meta["updatedAt"] = None
             finally:
@@ -782,11 +790,12 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             if not meta["updatedAt"]:
                 meta["updatedAt"] = file_updated_at(target)
                 meta["source"] = "file"
+                meta["author"] = ""
         return meta
 
     @app.get("/__doc-meta")
     def document_meta():
-        """文档最后更新日期（公开只读）：SVN 库显示 SVN 上的时间，其余显示文件时间。"""
+        """文档更新信息（公开只读）：提交/文件时间，以及可靠记录中的作者。"""
         path = str(request.args.get("path") or "").strip()
         if not path.startswith("md/"):
             return json_error(400, "invalid_path", "仅支持 md/ 下的文档")
@@ -800,7 +809,19 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             meta = svn_document_meta(binding, path, target)
         else:
             meta = {"path": path, "updatedAt": file_updated_at(target),
-                    "source": "file", "revision": None}
+                    "source": "file", "revision": None, "author": ""}
+            with auth_service._db_lock:
+                saved = conn.execute(
+                    'SELECT v.content, u.svn_username AS author FROM local_document_versions v'
+                    ' LEFT JOIN users u ON u.id=v.actor_id WHERE v.path=? ORDER BY v.id DESC LIMIT 1',
+                    (path,)).fetchone()
+            if saved is not None:
+                try:
+                    current = target.read_text(encoding='utf-8')
+                    if server_documents.normalize_eol(current) == server_documents.normalize_eol(saved['content']):
+                        meta['author'] = saved['author'] or ''
+                except (OSError, UnicodeError):
+                    pass
         return jsonify({"ok": True, "meta": meta})
 
     @app.get("/__trash")
@@ -1027,6 +1048,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         try:
             result = server_documents.save_feedback_image(
                 docs_root, payload.get("type"), payload.get("data"),
+                max_bytes=policy.upload_bytes(config),
             )
         except MdSaveError as error:
             return json_error(error.status, "image_error", error.message)
@@ -1045,6 +1067,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         try:
             result = server_documents.save_feedback_attachment(
                 docs_root, payload.get("name"), payload.get("data"),
+                max_bytes=policy.upload_bytes(config),
             )
         except MdSaveError as error:
             return json_error(error.status, "attachment_error", error.message)
@@ -1466,6 +1489,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         try:
             result = server_documents.save_document_image(
                 md_dir(), payload.get("path"), payload.get("type"), payload.get("data"),
+                max_bytes=policy.upload_bytes(config),
             )
         except MdSaveError as error:
             return json_error(error.status, "image_error", error.message)
@@ -1487,6 +1511,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         try:
             result = server_documents.save_document_attachment(
                 md_dir(), payload.get("path"), payload.get("name"), payload.get("data"),
+                max_bytes=policy.upload_bytes(config),
             )
         except MdSaveError as error:
             return json_error(error.status, "attachment_error", error.message)
@@ -2086,6 +2111,13 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 if not uploaded.filename:
                     continue
                 name = references.check_name(uploaded.filename)
+                uploaded.stream.seek(0, 2)
+                size = uploaded.stream.tell()
+                uploaded.stream.seek(0)
+                if size > policy.upload_bytes(config):
+                    results.append({'name': name, 'ok': False, 'error': '文件过大（上限 %d MB）' %
+                                    (policy.upload_bytes(config) // (1024 * 1024))})
+                    continue
                 if Path(name).suffix.lower() not in references.KINDS[kind]:
                     results.append({"name": name, "ok": False, "error": "文件扩展名与资料类型不匹配"})
                     continue

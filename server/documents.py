@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 MD_MAX_BODY = 8 * 1024 * 1024
-IMAGE_MAX_BYTES = 100 * 1024 * 1024
+IMAGE_MAX_BYTES = 500 * 1024 * 1024
 IMAGE_TYPES = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
@@ -31,7 +31,7 @@ ATTACHMENT_DIR_NAME = "附件"
 # 反馈截图与附件：站点页面在 docs/html/ 下，资产集中存放
 FEEDBACK_IMAGE_REL = "html/images"
 FEEDBACK_UPLOAD_REL = "html/uploads"
-ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024
+ATTACHMENT_MAX_BYTES = 500 * 1024 * 1024
 ATTACHMENT_NAME_MAX = 120
 ATTACHMENT_UNSAFE = re.compile(r'[\\/:*?"<>|#%\[\]{}()\x00-\x1f]+')
 # 可执行/可脚本化文件会被同源静态分发，禁止作为附件上传
@@ -227,7 +227,7 @@ def image_extension(mime_type):
     return extension
 
 
-def decode_image_data(data):
+def decode_image_data(data, max_bytes=None):
     """严格解码 base64 图片数据；空内容抛 400，超限抛 413。"""
     value = str(data or "").strip()
     if not value:
@@ -240,8 +240,9 @@ def decode_image_data(data):
         raise MdSaveError(400, "图片数据不是合法的 base64")
     if not blob:
         raise MdSaveError(400, "图片内容为空")
-    if len(blob) > IMAGE_MAX_BYTES:
-        raise MdSaveError(413, "图片过大（上限 %d MB）" % (IMAGE_MAX_BYTES // (1024 * 1024)))
+    limit = min(IMAGE_MAX_BYTES, max_bytes) if max_bytes is not None else IMAGE_MAX_BYTES
+    if len(blob) > limit:
+        raise MdSaveError(413, "图片过大（上限 %d MB）" % (limit // (1024 * 1024)))
     return blob
 
 
@@ -294,10 +295,10 @@ def _write_blob(directory, name, blob):
     return target
 
 
-def save_feedback_image(docs_dir, mime_type, data, now=None):
+def save_feedback_image(docs_dir, mime_type, data, now=None, max_bytes=None):
     """反馈截图/图片：写入 docs/html/images/，命名 fb-<时间戳>-<序号>.<扩展名>。"""
     extension = image_extension(mime_type)
-    blob = decode_image_data(data)
+    blob = decode_image_data(data, max_bytes)
     directory = Path(docs_dir) / FEEDBACK_IMAGE_REL
     stamp = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
     sequence = next_image_sequence(directory, "fb")
@@ -306,9 +307,9 @@ def save_feedback_image(docs_dir, mime_type, data, now=None):
     return {"path": FEEDBACK_IMAGE_REL + "/" + name, "name": name, "bytes": len(blob)}
 
 
-def save_feedback_attachment(docs_dir, name, data):
+def save_feedback_attachment(docs_dir, name, data, max_bytes=None):
     """反馈附件：写入 docs/html/uploads/，沿用原文件名（重名自动加序号）。"""
-    blob = decode_attachment_data(data)
+    blob = decode_attachment_data(data, max_bytes)
     filename = attachment_filename(name)
     directory = Path(docs_dir) / FEEDBACK_UPLOAD_REL
     final_name = next_attachment_name(directory, filename)
@@ -316,13 +317,13 @@ def save_feedback_attachment(docs_dir, name, data):
     return {"path": FEEDBACK_UPLOAD_REL + "/" + final_name, "name": final_name, "bytes": len(blob)}
 
 
-def save_document_image(md_dir, raw, mime_type, data, now=None):
+def save_document_image(md_dir, raw, mime_type, data, now=None, max_bytes=None):
     """把粘贴的图片写入文档同级 images/，返回相对路径（供 Markdown 引用）。
 
     命名规则：<文档名>-<时间戳>-<序号>.<扩展名>，例如 时钟树设计-20260917-113045-1.png
     """
     extension = image_extension(mime_type)
-    blob = decode_image_data(data)
+    blob = decode_image_data(data, max_bytes)
     path, directory = document_image_dir(md_dir, raw)
     stem = image_stem(path.stem)
     try:
@@ -392,7 +393,7 @@ def next_attachment_name(directory, name):
         index += 1
 
 
-def decode_attachment_data(data):
+def decode_attachment_data(data, max_bytes=None):
     """严格解码 base64 附件数据；空内容抛 400，超限抛 413。"""
     value = str(data or "").strip()
     if not value:
@@ -405,17 +406,18 @@ def decode_attachment_data(data):
         raise MdSaveError(400, "附件数据不是合法的 base64")
     if not blob:
         raise MdSaveError(400, "附件内容为空")
-    if len(blob) > ATTACHMENT_MAX_BYTES:
-        raise MdSaveError(413, "附件过大（上限 %d MB）" % (ATTACHMENT_MAX_BYTES // (1024 * 1024)))
+    limit = min(ATTACHMENT_MAX_BYTES, max_bytes) if max_bytes is not None else ATTACHMENT_MAX_BYTES
+    if len(blob) > limit:
+        raise MdSaveError(413, "附件过大（上限 %d MB）" % (limit // (1024 * 1024)))
     return blob
 
 
-def save_document_attachment(md_dir, raw, name, data, now=None):
+def save_document_attachment(md_dir, raw, name, data, now=None, max_bytes=None):
     """把附件写入文档同级 附件/，返回相对路径（供 Markdown 链接引用）。
 
     命名规则：沿用原文件名（清理链接敏感字符），同名自动追加 -2、-3 序号。
     """
-    blob = decode_attachment_data(data)
+    blob = decode_attachment_data(data, max_bytes)
     filename = attachment_filename(name)
     path, folder = document_folder(md_dir, raw)
     directory = folder / ATTACHMENT_DIR_NAME

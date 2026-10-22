@@ -8,7 +8,7 @@ from pathlib import Path
 
 DEFAULT_NAME = 'md2web_config.json'
 FIELDS = ('auth', 'sync', 'repositories', 'folderGroups', 'siteBackup', 'ai', 'credentials',
-          'authorization', 'cache', 'historyCompare', 'pathAliases', 'entryAliases', 'configSchemaVersion')
+          'authorization', 'cache', 'historyCompare', 'uploads', 'pathAliases', 'entryAliases', 'configSchemaVersion')
 # 配置页固定可选的三套配置：主配置、默认配置、备份配置
 PRESETS = (
     ('md2web_config.json', '主配置'),
@@ -164,7 +164,7 @@ def validate_data(data):
     if not isinstance(data, dict):
         raise ConfigError('方案必须是 JSON 对象')
     data = dict(data)
-    for key in ('authorization', 'cache', 'historyCompare', 'pathAliases', 'entryAliases'):
+    for key in ('authorization', 'cache', 'historyCompare', 'uploads', 'pathAliases', 'entryAliases'):
         data.setdefault(key, {})
     data.setdefault('configSchemaVersion', 2)
     if set(data) - set(FIELDS) - {'schemaVersion'} or data.get('schemaVersion', 1) != 1:

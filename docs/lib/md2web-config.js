@@ -122,8 +122,8 @@
     if(!state.config)return;
     var fields=[['auth','rememberSessionDays','保持登录天数',30],['auth','rememberIdleDays','闲置有效天数',7],
       ['cache','metadataTtlSeconds','元数据缓存秒数',60],['cache','maxEntries','缓存条目上限',256],
-      ['cache','maxBytes','缓存容量上限（MiB）',33554432]];
-    all('[data-policy-fields]').forEach(function(host){host.innerHTML=fields.filter(function(f){return f[0]===host.getAttribute('data-policy-fields');}).map(function(f){var value=(state.config[f[0]]||{})[f[1]]||f[3];if(f[1]==='maxBytes')value=value/1048576;return '<label>'+f[2]+'<input type="number" min="1" data-policy="'+f[0]+'.'+f[1]+'" value="'+escapeHtml(value)+'"></label>';}).join('');});
+      ['cache','maxBytes','缓存容量上限（MiB）',33554432],['uploads','maxFileMB','单文件上传上限（MB，1–500）',500]];
+    all('[data-policy-fields]').forEach(function(host){host.innerHTML=fields.filter(function(f){return f[0]===host.getAttribute('data-policy-fields');}).map(function(f){var value=(state.config[f[0]]||{})[f[1]]||f[3];if(f[1]==='maxBytes')value=value/1048576;return '<label>'+f[2]+'<input type="number" min="1"'+(f[0]==='uploads'?' max="500" step="1"':'')+' data-policy="'+f[0]+'.'+f[1]+'" value="'+escapeHtml(value)+'"></label>';}).join('');});
   }
   function installManagement() {
     if (managementInstalled) return;

@@ -100,8 +100,9 @@
 
   // ---------- 截图 / 附件上传 ----------
 
-  var FEEDBACK_IMAGE_MAX = 100 * 1024 * 1024;
-  var FEEDBACK_FILE_MAX = 100 * 1024 * 1024;
+  function uploadLimitBytes() {
+    return window.SiteAuth && SiteAuth.uploadLimitBytes ? SiteAuth.uploadLimitBytes() : 500 * 1048576;
+  }
 
   function uploaderMarkup() {
     return [
@@ -191,8 +192,8 @@
       setStatus('登录后才能上传截图', true);
       return Promise.reject(new Error('需要登录'));
     }
-    if (file.size > FEEDBACK_IMAGE_MAX) {
-      setStatus('图片过大（上限 8 MB）', true);
+    if (file.size > uploadLimitBytes()) {
+      setStatus('图片过大（上限 ' + (uploadLimitBytes() / 1048576) + ' MB）', true);
       return Promise.reject(new Error('图片过大'));
     }
     state.uploading += 1;
@@ -225,8 +226,8 @@
       setStatus('登录后才能上传附件', true);
       return Promise.reject(new Error('需要登录'));
     }
-    if (file.size > FEEDBACK_FILE_MAX) {
-      setStatus('附件过大（上限 32 MB）', true);
+    if (file.size > uploadLimitBytes()) {
+      setStatus('附件过大（上限 ' + (uploadLimitBytes() / 1048576) + ' MB）', true);
       return Promise.reject(new Error('附件过大'));
     }
     state.uploading += 1;

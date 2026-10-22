@@ -18,6 +18,15 @@ function loadWorkspace(repoInfo, repoList) {
   return window.__WORKSPACE_TEST_API__;
 }
 
+test('document update metadata includes plain author text and handles missing authors', () => {
+  const api = loadWorkspace();
+  assert.equal(api.updatedMetaText({updatedAt:'2026-10-22T01:02:03Z',source:'svn',author:'张三'}),
+    '最后更新：2026-10-22 · 作者：张三（SVN 库）');
+  assert.equal(api.updatedMetaText({updatedAt:'2026-10-22',source:'file'}),
+    '最后更新：2026-10-22 · 作者：未知（本地文件）');
+  assert.equal(api.updatedMetaText({updatedAt:'',author:'张三'}), '');
+});
+
 test('SVN controls identify root and nested repositories and show synchronization state', () => {
   const api = loadWorkspace({id: 'root', mount: 'md/A', url: 'https://svn.example/A', source_mode: 'svn'},
     [{id: 'nested', mount: 'md/A/B', url: 'https://svn.example/B', sourceMode: 'svn'}]);

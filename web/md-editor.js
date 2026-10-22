@@ -1098,8 +1098,8 @@
   function uploadImage(file, altText) {
     var type = file.type || IMAGE_MIME_FALLBACK;
     var alt = altText || imageAltText(file);
-    if (file.size > 8 * 1024 * 1024) {
-      setStatus('图片过大（上限 8 MB）：' + (file.name || ''));
+    if (file.size > uploadLimitBytes()) {
+      setStatus('图片过大（上限 ' + (uploadLimitBytes() / 1048576) + ' MB）：' + (file.name || ''));
       return Promise.reject(new Error('图片过大'));
     }
     if (state.localMode) {
@@ -1150,8 +1150,8 @@
     if (!file) {
       return Promise.reject(new Error('没有选择附件'));
     }
-    if (file.size > ATTACHMENT_MAX_BYTES) {
-      setStatus('附件过大（上限 ' + (ATTACHMENT_MAX_BYTES / (1024 * 1024)) + ' MB）：' + name);
+    if (file.size > uploadLimitBytes()) {
+      setStatus('附件过大（上限 ' + (uploadLimitBytes() / 1048576) + ' MB）：' + name);
       return Promise.reject(new Error('附件过大'));
     }
     if (state.localMode || !authAvailable()) {
@@ -1207,7 +1207,9 @@
   // ---------- 撤销 / 恢复 ----------
 
   var HISTORY_LIMIT = 200;
-  var ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024;
+  function uploadLimitBytes() {
+    return window.SiteAuth && SiteAuth.uploadLimitBytes ? SiteAuth.uploadLimitBytes() : 500 * 1048576;
+  }
 
   function historyReset(value) {
     state.history = [value];

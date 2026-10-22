@@ -34,6 +34,13 @@ try:
     page = fixture.docs / 'html/index_server_only.html'
     page.write_text(html, encoding='utf-8')
     (fixture.docs / 'md/old/math.md').write_text(os.environ['MD2WEB_MATH_SOURCE'], encoding='utf-8')
+    if os.environ.get('MD2WEB_REFERENCE_UPLOAD'):
+        fixture.config['uploads'] = {'maxFileMB': 1}
+        shutil.copyfile(str(root / 'web/reference_library.html'), str(fixture.docs / 'html/reference_library.html'))
+    if os.environ.get('MD2WEB_META_AUTHOR'):
+        from server import local_history
+        with fixture.conn:
+            local_history.record(fixture.conn, 'md/old/math.md', None, os.environ['MD2WEB_MATH_SOURCE'], 1)
     if os.environ.get('MD2WEB_INTERNAL_FILES'):
         (fixture.docs / 'pdf').mkdir(exist_ok=True)
         (fixture.docs / 'pdf/协议 #1.pdf').write_bytes(b'%PDF-1.4 fixture')

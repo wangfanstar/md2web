@@ -288,11 +288,12 @@ def load_config(path, docs_dir, allow_incomplete=False, create_mounts=False):
         authorization = policy.normalize(raw)
         cache = policy.options(raw.get('cache') or {}, policy.CACHE_DEFAULTS)
         compare = policy.options(raw.get('historyCompare') or {}, policy.COMPARE_DEFAULTS)
+        uploads = policy.upload_options(raw.get('uploads') or {})
         auth_options = policy.options(auth_raw, policy.AUTH_DEFAULTS)
     except (ValueError, TypeError, AttributeError) as error:
         raise ConfigError(str(error))
     result = {
-        "authorization": authorization, "cache": cache, "historyCompare": compare,
+        "authorization": authorization, "cache": cache, "historyCompare": compare, "uploads": uploads,
         "pathAliases": raw.get('pathAliases') or {}, "entryAliases": raw.get('entryAliases') or {},
         "path": config_path.resolve(),
         "profile_name": raw.get("profileName", "md2web_config.json"),
@@ -380,7 +381,7 @@ def config_to_json(config):
         data["security"] = {"secretKey": config["security"]["secretKey"]}
     from . import policy
     data['configSchemaVersion'] = 2
-    for key in ('authorization', 'cache', 'historyCompare', 'pathAliases', 'entryAliases'):
+    for key in ('authorization', 'cache', 'historyCompare', 'uploads', 'pathAliases', 'entryAliases'):
         data[key] = config.get(key, {})
     for key, value in policy.AUTH_DEFAULTS.items():
         data['auth'][key] = config['auth'].get(key, value)
@@ -526,6 +527,7 @@ def public_config(config):
     """给未登录前端的配置视图：不含认证地址、AI Key 与任何凭据。"""
     ai = config.get("ai") or {}
     return {
+        "uploads": dict(config.get('uploads') or {'maxFileMB': 500}),
         "repositories": [
             {"id": repo["id"], "mount": repo["mount"], "sourceMode": repo.get("source_mode", "svn"),
              "linkTarget": repo.get("link_target", ""),

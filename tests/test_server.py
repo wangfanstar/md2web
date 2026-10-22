@@ -1445,7 +1445,8 @@ class AdminConfigTests(ServerTestBase):
         else:
             self.assertFalse(self.app.config["JSON_AS_ASCII"])
             self.assertFalse(self.app.config["JSON_SORT_KEYS"])
-        self.assertEqual(self.app.config["MAX_CONTENT_LENGTH"], 100 * 1024 * 1024)
+        from server import policy
+        self.assertEqual(self.app.config["MAX_CONTENT_LENGTH"], policy.upload_request_bytes({}))
 
     def test_admin_login_rejects_wrong_password(self):
         response = self.client.post("/__auth/login", json={"username": "admin", "password": "nope", "mode": "admin"})
@@ -4040,6 +4041,7 @@ class FolderMetadataTests(ServerTestBase):
         meta = self.client.get("/__doc-meta?path=md/本地笔记/note.md").get_json()["meta"]
         self.assertEqual(meta["source"], "file")
         self.assertTrue(meta["updatedAt"].endswith("Z"))
+        self.assertEqual(meta["author"], "")
         with self.conn:
             self.conn.execute(
                 "INSERT INTO operations (id, actor_id, binding_id, kind, state, reviewed_manifest,"
@@ -4051,10 +4053,29 @@ class FolderMetadataTests(ServerTestBase):
         self.assertEqual(meta["source"], "svn")
         self.assertEqual(meta["updatedAt"], "2026-09-20T01:00:05Z")
         self.assertEqual(meta["revision"], 7)
+        self.assertEqual(meta["author"], "admin")
         routed = self.client.get("/__doc-meta?path=md/硬件设计/doc").get_json()["meta"]
         self.assertEqual(routed["path"], "md/硬件设计/doc.md")
         self.assertEqual(routed["updatedAt"], "2026-09-20T01:00:05Z")
         self.assertEqual(self.client.get("/__doc-meta?path=etc/passwd").status_code, 400)
+
+    def test_document_meta_reports_svn_log_author(self):
+        with mock.patch.object(self.auth.svn, 'log', create=True, return_value=[
+                {'date': '2026-10-22T01:02:03Z', 'revision': 9, 'author': 'svn-writer'}]):
+            meta = self.client.get('/__doc-meta?path=md/硬件设计/doc.md').get_json()['meta']
+        self.assertEqual(meta['author'], 'svn-writer')
+        self.assertEqual(meta['source'], 'svn')
+
+    def test_document_meta_reports_local_saved_author_only_for_current_content(self):
+        from server import local_history
+        path = 'md/本地笔记/note.md'
+        with self.conn:
+            local_history.record(self.conn, path, None, '# 笔记\n', 1)
+        meta = self.client.get('/__doc-meta?path=' + path).get_json()['meta']
+        self.assertEqual(meta['author'], 'admin')
+        (self.docs / path).write_text('# 外部修改\n', encoding='utf-8')
+        meta = self.client.get('/__doc-meta?path=' + path).get_json()['meta']
+        self.assertEqual(meta['author'], '')
 
     def test_health_reports_local_mode_without_svn_check(self):
         headers = {"X-CSRF-Token": self.csrf()}

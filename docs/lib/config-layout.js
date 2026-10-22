@@ -38,7 +38,7 @@
   function credentialKey(node){var detail=node.closest('[data-pair-detail]'),owner='global';if(detail){var row=q('[data-repo-row][data-pair="'+detail.getAttribute('data-pair-detail')+'"]');owner=row?row.getAttribute('data-mount'):'';}return owner+'|'+(node.getAttribute('data-repo')||node.getAttribute('data-default')||'backup-'+node.getAttribute('data-site-credential'));}
   function trackCredentials(){var dirty=false;credentialFields().forEach(function(n){if(n.dataset.credentialInitial===undefined)n.dataset.credentialInitial=n.value;if(n.value!==n.dataset.credentialInitial)dirty=true;});bridge.state.pendingCredentials=dirty;}
   function update(){
-    if(!bridge)return;trackCredentials();var s=bridge.state,changes=s.draft?s.draft.changes():[],names={repositories:'仓库管理',folderGroups:'仓库管理',auth:'账号与权限',ai:'AI 设置',cache:'缓存与性能',siteBackup:'备份与恢复'};
+    if(!bridge)return;trackCredentials();var s=bridge.state,changes=s.draft?s.draft.changes():[],names={repositories:'仓库管理',folderGroups:'仓库管理',auth:'账号与权限',ai:'AI 设置',cache:'缓存与性能',uploads:'缓存与性能',siteBackup:'备份与恢复'};
     var counts={};changes.forEach(function(c){var name=names[c.path.split('.')[0]]||'配置方案';counts[name]=(counts[name]||0)+1;});
     q('[data-config-savebar]').hidden=(!changes.length&&!s.jsonDirty&&!s.pendingCredentials&&!saving)||!s.editable;
     document.body.classList.toggle('config-has-draft',!q('[data-config-savebar]').hidden);

@@ -782,10 +782,11 @@ def document_update_counts(conn):
 
 
 def document_last_update(conn, path):
-    """某个文档最近一次已发布提交（时间与版本），无记录返回 None。"""
+    """某个文档最近一次已发布提交（时间、版本与作者），无记录返回 None。"""
     rows = conn.execute(
-        "SELECT reviewed_manifest, finished_at, created_at, svn_revision FROM operations"
-        " WHERE state = 'published' AND reviewed_manifest IS NOT NULL ORDER BY created_at DESC",
+        "SELECT o.reviewed_manifest, o.finished_at, o.created_at, o.svn_revision, u.svn_username AS author"
+        " FROM operations o LEFT JOIN users u ON u.id = o.actor_id"
+        " WHERE o.state = 'published' AND o.reviewed_manifest IS NOT NULL ORDER BY o.created_at DESC",
     ).fetchall()
     for row in rows:
         try:
@@ -795,7 +796,7 @@ def document_last_update(conn, path):
         if manifest.get("path") != path:
             continue
         return {"lastAt": row["finished_at"] or row["created_at"],
-                "lastRevision": row["svn_revision"]}
+                "lastRevision": row["svn_revision"], "author": row['author'] or ''}
     return None
 
 

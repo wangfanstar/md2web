@@ -1,4 +1,5 @@
 {
+  "uploads": {"maxFileMB": 500},
   "server": {
     "bind": "0.0.0.0",
     "port": 8882,

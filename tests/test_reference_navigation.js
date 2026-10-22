@@ -13,7 +13,7 @@ test('reference folder link resolves beneath html despite the page base tag', ()
   assert.match(script, /var href = folder \? 'html\/reference_library\.html\?kind='/);
   assert.match(script, /: sourceKind \+ '\/' \+ item\.path\.split\('\/'\)/);
   assert.match(script, /new URL\('html\/reference_library\.html\?kind='/);
-  assert.match(script, /files\.forEach\(function \(file\) \{ form\.append\('file', file, file\.name\); \}\)/);
+  assert.match(script, /form\.append\('file',\s*file,\s*file\.name\)/);
   assert.match(script, /payload\.error \|\| \('上传失败（HTTP ' \+ response\.status \+ '）'\)/);
   assert.match(script, /__references\/search\?q=/);
   assert.match(script, /sourceKind = item\.referenceKind \|\| state\.kind/);
