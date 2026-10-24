@@ -624,6 +624,7 @@
   function getTocHeadingSelector() {
     var minLevel = Math.max(1, Math.min(6, parseInt(tocConfig.minLevel, 10) || 2));
     var maxLevel = Math.max(minLevel, Math.min(6, parseInt(tocConfig.maxLevel, 10) || 4));
+    if(window.SiteNumbering){var range=window.SiteNumbering.tocRange();minLevel=Math.min(minLevel,range.min);maxLevel=Math.max(maxLevel,range.max);}
     if (minLevel === 2 && maxLevel === 4) {
       return 'h2, h3, h4';
     }
@@ -798,7 +799,7 @@
     }
 
     var base = currentRouteBase();
-    var counters = { 2: 0, 3: 0, 4: 0 };
+    var numbered = window.SiteNumbering ? window.SiteNumbering.contentLabels() : null;
     var collapsed = loadTocCollapsed();
     var rootItems = [];
     var stack = [];
@@ -806,17 +807,8 @@
       var level = parseInt(heading.tagName.slice(1), 10);
       var href = pageDocumentUrl() + base + '?id=' + encodeURIComponent(heading.id);
       var number = '';
-      if (level >= 2 && level <= 4) {
-        counters[level] += 1;
-        for (var deeper = level + 1; deeper <= 4; deeper += 1) {
-          counters[deeper] = 0;
-        }
-        var parts = [];
-        for (var current = 2; current <= level; current += 1) {
-          parts.push(counters[current]);
-        }
-        number = '<span class="docs-page-toc-index">' + parts.join('.') + '</span>';
-      }
+      var label=numbered&&numbered.labels[numbered.nodes.indexOf(heading)];
+      if(label)number='<span class="docs-page-toc-index">'+escapeHtml(label)+'</span>';
       var item = {
         id: heading.id,
         level: level,
@@ -1139,6 +1131,7 @@
   }
 
   function observePageContent() {
+    document.addEventListener('md2web:numbering-change',schedulePageTocBuild);
     window.addEventListener('hashchange', function () {
       schedulePageTocBuild();
       syncRepoFilterUI();

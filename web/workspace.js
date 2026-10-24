@@ -4,9 +4,102 @@
   var STORAGE = {
     collapsed: 'md2web.workspace.collapsed',
     wide: 'md2web.workspace.wide',
-    numbers: 'md2web.workspace.numbers'
   };
   var state = { filter: '', observer: null, timer: 0, lastRoute: null };
+
+  var NUMBER_STORAGE = 'md2web.workspace.numbering.v1';
+  function normalizeNumberSettings(raw) {
+    raw = raw && typeof raw === 'object' ? raw : {};
+    var result = {};
+    ['sidebar','content'].forEach(function (area) {
+      var value = raw[area] || {}, start = area === 'sidebar' ? 1 : 2, depth = area === 'sidebar' ? 12 : 3;
+      function integer(key, fallback, max) { var n=value[key];return typeof n==='number'&&n%1===0&&n>=1&&n<=max?n:fallback; }
+      function choice(key, choices, fallback) { return choices.indexOf(value[key])>=0?value[key]:fallback; }
+      result[area] = {enabled:value.enabled!==false,startLevel:integer('startLevel',start,area==='sidebar'?12:6),
+        depth:integer('depth',depth,area==='sidebar'?12:6),mode:choice('mode',['hierarchy','continuous'],'hierarchy'),
+        format:choice('format',['decimal','chinese','roman','alpha'],'decimal'),
+        suffix:choice('suffix',['plain','dot','paren','comma'],area==='sidebar'?'plain':'dot'),
+        appearance:choice('appearance',['muted','bold','badge'],'muted')};
+    });
+    return result;
+  }
+  var numberSettings = (function () { try { return normalizeNumberSettings(JSON.parse(localStorage.getItem(NUMBER_STORAGE))); } catch (_) { return normalizeNumberSettings(); } }());
+  function numberSymbol(n, format) {
+    if(format==='alpha'){var letters='';while(n>0){n--;letters=String.fromCharCode(65+n%26)+letters;n=Math.floor(n/26);}return letters;}
+    if(format==='roman'&&n<=3999){var roman='',values=[1000,900,500,400,100,90,50,40,10,9,5,4,1],symbols=['M','CM','D','CD','C','XC','L','XL','X','IX','V','IV','I'];values.forEach(function(v,i){while(n>=v){roman+=symbols[i];n-=v;}});return roman;}
+    if(format==='chinese'&&n<10000){var digits='零一二三四五六七八九',units=['','十','百','千'],out='',zero=false;for(var p=3;p>=0;p--){var digit=Math.floor(n/Math.pow(10,p))%10;if(digit){if(zero)out+='零';out+=digits[digit]+units[p];zero=false;}else if(out&&n%Math.pow(10,p)>0)zero=true;}return out.replace(/^一十/,'十');}
+    return String(n);
+  }
+  function formatNumber(parts, options) {
+    var value=parts.map(function(n){return numberSymbol(n,options.format);}).join('.');
+    return options.suffix==='paren'?'('+value+')':value+(options.suffix==='dot'?'.':options.suffix==='comma'?'、':'');
+  }
+  function numberLevels(levels, options) {
+    var counters=[],serial=0;
+    return levels.map(function(level){
+      if(level<options.startLevel){counters=[];return '';}
+      var index=level-options.startLevel;
+      counters[index]=(counters[index]||0)+1;counters.length=index+1;
+      if(!options.enabled||index>=options.depth)return '';
+      serial++;
+      var parts=[];for(var i=0;i<=index;i++)parts.push(counters[i]||1);
+      return formatNumber(options.mode==='continuous'?[serial]:parts,options);
+    });
+  }
+  function contentNumberLabels() {
+    var nodes=all('.markdown-section h1, .markdown-section h2, .markdown-section h3, .markdown-section h4, .markdown-section h5, .markdown-section h6');
+    var labels=numberLevels(nodes.map(function(node){return Number(node.tagName.slice(1));}),numberSettings.content);
+    return {nodes:nodes,labels:labels};
+  }
+  function applyContentNumbers() {
+    var data=contentNumberLabels();
+    data.nodes.forEach(function(node,i){
+      var value=data.labels[i];
+      if(value){if(node.getAttribute('data-workspace-number')!==value)node.setAttribute('data-workspace-number',value);}
+      else if(node.hasAttribute('data-workspace-number'))node.removeAttribute('data-workspace-number');
+    });
+  }
+  function refreshNumberControls() {
+    document.body.classList.toggle('hide-heading-numbers',!numberSettings.content.enabled);
+    document.body.classList.toggle('hide-tree-numbers',!numberSettings.sidebar.enabled);
+    document.body.setAttribute('data-number-content-style',numberSettings.content.appearance);
+    document.body.setAttribute('data-number-sidebar-style',numberSettings.sidebar.appearance);
+    all('[data-workspace-numbers]').forEach(function(button){var label=numberSettings.content.enabled?'隐藏序号':'显示序号';if(button.textContent!==label)button.textContent=label;button.setAttribute('aria-pressed',String(numberSettings.content.enabled));});
+    all('[data-workspace-tree-numbers]').forEach(function(button){var label=numberSettings.sidebar.enabled?'序号：开':'序号：关';if(button.textContent!==label)button.textContent=label;button.setAttribute('aria-pressed',String(numberSettings.sidebar.enabled));});
+  }
+  function saveNumberSettings(value) {
+    numberSettings=normalizeNumberSettings(value);
+    try { localStorage.setItem(NUMBER_STORAGE,JSON.stringify(numberSettings)); } catch (_) {}
+    refreshNumberControls();enhance();document.dispatchEvent(new CustomEvent('md2web:numbering-change'));
+  }
+  function toggleNumbers(area) { numberSettings[area].enabled=!numberSettings[area].enabled;saveNumberSettings(numberSettings); }
+  function openNumberSettings() {
+    if(document.querySelector('.workspace-number-dialog'))return;
+    var dialog=document.createElement('dialog');dialog.className='workspace-number-dialog';dialog.setAttribute('aria-label','序号设置');
+    function options(values){return values.map(function(item){return '<option value="'+item[0]+'">'+item[1]+'</option>';}).join('');}
+    function field(area,key,label,values){return '<label>'+label+'<select data-number-area="'+area+'" data-number-key="'+key+'">'+options(values)+'</select></label>';}
+    var html='<form><h2>序号设置</h2><p>左侧导航与正文独立控制。正文设置同时应用于右侧本文目录；设置保存在当前浏览器，适用于本站各文档。</p><div class="workspace-number-columns">';
+    ['sidebar','content'].forEach(function(area){
+      var max=area==='sidebar'?12:6,levels=[];for(var i=1;i<=max;i++)levels.push([i,area==='content'?'H'+i:'第 '+i+' 层']);
+      html+='<fieldset data-number-section="'+area+'"><legend>'+(area==='sidebar'?'左侧导航':'MD 正文与本文目录')+'</legend><label class="workspace-number-enabled"><input type="checkbox" data-number-area="'+area+'" data-number-key="enabled">显示序号</label>';
+      html+=field(area,'startLevel','从哪一层开始',levels)+field(area,'depth','最多显示多少层',levels.map(function(item){return [item[0],item[0]+' 层'];}));
+      html+=field(area,'mode','编号模式',[['hierarchy','层级编号（1 / 1.1 / 1.1.1）'],['continuous','连续编号（1 / 2 / 3）']]);
+      html+=field(area,'format','编号格式',[['decimal','阿拉伯数字（1、2、3）'],['chinese','中文数字（一、二、三）'],['roman','罗马数字（I、II、III）'],['alpha','英文字母（A、B、C）']]);
+      html+=field(area,'suffix','标点样式',[['plain','无标点：1'],['dot','尾随点：1.'],['paren','括号：(1)'],['comma','顿号：1、']]);
+      html+=field(area,'appearance','显示样式',[['muted','淡色'],['bold','加粗'],['badge','徽标']]);
+      html+='<p>'+(area==='sidebar'?'“所有文档 / 仓库”分组不计层级，其下一层为第 1 层；过滤后连续编号。':'H1 为一级标题，最多编号到 H6；不修改 Markdown 源码和标题链接。')+'</p><output data-number-preview="'+area+'"></output></fieldset>';
+    });
+    dialog.innerHTML=html+'</div><footer><button type="button" data-number-reset>恢复默认</button><button type="button" data-number-cancel>取消</button><button type="submit">保存设置</button></footer></form>';
+    document.body.appendChild(dialog);
+    function values(){var value={sidebar:{},content:{}};all('[data-number-key]',dialog).forEach(function(input){value[input.getAttribute('data-number-area')][input.getAttribute('data-number-key')]=input.type==='checkbox'?input.checked:(input.getAttribute('data-number-key')==='startLevel'||input.getAttribute('data-number-key')==='depth')?Number(input.value):input.value;});return normalizeNumberSettings(value);}
+    function preview(){var value=values();['sidebar','content'].forEach(function(area){var opt=value[area],next=area==="content"?Math.min(6,opt.startLevel+1):opt.startLevel+1,labels=numberLevels([opt.startLevel,next,next,opt.startLevel],opt);dialog.querySelector('[data-number-preview="'+area+'"]').textContent=opt.enabled?'预览：'+labels.filter(Boolean).join(' → '):'序号已关闭';});}
+    function fill(value){all('[data-number-key]',dialog).forEach(function(input){var item=value[input.getAttribute('data-number-area')][input.getAttribute('data-number-key')];if(input.type==='checkbox')input.checked=item;else input.value=String(item);});preview();}
+    function close(){dialog.close();dialog.remove();var button=document.querySelector('[data-workspace-number-settings]');if(button)button.focus();}
+    dialog.addEventListener('change',preview);dialog.querySelector('form').addEventListener('submit',function(event){event.preventDefault();saveNumberSettings(values());close();});
+    dialog.querySelector('[data-number-cancel]').onclick=close;dialog.querySelector('[data-number-reset]').onclick=function(){fill(normalizeNumberSettings());};
+    dialog.addEventListener('cancel',function(event){event.preventDefault();close();});fill(numberSettings);dialog.showModal();
+  }
+  window.SiteNumbering={apply:applyContentNumbers,contentLabels:contentNumberLabels,tocRange:function(){return {min:numberSettings.content.startLevel,max:Math.min(6,numberSettings.content.startLevel+numberSettings.content.depth-1)};}};
 
   function all(selector, root) { return Array.prototype.slice.call((root || document).querySelectorAll(selector)); }
   function text(node) { return String((node && node.textContent) || '').replace(/\s+/g, ' ').trim(); }
@@ -67,6 +160,7 @@
   // 按 md 层级给左侧导航加序号（1 / 1.1 / 1.1.1）：顶层「所有文档/仓库」分组不加序号，
   // 从下一层子文件夹开始编号；过滤后只对可见条目连续编号
   function addTreeNumbers(root) {
+    var options=numberSettings.sidebar,serial=0;
     function walk(ul, prefix, depth) {
       var index = 0;
       all(':scope > li', ul).forEach(function (li) {
@@ -85,8 +179,11 @@
         }
         index += 1;
         var path = prefix.concat(index);
-        if (label) {
-          var value = path.join('.');
+        var eligible=options.enabled&&depth>=options.startLevel&&depth<options.startLevel+options.depth;
+        if (!eligible&&badge)badge.remove();
+        if (label&&eligible) {
+          serial++;
+          var value = formatNumber(options.mode==='continuous'?[serial]:path.slice(options.startLevel-1),options);
           if (!badge) {
             badge = document.createElement('span');
             badge.className = 'workspace-tree-index';
@@ -194,6 +291,13 @@
     if (input && input.value !== state.filter) input.value = state.filter;
     filterTree(root);
     addTreeNumbers(root);
+    var allLabel=all(':scope > li > a, :scope > li > strong, :scope > li > span',root).filter(function(label){return folderLabel(label.parentNode)==='所有文档';})[0];
+    if(allLabel&&!allLabel.parentNode.querySelector('[data-workspace-tree-numbers]')){
+      var numberSwitch=document.createElement('button');numberSwitch.type='button';numberSwitch.className='workspace-tree-number-switch';numberSwitch.setAttribute('data-workspace-tree-numbers','');numberSwitch.setAttribute('aria-label','左侧导航显示序号');
+      allLabel.parentNode.classList.add('workspace-has-number-switch');allLabel.parentNode.insertBefore(numberSwitch,allLabel.nextSibling);
+      numberSwitch.addEventListener('click',function(event){event.preventDefault();event.stopPropagation();toggleNumbers('sidebar');});
+    }
+    refreshNumberControls();
     var routeChanged = state.lastRoute !== currentRoute();
     if (routeChanged) { state.lastRoute = currentRoute(); locateCurrent(root, false); }
   }
@@ -320,14 +424,20 @@
     var actions = section.querySelector(':scope > .workspace-page-actions');
     if (!actions) { actions = document.createElement('div'); actions.className = 'workspace-page-actions'; section.insertBefore(actions, crumb.nextSibling); }
     if (!actions.querySelector('[data-workspace-copy-path]')) {
-      var numbersHidden = document.body.classList.contains('hide-heading-numbers');
+      var numbersHidden = !numberSettings.content.enabled;
       actions.innerHTML = '<button type="button" data-workspace-copy-path title="复制当前页面链接（含 #/ 路由，可直接分享）">复制链接</button><button type="button" data-workspace-export>下载本页</button><button type="button" data-workspace-numbers>' + (numbersHidden ? '显示序号' : '隐藏序号') + '</button>';
       actions.querySelector('[data-workspace-copy-path]').addEventListener('click', function () {
         // 复制当前链接地址（含 #/ 路由，可直接分享）；中文保持可读，file:// 也能正确拼接
         copyText(readableLink(shareLink()), this);
       });
       actions.querySelector('[data-workspace-export]').addEventListener('click', function () { if (window.PageExport) { window.PageExport.download(); } });
-      actions.querySelector('[data-workspace-numbers]').addEventListener('click', function () { var hidden = document.body.classList.toggle('hide-heading-numbers'); try { localStorage.setItem(STORAGE.numbers, hidden ? '0' : '1'); } catch (_) {} this.textContent = hidden ? '显示序号' : '隐藏序号'; });
+      actions.querySelector('[data-workspace-numbers]').setAttribute('aria-label','正文显示序号');
+      actions.querySelector('[data-workspace-numbers]').setAttribute('aria-pressed',String(numberSettings.content.enabled));
+      actions.querySelector('[data-workspace-numbers]').addEventListener('click',function(){toggleNumbers('content');});
+    }
+    if(!actions.querySelector('[data-workspace-number-settings]')){
+      var numberOptions=document.createElement('button');numberOptions.type='button';numberOptions.setAttribute('data-workspace-number-settings','');numberOptions.textContent='序号设置';
+      var numberButton=actions.querySelector('[data-workspace-numbers]');actions.insertBefore(numberOptions,numberButton.nextSibling);numberOptions.addEventListener('click',openNumberSettings);
     }
     // Copy the rendered page like "下载本页", independently of whether the
     // current route is an editable Markdown document, overview or folder view.
@@ -737,7 +847,7 @@
     consumeSvnNotice(status);
   }
 
-  function enhance() { decorateTree(); addBreadcrumb(); addUpdatedMeta(); addSvnControls(); addCodeButtons(); resolveRelativeImages(); }
+  function enhance() { decorateTree(); addBreadcrumb(); applyContentNumbers(); addUpdatedMeta(); addSvnControls(); addCodeButtons(); resolveRelativeImages(); }
   function schedule() { clearTimeout(state.timer); state.timer = setTimeout(enhance, 40); }
 
   // 指向独立页面（index_*.html、lib/*.html 等）的相对链接：交给浏览器正常跳转，
@@ -753,7 +863,7 @@
       return;
     }
     var target = event.target;
-    if (target && target.closest && target.closest('.workspace-folder-toggle')) {
+    if (target && target.closest && target.closest('.workspace-folder-toggle, [data-workspace-tree-numbers]')) {
       // 侧栏目录的展开/折叠按钮：不触发入口页跳转
       return;
     }
@@ -793,7 +903,7 @@
   }
 
   function init() {
-    try { if (localStorage.getItem(STORAGE.numbers) === '0') document.body.classList.add('hide-heading-numbers'); } catch (_) {}
+    refreshNumberControls();
     window.addEventListener('click', handleStaticPageClick, true);
     document.addEventListener('click', handleHashLinkClick, true);
     enhance();
@@ -811,6 +921,9 @@
       isSvnDocumentPage: isSvnDocumentPage,
       isDocumentView: isDocumentView,
       addTreeNumbers: addTreeNumbers,
+      normalizeNumberSettings: normalizeNumberSettings,
+      numberLevels: numberLevels,
+      formatNumber: formatNumber,
       readableLink: readableLink,
       isStaticPageHref: isStaticPageHref,
       updatedMetaText: updatedMetaText,

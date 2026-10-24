@@ -27,6 +27,27 @@ test('document update metadata includes plain author text and handles missing au
   assert.equal(api.updatedMetaText({updatedAt:'',author:'张三'}), '');
 });
 
+test('number settings independently default to enabled and validate saved values', () => {
+  const api=loadWorkspace();
+  const settings=api.normalizeNumberSettings({sidebar:{enabled:false,startLevel:99},content:{format:'unsafe'}});
+  assert.equal(settings.sidebar.enabled,false);
+  assert.equal(settings.sidebar.startLevel,1);
+  assert.equal(settings.content.enabled,true);
+  assert.equal(settings.content.format,'decimal');
+});
+
+test('heading numbering supports start level, depth, skipped levels, modes and formats', () => {
+  const api=loadWorkspace();
+  const options={enabled:true,startLevel:2,depth:2,mode:'hierarchy',format:'decimal',suffix:'plain'};
+  assert.deepEqual(Array.from(api.numberLevels([1,2,3,4,3,2,3],options)),['','1','1.1','','1.2','2','2.1']);
+  assert.deepEqual(Array.from(api.numberLevels([2,3,2],Object.assign({},options,{mode:'continuous',format:'roman',suffix:'paren'}))),['(I)','(II)','(III)']);
+  assert.deepEqual(Array.from(api.numberLevels([1,2,3],Object.assign({},options,{startLevel:3}))),['','','1']);
+  assert.equal(api.formatNumber([2,3],{format:'chinese',suffix:'dot'}),'二.三.');
+  assert.equal(api.formatNumber([10,11,20,101,1001],{format:'chinese',suffix:'plain'}),'十.十一.二十.一百零一.一千零一');
+  assert.equal(api.formatNumber([27],{format:'alpha',suffix:'plain'}),'AA');
+  assert.deepEqual(Array.from(api.numberLevels([2,3],Object.assign({},options,{enabled:false}))),['','']);
+});
+
 test('SVN controls identify root and nested repositories and show synchronization state', () => {
   const api = loadWorkspace({id: 'root', mount: 'md/A', url: 'https://svn.example/A', source_mode: 'svn'},
     [{id: 'nested', mount: 'md/A/B', url: 'https://svn.example/B', sourceMode: 'svn'}]);
@@ -163,9 +184,22 @@ test('sidebar numbering follows the md hierarchy (1 / 2 / 2.1 / 2.2)', () => {
   // 顶层「所有文档」分组不出序号，子层级从 1 开始
   assert.deepEqual(numbers, ['1', '2', '2.1', '2.2']);
   assert.equal(topStrong.querySelector(':scope > .workspace-tree-index'), null);
+  function configuredNumbers(sidebar) {
+    context.localStorage={getItem:()=>JSON.stringify({sidebar})};
+    vm.runInContext(source,context,{filename:'workspace.js'});
+    context.window.__WORKSPACE_TEST_API__.addTreeNumbers(root);
+    const result=[];
+    (function collect(node){node.children.forEach(child=>{if(child.className==='workspace-tree-index')result.push(child.textContent);collect(child);});})(root);
+    return result;
+  }
+  assert.deepEqual(configuredNumbers({startLevel:2,depth:1}),['1','2']);
+  assert.deepEqual(configuredNumbers({mode:'continuous',format:'roman',suffix:'paren'}),['(I)','(II)','(III)','(IV)']);
+  assert.deepEqual(configuredNumbers({enabled:false}),[]);
+  inner.children[0].style.display='none';
+  assert.deepEqual(configuredNumbers({}),['1','1.1','1.2']);
   const css = fs.readFileSync(path.join(__dirname, '..', 'web', 'workspace.css'), 'utf8');
   assert.match(css, /\.sidebar-nav \.workspace-tree-index/);
-  assert.match(css, /body\.hide-heading-numbers \.sidebar-nav \.workspace-tree-index/);
+  assert.match(css, /body\.hide-tree-numbers \.sidebar-nav \.workspace-tree-index/);
 });
 
 test('sidebar reserves a fixed leading marker so same-level items align', () => {

@@ -81,6 +81,7 @@
     if (window.PacketDiagEnsureRendered) {
       window.PacketDiagEnsureRendered(section);
     }
+    if(window.SiteNumbering)window.SiteNumbering.apply();
     var clone = section.cloneNode(true);
     Array.prototype.forEach.call(
       clone.querySelectorAll('.workspace-breadcrumb, .workspace-page-actions, .workspace-svn-controls, .search-reading-toolbar, .workspace-copy-code, .search-section-arrow, .search-section-badge, .search-section-body'),
@@ -114,11 +115,12 @@
         anchor.setAttribute('href', '#' + heading.id);
       }
     });
+    Array.prototype.forEach.call(clone.querySelectorAll('[data-workspace-number]'),function(heading){heading.insertBefore(document.createTextNode(heading.getAttribute('data-workspace-number')+' '),heading.firstChild);});
     return clone;
   }
 
   function buildToc(root) {
-    var headings = Array.prototype.slice.call(root.querySelectorAll('h2, h3, h4')).filter(function (heading) {
+    var headings = Array.prototype.slice.call(root.querySelectorAll('h1[data-workspace-number], h2, h3, h4, h5[data-workspace-number], h6[data-workspace-number]')).filter(function (heading) {
       return heading.id;
     });
     if (!headings.length) {
@@ -293,6 +295,7 @@
   function prepare() {
     var section = document.querySelector('.markdown-section');
     if (!section) return Promise.reject(new Error('当前没有可复制的正文'));
+    if(window.SiteNumbering)window.SiteNumbering.apply();
     if (window.PacketDiagEnsureRendered) window.PacketDiagEnsureRendered(section);
     var root = section.cloneNode(true), originals = nodes(section, '*'), copies = nodes(root, '*');
     // Carry text colors (including syntax highlighting) without the site's
@@ -351,7 +354,11 @@
     nodes(root, '.search-section-body').forEach(function (wrapper) { wrapper.replaceWith.apply(wrapper, Array.prototype.slice.call(wrapper.childNodes)); });
     nodes(root, 'input').forEach(function (input) { input.replaceWith(document.createTextNode(input.type === 'checkbox' ? (input.checked ? '☑ ' : '☐ ') : '')); });
     nodes(root, 'h1 > a.anchor, h2 > a.anchor, h3 > a.anchor, h4 > a.anchor, h5 > a.anchor, h6 > a.anchor').forEach(function (anchor) { anchor.replaceWith.apply(anchor, Array.prototype.slice.call(anchor.childNodes)); });
-    if (!document.body.classList.contains('hide-heading-numbers')) {
+    if (window.SiteNumbering) {
+      nodes(root,'h1[data-workspace-number],h2[data-workspace-number],h3[data-workspace-number],h4[data-workspace-number],h5[data-workspace-number],h6[data-workspace-number]').forEach(function(heading){
+        heading.insertBefore(document.createTextNode(heading.getAttribute('data-workspace-number')+' '),heading.firstChild);
+      });
+    } else if (!document.body.classList.contains('hide-heading-numbers')) {
       var counts = [0, 0, 0];
       nodes(root, 'h2, h3, h4').forEach(function (heading) {
         var level = Number(heading.tagName.slice(1)) - 2;
