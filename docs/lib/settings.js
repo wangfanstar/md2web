@@ -334,22 +334,23 @@
       return;
     }
     var logins = (payload.logins || []).map(function (item) {
-      return [item.client_ip || '未知', item.resource || '', item.result || '', item.count, item.last_at || ''];
+      return [item.client_ip || '未知', item.resource || '', item.result || '', item.count, formatTime(item.last_at)];
     });
     var users = (payload.users || []).map(function (item) {
-      return [item.username, item.role === 'admin' ? '管理员' : '用户', item.last_login_at || '未登录',
+      return [item.username, item.role === 'admin' ? '管理员' : '用户',
+        item.last_login_at ? formatTime(item.last_login_at) : '未登录',
         item.drafts, item.revisions, item.operations, item.last_state || '', item.last_revision || ''];
     });
     var operations = (payload.operations || []).map(function (item) {
-      return [item.created_at || '', item.username || '', item.path || '', item.state || '',
+      return [formatTime(item.created_at), item.username || '', item.path || '', item.state || '',
         item.svn_revision || '', item.error_code || ''];
     });
     var sessions = (payload.sessions || []).map(function (item) {
-      return [item.username || '', item.created_at || '', item.last_seen_at || '', item.expires_at || '',
-        (item.user_agent || '').slice(0, 40)];
+      return [item.username || '', formatTime(item.created_at), formatTime(item.last_seen_at),
+        formatTime(item.expires_at), (item.user_agent || '').slice(0, 40)];
     });
     var audit = (payload.audit || []).map(function (item) {
-      return [item.created_at || '', item.username || (item.role === 'admin' ? '管理员' : ''),
+      return [formatTime(item.created_at), item.username || (item.role === 'admin' ? '管理员' : ''),
         item.action || '', item.resource || '', item.result || '', item.client_ip || ''];
     });
     var count = payload.userCount || { total: 0, disabled: 0 };
@@ -422,10 +423,14 @@
   function formatTime(value) {
     if (!value) return '';
     if (typeof value === 'number') {
-      var date = new Date(value * 1000);
-      return date.toLocaleString('zh-CN', { hour12: false });
+      return new Date(value * 1000).toLocaleString('zh-CN', { hour12: false });
     }
-    return String(value);
+    var text = String(value);
+    var parsed = new Date(text);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toLocaleString('zh-CN', { hour12: false });
+    }
+    return text;
   }
 
   function sortableHeader(label, key) {
@@ -450,7 +455,7 @@
       return [item.path, formatBytes(item.size), item.files];
     });
     var events = (payload.events || []).map(function (item) {
-      return [item.created_at || '', item.kind === 'added' ? '新增' : (item.kind === 'removed' ? '删除' : '修改'),
+      return [formatTime(item.created_at), item.kind === 'added' ? '新增' : (item.kind === 'removed' ? '删除' : '修改'),
         item.path, item.size === null || item.size === undefined ? '' : formatBytes(item.size)];
     });
     var documentTable = '<div class="settings-usage-block"><strong>文档（共 '

@@ -1400,6 +1400,27 @@ class AdminConfigTests(ServerTestBase):
         self.assertEqual(visitor['path'], 'md/read.md')
         self.assertEqual(data['articles'][0]['visits'], 1)
 
+    def test_user_records_ip_ranking_includes_anonymous(self):
+        self.docs.joinpath('md').mkdir(exist_ok=True)
+        self.docs.joinpath('md/read.md').write_text('# Read', encoding='utf-8')
+        visitor = self.app.test_client()
+        self.assertEqual(visitor.post('/__md/visit', json={'path': 'md/read.md'},
+                                      environ_overrides={'REMOTE_ADDR': '10.9.9.9'}).status_code, 200)
+        csrf = self.admin_login()
+        self.assertEqual(self.client.post('/__md/visit', json={'path': 'md/read.md'},
+                                          headers={'X-CSRF-Token': csrf}).status_code, 200)
+        data = self.client.get('/__admin/user-records').get_json()
+        ranking = {row['client_ip']: row for row in data['ip_ranking']}
+        self.assertEqual(ranking['10.9.9.9']['visits'], 1)
+        self.assertEqual(ranking['10.9.9.9']['articles'], 1)
+        self.assertEqual(ranking['10.9.9.9']['logins'], 0)
+        self.assertEqual(ranking['10.9.9.9']['username'], '未登录访客')
+        self.assertEqual(ranking['10.9.9.9']['anonymous'], 1)
+        self.assertEqual(ranking['127.0.0.1']['visits'], 1)
+        self.assertEqual(ranking['127.0.0.1']['username'], 'admin')
+        self.assertIn('local-admin', ranking['127.0.0.1']['source'])
+        self.assertFalse(ranking['127.0.0.1']['anonymous'])
+
     def test_schema_v2_adds_admin_columns_and_seed(self):
         columns = {row[1] for row in self.conn.execute("PRAGMA table_info(users)")}
         self.assertIn("role", columns)

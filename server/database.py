@@ -953,5 +953,39 @@ def user_records(conn):
         MAX(a.created_at) AS last_at FROM audit_events a
         WHERE a.action='article_visit' GROUP BY a.resource ORDER BY visits DESC, path
     """).fetchall()
+    ip_rows = conn.execute("""
+        SELECT a.client_ip,
+        SUM(CASE WHEN a.action IN ('login','admin_login') AND a.result='ok' THEN 1 ELSE 0 END) AS logins,
+        SUM(CASE WHEN a.action='article_visit' THEN 1 ELSE 0 END) AS visits,
+        COUNT(DISTINCT CASE WHEN a.action='article_visit' THEN a.resource END) AS articles,
+        SUM(CASE WHEN a.actor_id IS NULL AND a.action IN ('article_visit','site_visit') THEN 1 ELSE 0 END) AS anonymous,
+        MAX(a.created_at) AS last_at
+        FROM audit_events a WHERE """ + relevant + """
+        GROUP BY a.client_ip
+        ORDER BY visits DESC, logins DESC, last_at DESC
+    """).fetchall()
+    identities = conn.execute("""
+        SELECT a.client_ip, u.svn_username AS username, u.auth_source_id AS source
+        FROM audit_events a JOIN users u ON u.id=a.actor_id
+        WHERE """ + relevant + """
+        GROUP BY a.client_ip, u.id
+        ORDER BY COUNT(*) DESC, u.svn_username
+    """).fetchall()
+    names, sources = {}, {}
+    for row in identities:
+        ip = row["client_ip"] or ""
+        if row["username"] and row["username"] not in names.setdefault(ip, []):
+            names[ip].append(row["username"])
+        if row["source"] and row["source"] not in sources.setdefault(ip, []):
+            sources[ip].append(row["source"])
+    ip_ranking = []
+    for row in ip_rows:
+        item = dict(row)
+        ip = item.get("client_ip") or ""
+        item["client_ip"] = ip
+        item["username"] = "、".join(names.get(ip) or []) or "未登录访客"
+        item["source"] = "、".join(sources.get(ip) or [])
+        item["anonymous"] = 1 if item.get("anonymous") else 0
+        ip_ranking.append(item)
     return dict(users=[dict(r) for r in users], ips=[dict(r) for r in ips],
-                articles=[dict(r) for r in articles])
+                ip_ranking=ip_ranking, articles=[dict(r) for r in articles])

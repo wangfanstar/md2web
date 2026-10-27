@@ -73,13 +73,16 @@
       var filtered=rows.filter(function(row){return !filter || JSON.stringify(row).toLowerCase().indexOf(filter)>=0;});
       var page=0, section=document.createElement('section'), heading=document.createElement('h3'), body=document.createElement('div'), more=document.createElement('button');
       heading.textContent=title+'（'+filtered.length+'）';body.className='table-scroll';more.type='button';
-      function draw(){var part=filtered.slice(page*100,(page+1)*100);body.innerHTML='<table><thead><tr>'+columns.map(function(c){return '<th>'+escapeHtml(c[1])+'</th>';}).join('')+'</tr></thead><tbody>'+part.map(function(row){return '<tr>'+columns.map(function(c){return '<td>'+escapeHtml(row[c[0]])+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table>';more.textContent='第 '+(page+1)+' / '+Math.max(1,Math.ceil(filtered.length/100))+' 页 · 下一页';more.disabled=filtered.length<=100;}
+      function draw(){var part=filtered.slice(page*100,(page+1)*100);body.innerHTML='<table><thead><tr>'+columns.map(function(c){return '<th>'+escapeHtml(c[1])+'</th>';}).join('')+'</tr></thead><tbody>'+part.map(function(row){return '<tr>'+columns.map(function(c){var value=row[c[0]];if(c[0]==='last_at')value=formatTime(value);return '<td>'+escapeHtml(value)+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table>';more.textContent='第 '+(page+1)+' / '+Math.max(1,Math.ceil(filtered.length/100))+' 页 · 下一页';more.disabled=filtered.length<=100;}
       more.onclick=function(){page=(page+1)%Math.ceil(filtered.length/100);draw();};section.appendChild(heading);section.appendChild(body);section.appendChild(more);host.appendChild(section);draw();
     }
     host.textContent='';var key=query('[data-records-sort]').value;
-    var users=recordsData.users.slice().sort(function(a,b){return b[key]-a[key] || a.id-b.id;}).map(function(u,i){return Object.assign({rank:i+1},u);});
-    table('用户排行榜',[['rank','排名'],['username','用户'],['source','认证源'],['logins','登录次数'],['visits','访问次数'],['articles','文章总数'],['last_at','最近活动']],users);
     var audience=query('[data-records-audience]'), scope=audience?audience.value:'all';
+    function inScope(row){return scope==='all'||(scope==='anonymous'?!!row.anonymous:!!row.source);}
+    function rank(rows){return rows.slice().sort(function(a,b){return (Number(b[key])||0)-(Number(a[key])||0)||(Number(b.visits)||0)-(Number(a.visits)||0)||String(a.client_ip||a.username||'').localeCompare(String(b.client_ip||b.username||''));}).map(function(row,index){return Object.assign({rank:index+1},row);});}
+    var columns=[['rank','排名'],['username','用户'],['source','认证源'],['logins','登录次数'],['visits','访问次数'],['articles','文章总数'],['last_at','最近活动']];
+    table('IP 排行榜（按 IP 分类，含未登录访客）',[['rank','排名'],['client_ip','IP 地址']].concat(columns.slice(1)),rank((recordsData.ip_ranking||[]).filter(inScope)));
+    table('账号排行榜',columns,rank(recordsData.users.filter(function(row){return scope!=='anonymous';})));
     var ips=recordsData.ips.filter(function(row){return scope==='all'||(scope==='anonymous'?!!row.anonymous:!row.anonymous);});
     var uniqueIps=new Set(ips.map(function(row){return row.client_ip;}));
     table('全部 IP 与用户记录 · '+uniqueIps.size+' 个 IP',[['client_ip','IP 地址'],['username','用户'],['source','认证源'],['path','访问页面 / 文章'],['action','事件'],['result','结果'],['count','次数'],['last_at','最近时间']],ips);
