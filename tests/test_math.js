@@ -15,6 +15,18 @@ test('Chinese bold labels with punctuation or inner edge spaces render in shared
   }
 });
 
+test('intraword asterisks stay literal and keep the surrounding strong', () => {
+  for (const source of ['#### **为什么倒序遍历 (543 - 4*k - j) ?**', '**参数*变量**', '**foo 4*k *bar* baz**']) {
+    const prepared = math.prepare(source);
+    assert.ok(prepared.markdown.includes('\\*'), source);
+    const html = prepared.restore(marked.parse(prepared.markdown));
+    assert.ok(!html.includes('**'), source);
+    assert.match(html, /<strong>/, source);
+    assert.ok(html.includes('*'), source);
+  }
+  assert.equal(math.prepare('`4*k`').markdown, '`4*k`');
+});
+
 test('bold compatibility preserves literal code, escapes, HTML attributes, links and TeX', () => {
   for (const source of ['`**答案： **`', '```md\n**答案： **块同步\n```',
     '> ```md\n> **答案： **块同步\n> ```', '`first\n**答案： **块同步\nlast`',

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const {spawn} = require('node:child_process');
 const readline = require('node:readline');
 const path = require('node:path');
-const source = '### 发送前：检查是否有足够 credit\n\n以每 VC 限额模式为例：\n\n$$\n\\text{S\\_VC\\_CU}[x]+\\text{pktCredits}\n\\leq\n\\text{S\\_VC\\_CL}[x]\n$$\n\n其中：\n\n- `CU`：Credits in Use。\n\n$$\n\\text{S\\_P\\_CU}+\\text{pktCredits}\n\\leq\n\\text{S\\_P\\_CL}\n$$';
+const source = '### 发送前：检查是否有足够 credit\n\n#### **为什么倒序遍历 (543 - 4*k - j) ?**\n\n以每 VC 限额模式为例：\n\n$$\n\\text{S\\_VC\\_CU}[x]+\\text{pktCredits}\n\\leq\n\\text{S\\_VC\\_CL}[x]\n$$\n\n其中：\n\n- `CU`：Credits in Use。\n\n$$\n\\text{S\\_P\\_CU}+\\text{pktCredits}\n\\leq\n\\text{S\\_P\\_CL}\n$$';
 (async () => {
   const server = spawn(process.env.MD2WEB_PYTHON||'C:/Users/wangfan/AppData/Local/Temp/md2web-py368/python.exe',
     ['tests/browser/site-math-server.py'],{env:{...process.env,MD2WEB_MATH_SOURCE:'**答案： **块同步只能解决单条 lane 内部的问题。\n\n**说明：**接收端\n\n'+source},stdio:['pipe','pipe','pipe']});
@@ -20,11 +20,11 @@ const source = '### 发送前：检查是否有足够 credit\n\n以每 VC 限额
     assert.ok(!(await response.text()).includes('?v=stale'),'server refreshes asset versions without rebuilding server-only page');
     await page.waitForFunction(()=>document.querySelectorAll('.markdown-section .katex-display').length===2);
     assert.equal(await page.locator('.markdown-section .katex-error').count(),0);
-    assert.deepEqual(await page.locator('.markdown-section strong').allTextContents(),['答案：','说明：']);
+    assert.deepEqual(await page.locator('.markdown-section strong').allTextContents(),['答案：','说明：','为什么倒序遍历 (543 - 4*k - j) ?']);
     await page.evaluate(()=>window.MdEditor.openLocal());
     await page.waitForFunction(()=>document.querySelectorAll('.md-editor-preview .katex-display').length===2);
     assert.equal(await page.locator('.md-editor-preview .katex-error').count(),0);
-    assert.deepEqual(await page.locator('.md-editor-preview strong').allTextContents(),['答案：','说明：']);
+    assert.deepEqual(await page.locator('.md-editor-preview strong').allTextContents(),['答案：','说明：','为什么倒序遍历 (543 - 4*k - j) ?']);
     assert.match(await page.locator('.md-editor-preview annotation').first().textContent(),/\\text\{S\\_VC\\_CU\}/);
     await page.screenshot({path:path.join(process.env.TEMP||'.','md2web-site-math.png')});
     assert.deepEqual(errors,[]);

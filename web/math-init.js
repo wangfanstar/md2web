@@ -16,15 +16,26 @@
   // Chinese labels often end in punctuation immediately followed by CJK text,
   // or contain a space before **. Both are rejected by standard emphasis rules.
   // Normalize only these plain-text labels; leave code, raw HTML and URLs alone.
+  // Intraword asterisks (4*k, 参数*变量) are literal characters, but marked 1.x
+  // still treats them as emphasis delimiters and breaks the surrounding strong.
+  function escapeIntrawordAsterisks(text) {
+    return text.replace(/([\u3400-\u9fffA-Za-z0-9])\*(?=[\u3400-\u9fffA-Za-z0-9])/g, '$1\\*');
+  }
+
   function prepareStrong(source) {
-    var pattern = /(^(?: {0,3}> ?)* {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^(?: {0,3}> ?)* {0,3}\2[~`]*[ \t]*(?:\n|$)|(?![\s\S])))|(^[ \t]{4}[^\n]*|^\t[^\n]*)|(`+)[\s\S]*?\4(?!`)|<(pre|code|script|style|textarea)\b[^>]*>[\s\S]*?<\/\5\s*>|<[^>\n]*>|\]\([^\n]*?\)|^ {0,3}\[[^\]\n]+\]:[^\n]*|\\[\s\S]|\*\*([^*<>`\n]+)\*\*/gmi;
+    var pattern = /(^(?: {0,3}> ?)* {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^(?: {0,3}> ?)* {0,3}\2[~`]*[ \t]*(?:\n|$)|(?![\s\S])))|(^[ \t]{4}[^\n]*|^\t[^\n]*)|(`+)[\s\S]*?\4(?!`)|<(pre|code|script|style|textarea)\b[^>]*>[\s\S]*?<\/\5\s*>|<[^>\n]*>|\]\([^\n]*?\)|^ {0,3}\[[^\]\n]+\]:[^\n]*|\\[\s\S]|\*\*((?:(?!\*\*)[^<>`\n])+)\*\*/gmi;
     return source.replace(pattern, function (whole, fence, fenceMark, indent, ticks, tag, label, offset) {
       if (label === undefined || source.charAt(offset - 1) === '*' || source.charAt(offset + whole.length) === '*') return whole;
       var text = label.trim();
-      if (!text || !/[\u3400-\u9fff]/.test(text)) return whole;
+      if (!text) return whole;
       var next = source.charAt(offset + whole.length);
-      if (text === label && !(/[：，。！？；、）】》」』]$/.test(text) && /[\u3400-\u9fffA-Za-z0-9]/.test(next))) return whole;
-      return '<strong>' + text + '</strong>';
+      var escaped = escapeIntrawordAsterisks(label);
+      var hasIntraword = escaped !== label;
+      // Labels with only emphasis asterisks keep the parser's normal nested markup.
+      if (!hasIntraword && !/[\u3400-\u9fff]/.test(text)) return whole;
+      var normalize = text !== label || (/[：，。！？；、）】》」』]$/.test(text) && /[\u3400-\u9fffA-Za-z0-9]/.test(next));
+      if (normalize) return '<strong>' + text + '</strong>';
+      return hasIntraword ? '**' + escaped + '**' : whole;
     });
   }
 
