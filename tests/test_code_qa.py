@@ -41,6 +41,7 @@ class CodeQaTests(unittest.TestCase):
         self.assertEqual(found[0]['url'], 'https://svn.example.com/trunk')
         self.assertTrue(found[0]['configured'])
         self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]['name'], found[0]['folder'])
         svn.info.assert_called_once()
 
     def test_public_permissions_secrets_and_retired_config(self):
@@ -51,6 +52,7 @@ class CodeQaTests(unittest.TestCase):
         self.assertNotIn('never-publish-me', f.client.get('/__auth/session').get_data(as_text=True))
         public = f.client.get('/__ai/public').get_json()
         self.assertEqual(public['repositories'][0]['revision'], '12')
+        self.assertEqual(public['repositories'][0]['folder'], 'a')
         self.assertNotIn('url', public['repositories'][0])
         self.assertEqual(f.client.put('/__admin/ai', json={}, headers={'X-CSRF-Token': csrf}).status_code, 403)
         self.assertEqual(f.client.post('/__ai/chat', json={}).status_code, 403)

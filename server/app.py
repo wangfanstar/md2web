@@ -520,7 +520,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 revision = (marker.read_text(encoding='utf-8').strip() if repo.get('url') else 'local') if ready else ''
             except (ValueError, OSError):
                 ready = False
-            repos.append({'id': repo['id'], 'name': repo.get('name') or repo['id'], 'ready': ready,
+            repos.append({'id': repo['id'], 'name': repo.get('name') or repo['folder'], 'folder': repo['folder'], 'ready': ready,
                           'revision': revision, 'path': settings['codeFolder'] + '/' + repo['folder'],
                           'folders': code_qa.directory_choices(docs_root, settings['codeFolder'] + '/' + repo['folder']) if ready else []})
         folders = []

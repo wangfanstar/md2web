@@ -172,7 +172,7 @@ def discover_repositories(docs, settings, svn, config_dir):
             url, revision = info.get('url', ''), str(info.get('revision', ''))
         except Exception:
             error = 'SVN 元数据读取失败，请检查本机 SVN 客户端'
-        result.append({'folder': folder, 'name': path.name, 'url': url,
+        result.append({'folder': folder, 'name': folder, 'url': url,
                        'revision': revision, 'configured': folder in known, 'error': error})
     return result
 

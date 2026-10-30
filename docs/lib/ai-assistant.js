@@ -515,6 +515,11 @@
       + (scope ? ' · 范围 ' + scope : '');
   }
 
+  function repositoryLabel(repo) {
+    var folder=repo.folder || repo.path || repo.id || '';
+    return repo.name && repo.name !== folder && repo.name !== folder.split('/').pop() ? folder + '（' + repo.name + '）' : folder;
+  }
+
   function openPanel() {
     setTimeout(function(){
       if(!state.overlay)return;
@@ -526,12 +531,12 @@
         if(!select)return;select.textContent='';
         var chosen={};Array.prototype.forEach.call(state.overlay.querySelectorAll('[data-document-folder]'),function(input){if(input.checked)chosen[input.value]=true;});
         var empty=document.createElement('option');empty.value='';empty.textContent='不使用代码库（默认）';select.appendChild(empty);
-        (data.repositories||[]).forEach(function(repo){var option=document.createElement('option');option.value=repo.id;option.textContent=repo.name+(repo.ready?' @ '+repo.revision:'（目录未就绪）');select.appendChild(option);});select.value='';
+        (data.repositories||[]).forEach(function(repo){var option=document.createElement('option');option.value=repo.id;option.textContent=repositoryLabel(repo)+(repo.ready?' @ '+repo.revision:'（目录未就绪）');select.appendChild(option);});select.value='';
         var codes=state.overlay.querySelector('[data-code-scopes]');
         var previous={};codes.querySelectorAll('input:checked').forEach(function(e){previous[e.value]=true;});
         codes.textContent='';var codeLegend=document.createElement('legend');codeLegend.textContent='代码仓库（可多选到子目录）';codes.appendChild(codeLegend);
         (data.repositories||[]).forEach(function(repo){
-          var group=document.createElement('details'),title=document.createElement('summary');title.textContent=repo.name+(repo.ready?' · '+(repo.revision||'本地代码'):'（目录未就绪）');group.appendChild(title);
+          var group=document.createElement('details'),title=document.createElement('summary');title.textContent=repositoryLabel(repo)+(repo.ready?' · '+(repo.revision||'本地代码'):'（目录未就绪）');group.appendChild(title);
           [repo.path].concat(repo.folders||[]).forEach(function(path){if(!path)return;var label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.setAttribute('data-code-folder','');input.value=path;input.checked=!!previous[path];input.disabled=!repo.ready;label.appendChild(input);label.appendChild(document.createTextNode(path));group.appendChild(label);});codes.appendChild(group);
           if(!repo.folders||!repo.folders.length)group.open=true;
         });
@@ -599,7 +604,7 @@
       box.querySelector('[data-daily-time]').value=settings.dailySyncTime||'03:00';
       var host=box.querySelector('[data-repos]');host.textContent='';
       settings.repositories.forEach(function(repo,index){
-        var card=document.createElement('fieldset'),legend=document.createElement('legend');legend.textContent='代码版本 '+(repo.name||repo.id);card.appendChild(legend);
+        var card=document.createElement('fieldset'),legend=document.createElement('legend');legend.textContent='代码仓库 '+repositoryLabel(repo);card.appendChild(legend);
         [['id','ID'],['name','名称'],['folder','代码根目录下的相对目录'],['url','SVN URL（本地目录留空）'],['revision','SVN 版本'],['username','同步账号'],['password','同步密码']].forEach(function(field){
           var label=document.createElement('label'),input=document.createElement('input');label.textContent=field[1]+' ';input.type=field[0]==='password'?'password':'text';input.autocomplete='off';input.value=repo[field[0]]||'';input.setAttribute('data-code-repo-field',field[0]);
           input.oninput=function(){try{var current=read();current.claude.repositories[index][field[0]]=input.value;write(current);}catch(e){status.textContent='请先修正 JSON：'+e.message;}};label.appendChild(input);card.appendChild(label);
