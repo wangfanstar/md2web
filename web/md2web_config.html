@@ -120,8 +120,11 @@
         <label>代理<select data-ai="useProxy"><option value="auto">自动</option><option value="always">始终使用</option><option value="never">不使用</option></select></label>
         <label>上下文字符数<input data-ai="contextChars" type="number" min="1000" step="1000"></label>
         <label>默认资料路径<input data-ai="sourcePath" placeholder="md/仓库"></label>
+        <label>温度<input data-ai="temperature" type="number" min="0" max="2" step="0.1"></label>
+        <label>系统提示<textarea data-ai="systemPrompt" rows="3" placeholder="留空使用内置提示词"></textarea></label>
       </div>
       <p class="hint">随当前 JSON 方案保存。SVN 账号验证使用上方「SVN 认证路径」，默认同步账号及各库专用账号也会写入当前方案。AI 默认值提供给已登录用户，个人 AI 设置可覆盖默认值。</p>
+      <details><summary>公共 AI 配置 JSON（可查看、编辑）</summary><p class="hint">包含公共 API Key，请仅由管理员查看。编辑后点击「应用 JSON 到表单」，再点「保存全部修改」写入当前配置方案。所有用户统一使用此公共配置；Claude 与代码库参数可在 AI 面板的管理员配置入口维护。</p><textarea data-public-ai-json rows="12" spellcheck="false" aria-label="公共 AI 配置 JSON" style="width:100%;box-sizing:border-box"></textarea><div class="row"><button type="button" data-public-ai-read>读取当前表单 JSON</button><button type="button" data-public-ai-apply>应用 JSON 到表单</button></div></details>
 
     </section><div data-tab-status="ai" role="status" hidden></div></div><div role="tabpanel" id="panel-performance" aria-labelledby="tab-performance" data-config-tab-panel="performance" hidden><section class="panel" data-config-main hidden><h2>上传大小</h2><p class="hint">统一控制 PDF、Word、Excel、PPT、编辑器图片/附件和反馈附件的单文件大小，默认 500 MB（1 MB = 1024 × 1024 字节）。管理员修改后点击“保存全部修改”，立即生效并保存到当前 JSON 方案。多文件上传将自动分批。</p><div class="policy-fields" data-policy-fields="uploads"></div></section><section class="panel" data-config-main hidden><h2>缓存与性能</h2><p class="hint">元数据缓存参数保存后需重启服务应用。版本检查周期将在后续支持配置；当前固定为 30 秒。</p><div class="policy-fields" data-policy-fields="cache"></div><details><summary>推荐初值与生效方式</summary><p>有效期 60 秒、最多 256 项、容量 32 MiB。保存 JSON 不代表已重建内存缓存实例；请重启服务后使用新限制。</p></details></section><div data-tab-status="performance" role="status" hidden></div></div><div role="tabpanel" id="panel-profiles" aria-labelledby="tab-profiles" data-config-tab-panel="profiles" hidden><section class="panel" data-config-main hidden>      <div class="profile-panel" data-profile-panel>
         <h2>配置方案</h2><button type="button" data-config-latest>读取服务器最新配置并比较</button>

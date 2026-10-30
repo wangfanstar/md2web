@@ -134,10 +134,24 @@
 }
 
 .settings-repo-row {
+  align-items: center;
   display: grid;
   gap: 6px;
-  grid-template-columns: 120px 1.1fr 1.6fr 28px;
+  grid-template-columns: 108px 1.1fr 1.5fr 1fr 1fr auto 28px;
   margin-bottom: 6px;
+}
+
+.settings-repo-row input[disabled] {
+  background: #f6f8fa;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.settings-repo-mode {
+  color: var(--docs-muted, #6b7a8d);
+  font-size: 11px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .settings-repo-row button {
@@ -267,6 +281,27 @@
 
 .settings-inline input {
   width: 72px;
+}
+
+.settings-inline input[type="checkbox"] {
+  width: auto;
+}
+
+.settings-json {
+  border: 1px solid #d5dee8;
+  border-radius: 5px;
+  font-family: var(--docs-mono, ui-monospace, Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0 0 8px;
+  padding: 8px;
+  resize: vertical;
+  width: 100%;
+}
+
+.settings-json:focus {
+  border-color: var(--docs-accent, #1f6feb);
+  outline: none;
 }
 
 .settings-sort {

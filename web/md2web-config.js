@@ -302,8 +302,22 @@
     var panel = query('[data-ai-panel]');
     if (!panel) return;
     panel.hidden = !state.editable;
-    all('[data-ai]').forEach(function (node) { node.value = (state.config.ai || {})[node.getAttribute('data-ai')] || ''; });
+    all('[data-ai]').forEach(function (node) { var value=(state.config.ai || {})[node.getAttribute('data-ai')];node.value = value == null ? '' : value; });
+    var json=query('[data-public-ai-json]');if(json)json.value=JSON.stringify(state.config.ai || {},null,2);
   }
+
+  document.addEventListener('click',function(event){
+    if(!event.target.matches||!event.target.matches('[data-public-ai-read], [data-public-ai-apply]')||!state.editable)return;
+    var box=query('[data-public-ai-json]');
+    try{
+      if(event.target.matches('[data-public-ai-read]')){box.value=JSON.stringify(serializeForm().ai,null,2);return;}
+      var value=JSON.parse(box.value),allowed=['provider','baseUrl','model','apiKey','useProxy','contextChars','sourcePath','temperature','systemPrompt','claude'];
+      if(!value||Array.isArray(value)||typeof value!=='object'||Object.keys(value).some(function(key){return allowed.indexOf(key)<0;}))throw new Error('JSON 必须为 AI 配置对象，不能含未知字段');
+      state.config.ai=Object.assign({},state.config.ai || {},value);renderAiPanel();
+      var field=query('[data-ai]');field.dispatchEvent(new Event('input',{bubbles:true}));
+      setStatus('公共 AI JSON 已填入表单，请点击「保存全部修改」写盘。');
+    }catch(error){setStatus('公共 AI JSON 无效：'+error.message,true);}
+  });
 
   function rememberCredential(id, username, password) {
     if (!state.config) return;
@@ -1241,7 +1255,12 @@
     payload.ai = Object.assign({}, payload.ai || {});
     all('[data-ai]').forEach(function (node) {
       var key = node.getAttribute('data-ai');
-      payload.ai[key] = key === 'contextChars' ? Number(node.value) : node.value;
+      var numeric = key === 'contextChars' || key === 'temperature';
+      var raw = node.value;
+      if (numeric && raw === '') {
+        return;  // 留空表示沿用现有值（0 是合法温度，不能当空处理）
+      }
+      payload.ai[key] = numeric ? Number(raw) : raw;
     });
     payload.folderGroups = collectFolderGroups();
     payload.repositories = repos.map(function (repo) {

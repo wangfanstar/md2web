@@ -26,7 +26,27 @@ DEFAULT_AI = {
     "useProxy": "auto",
     "contextChars": 6000,
     "sourcePath": "",
+    "temperature": 0.2,
+    "systemPrompt": "",
 }
+
+# AI 配置允许从接口写入的字段（防止客户端往配置里塞未知键）。
+AI_FIELDS = ("provider", "baseUrl", "model", "apiKey", "useProxy", "contextChars",
+             "sourcePath", "temperature", "systemPrompt", "claude")
+
+# 网页「服务设置」弹窗只编辑仓库的部分字段（SVN 地址、凭据分组、更新频率），
+# 整体回传时若缺少来源类型/权限等字段，必须沿用磁盘上的既有值：
+# 否则本地/软链接仓库会被当成 SVN 仓库校验（url 为空 → repositories[i].url 不能为空），
+# 只读仓库的权限也会被静默重置为可写。
+REPOSITORY_INHERITED_FIELDS = (
+    ("sourceMode", "source_mode"),
+    ("linkTarget", "link_target"),
+    ("displayName",),
+    ("entrySlug",),
+    ("group",),
+    ("readOnly",),
+    ("allowCommit",),
+)
 
 
 class ConfigError(Exception):
@@ -216,6 +236,10 @@ def load_config(path, docs_dir, allow_incomplete=False, create_mounts=False):
         raw_url = str(item.get("url") or "").strip()
         link_target = ""
         if source_mode == "svn":
+            if not raw_url:
+                raise ConfigError(
+                    f"repositories[{index}].url 不能为空：sourceMode=svn 的仓库必须填写 SVN 地址"
+                    f"（本地/软链接仓库请改用 sourceMode=local/symlink，并在「仓库配置」页维护）")
             repo_url = _check_url(raw_url, f"repositories[{index}].url")
         else:
             if raw_url:
@@ -271,15 +295,39 @@ def load_config(path, docs_dir, allow_incomplete=False, create_mounts=False):
                     raise ConfigError("无法创建仓库目录 %s: %s" % (repo["mount"], error))
 
     ai_raw = raw.get("ai") or {}
+    if not isinstance(ai_raw, dict):
+        raise ConfigError('ai 必须为 JSON 对象')
+    try:
+        context_chars = int(ai_raw.get('contextChars') or DEFAULT_AI['contextChars'])
+    except (ValueError, TypeError, OverflowError):
+        raise ConfigError('ai.contextChars 必须为整数')
+    if isinstance(ai_raw.get('contextChars'), bool) or not 1000 <= context_chars <= 2000000:
+        raise ConfigError('ai.contextChars 必须在 1000–2000000 之间')
+    temperature = ai_raw.get("temperature", DEFAULT_AI["temperature"])
+    if isinstance(temperature, bool):
+        raise ConfigError("ai.temperature 必须是数值")
+    try:
+        temperature = float(temperature)
+    except (TypeError, ValueError):
+        raise ConfigError("ai.temperature 必须是数值")
+    if not math.isfinite(temperature) or not 0 <= temperature <= 2:
+        raise ConfigError("ai.temperature 必须在 0-2 之间")
     ai = {
         "provider": str(ai_raw.get("provider") or DEFAULT_AI["provider"]).strip() or DEFAULT_AI["provider"],
         "baseUrl": str(ai_raw.get("baseUrl") or "").strip(),
         "model": str(ai_raw.get("model") or "").strip(),
         "apiKey": str(ai_raw.get("apiKey") or "").strip(),
         "useProxy": str(ai_raw.get("useProxy") or DEFAULT_AI["useProxy"]).strip() or DEFAULT_AI["useProxy"],
-        "contextChars": int(ai_raw.get("contextChars") or DEFAULT_AI["contextChars"]),
+        "contextChars": context_chars,
         "sourcePath": str(ai_raw.get("sourcePath") or "").strip()[:500],
+        "temperature": temperature,
+        "systemPrompt": str(ai_raw.get("systemPrompt") or "")[:4000],
     }
+    from . import code_qa
+    try:
+        ai['claude'] = code_qa.validate(ai_raw.get('claude'))
+    except ValueError as error:
+        raise ConfigError(str(error))
     if ai["baseUrl"]:
         ai["baseUrl"] = _check_url(ai["baseUrl"], "ai.baseUrl")
 
@@ -388,10 +436,44 @@ def config_to_json(config):
     return data
 
 
+def _inherit_repository_fields(payload, old):
+    """按仓库 id 继承客户端未提交的来源类型/权限等字段。
+
+    网页「服务设置」弹窗整体回传配置时只带自己编辑的字段；这里用磁盘上的既有
+    配置补齐缺失项，避免把本地/软链接仓库误当成 SVN 仓库（url 为空直接校验失败），
+    也避免只读仓库的权限被静默改写。客户端显式给出的字段一律以客户端为准。
+    """
+    if not isinstance(payload, dict) or not isinstance(old, dict):
+        return
+    repositories = payload.get("repositories")
+    if not isinstance(repositories, list):
+        return
+    previous = {}
+    for item in old.get("repositories") or []:
+        if isinstance(item, dict) and item.get("id"):
+            previous[str(item["id"]).strip()] = item
+    if not previous:
+        return
+    for item in repositories:
+        if not isinstance(item, dict):
+            continue
+        old_item = previous.get(str(item.get("id") or "").strip())
+        if not old_item:
+            continue
+        for aliases in REPOSITORY_INHERITED_FIELDS:
+            if any(alias in item for alias in aliases):
+                continue
+            for alias in aliases:
+                if alias in old_item:
+                    item[alias] = old_item[alias]
+                    break
+
+
 def save_config(path, payload, docs_dir, create_mounts=True, sync_profiles=True):
     """校验并原子写入配置文件，返回加载后的配置。
 
     载荷里没有 security.secretKey 时保留磁盘上的原值（网页端不应接触该密钥）。
+    载荷里缺少仓库的来源类型/权限字段时沿用磁盘上的既有值（见 _inherit_repository_fields）。
     """
     if not isinstance(payload, dict):
         raise ConfigError("配置必须是 JSON 对象")
@@ -399,8 +481,10 @@ def save_config(path, payload, docs_dir, create_mounts=True, sync_profiles=True)
     from . import config_profiles
     if Path(path).is_file():
         old = json.loads(Path(path).read_text(encoding='utf-8'))
-        payload.setdefault('profileName', old.get('profileName', config_profiles.DEFAULT_NAME))
-        payload.setdefault('credentials', old.get('credentials'))
+        if isinstance(old, dict):
+            payload.setdefault('profileName', old.get('profileName', config_profiles.DEFAULT_NAME))
+            payload.setdefault('credentials', old.get('credentials'))
+            _inherit_repository_fields(payload, old)
     payload['profileName'] = config_profiles.validate_name(payload.get('profileName', config_profiles.DEFAULT_NAME))
     secret = str(((payload.get("security") or {}).get("secretKey")) or "").strip()
     if not secret:
@@ -540,14 +624,13 @@ def public_config(config):
         "sessionHours": config["auth"]["session_hours"],
         "idleMinutes": config["auth"]["idle_minutes"],
         "authConfigured": bool(config["auth"]["url"]),
-        "ai": {"provider": ai.get("provider", ""), "baseUrl": ai.get("baseUrl", ""),
-               "model": ai.get("model", ""), "useProxy": ai.get("useProxy", "auto"),
-               "contextChars": ai.get("contextChars", 6000), "sourcePath": ai.get("sourcePath", "")},
+        "ai": {"model": ai.get("model", ""),
+               "enabled": bool((ai.get('claude') or {}).get('enabled'))},
     }
 
 
 def authenticated_config(config):
-    """给已登录用户的配置视图：包含 AI 默认值（含 Key，供共享 AI 助手使用）。"""
+    """给已登录用户的脱敏公共 AI 状态，不包含服务凭据。"""
     data = public_config(config)
-    data["ai"]["apiKey"] = (config.get("ai") or {}).get("apiKey", "")
+    # Public sessions never receive provider credentials.
     return data

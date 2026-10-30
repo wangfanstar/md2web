@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .passwords import hash_password
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 # 兼容目标：RHEL7 自带 SQLite 3.7.17（Python 3.6 的 sqlite3）。
 # Windows 端也必须只写这些版本能解析的对象，保证 data/ 数据库可在两个平台间直接共用。
@@ -353,6 +353,8 @@ def migrate(conn, logger=None):
             if version < 13:
                 conn.execute('CREATE INDEX IF NOT EXISTS idx_audit_actor_action ON audit_events (actor_id, action)')
                 conn.execute('CREATE INDEX IF NOT EXISTS idx_audit_action_resource ON audit_events (action, resource)')
+            if version < 14:
+                conn.execute('CREATE TABLE IF NOT EXISTS user_ai_configs (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, config_secret TEXT NOT NULL, updated_at TEXT NOT NULL)')
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     sanitize_schema(conn, logger)
     return SCHEMA_VERSION

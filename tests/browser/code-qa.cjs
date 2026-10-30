@@ -1,0 +1,43 @@
+const {chromium}=require('playwright');
+const {spawn}=require('node:child_process');
+const readline=require('node:readline');
+const assert=require('node:assert/strict');
+(async()=>{
+ const server=spawn('C:/Python36/python.exe',['tests/browser/site-math-server.py'],{env:{...process.env,MD2WEB_MATH_SOURCE:'# AI'},stdio:['pipe','pipe','pipe']});
+ let browser,stderr='';server.stderr.on('data',d=>stderr+=d);
+ try{
+  const base=await new Promise((resolve,reject)=>{readline.createInterface({input:server.stdout}).on('line',line=>{try{const d=JSON.parse(line);if(d.url)resolve(d.url);}catch{}});server.on('exit',()=>reject(new Error(stderr)));});
+  browser=await chromium.launch({headless:true,executablePath:process.env.MD2WEB_BROWSER});
+  const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  console.log('fixture ready',base);
+  await page.request.post(base+'/__auth/login',{data:{username:'alice',password:'good'}});
+  await page.goto(base+'/html/index_server_only.html#/md/old/math');
+  console.log('page loaded',await page.title());
+  await page.waitForFunction(()=>window.SiteAuth?.isAuthenticated()&&window.AIAssistant,{},{timeout:10000});
+  console.log('authenticated');
+  await page.evaluate(()=>{localStorage.setItem('md2web:ai-config','secret');return AIAssistant.ready();});
+  assert.equal(await page.evaluate(()=>localStorage.getItem('md2web:ai-config')),null);
+  await page.route('**/__ai/public',route=>route.fulfill({json:{enabled:true,defaultRepository:'repo',repositories:[{id:'repo',name:'Test Repo',revision:'12',ready:true}]}}));
+  await page.route('**/__ai/chat',route=>route.fulfill({contentType:'text/event-stream',body:'event: start\ndata: {"jobId":"test"}\n\nevent: complete\ndata: {"answer":"result 42","repository":"repo","revision":"12","sources":["main.py"]}\n\n'}));
+  await page.evaluate(()=>AIAssistant.open());
+  await page.waitForFunction(()=>document.querySelector('[data-code-repository]').value==='repo');
+  assert.equal(await page.locator('[data-ai-action="config"]').isVisible(),false);
+  assert.equal(await page.locator('[data-ai-file]').count(),0);
+  await page.evaluate(()=>AIAssistant.ask('frobnicate'));
+  assert.ok((await page.locator('[data-ai-messages]').innerText()).includes('result 42'));
+  assert.ok((await page.locator('[data-ai-messages]').innerText()).includes('r12'));
+  await page.evaluate(()=>AIAssistant.openConfig());assert.equal(await page.locator('[data-json]').count(),0);
+  await page.request.post(base+'/__auth/login',{data:{username:'admin',password:'admin',mode:'admin'}});
+  await page.evaluate(()=>SiteAuth.refresh());
+  await page.evaluate(()=>AIAssistant.openConfig());
+  await page.waitForFunction(()=>document.querySelector('[data-json]')?.value.includes('claude'));
+  const config=JSON.parse(await page.locator('[data-json]').inputValue());
+  assert.equal(config.claude.enabled,false);
+  await page.locator('[data-save]').click();
+  await page.waitForFunction(()=>document.querySelector('[data-status]').textContent.includes('已保存'));
+  await page.locator('[data-purge]').click();
+  await page.waitForFunction(()=>document.querySelector('[data-status]').textContent.includes('已清理'));
+  assert.deepEqual(errors,[]);
+  console.log('Public AI browser checks passed');
+ }finally{if(browser)await browser.close();server.stdin.end('\n');}
+})().catch(e=>{console.error(e);process.exitCode=1;});

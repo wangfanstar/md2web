@@ -735,135 +735,29 @@ class ServeTests(unittest.TestCase):
             with self.assertRaises(ValueError, msg=value):
                 serve.ai_target_url(value)
 
-    def test_ai_proxy_forwards_json(self):
-        serve = load_module("serve", "serve.py")
-        received = {}
-
-        class Upstream(http.server.BaseHTTPRequestHandler):
-            def do_POST(self):
-                length = int(self.headers.get("Content-Length") or 0)
-                received["body"] = self.rfile.read(length).decode("utf-8")
-                received["auth"] = self.headers.get("Authorization")
-                payload = json.dumps({"choices": [{"message": {"content": "pong"}}]}).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
-
-            def log_message(self, *args):
-                pass
-
-        upstream = serve.PreviewServer(("127.0.0.1", 0), Upstream)  # 兼容 Python 3.6
-        upstream_port = upstream.server_address[1]
-        tmp = Path(tempfile.mkdtemp(prefix="md2web-ai-"))
-        try:
-            docs = tmp / "docs"
-            (docs / "md").mkdir(parents=True)
-            (docs / "index.html").write_text("ok", encoding="utf-8")
-            server, port = serve.make_server(docs, "127.0.0.1", 0)
-            threading.Thread(target=upstream.serve_forever, daemon=True).start()
+    def test_preview_rejects_ai_proxy(self):
+        import serve
+        import threading
+        import urllib.request
+        import urllib.error
+        with tempfile.TemporaryDirectory() as directory:
+            docs = Path(directory)
+            (docs / 'md').mkdir()
+            (docs / 'index.html').write_text('ok', encoding='utf-8')
+            server, port = serve.make_server(docs, '127.0.0.1', 0)
             threading.Thread(target=server.serve_forever, daemon=True).start()
-            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
             try:
-                payload = json.dumps({
-                    "url": f"http://127.0.0.1:{upstream_port}/v1/chat",
-                    "apiKey": "sk-test",
-                    "payload": {"model": "m", "messages": [{"role": "user", "content": "ping"}]},
-                }).encode("utf-8")
-                req = urllib.request.Request(
-                    f"http://127.0.0.1:{port}/__ai/chat",
-                    data=payload,
-                    headers={"Content-Type": "application/json"},
-                )
-                with opener.open(req) as response:
-                    result = json.loads(response.read().decode("utf-8"))
-                self.assertEqual(result["choices"][0]["message"]["content"], "pong")
-                self.assertEqual(received["auth"], "Bearer sk-test")
-                self.assertIn("ping", received["body"])
-            finally:
-                server.shutdown()
-                server.server_close()
-                upstream.shutdown()
-                upstream.server_close()
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
-    def test_ai_proxy_streams_sse(self):
-        serve = load_module("serve", "serve.py")
-
-        class Upstream(http.server.BaseHTTPRequestHandler):
-            def do_POST(self):
-                self.rfile.read(int(self.headers.get("Content-Length") or 0))
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
-                self.end_headers()
-                for chunk in (b'data: {"a":1}\n\n', b'data: {"a":2}\n\n', b"data: [DONE]\n\n"):
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
-
-            def log_message(self, *args):
-                pass
-
-        upstream = serve.PreviewServer(("127.0.0.1", 0), Upstream)  # 兼容 Python 3.6
-        upstream_port = upstream.server_address[1]
-        tmp = Path(tempfile.mkdtemp(prefix="md2web-ai-"))
-        try:
-            docs = tmp / "docs"
-            (docs / "md").mkdir(parents=True)
-            (docs / "index.html").write_text("ok", encoding="utf-8")
-            server, port = serve.make_server(docs, "127.0.0.1", 0)
-            threading.Thread(target=upstream.serve_forever, daemon=True).start()
-            threading.Thread(target=server.serve_forever, daemon=True).start()
-            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-            try:
-                payload = json.dumps({
-                    "url": f"http://127.0.0.1:{upstream_port}/v1/chat",
-                    "stream": True,
-                    "payload": {"stream": True},
-                }).encode("utf-8")
-                req = urllib.request.Request(
-                    f"http://127.0.0.1:{port}/__ai/chat",
-                    data=payload,
-                    headers={"Content-Type": "application/json"},
-                )
-                with opener.open(req) as response:
-                    body = response.read().decode("utf-8")
-                self.assertIn('data: {"a":1}', body)
-                self.assertIn("data: [DONE]", body)
-            finally:
-                server.shutdown()
-                server.server_close()
-                upstream.shutdown()
-                upstream.server_close()
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
-    def test_ai_proxy_rejects_bad_url(self):
-        serve = load_module("serve", "serve.py")
-        tmp = Path(tempfile.mkdtemp(prefix="md2web-ai-"))
-        try:
-            docs = tmp / "docs"
-            (docs / "md").mkdir(parents=True)
-            (docs / "index.html").write_text("ok", encoding="utf-8")
-            server, port = serve.make_server(docs, "127.0.0.1", 0)
-            threading.Thread(target=server.serve_forever, daemon=True).start()
-            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-            try:
-                payload = json.dumps({"url": "file:///etc/passwd", "payload": {}}).encode("utf-8")
-                req = urllib.request.Request(
-                    f"http://127.0.0.1:{port}/__ai/chat",
-                    data=payload,
-                    headers={"Content-Type": "application/json"},
-                )
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                req = urllib.request.Request('http://127.0.0.1:%d/__ai/chat' % port,
+                                             data=b'{}', headers={'Content-Type': 'application/json'})
                 with self.assertRaises(urllib.error.HTTPError) as ctx:
                     opener.open(req)
-                self.assertEqual(ctx.exception.code, 400)
+                self.assertEqual(ctx.exception.code, 403)
+                self.assertIn(b'read_only_preview', ctx.exception.read())
             finally:
                 server.shutdown()
                 server.server_close()
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+
 
     def test_needs_rebuild_detects_newer_markdown(self):
         serve = load_module("serve", "serve.py")

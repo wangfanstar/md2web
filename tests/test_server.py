@@ -403,6 +403,71 @@ class ConfigTests(ServerTestBase):
         server_config.save_config(path, payload, self.docs)
         self.assertTrue((self.docs / "md" / "new-repo").is_dir())
 
+    def test_save_config_inherits_repository_source_mode_and_permissions(self):
+        """「服务设置」弹窗整体回传时只带自己编辑的字段，其余字段必须沿用磁盘上的值。"""
+        target = (self.tmp / "link-target").resolve()
+        path = self.write_config({"repositories": [
+            {"id": "local", "mount": "md/local", "sourceMode": "local", "url": "",
+             "readOnly": True, "allowCommit": False, "group": "硬件"},
+            {"id": "link", "mount": "md/link", "sourceMode": "symlink", "url": "",
+             "linkTarget": str(target)},
+            {"id": "svn", "mount": "md/svn", "url": "https://svn.example.invalid/svn/x/"},
+        ]})
+        payload = server_config.config_to_json(server_config.load_config(path, self.docs))
+        payload["repositories"] = [
+            {"id": "local", "mount": "md/local", "url": "", "credential_group": "default"},
+            {"id": "link", "mount": "md/link", "url": "", "credential_group": "default"},
+            {"id": "svn", "mount": "md/svn", "url": "https://svn.example.invalid/svn/x/",
+             "credential_group": "default"},
+        ]
+        payload["ai"]["model"] = "deepseek-v4-flash"
+        loaded = server_config.save_config(path, payload, self.docs)
+        repos = {repo["id"]: repo for repo in loaded["repositories"]}
+        self.assertEqual(repos["local"]["source_mode"], "local")
+        self.assertTrue(repos["local"]["read_only"])
+        self.assertFalse(repos["local"]["allow_commit"])
+        self.assertEqual(repos["local"]["group"], "硬件")
+        self.assertEqual(repos["link"]["source_mode"], "symlink")
+        self.assertEqual(repos["link"]["link_target"], str(target))
+        self.assertEqual(repos["svn"]["source_mode"], "svn")
+        self.assertEqual(loaded["ai"]["model"], "deepseek-v4-flash")
+
+    def test_save_config_keeps_client_supplied_repository_fields(self):
+        path = self.write_config({"repositories": [
+            {"id": "local", "mount": "md/local", "sourceMode": "local", "url": ""}]})
+        payload = server_config.config_to_json(server_config.load_config(path, self.docs))
+        payload["repositories"] = [{"id": "local", "mount": "md/local", "sourceMode": "svn",
+                                    "url": "https://svn.example.invalid/svn/new/",
+                                    "readOnly": False, "allowCommit": True}]
+        loaded = server_config.save_config(path, payload, self.docs)
+        self.assertEqual(loaded["repositories"][0]["source_mode"], "svn")
+        self.assertTrue(loaded["repositories"][0]["allow_commit"])
+
+    def test_svn_repository_without_url_reports_source_mode_hint(self):
+        path = self.write_config({"repositories": [
+            {"id": "local", "mount": "md/local", "url": ""}]})
+        with self.assertRaises(server_config.ConfigError) as ctx:
+            server_config.load_config(path, self.docs)
+        self.assertIn("sourceMode", str(ctx.exception))
+
+    def test_ai_config_roundtrip_keeps_temperature_and_system_prompt(self):
+        path = self.write_config({"ai": {
+            "provider": "openai", "baseUrl": "https://api.example.invalid/v1",
+            "model": "deepseek-v4-flash", "apiKey": "sk-test",
+            "temperature": 0.7, "systemPrompt": "你是文档助手"}})
+        config = server_config.load_config(path, self.docs)
+        self.assertEqual(config["ai"]["temperature"], 0.7)
+        self.assertEqual(config["ai"]["systemPrompt"], "你是文档助手")
+        again = server_config.config_to_json(config)
+        self.assertEqual(again["ai"]["temperature"], 0.7)
+        self.assertEqual(again["ai"]["systemPrompt"], "你是文档助手")
+
+    def test_ai_config_rejects_invalid_temperature(self):
+        for value in (5, -1, "abc", True):
+            path = self.write_config({"ai": {"temperature": value}})
+            with self.assertRaises(server_config.ConfigError, msg=str(value)):
+                server_config.load_config(path, self.docs)
+
     def test_reconcile_manual_folder_deletion_updates_config_without_recreating_mounts(self):
         path = self.write_config({'repositories': [
             {'id': 'local', 'mount': 'md/local', 'sourceMode': 'local', 'url': ''},
@@ -1310,6 +1375,57 @@ class AdminConfigTests(ServerTestBase):
         self.assertEqual(result['lastSuccessAt'], '2026-10-13T01:00:00Z')
         self.assertEqual(result['error'], 'auth_failed')
 
+    def test_ai_endpoint_writes_json_config_section(self):
+        self.assertEqual(self.client.put("/__admin/ai", json={"model": "x"}).status_code, 401)
+        csrf = self.admin_login()
+        self.assertEqual(self.client.put("/__admin/ai", json={"model": "x"}).status_code, 403)
+        result = self.client.put("/__admin/ai", json={
+            "provider": "openai", "baseUrl": "https://api.example.invalid/v1",
+            "model": "deepseek-v4-flash", "apiKey": "sk-test",
+            "temperature": 0.5, "systemPrompt": "你是文档助手", "unknown": "x"},
+            headers={"X-CSRF-Token": csrf})
+        self.assertEqual(result.status_code, 200, result.get_data(as_text=True))
+        ai = result.get_json()["ai"]
+        self.assertEqual(ai["model"], "deepseek-v4-flash")
+        self.assertEqual(ai["temperature"], 0.5)
+        self.assertEqual(ai["systemPrompt"], "你是文档助手")
+        self.assertNotIn("unknown", ai)
+        # 已写进配置文件（运行配置与配置方案）
+        saved = json.loads(Path(self.config["path"]).read_text(encoding="utf-8"))
+        self.assertEqual(saved["ai"]["model"], "deepseek-v4-flash")
+        profile = json.loads((self.docs / "html" / "md2web_config.json").read_text(encoding="utf-8"))
+        self.assertEqual(profile["ai"]["model"], "deepseek-v4-flash")
+        self.assertEqual(profile["ai"]["temperature"], 0.5)
+
+    def test_settings_dialog_save_keeps_local_repository_and_updates_ai(self):
+        """网页「服务设置」弹窗整体保存时不能把本地仓库误当成 SVN 仓库（url 为空 → 报错）。"""
+        csrf = self.admin_login()
+        payload = self.client.get('/__config').get_json()['config']
+        payload['repositories'] = list(payload['repositories']) + [
+            {'id': 'local', 'mount': 'md/local', 'sourceMode': 'local', 'url': '',
+             'readOnly': True, 'allowCommit': False, 'group': '硬件'}]
+        first = self.client.put('/__config', json=payload, headers={'X-CSRF-Token': csrf})
+        self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
+
+        # 弹窗只回传自己编辑的字段（id/mount/url/凭据分组/更新频率）。
+        current = self.client.get('/__config').get_json()['config']
+        current['repositories'] = [
+            {'id': repo['id'], 'mount': repo['mount'], 'url': repo.get('url', ''),
+             'credential_group': repo.get('credential_group', ''),
+             'syncIntervalSeconds': repo.get('syncIntervalSeconds')}
+            for repo in current['repositories']]
+        current['ai']['model'] = 'deepseek-v4-flash'
+        result = self.client.put('/__config', json=current, headers={'X-CSRF-Token': csrf})
+        self.assertEqual(result.status_code, 200, result.get_data(as_text=True))
+        saved = result.get_json()['config']
+        repos = {repo['id']: repo for repo in saved['repositories']}
+        self.assertEqual(repos['local']['sourceMode'], 'local')
+        self.assertTrue(repos['local']['readOnly'])
+        self.assertFalse(repos['local']['allowCommit'])
+        self.assertEqual(repos['local']['group'], '硬件')
+        self.assertEqual(repos['hardware']['sourceMode'], 'svn')
+        self.assertEqual(saved['ai']['model'], 'deepseek-v4-flash')
+
     def setUp(self):
         super().setUp()
         self.conn = server_database.connect(self.tmp / "data" / "db.sqlite3")
@@ -1508,7 +1624,7 @@ class AdminConfigTests(ServerTestBase):
         self.assertFalse(svn_client.get("/__auth/session").get_json()["authenticated"])
         session = self.client.get("/__auth/session").get_json()
         self.assertTrue(session["authenticated"])
-        self.assertEqual(session["site"]["ai"]["apiKey"], "sk-team")
+        self.assertNotIn("apiKey", session["site"]["ai"])
         self.assertEqual(session["site"]["authConfigured"], True)
 
     def test_anonymous_session_hides_ai_key(self):

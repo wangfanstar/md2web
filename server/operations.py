@@ -1190,7 +1190,7 @@ def backup_site(conn, svn_client, config, root, credential=None, message=None, n
     def private(path):
         return is_blocked_static_path(Path(path).as_posix())
     def ignore(directory, names):
-        return [name for name in names if private(name) or folder_sources.is_directory_link(Path(directory) / name)
+        return [name for name in names if private((Path(directory) / name).relative_to(root)) or folder_sources.is_directory_link(Path(directory) / name)
                 or (Path(directory) / name).is_symlink()]
     root = Path(root).resolve()
     for item in includes:

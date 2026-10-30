@@ -14,6 +14,11 @@
     return window.SiteAuth || null;
   }
 
+  function isAdmin() {
+    var siteAuth = auth();
+    return !!(siteAuth && siteAuth.isAdmin && siteAuth.isAdmin());
+  }
+
   function snapshot() {
     var siteAuth = auth();
     return siteAuth && siteAuth.snapshot ? siteAuth.snapshot() : { available: false, fileMode: false, authenticated: false };
@@ -31,6 +36,7 @@
           if (siteAuth && siteAuth.handleResponse) siteAuth.handleResponse(response, payload);
           var error = new Error(payload.error || ('HTTP ' + response.status));
           error.status = response.status;
+          error.code = payload.code || '';
           throw error;
         }
         return payload;
@@ -48,16 +54,37 @@
 
   // ---------- 表单 ----------
 
+  // 本弹窗只编辑仓库的少量字段，其余字段（来源类型、软链接目标、权限、分组等）
+  // 保存时必须原样带回，否则整体保存会把本地/软链接仓库误当成 SVN 仓库。
+  var REPO_PRESERVED_FIELDS = ['sourceMode', 'linkTarget', 'displayName', 'entrySlug',
+    'group', 'readOnly', 'allowCommit'];
+
+  function repoModeLabel(mode) {
+    if (mode === 'symlink') {
+      return '软链接';
+    }
+    if (mode === 'local') {
+      return '本地文件夹';
+    }
+    return 'SVN 库';
+  }
+
   function repositoryRow(repo) {
     var item = repo || { id: '', mount: '', url: '' };
+    var sourceMode = item.sourceMode || 'svn';
+    var svnMode = sourceMode === 'svn';
+    var urlPlaceholder = svnMode ? 'SVN 地址 https://…' : repoModeLabel(sourceMode) + '（无 SVN 地址）';
     return [
-      '<div class="settings-repo-row">',
+      '<div class="settings-repo-row" data-repo-mode="' + escapeHtml(sourceMode) + '">',
       '<input type="text" data-repo="id" placeholder="id（如 hardware）" value="' + escapeHtml(item.id) + '">',
       '<input type="text" data-repo="mount" placeholder="docs 下的目录（如 md/硬件设计）" value="' + escapeHtml(item.mount) + '">',
-      '<input type="text" data-repo="url" placeholder="SVN 地址 https://…" value="' + escapeHtml(item.url) + '">',
+      '<input type="text" data-repo="url" placeholder="' + escapeHtml(urlPlaceholder) + '"'
+        + (svnMode ? '' : ' disabled') + ' value="' + escapeHtml(item.url || '') + '">',
       '<input type="text" data-repo="credential_group" placeholder="凭据分组（可选）" value="' + escapeHtml(item.credential_group || '') + '">',
       '<input type="number" min="0" step="30" data-repo="syncIntervalSeconds" placeholder="更新频率（秒，0=不同步）" value="'
-        + escapeHtml(item.syncIntervalSeconds === null || item.syncIntervalSeconds === undefined ? '' : String(item.syncIntervalSeconds)) + '">',
+        + escapeHtml(item.syncIntervalSeconds === null || item.syncIntervalSeconds === undefined ? '' : String(item.syncIntervalSeconds)) + '"'
+        + (svnMode ? '' : ' disabled') + '>',
+      '<span class="settings-repo-mode" title="来源类型">' + escapeHtml(repoModeLabel(sourceMode)) + '</span>',
       '<button type="button" data-settings-action="remove-repo" title="删除">×</button>',
       '</div>'
     ].join('');
@@ -72,47 +99,8 @@
   }
 
   function personalAiSection() {
-    if (!(window.AIAssistant && window.AIAssistant.getConfig)) {
-      return '';
-    }
-    var config = window.AIAssistant.getConfig() || {};
-    return [
-      '<section class="settings-section" data-settings-tab="ai">',
-      '<h4>AI 助手（我的设置，仅本机浏览器）</h4>',
-      '<p class="settings-note">接口与 Key 只保存在浏览器 localStorage；「参考源码路径」会随提问发给模型，便于引用代码库中的位置。</p>',
-      '<div class="settings-grid">',
-      '<label>服务商<select data-ai-chip="provider">' + providerOptions(config.provider) + '</select></label>',
-      '<label>模型<input type="text" data-ai-chip="model" placeholder="如 deepseek-chat" value="' + escapeHtml(config.model || '') + '"></label>',
-      '</div>',
-      '<label>接口地址<input type="text" data-ai-chip="baseUrl" placeholder="https://api.deepseek.com/chat/completions" value="' + escapeHtml(config.baseUrl || '') + '"></label>',
-      '<div class="settings-grid">',
-      '<label>API Key<input type="password" data-ai-chip="apiKey" autocomplete="off" placeholder="仅保存在本机" value="' + escapeHtml(config.apiKey || '') + '"></label>',
-      '<label>请求方式<select data-ai-chip="useProxy">'
-        + '<option value="auto"' + (config.useProxy === 'auto' ? ' selected' : '') + '>自动</option>'
-        + '<option value="always"' + (config.useProxy === 'always' ? ' selected' : '') + '>始终走本机代理</option>'
-        + '<option value="never"' + (config.useProxy === 'never' ? ' selected' : '') + '>只允许直连</option>'
-        + '</select></label>',
-      '<label>资料上限（字符）<input type="number" step="500" min="1000" data-ai-chip="contextChars" value="' + escapeHtml(String(config.contextChars || 6000)) + '"></label>',
-      '</div>',
-      '<label>参考源码路径<input type="text" data-ai-chip="sourcePath" placeholder="如 D:/repo/firmware 或 /srv/src/project（可选）" value="' + escapeHtml(config.sourcePath || '') + '"></label>',
-      '<div class="ai-scope-head"><strong>资料范围</strong><span>勾选后 AI 只在所选范围检索</span>'
-        + '<button type="button" data-settings-action="scopeAll">全选</button>'
-        + '<button type="button" data-settings-action="scopeNone">全不选</button></div>',
-      '<details class="settings-details"><summary>资料范围（默认全部文档，点击展开调整）</summary>',
-      '<div class="ai-scope-tree" data-personal-scope>正在加载文档索引…</div>',
-      '</details>',
-      '<div class="settings-row-actions"><button type="button" data-settings-action="save-personal-ai">保存我的 AI 设置</button></div>',
-      '</section>'
-    ].join('');
+    return '<section class="settings-section" data-settings-tab="ai"><p>所有用户统一使用管理员公共 AI 配置。在 AI 问答面板选择代码库；管理员可通过面板的配置入口管理 Claude 和 SVN 代码库。</p>' + (isAdmin() ? '<button type="button" data-settings-action="open-code-ai">管理公共 Claude 与代码库</button>' : '') + '</section>';
   }
-
-  var TABS = [
-    { id: 'ai', label: 'AI 助手' },
-    { id: 'repo', label: 'SVN 与仓库' },
-    { id: 'account', label: '账号' },
-    { id: 'query', label: '信息查询' }
-  ];
-  var TAB_STORAGE = 'md2web:settings-tab';
 
   function availableTabs() {
     var body = state.overlay && state.overlay.querySelector('[data-settings-body]');
@@ -250,7 +238,9 @@
       '<h4>仓库映射（docs 目录 ↔ SVN）</h4>',
       '<p class="settings-note">每个文件夹都可以单独映射到一个 SVN 库（可添加多条，按目录段最长前缀匹配，嵌套目录优先更具体的挂载点）。提交时按文档所在目录自动选择对应仓库。</p>',
       '<div data-settings-repos>' + (config.repositories || []).map(repositoryRow).join('') + '</div>',
-      '<p class="settings-note">「更新频率（秒）」留空表示用下方「默认更新频率」；填 0 表示该库不自动同步。自动同步会跳过正在编辑（有活动草稿）的文档并提示合并。</p>','<div class="settings-row-actions"><button type="button" data-settings-action="add-repo">+ 添加映射</button><button type="button" data-settings-action="sync-now">立即同步 SVN 库</button></div>',
+      '<p class="settings-note">「更新频率（秒）」留空表示用下方「默认更新频率」；填 0 表示该库不自动同步。自动同步会跳过正在编辑（有活动草稿）的文档并提示合并。</p>',
+      '<p class="settings-note">标注为「本地文件夹 / 软链接」的仓库没有 SVN 地址，其目标目录与权限请在「仓库配置」页维护；此处保存会原样保留这些仓库的来源类型与权限设置。</p>',
+      '<div class="settings-row-actions"><button type="button" data-settings-action="add-repo">+ 添加映射</button><button type="button" data-settings-action="sync-now">立即同步 SVN 库</button></div>',
       '</section>',
       '<section class="settings-section" data-settings-tab="ai">',
       '<h4>AI 助手（全站默认值）</h4>',
@@ -269,7 +259,14 @@
         + '</select></label>',
       '<label>资料上限（字符）<input type="number" step="500" min="1000" data-config="ai.contextChars" value="' + escapeHtml(String(ai.contextChars || 6000)) + '"></label>',
       '</div>',
-      '<label>参考源码路径<input type="text" data-config="ai.sourcePath" placeholder="如 D:/repo/firmware（可选，下发所有用户）" value="' + escapeHtml(ai.sourcePath || '') + '"></label>',
+      '<p>代码库固定在 docs/code/ 下，由 AI 面板管理员配置管理；旧 sourcePath 不再用于读取文件。</p>',
+      '<details class="settings-details" open><summary>AI 配置 JSON（配置文件 <code>ai</code> 段，可直接编辑）</summary>',
+      '<p class="settings-note">下面就是服务器配置文件里的 <code>ai</code> 段内容：点「应用 JSON」把内容填回上面的表单，再点右上角「保存配置」写入 JSON 文件。'
+        + '文件位置：<code>docs/html/md2web_config.json</code>（站点目录，静态访问已屏蔽）与 <code>data/config-profiles/md2web_config.json</code>（私有副本）。</p>',
+      '<textarea class="settings-json" data-ai-json rows="10" spellcheck="false"></textarea>',
+      '<div class="settings-row-actions"><button type="button" data-settings-action="apply-ai-json">应用 JSON</button>'
+        + '<button type="button" data-settings-action="reload-ai-json">重新读取</button></div>',
+      '</details>',
       '</section>',
       usageSection(),
       documentsSection(),
@@ -291,6 +288,75 @@
     ].join('');
     renderTabs();
     renderPersonalScope();
+    renderAiJson();
+  }
+
+  function aiJsonBox() {
+    return state.overlay && state.overlay.querySelector('[data-ai-json]');
+  }
+
+  function renderAiJson() {
+    var box = aiJsonBox();
+    if (!box) {
+      return;
+    }
+    var ai = (state.config && state.config.ai) || {};
+    box.value = JSON.stringify(ai, null, 2);
+  }
+
+  function writeAiFields(ai) {
+    var overlay = state.overlay;
+    function setField(name, value) {
+      if (value === undefined || value === null) {
+        return;
+      }
+      var input = overlay.querySelector('[data-config="ai.' + name + '"]');
+      if (input) {
+        input.value = value;
+      }
+    }
+    setField('provider', ai.provider);
+    setField('model', ai.model);
+    setField('baseUrl', ai.baseUrl);
+    setField('apiKey', ai.apiKey);
+    setField('useProxy', ai.useProxy);
+    setField('contextChars', ai.contextChars);
+    setField('sourcePath', ai.sourcePath);
+  }
+
+  function applyAiJson() {
+    var box = aiJsonBox();
+    if (!box) {
+      return;
+    }
+    var parsed;
+    try {
+      parsed = JSON.parse(box.value || '{}');
+    } catch (error) {
+      setStatus('AI 配置 JSON 解析失败：' + error.message, true);
+      return;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      setStatus('AI 配置 JSON 必须是对象', true);
+      return;
+    }
+    var allowed = ['provider', 'baseUrl', 'model', 'apiKey', 'useProxy', 'contextChars',
+      'sourcePath', 'temperature', 'systemPrompt', 'claude'];
+    var unknown = Object.keys(parsed).filter(function (key) { return allowed.indexOf(key) < 0; });
+    if (unknown.length) {
+      setStatus('AI 配置 JSON 含未知字段：' + unknown.join('、'), true);
+      return;
+    }
+    state.config = state.config || {};
+    state.config.ai = Object.assign({}, state.config.ai || {}, parsed);
+    writeAiFields(state.config.ai);
+    renderAiJson();
+    setStatus('AI 配置 JSON 已填入表单，点「保存配置」写入配置文件');
+  }
+
+  function reloadAiJson() {
+    renderAiJson();
+    setStatus('已重新读取配置文件中的 AI 配置');
   }
 
   function usageSection() {
@@ -560,13 +626,45 @@
     };
   }
 
+  function saveAiToServer(patch) {
+    var headers = { 'Content-Type': 'application/json' };
+    var siteAuth = auth();
+    if (siteAuth && siteAuth.csrfToken()) {
+      headers['X-CSRF-Token'] = siteAuth.csrfToken();
+    }
+    return api('__admin/ai', { method: 'PUT', body: JSON.stringify(patch) }).then(function (result) {
+      if (state.config && result.config) {
+        // 配置版本随写入变化：同步更新，避免后续「保存配置」被判为配置冲突。
+        state.config.expectedConfigVersion = result.config.expectedConfigVersion;
+      }
+      if (state.config && result.ai) {
+        state.config.ai = Object.assign({}, state.config.ai || {}, result.ai);
+      }
+      renderAiJson();
+      return result;
+    });
+  }
+
   function savePersonalAi() {
     if (!(window.AIAssistant && window.AIAssistant.configure)) {
       return;
     }
     var patch = readPersonalAi();
-    window.AIAssistant.configure(patch);
-    setStatus('已保存本机 AI 设置' + (patch.sourcePath ? '（参考源码路径：' + patch.sourcePath + '）' : ''));
+    var message = '已保存个人 AI 设置' + (patch.sourcePath ? '（参考源码路径：' + patch.sourcePath + '）' : '');
+    return window.AIAssistant.configure(patch).then(function(ok){
+    if(!ok){setStatus('个人 AI 配置未保存，请检查 AI 面板提示后重试',true);return;}
+    var host = state.overlay && state.overlay.querySelector('[data-ai-chip="writeServer"]');
+    if (!host || !host.checked || !isAdmin()) {
+      setStatus(message + '（未写入服务器配置 JSON）');
+      return;
+    }
+    setStatus(message + '，正在写入服务器配置 JSON…');
+    return saveAiToServer(patch).then(function () {
+      setStatus(message + '，并已写入服务器配置 JSON（ai 段），对所有用户生效');
+    }).catch(function (error) {
+      setStatus(message + '，但写入服务器配置失败：' + error.message, true);
+    });
+    });
   }
 
   function updatePersonalScope(scopeValue, checked) {
@@ -576,6 +674,16 @@
     }
     window.AIAssistant.configure({ scope: scope });
     renderPersonalScope();
+  }
+
+  function savedRepositories() {
+    var map = {};
+    ((state.config && state.config.repositories) || []).forEach(function (item) {
+      if (item && item.id) {
+        map[String(item.id).trim()] = item;
+      }
+    });
+    return map;
   }
 
   function readConfig() {
@@ -600,18 +708,33 @@
     config.sync = config.sync || {};
     config.sync.credential_name = field('sync.credential_name');
     config.sync.interval_seconds = Number(field('sync.interval_seconds')) || 120;
+    var saved = savedRepositories();
     config.repositories = Array.prototype.slice.call(overlay.querySelectorAll('.settings-repo-row')).map(function (row) {
-      return {
-        id: row.querySelector('[data-repo="id"]').value.trim(),
-        mount: row.querySelector('[data-repo="mount"]').value.trim(),
-        url: row.querySelector('[data-repo="url"]').value.trim(),
-        credential_group: row.querySelector('[data-repo="credential_group"]').value.trim(),
-        syncIntervalSeconds: (function () {
-          var field = row.querySelector('[data-repo="syncIntervalSeconds"]');
-          var value = field ? field.value.trim() : '';
-          return value === '' ? null : Number(value);
-        }())
-      };
+      function rowValue(name) {
+        var input = row.querySelector('[data-repo="' + name + '"]');
+        return input ? String(input.value || '').trim() : '';
+      }
+      var id = rowValue('id');
+      var repo = {};
+      var previous = saved[id];
+      if (previous) {
+        // 保留本弹窗不编辑的字段：来源类型/软链接目标/权限/分组等。
+        REPO_PRESERVED_FIELDS.forEach(function (name) {
+          if (previous[name] !== undefined && previous[name] !== null) {
+            repo[name] = previous[name];
+          }
+        });
+      }
+      repo.id = id;
+      repo.mount = rowValue('mount');
+      repo.url = rowValue('url');
+      repo.credential_group = rowValue('credential_group');
+      repo.sourceMode = repo.sourceMode || 'svn';
+      repo.syncIntervalSeconds = (function () {
+        var value = rowValue('syncIntervalSeconds');
+        return value === '' ? null : Number(value);
+      }());
+      return repo;
     }).filter(function (repo) { return repo.id || repo.mount || repo.url; });
     return config;
   }
@@ -644,6 +767,13 @@
       renderForm();
       setStatus('已保存并生效' + (result.authConfigured ? '：SVN 登录已可用' : '：SVN 认证路径仍为空'));
     }).catch(function (error) {
+      if (error.code === 'config_conflict') {
+        // 配置在别处被改动过：自动重新读取，用户再点一次「保存配置」即可。
+        loadConfig().then(function () {
+          setStatus('保存失败：' + error.message + '（已重新读取配置，请再点一次「保存配置」）', true);
+        });
+        return;
+      }
       setStatus('保存失败：' + error.message, true);
     }).then(function () {
       state.busy = false;
@@ -716,8 +846,14 @@
         if (window.SiteAuth) {
           window.SiteAuth.openLogin();
         }
+      } else if (action === 'open-code-ai') {
+        window.AIAssistant.openConfig();
       } else if (action === 'save-personal-ai') {
         savePersonalAi();
+      } else if (action === 'apply-ai-json') {
+        applyAiJson();
+      } else if (action === 'reload-ai-json') {
+        reloadAiJson();
       } else if (action === 'scopeAll') {
         if (window.AIAssistant && window.AIAssistant.scopeTree) {
           window.AIAssistant.scopeTree().then(function (tree) {
@@ -822,6 +958,12 @@
   }
 
   function init() {
+    document.addEventListener('md2web:ai-config-loaded',function(){
+      if(!state.overlay)return;
+      var config=personalAiConfig();
+      Array.prototype.forEach.call(state.overlay.querySelectorAll('[data-ai-chip]'),function(input){var key=input.getAttribute('data-ai-chip');if(key!=='writeServer'&&config[key]!==undefined)input.value=config[key];});
+      renderPersonalScope();
+    });
     document.addEventListener('siteauth:change', function () {
       updateBadge();
       if (state.overlay && state.overlay.classList.contains('is-open')) {

@@ -6,6 +6,8 @@
 """
 
 import hmac
+import queue
+import uuid
 import json
 import shutil
 import tempfile
@@ -14,7 +16,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from flask import Flask, jsonify, make_response, request, send_from_directory
+from flask import Response, Flask, jsonify, make_response, request, send_from_directory
 
 from . import config as server_config
 from . import database, documents as server_documents, drafts, operations, entries, recycle, references, folder_sources
@@ -38,6 +40,8 @@ MAX_BODY = policy.upload_request_bytes({})
 
 def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
     docs_root = Path(docs_dir).resolve()
+    ai_jobs = {}
+    ai_jobs_lock = threading.Lock()
     auth_service.enable_config_profiles(docs_root)
     app = Flask(__name__, static_folder=None)
     app.config["MAX_CONTENT_LENGTH"] = MAX_BODY
@@ -491,6 +495,196 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         auth_service.on_config_changed()
         rebuilt = rebuild_repository_pages()
         return jsonify({"ok": True, "config": public_config_json(), "authConfigured": bool(config["auth"]["url"]), "rebuilt": rebuilt})
+
+    @app.route('/__ai/config', methods=['GET', 'PUT', 'DELETE'])
+    def personal_ai_config():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        return json_error(410, 'ai_personal_config_retired', '个人 AI 配置已停用，请使用公共 AI 服务')
+
+    @app.get('/__ai/public')
+    def public_ai():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        from . import code_qa
+        settings = code_qa.validate((config.get('ai') or {}).get('claude'))
+        repos = []
+        for repo in settings.get('repositories', []):
+            path = code_qa.code_path(docs_root, repo)
+            marker = path / '.md2web-revision'
+            repos.append({'id': repo['id'], 'name': repo.get('name') or repo['id'],
+                          'ready': marker.is_file() and not marker.is_symlink(),
+                          'revision': marker.read_text(encoding='utf-8').strip() if marker.is_file() and not marker.is_symlink() else ''})
+        return jsonify(ok=True, enabled=bool(settings.get('enabled')), repositories=repos,
+                       defaultRepository=settings.get('defaultRepository', ''))
+
+    @app.post('/__admin/ai/personal-configs/clear')
+    def clear_retired_ai_configs():
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        rejected = require_csrf(session)
+        if rejected:
+            return rejected
+        with auth_service._db_lock:
+            with conn:
+                count = conn.execute('SELECT COUNT(*) FROM user_ai_configs').fetchone()[0]
+                conn.execute('DELETE FROM user_ai_configs')
+                database.audit(conn, 'ai_personal_configs_clear', 'count:%s' % count,
+                               actor_id=session['user']['id'])
+        return jsonify(ok=True, cleared=count)
+
+    @app.post('/__ai/chat')
+    def code_chat():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        rejected = require_csrf(session)
+        if rejected:
+            return rejected
+        from . import code_qa
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or set(payload) - {'messages', 'codeRepositoryId'}:
+            return json_error(400, 'invalid_request', '仅接受对话和代码库 ID')
+        if not code_qa.LOCK.acquire(False):
+            return json_error(429, 'ai_busy', '正在问答或更新代码库，请稍后重试')
+        job_id = uuid.uuid4().hex
+        cancel = threading.Event()
+        results = queue.Queue(maxsize=1)
+        ai_snapshot = json.loads(json.dumps(config.get('ai') or {}))
+        with ai_jobs_lock:
+            ai_jobs[job_id] = (session['user']['id'], cancel)
+        def run():
+            try:
+                result = code_qa.answer(docs_root, ai_snapshot, payload, cancel)
+                results.put(('complete', result))
+            except ValueError as error:
+                results.put(('error', {'message': str(error)}))
+            except Exception:
+                results.put(('error', {'message': 'Claude 执行失败，请检查安装、中转及代码库'}))
+            finally:
+                with ai_jobs_lock:
+                    ai_jobs.pop(job_id, None)
+                code_qa.LOCK.release()
+        threading.Thread(target=run, daemon=True).start()
+        def events():
+            try:
+                yield 'event: start\ndata: %s\n\n' % json.dumps({'jobId': job_id})
+                while True:
+                    try:
+                        kind, data = results.get(timeout=1)
+                    except queue.Empty:
+                        yield ': waiting\n\n'
+                        continue
+                    yield 'event: %s\ndata: %s\n\n' % (kind, json.dumps(data, ensure_ascii=False))
+                    break
+            finally:
+                cancel.set()
+        return Response(events(), mimetype='text/event-stream', headers={'X-Accel-Buffering': 'no'})
+
+    @app.post('/__ai/jobs/<job_id>/cancel')
+    def cancel_ai_job(job_id):
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        rejected = require_csrf(session)
+        if rejected:
+            return rejected
+        with ai_jobs_lock:
+            job = ai_jobs.get(job_id)
+            if job is None:
+                return json_error(404, 'job_not_found', '任务已结束或不存在')
+            if job[0] != session['user']['id'] and session['user'].get('role') != 'admin':
+                return json_error(403, 'forbidden', '无权取消此任务')
+            job[1].set()
+        return jsonify(ok=True)
+
+    @app.post('/__admin/code-repositories/<repo_id>/sync')
+    def sync_code_repository(repo_id):
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        rejected = require_csrf(session)
+        if rejected:
+            return rejected
+        from . import code_qa
+        if not code_qa.LOCK.acquire(False):
+            return json_error(409, 'ai_busy', '正在问答或同步，请稍后重试')
+        stage = None
+        preserve_stage = False
+        try:
+            settings = code_qa.validate((config.get('ai') or {}).get('claude'))
+            repo = code_qa.repository(settings, repo_id)
+            target = code_qa.code_path(docs_root, repo)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            stage = Path(tempfile.mkdtemp(prefix='.sync-', dir=str(target.parent)))
+            with auth_service._db_lock:
+                credential = auth_service.repo_sync_credential({'id': 'code-' + repo_id}) or (None, None)
+            info = auth_service.svn.info(repo['url'], str(stage / 'svn-config'),
+                                         username=credential[0], password=credential[1])
+            revision = str(repo.get('revision', 'HEAD'))
+            if revision == 'HEAD':
+                revision = str(info['revision'])
+            exported = stage / 'export'
+            auth_service.svn.export(repo['url'], exported, revision=revision,
+                                    config_dir=str(stage / 'svn-config'),
+                                    username=credential[0], password=credential[1])
+            code_qa.validate_snapshot(exported)
+            (exported / '.md2web-revision').write_text(revision, encoding='utf-8')
+            previous = stage / 'previous'
+            if target.exists():
+                target.rename(previous)
+            try:
+                exported.rename(target)
+            except OSError:
+                if previous.exists():
+                    try:
+                        previous.rename(target)
+                    except OSError:
+                        preserve_stage = True
+                        raise ValueError('发布与回滚失败，旧版本保留在 ' + str(previous))
+                raise
+            return jsonify(ok=True, revision=revision)
+        except ValueError as error:
+            return json_error(400, 'code_sync_failed', str(error))
+        except Exception:
+            return json_error(502, 'code_sync_failed', '代码库同步失败，请检查 SVN 地址、版本和默认同步凭据')
+        finally:
+            if stage is not None and not preserve_stage:
+                shutil.rmtree(str(stage), ignore_errors=True)
+            code_qa.LOCK.release()
+
+    @app.put("/__admin/ai")
+    @serialized
+    def write_ai_config():
+        """只更新 AI 配置（写进配置 JSON 的 ai 段），供 AI 面板保存全站默认值。"""
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        csrf_error = require_csrf(session)
+        if csrf_error:
+            return csrf_error
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return json_error(400, "invalid_request", "AI 配置必须是 JSON 对象")
+        current = config_to_json(config)
+        if payload.get('expectedConfigVersion') and payload['expectedConfigVersion'] != policy.version(current):
+            return json_error(409, 'config_conflict', '配置已变化，请关闭并重新打开配置后再保存')
+        ai = dict(current.get("ai") or {})
+        for key in server_config.AI_FIELDS:
+            if key in payload:
+                ai[key] = payload[key]
+        current["ai"] = ai
+        try:
+            loaded = save_config(config["path"], current, docs_root)
+        except server_config.ConfigError as error:
+            return json_error(400, "config_invalid", str(error))
+        config.clear()
+        config.update(loaded)
+        auth_service.on_config_changed()
+        return jsonify({"ok": True, "ai": loaded["ai"], "config": public_config_json()})
 
     @app.post('/__admin/repository-rename')
     @serialized

@@ -12,7 +12,7 @@ md2web 把 `docs/md/` 下的 Markdown 构建成**完全离线可用**的 Docsify
 - 支持 Windows 与 Linux；`file://` 双击与 HTTP 预览均可用
 - Python 版本：**3.6.8 及以上统一支持**（构建/只读预览仅标准库；认证编辑服务 `python3 -m pip install -r server/requirements.txt`）。新增代码必须通过 `Python36CompatibilityTests`（3.6 语法解析 + 禁用 3.7+ API 清单）。
 - **验证统一用 Python 3.6.8**：改完代码只跑 3.6.8 的解释器（本机 `C:\Users\wangf\AppData\Local\Temp\opencode\py36\python\python.exe`，目标机 `python3`）跑测试/构建，**不需要再跑 3.12**；系统默认 `python`（3.12）只用于临时脚本与调试，不作为验收依据。
-- 仓库是**公开仓库**：不要提交密钥、令牌或敏感文档。个人 AI Key 在浏览器 localStorage；按用户要求，管理员配置方案中的 SVN 账号/密码和 AI 默认 Key 可明文保存于被 Git 忽略的 `docs/html/md2web_config*.json` 及私有备份，禁止写入被提交的文件或公开离线快照。
+- 仓库是**公开仓库**：不要提交密钥、令牌或敏感文档。登录用户个人 AI 配置（含 Key、范围、检索文档）加密存于 SQLite 的 user_ai_configs（schema v14）；访客/离线配置保存在独立 localStorage；按用户要求，管理员配置方案中的 SVN 账号/密码和 AI 默认 Key 可明文保存于被 Git 忽略的 `docs/html/md2web_config*.json` 及私有备份，禁止写入被提交的文件或公开离线快照。
 
 ## 架构与数据流
 
@@ -40,7 +40,7 @@ docs/html/images|uploads                  (反馈截图/附件，运行时写入
 |------|------|
 | `setup_docsify.py` | 构建：扫描、编码校验、依赖复用/下载、Prism 组件、生成导航/首页/索引/离线数据/入口；默认站点标题 `DEFAULT_TITLE = GT文档知识库`（`--title` 覆盖）；**每个目录（仓库与子文件夹）都生成入口页** `index_<仓库名>_<子文件夹>.html`（`folder_page_map`：顶层为 `index_<仓库ID>.html`，子目录用「仓库名_子文件夹[_更深]」下划线拼接，天然唯一；子文件夹入口页为独立的 docsify 应用：生成专属侧栏 `_sidebar_<页面>.md`（与仓库入口页同样以「所有文档 → 路径 → 内容」呈现，但不列出同级其它子文件夹），并复用所属仓库的离线快照（通过 `extra_pages` 内嵌该侧栏与占位首页），`repoInfo.mount` 限定到该文件夹，`recycle_mount` 指向仓库）；空仓库/全图片文件夹生成占位首页 `html/_home_<页面>.md`（`homepage` 指向它，避免入口页 docsify 404；图片文件夹为画廊 `image_gallery_markdown`，含缩略图与名称/大小/尺寸，`read_image_size` 用标准库解析 PNG/JPEG/GIF/BMP/WebP）；`cleanup_repo_artifacts` 清理不再使用的入口页/占位文件；扫描统一走 `server/folder_sources.walk_paths`（只跟随 `docs/md` 一级链接、不进入嵌套链接），未配置文件夹由 `describe()` 探测来源（symlink/local），总览页与 `html/README.md` 按来源显示标记（软链接可读写时备注「可读写」） |
 | `serve.py` | 跨平台入口：默认**只读预览**（静态站点 + 自动重建 + 本机 AI 代理，写接口一律 403）；`--config config/server.local.json` 启动认证编辑服务（Flask + Waitress）；按 pidfile 只管理本项目自身实例；认证模式后台线程：每 15 秒检查仓库同步到期（`start_repo_sync`）与每 10 秒记录文档增删（`start_document_recorder`） |
-| `server/config.py` | 配置加载/校验：存储路径不得在 `docs/` 内、mount 唯一且禁止越界（只填文件夹名时自动规范为 `md/<文件夹>`）、URL 仅 http/https、仓库存目录段最长前缀匹配；仓库映射支持每库 `syncIntervalSeconds`（0 = 不自动同步）；`sourceMode` 支持 `svn`/`local`/`symlink`，symlink 必须提供 `linkTarget`（相对路径按配置文件目录解析为绝对路径，禁止指向/包含 `docs` 或 `md`），**默认只读**（未给 `allowCommit` 时为 `read_only=true`/`allow_commit=false`），`allowCommit=true` 时允许网页直接写入目标目录；`save_config`（create_mounts）会在 `docs/md/` 下为本地/SVN 仓库补齐空目录，读取/启动不建目录 |
+| `server/config.py` | 配置加载/校验：存储路径不得在 `docs/` 内、mount 唯一且禁止越界（只填文件夹名时自动规范为 `md/<文件夹>`）、URL 仅 http/https、仓库存目录段最长前缀匹配；仓库映射支持每库 `syncIntervalSeconds`（0 = 不自动同步）；`sourceMode` 支持 `svn`/`local`/`symlink`，symlink 必须提供 `linkTarget`（相对路径按配置文件目录解析为绝对路径，禁止指向/包含 `docs` 或 `md`），**默认只读**（未给 `allowCommit` 时为 `read_only=true`/`allow_commit=false`），`allowCommit=true` 时允许网页直接写入目标目录；`save_config`（create_mounts）会在 `docs/md/` 下为本地/SVN 仓库补齐空目录，读取/启动不建目录；**整体保存时按仓库 id 继承磁盘上的 `sourceMode`/`linkTarget`/`readOnly`/`allowCommit`/`group` 等字段**（`_inherit_repository_fields`，客户端显式值优先），避免只编辑部分字段的入口把本地/软链接仓库误当成 SVN 仓库；AI 段支持 `provider/baseUrl/model/apiKey/useProxy/contextChars/sourcePath/temperature/systemPrompt`（`temperature` 限 0–2），`AI_FIELDS` 是接口可写入的白名单 |
 | `server/database.py` | SQLite 访问层：迁移 v9（users 含 role/password_hash，首次启动创建 admin/admin；svn_credentials 存加密口令；document_snapshots/document_events 记录文档快照与增删；audit_events 含 client_ip；feedback 含 images/attachments JSON）、外键与 busy_timeout、`backup_to`、SQLite 3.7.17 兼容检查与清理 |
 | `server/svn.py` | 唯一的 svn 子进程入口：优先 `--password-from-stdin`，旧版客户端（RHEL7 1.7/1.8）自动回退 `--password`（`password_transport()` 可查询）；匿名可读检测、错误分类、info/log XML 解析、检出/稀疏更新/差异/提交/导出，超时与脱敏 |
 | `server/auth.py` | SVN 登录、本地管理员登录/改密、会话（token 只存摘要、闲置/绝对过期）、CSRF、限速、审计；SVN 口令登录成功后以本机密钥加密存入 `svn_credentials`（换密码重新登录会更新），提交时优先取库内最新口令；重启与认证源变更使 SVN 旧会话失效（保留管理员会话）；`verify_account` 只校验账号密码（含限速与审计 `account_verify`），不建会话/不建用户；默认同步凭据由当前配置方案 `credentials.__default__` 管理，兼容数据库 `repo_credentials` 的保留 id `__default__`（`DEFAULT_CREDENTIAL_ID`），`repo_sync_credential` 解析「仓库自有 → 默认 → 会话/环境变量」；数据库访问串行化 |
@@ -48,10 +48,10 @@ docs/html/images|uploads                  (反馈截图/附件，运行时写入
 | `server/operations.py` | 提交任务与仓库同步：审阅清单冻结、私有工作副本（稀疏检出）、UUID/URL 绑定核对、幂等 operation、状态机（prepared/running/svn_committed/published/failed/uncertain/needs_auth）、发布到 docs/md 与 published_revision、远端同步导出；提交时把文档引用的 `images/` 图片与 `附件/` 文件一并 `svn add`/提交（`documents.referenced_images` / `referenced_attachments`）；定时同步（`sync_due`/`sync_all`）跳过有活动草稿的文档并报告冲突，`remote_diff`/`remote_revision` 提供远端对比；无 SVN 库的一步保存：`local_publish_content`（内容直接写 SQLite 主库并物化 docs/md，校验主库与文件基线）与 `publish_file`（未关联仓库的文档直接原子写回 docs/md）；`folder_listing` 返回文档所属 `folder`/`group` 与递归 `allFolders`，`move_entry`/`move_document_assets` 实现文档跨文件夹移动与引用资源随移（共享资源复制、同名不同内容跳过并报告） |
 | `server/drafts.py` | 个人草稿与版本历史：乐观并发（expected_version → 409）、不可变 revision 全文快照、统一差异（published/draft/版本号）、放弃草稿；`list_active_drafts` 给离开页面提醒用 |
 | `server/documents.py` | 受管 Markdown 读写底层：路径校验、EOL 保持、唯一临时文件 + 原子替换、必填 `base_hash` 冲突检测；图片写入文档同级 `images/`（`save_document_image`），附件写入文档同级 `附件/`（`save_document_attachment`，沿用原文件名、重名加序号、禁止 html/js/svg 等可脚本化后缀）；反馈截图/附件写入 `docs/html/images|uploads`（`save_feedback_image` / `save_feedback_attachment`）；`referenced_images` / `referenced_attachments` 解析提交需随带的资源 |
-| `server/app.py` | Flask 应用：`/__auth/session|login|logout`（含 `mode:admin`）、`GET/PUT /__config`、`POST /__config/test-auth`、`POST /__admin/verify-account`（验证 SVN 账号密码是否合法，不切换会话）、`GET/POST /__admin/default-credential`（默认同步凭据：先经认证路径校验再加密入库）、`POST /__admin/password`、`POST /__admin/sync`（立即同步仓库）、**软链接管理** `POST /__admin/folder-link`（管理员 + CSRF，`{mount, action: check|create|remove, target}`）、`GET /__admin/usage`（登录 IP/账号活动/用户数/审计）、`GET /__admin/documents`（文档更新时间与次数/文件夹大小/增删记录）（均要求管理员 + CSRF）、草稿接口（`/__md/document|draft|drafts|image|attachment|history|diff|revision|discard`）、**无 SVN 库一步保存** `POST /__md/publish`（本地模式写 SQLite 主库、未关联仓库直接写 docs/md，成功后触发重建）、**移动文档** `POST /__md/move`（同仓库内换文件夹）、`GET /__folder` 附带 `group`/`allFolders`（按 `folderGroups`/仓库 group 解析，供分组显示与移动选择）、**文档更新时间** `GET /__doc-meta?path=`（公开只读：SVN 优先已发布提交记录、其次 `svn log`（10 分钟缓存）、失败回退文件时间；本地区间显示文件 mtime）、反馈接口（`/__feedback`、`/__feedback/image|attachment|delete`、`/__admin/feedback`）、SVN 接口（`/__svn/info|log|prepare|commit|refresh|status|remote-diff|update|sync-status`、`/__operations/<id>`；`/__svn/update` 单篇文档与整库都免登录、仅同源校验，用配置账号自动拉取）、写接口守卫（匿名 401、旧 `/__md/save` 410、`symlink_write_guard` 对只读软链接返回 403 `symlink_readonly`，可读写软链接放行）、静态分发白名单与安全响应头 |
+| `server/app.py` | Flask 应用：`/__auth/session|login|logout`（含 `mode:admin`）、`GET/PUT /__config`、`PUT /__admin/ai`（**只更新 AI 段并写进配置 JSON**，管理员 + CSRF，字段白名单 `AI_FIELDS`）、`POST /__config/test-auth`、`POST /__admin/verify-account`（验证 SVN 账号密码是否合法，不切换会话）、`GET/POST /__admin/default-credential`（默认同步凭据：先经认证路径校验再加密入库）、`POST /__admin/password`、`POST /__admin/sync`（立即同步仓库）、**软链接管理** `POST /__admin/folder-link`（管理员 + CSRF，`{mount, action: check|create|remove, target}`）、`GET /__admin/usage`（登录 IP/账号活动/用户数/审计）、`GET /__admin/documents`（文档更新时间与次数/文件夹大小/增删记录）（均要求管理员 + CSRF）、草稿接口（`/__md/document|draft|drafts|image|attachment|history|diff|revision|discard`）、**无 SVN 库一步保存** `POST /__md/publish`（本地模式写 SQLite 主库、未关联仓库直接写 docs/md，成功后触发重建）、**移动文档** `POST /__md/move`（同仓库内换文件夹）、`GET /__folder` 附带 `group`/`allFolders`（按 `folderGroups`/仓库 group 解析，供分组显示与移动选择）、**文档更新时间** `GET /__doc-meta?path=`（公开只读：SVN 优先已发布提交记录、其次 `svn log`（10 分钟缓存）、失败回退文件时间；本地区间显示文件 mtime）、反馈接口（`/__feedback`、`/__feedback/image|attachment|delete`、`/__admin/feedback`）、SVN 接口（`/__svn/info|log|prepare|commit|refresh|status|remote-diff|update|sync-status`、`/__operations/<id>`；`/__svn/update` 单篇文档与整库都免登录、仅同源校验，用配置账号自动拉取）、写接口守卫（匿名 401、旧 `/__md/save` 410、`symlink_write_guard` 对只读软链接返回 403 `symlink_readonly`，可读写软链接放行）、静态分发白名单与安全响应头 |
 | `server/paths.py` | 静态分发禁止清单（点目录、`.svn`、`data/`、`config/`、临时/数据库/源码文件），预览与认证服务共用 |
 | `web/auth.js` / `.css` | 登录状态与弹窗（`window.SiteAuth`）：会话刷新、登录/退出、侧栏指示器、只读模式提示、管理员角色与 AI 默认值下发；无侧栏的独立页渲染固定右上角登录入口（`.site-auth-fixed`，侧栏出现后自动收起）；`window.MD2WEB_BASE` 可用于指定站点根前缀（如 `docs/lib/plot-playground.html` 用 `'../'`） |
-| `web/settings.js` / `.css` | 统一设置弹窗（`window.Settings`，侧栏单一入口，**分为 AI 助手 / SVN 与仓库 / 账号 / 信息查询 四个 Tab**）：本机 AI 设置、管理员登录、SVN 认证路径与测试、仓库映射增删（含凭据分组与「更新频率」）、全站 AI 默认值、管理员改密，、「立即同步 SVN 库」，以及**管理员使用情况**（登录 IP/账号活动/用户数/审计）与**文档统计**（文档更新时间与次数、文件夹大小、增删记录，表头可排序） |
+| `web/settings.js` / `.css` | 统一设置弹窗（`window.Settings`，侧栏单一入口，**分为 AI 助手 / SVN 与仓库 / 账号 / 信息查询 四个 Tab**）：本机 AI 设置、管理员登录、SVN 认证路径与测试、仓库映射增删（含凭据分组与「更新频率」）、全站 AI 默认值、管理员改密，、「立即同步 SVN 库」，以及**管理员使用情况**（登录 IP/账号活动/用户数/审计）与**文档统计**（文档更新时间与次数、文件夹大小、增删记录，表头可排序）。**保存配置是整体保存**：仓库行只编辑 id/mount/url/凭据分组/更新频率，`readConfig` 必须按 id 保留 `sourceMode`/`linkTarget`/`displayName`/`entrySlug`/`group`/`readOnly`/`allowCommit`（本地/软链接仓库的 url 为空，丢掉 sourceMode 会被当成 SVN 仓库 → `repositories[i].url 不能为空`；权限也会被静默重置）；非 SVN 仓库的 url 与更新频率输入框置灰并标注来源类型。**AI 配置同时落在 JSON**：AI 助手 Tab 有「AI 配置 JSON」文本框（显示配置文件里的 `ai` 段，可直接编辑 → 「应用 JSON」填回表单 → 「保存配置」写盘），管理员的「我的设置」可勾选「同时写入服务器配置 JSON」（走 `PUT /__admin/ai`，写完同步 `expectedConfigVersion`，避免后续整体保存被判 `config_conflict`；冲突时自动重新读取并提示再点一次保存） |
 | `web/sanitize.js` | 前端净化入口（`window.Sanitize`，基于离线 DOMPurify）：阅读/预览/AI 回答统一净化；`style` 只放行 `color:` 单属性（编辑器文字颜色用 `<span style="color:…">`，其余样式一律移除） |
 | `config/server.example.json` | 认证服务示例配置（可提交）；`config/server.local.json` 为真实配置，不提交（缺失时 `--config` 会自动生成默认文件） |
 | `tests/test_server.py` | 认证服务单元/HTTP 集成测试（配置、数据库、SVN 假 CLI、登录会话、静态白名单） |
@@ -71,7 +71,7 @@ docs/html/images|uploads                  (反馈截图/附件，运行时写入
 | `web/math-init.js` | docsify 插件：`$...$` / `$$...$$` 等分隔符的 KaTeX 离线渲染；暴露 `window.MathRender.render` 供编辑器预览复用 |
 | `web/prism-init.js` | docsify 插件：`beforeEach` 阶段按围栏语言预载 Prism 组件，保证 docsify 渲染期即可高亮（docsify 内置 Prism 覆盖了 `window.Prism`，autoloader 必须在其之后加载） |
 | `web/ai-retrieval.js` | AI 助手的离线检索核心（纯函数，`window.AIRetrieval`）：分词（CJK 单字+双字）、从 `searchIndex`/Markdown 构建语料、TF-IDF 打分、摘录与上下文/消息组装；`tests/test_ai_retrieval.js` 覆盖 |
-| `web/ai-assistant.js` / `.css` | AI 助手聊天面板与独立配置弹窗（`window.AIAssistant`）：设置面板（服务商预设、接口地址、模型、Key、代理策略，Key 仅存 localStorage）、**资料范围勾选**（按文件夹/文档过滤检索）、**上传文档**（.md/.txt，仅本机 localStorage，≤512 KB）、本地检索 + 引用来源、OpenAI/Anthropic 风格流式 SSE 解析、直连失败自动走 `/__ai/chat` 代理；侧栏「AI 配置」图标与对话面板 ⚙ 均可打开配置 |
+| `web/ai-assistant.js` / `.css` | AI 助手聊天面板与独立配置弹窗（`window.AIAssistant`）：设置面板（服务商预设、接口地址、模型、Key、代理策略，公共配置存私有 JSON，登录用户个人配置加密存 SQLite）、**资料范围勾选**（按文件夹/文档过滤检索）、**上传文档**（.md/.txt，个人 SQLite 配置或访客 localStorage，≤512 KB）、本地检索 + 引用来源、OpenAI/Anthropic 风格流式 SSE 解析、直连失败自动走 `/__ai/chat` 代理；侧栏「AI 配置」图标与对话面板 ⚙ 均可打开配置；**管理员多一个「保存到服务器配置」按钮**，把面板当前配置写入配置 JSON 的 `ai` 段（`PUT /__admin/ai`，非管理员不显示该按钮，个人 Key 加密存 SQLite）；服务端默认值（`temperature`/`systemPrompt` 等）随 `/__auth/session` 下发，个人 SQLite 配置优先，无个人配置时用公共默认值 |
 | `tests/test_ai_retrieval.js` | AI 检索算法测试（`node --test`） |
 | `web/plot-playground.html` | 独立绘图在线预览页（Mermaid 全部类型模板 + PacketDiag 增强控件与完整语法说明、一键复制源码、下载），构建复制到 `docs/lib/`；`docs/md/使用说明/绘图示例.md` 与之保持全部样例同步（`tests/test_setup_docsify.py::DrawingExamplesTests` 校验） |
 | `web/md2web_config.html` / `web/md2web-config.js` | 仓库配置页（构建复制到 `docs/html/md2web_config.html`）：**仓库 ID 由系统按文件夹名自动生成**（`autoRepoId`，既有仓库沿用保存的 ID 以免绑定/凭据失效）；默认只列 `docs/md` 一级文件夹（显示文件夹名、不带 `md/` 前缀）+ 入口页链接（已配置仓库用仓库 ID，未配置用文件夹名，均有对应 `index_*.html`）+ 最新更新（作者/时间）+ 仓库大小（合计/文档/附件/子文件夹分类）+ 状态，并有「刷新文件夹信息」按钮；**「来源类型」三选一**：SVN 库（地址/频率/同步凭据/允许合入 + 健康检查/修复/删除重建/创建并拉取）、软链接（目标目录 + 检查连接/创建链接/移除链接；默认只读，可勾选「允许在线修改」直接写入目标目录并有明确提示）、本地文件夹（仅分组与允许在线修改），明细区按类型显隐；切换类型需确认，软链接由 `/__folders` 的 `sourceMode/linkTarget/linkExists` 自动回显。另有「账号切换与验证（SVN）」面板：查看当前账号、保存/测试 SVN 认证路径（`PUT /__config` + `POST /__config/test-auth`）、退出登录切换账号、验证（可选直接切换）SVN 账号；**「默认同步凭据（SVN 账号）」面板**：认证路径 URL + 同步账号 + 密码，「验证并保存为默认凭据」先用认证路径校验再保存当前 JSON 及加密数据库副本（`GET/POST /__admin/default-credential`），未单独配置凭据的仓库同步时统一使用；**每个仓库明细行内**直接提供「同步账号 / 密码 / 保存凭据」（`POST /__admin/repo-credential`，不再用 `window.prompt`），并显示「已单独配置 / 跟随默认凭据」（读取/切换 JSON 方案后，从管理员配置视图 `GET /__config` 的 `credentials` 回填行内同步账号与密码，默认凭据与网站备份凭据同理）；网站备份凭据同样行内输入；管理员登录后保存配置，支持「创建并拉取」（`POST /__admin/provision`：目录不存在时创建并从 SVN 导出）。SVN 认证路径在「账号切换与验证（SVN）」面板（`data-auth="url"`，保存/测试认证路径）与「默认同步凭据（SVN 账号）」面板（`data-default="url"`）双向联动，并随 `auth.url` 写入当前 JSON 方案与 JSON 编辑框；`showPanels` 必须用 `all('[data-config-main]')` 一次性显隐所有主面板（曾误用 `query` 只显示第一个，导致 SVN 认证路径/默认凭据/网站备份面板不可见） |
@@ -82,6 +82,7 @@ docs/html/images|uploads                  (反馈截图/附件，运行时写入
 | `tests/test_setup_docsify.py` | Python 回归测试（unittest，全程离线） |
 | `tests/test_search.js` | 搜索算法测试（`node --test`） |
 | `tests/test_packetdiag.js` | PacketDiag 解析回归测试（`node --test`） |
+| `tests/test_settings.js` | 服务设置弹窗测试（`node --test`）：整体保存配置时按 id 保留仓库的来源类型/软链接目标/权限/分组，非 SVN 仓库的 url 与更新频率输入框置灰 |
 | `specs/` | 设计与计划文档（历史归档，新增设计放这里）；`specs/2026-09-20-content-asset-storage-design.md` 为文本/资产 SQLite 双库存储方案（结论：文件仍为唯一事实源，`content.sqlite3` 存文本元数据、`assets.sqlite3` 存资产登记与可选二进制备份） |
 
 - 第三方组件与许可：见 `THIRD-PARTY-NOTICES.md`（本项目基于 docsify 4.13.1 构建，构建会给 `docsify.min.js` 写版权横幅）。
@@ -105,6 +106,7 @@ node --test tests/test_packetdiag.js
 node --test tests/test_ai_retrieval.js
 node --test tests/test_text_find.js
 node --test tests/test_folder_view.js
+node --test tests/test_settings.js
 node --check web/custom-search.js       # 前端语法检查（workspace/mermaid-init/media-viewer/packetdiag/page-export/md-editor/text-find/math-init/prism-init/ai-assistant/ai-retrieval/auth/sanitize 同理）
 ```
 
@@ -124,6 +126,7 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 8. **静态页链接用原始 HTML**：docsify 会重写 Markdown 链接为 hash 路由，指向 `lib/plot-playground.html` 等静态文件时必须使用 `<a href="lib/...">` 原始锚点，否则会被路由拦截。
 9. **UI 令牌统一**：颜色/字体使用 `--docs-*` 变量；`--docs-accent`（#1f6feb）只用于当前项/命中/焦点；路径、标识符、计数用等宽字体。
 10. **章节序号**：正文 H1–H6 编号由 `workspace.js` 的 `numberLevels` 共用函数生成，通过 `data-workspace-number` 显示；右侧目录从 `window.SiteNumbering` 取同一份标签。导航与正文独立控制，默认均开启；正文按钮仅影响正文/本文目录，左侧「所有文档」旁的开关仅影响导航。设置存于 localStorage `md2web.workspace.numbering.v1`；复制/导出保留当前编号，不修改标题文字或 ID。
+11. **整体保存配置不得丢字段**：`PUT /__config` 是整体替换，`server/config.py` 的 `_inherit_repository_fields` 按仓库 id 继承磁盘上已有的 `sourceMode`/`linkTarget`/`displayName`/`entrySlug`/`group`/`readOnly`/`allowCommit`（客户端显式给出的字段以客户端为准）。前端任何只编辑部分字段的入口（服务设置弹窗）必须原样带回其余字段；否则本地/软链接仓库（url 为空）会被当成 SVN 仓库 → `repositories[i].url 不能为空`，只读仓库的权限也会被静默改成可写。
 
 ## 开发流程
 
@@ -224,8 +227,8 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - Linux 更新代码只还原确认属于生成物的改动；存在 `docs/md` 或参考网页等源资料修改/删除时不得执行整个 `docs/` 的 checkout。还原生成物前把旧目录/索引证据存入被忽略的 `data/*-before-update.json`，供启动清理配置使用。
 
 1. **用 Python 3.6.8 跑** `python -m unittest discover -s tests` 全绿（含 `tests/test_server.py`：配置、数据库、SVN 假 CLI、登录会话、静态白名单）；不再跑 3.12
-2. `node --test tests/test_search.js`、`node --test tests/test_packetdiag.js`、`node --test tests/test_ai_retrieval.js`、`node --test tests/test_text_find.js`、`node --test tests/test_folder_view.js` 全绿
-3. `node --check web/custom-search.js`、`web/workspace.js`、`web/mermaid-init.js`、`web/media-viewer.js`、`web/packetdiag.js`、`web/packetdiag-init.js`、`web/page-export.js`、`web/md-editor.js`、`web/text-find.js`、`web/math-init.js`、`web/prism-init.js`、`web/auth.js`、`web/sanitize.js` 通过
+2. `node --test tests/test_search.js`、`node --test tests/test_packetdiag.js`、`node --test tests/test_ai_retrieval.js`、`node --test tests/test_text_find.js`、`node --test tests/test_folder_view.js`、`node --test tests/test_settings.js` 全绿
+3. `node --check web/custom-search.js`、`web/workspace.js`、`web/mermaid-init.js`、`web/media-viewer.js`、`web/packetdiag.js`、`web/packetdiag-init.js`、`web/page-export.js`、`web/md-editor.js`、`web/text-find.js`、`web/math-init.js`、`web/prism-init.js`、`web/auth.js`、`web/sanitize.js`、`web/settings.js` 通过
 4. **用 3.6.8 跑** `python setup_docsify.py` 后 `git status` 无意外生成物差异（构建幂等）
 5. `docs/md` 内容逐字节未变
 
@@ -253,3 +256,12 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - `svn_snapshot.publish(confirm=...)` 把数据库事务确认纳入文件回滚边界；确认失败回滚文件，回滚失败保留备份路径提示。不宣称支持突然断电下的多文件原子事务。
 - `SvnClient.cat` 以 bytes 接收正文并严格 UTF-8 解码，保留 CRLF；命令诊断文本仍可容错解码。网站备份复用已有 `.svn` 前核对实际 URL，不一致拒绝复制与提交。
 - `folder_page_names` 先预留全部仓库入口（包含嵌套库），普通子目录按 casefold 去重；生成子目录页面时跳过配置仓库挂载。`tests/test_review_1015.py` 包含独立临时构建和复审回归。
+
+## 2026-10-30 AI 公共配置与 Claude 中转集成约束
+
+- 用户所称 `linx_ai` 对应实际目录 `linux_ai/`，它是独立 GitHub 仓库（自带 `.git`），提供 Linux Claude 安装与 Windows `win_soft/ClaudeRelay` 中转。保持独立版本边界，未经明确要求不修改其内容、不将其文件或安装包纳入 md2web 提交；部署按独立仓库获取。
+- 目标调用链：md2web 问答 → 服务器 Claude 进程（工作目录为本项目 `docs/`）→ Windows ClaudeRelay → 模型服务 → 原路返回结果。Windows 中转负责模型协议与网络转发，代码搜索在服务器完成。
+- AI 服务配置仅管理员可修改；普通用户统一使用公共 AI 配置，移除个人/访客 AI 服务配置入口，后端拒绝个人配置写入。公共会话不得下发 API Key、relayToken 等秘密；问答统一由服务器执行，禁止浏览器直连绕过公共策略。
+- 代码库根固定为 `docs/code/`，其下每个独立子目录可对应不同 SVN 版本库和指定 revision。管理员管理、更新和设置默认库；普通用户可选择允许使用的代码库进行只读搜索问答，不可提交任意服务器路径或 SVN 地址。
+- `docs/code/` 为私有运行数据，必须在静态服务、构建/离线快照、搜索索引、网站备份与 Git 提交中排除；Claude 的工作目录不是访问隔离，必须另行落实只读范围与进程权限。
+- 实施方案见 `specs/2026-10-30-claude-relay-code-qa-design.md`。本节取代前文个人 AI 配置设计；已实现公共配置、受控检索、SVN 指定版本同步和可取消 SSE 任务。实施与部署边界见方案末尾。

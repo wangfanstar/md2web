@@ -12,6 +12,9 @@ def is_blocked_static_path(value):
     parts = [part for part in rel.split("/") if part not in ("", ".")]
     if not parts:
         return True
+    lowered = [part.lower() for part in parts]
+    if lowered[0] == 'code' or lowered[:2] == ['docs', 'code']:
+        return True
     if any(part.startswith(".") for part in parts):
         return True
     if any(part.lower() in BLOCKED_SEGMENTS for part in parts):

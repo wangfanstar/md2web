@@ -610,56 +610,10 @@ class PreviewHandler(http.server.SimpleHTTPRequestHandler):
         self.send_error(405, "Method Not Allowed")
 
     def _handle_ai_api(self):
-        """把浏览器请求转发到用户配置的 AI 接口（解决跨域，仅本机调用）。"""
-        if not self._client_is_local():
-            self._send_json(403, {"ok": False, "error": "AI 代理仅允许本机调用"})
-            return
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-            if length <= 0 or length > AI_MAX_BODY:
-                raise ValueError("请求体为空或过大")
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
-            if not isinstance(payload, dict):
-                raise ValueError("请求体必须是 JSON 对象")
-            target = ai_target_url(payload.get("url"))
-            body = json.dumps(payload.get("payload") or {}, ensure_ascii=False).encode("utf-8")
-            headers = {
-                "Content-Type": "application/json",
-                "Accept": "application/json, text/event-stream",
-                "User-Agent": "md2web-ai-proxy",
-            }
-            api_key = payload.get("apiKey")
-            if api_key:
-                headers["Authorization"] = "Bearer " + str(api_key)
-            for name, value in (payload.get("headers") or {}).items():
-                if isinstance(value, str) and name.lower() not in AI_HOP_HEADERS:
-                    headers[name] = value
-            request = urllib.request.Request(target, data=body, headers=headers, method="POST")
-            self.close_connection = True
-            try:
-                upstream = urllib.request.urlopen(request, timeout=180)
-            except urllib.error.HTTPError as error:
-                detail = error.read().decode("utf-8", "replace")
-                self._send_json(error.code, {"ok": False, "error": detail[:4000]})
-                return
-            except (urllib.error.URLError, OSError) as error:
-                self._send_json(502, {"ok": False, "error": f"无法访问 AI 接口: {error}"})
-                return
-            with upstream:
-                self.send_response(200)
-                self.send_header("Content-Type", upstream.headers.get("Content-Type", "application/json"))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                while True:
-                    chunk = upstream.read(2048)
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
-        except ValueError as error:
-            self._send_json(400, {"ok": False, "error": str(error)})
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            self._send_json(400, {"ok": False, "error": "请求体不是有效的 JSON"})
+        """AI requires the authenticated service and its administrator settings."""
+        self._send_json(403, {'ok': False, 'code': 'read_only_preview',
+                             'error': '公共 AI 问答需要认证服务，请登录后使用'})
+
 
     def log_message(self, fmt, *args):
         if self.path.startswith(AI_API_PREFIX):
