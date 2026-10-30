@@ -303,6 +303,13 @@
     var done=document.createElement('button');done.type='button';done.textContent='完成选择';done.className='ai-scope-primary';scopeFooter.appendChild(done);
     scopeButton.onclick=function(){scopeDialog.showModal();};done.onclick=function(){scopeDialog.close();var count=picker.querySelectorAll('input:checked').length;scopeButton.textContent='查询范围：已选 '+count+' 项 · 修改 ▾';};
 
+    var panel=overlay.querySelector('.ai-panel'),grip=document.createElement('div');grip.className='ai-resize-grip';grip.tabIndex=0;grip.setAttribute('role','separator');grip.setAttribute('aria-orientation','vertical');grip.setAttribute('aria-label','调整 AI 助手宽度，左右方向键微调');panel.appendChild(grip);
+    function setWidth(width){width=Math.max(360,Math.min(window.innerWidth-36,width));panel.style.width=width+'px';grip.setAttribute('aria-valuenow',Math.round(width));return width;}
+    try{var saved=Number(localStorage.getItem('md2web:ai-panel-width'));if(saved>0)setWidth(saved);}catch(e){}
+    function remember(){try{localStorage.setItem('md2web:ai-panel-width',String(panel.getBoundingClientRect().width));}catch(e){}}
+    grip.addEventListener('pointerdown',function(e){if(e.button!==0)return;e.preventDefault();var start=e.clientX,width=panel.getBoundingClientRect().width;grip.setPointerCapture(e.pointerId);document.body.classList.add('ai-is-resizing');function move(event){setWidth(width+start-event.clientX);}function finish(){document.body.classList.remove('ai-is-resizing');remember();grip.removeEventListener('pointermove',move);grip.removeEventListener('pointerup',finish);grip.removeEventListener('pointercancel',finish);grip.removeEventListener('lostpointercapture',finish);}grip.addEventListener('pointermove',move);grip.addEventListener('pointerup',finish);grip.addEventListener('pointercancel',finish);grip.addEventListener('lostpointercapture',finish);});
+    grip.addEventListener('keydown',function(e){if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();setWidth(panel.getBoundingClientRect().width+(e.key==='ArrowLeft'?24:-24));remember();}});
+    window.addEventListener('resize',function(){if(window.innerWidth>640)setWidth(panel.getBoundingClientRect().width);});
     bindOverlay();
   }
 

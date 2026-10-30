@@ -5,11 +5,12 @@
     <section class="panel" id="admin-login" data-config-login hidden>
       <h2>管理员登录</h2>
       <div class="row">
+        <label>登录方式<select data-login-mode><option value="admin">管理员账号（自动识别）</option><option value="svn">SVN 账号（需管理员权限）</option></select></label>
         <label>用户名<input type="text" data-login-username value="admin" autocomplete="username"></label>
         <label>密码<input type="password" data-login-password autocomplete="current-password"></label>
         <button class="primary" type="button" data-action="login">登录</button>
       </div>
-      <p class="hint">默认管理员账号 <code>admin / admin</code>（仅用于本页与站点设置，合入 SVN 时需要另外的 SVN 账号）。</p>
+      <p class="hint">支持本地管理员和已授予管理员权限的 SVN 用户。若账号与本地管理员同名，请选择「SVN 账号」登录；普通用户不能管理配置。首次部署的本地管理员为 <code>admin / admin</code>。</p>
     </section>    <section class="panel" data-config-file hidden>
       <h2>当前为离线浏览（file://）</h2>
       <p class="hint">仓库配置需要认证服务：请用 <code>python serve.py</code> 启动后访问
@@ -141,4 +142,4 @@
 </div>
 <dialog class="repo-drawer" data-repo-drawer aria-labelledby="repo-drawer-title"><header><h2 id="repo-drawer-title">仓库设置</h2><button type="button" data-drawer-close aria-label="关闭仓库设置">关闭</button></header><p class="hint">普通设置加入全局待保存项；带“保存”或“执行”的维护操作立即生效。</p><table><tbody data-drawer-body></tbody></table><div data-drawer-status role="status" hidden></div><footer><span>编辑内容待全局保存</span><button type="button" data-drawer-close>完成编辑</button></footer></dialog>
 <dialog class="config-review" data-config-review-dialog aria-labelledby="review-title"><h2 id="review-title">配置修改</h2><div data-config-review-content></div><button type="button" data-review-close>关闭</button></dialog>
-<script src="lib/config-draft.js?v=d882fdd4e1"></script><script src="lib/config-layout.js?v=a204ef3c8c"></script><script src="lib/auth.js?v=dc4784aa8b"></script><script src="lib/md2web-config.js?v=83104266c1"></script><script src="lib/md2web-feedback.js?v=9aca95501d"></script></body></html>
+<script src="lib/config-draft.js?v=d882fdd4e1"></script><script src="lib/config-layout.js?v=a204ef3c8c"></script><script src="lib/auth.js?v=dc4784aa8b"></script><script src="lib/md2web-config.js?v=23092bee40"></script><script src="lib/md2web-feedback.js?v=9aca95501d"></script></body></html>

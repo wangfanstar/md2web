@@ -620,7 +620,7 @@ def generate_custom_search_assets():
     (LIB_DIR / "custom-search.css").write_text(CUSTOM_SEARCH_CSS, encoding="utf-8")
     for name in (
         "workspace.js",
-        "home-repositories.js",
+        "home-repositories.js", "home.css",
         "config-draft.js", "config-layout.js", "md2web-config.css",
         "workspace.css",
         "mermaid-init.js",
@@ -2093,11 +2093,16 @@ def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.h
   <title>{html.escape(title)}</title>
   <link rel="stylesheet" href="lib/auth.css">
   <style>{MASTER_STYLE}</style>
+  <link rel="stylesheet" href="lib/home.css">
 </head>
 <body>
   <div class="wrap">
-    <h1>{html.escape(title)}</h1>
-    <p class="sub">按仓库分组浏览；搜索默认覆盖全部仓库，并将文档名与全文结果分组显示。</p>
+    <a class="skip-link" href="#knowledge">跳到知识库</a>
+    <header class="home-header"><a class="home-brand" href="index.html">文档中心</a><nav aria-label="首页导航"><a href="#knowledge">浏览知识库</a><a href="#references">参考资料</a><a href="{HTML_PREFIX}{config_page}">管理设置</a></nav></header>
+    <main id="home-main">
+    <section class="home-hero" aria-labelledby="home-title"><p class="home-eyebrow">知识 · 查阅 · 探索</p><h1 id="home-title">{html.escape(title)}</h1>
+    <p class="sub">从一篇文档开始，找到需要的知识与答案。</p></section>
+    <section class="home-search" aria-label="搜索文档"><div class="home-section-caption"><h2>你想查找什么？</h2><a href="{HTML_PREFIX}{all_page}">浏览全部文档 →</a></div>
     <div class="tools">
       <input type="search" placeholder="搜索全部仓库（文档名和全文）" data-master-search
              aria-label="搜索全部仓库的文档名和全文">
@@ -2109,23 +2114,19 @@ def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.h
         </div>
       </div>
       <label>模式<select class="master-search-mode" data-master-mode aria-label="搜索模式"><option value="both" selected>文档名和全文</option><option value="file">仅文档名</option><option value="full">仅全文</option></select></label>
-      <a href="{HTML_PREFIX}{all_page}">全部文档（合并视图）</a>
-      <a href="{HTML_PREFIX}{config_page}">仓库配置</a>
-      <a href="{HTML_PREFIX}md2web_feedback.html">读者反馈</a>
-      <a href="{HTML_PREFIX}md2web_recycle.html?mount=md">回收站</a>
     </div>
     <p class="hint">当前搜索范围：<strong>全部仓库</strong>；默认模式：<strong>文档名和全文</strong>，结果按两类分组显示。</p>
-    <div class="results" data-master-results></div>
+    <div class="results" data-master-results aria-live="polite"></div></section>
+    <section class="home-ai" aria-labelledby="home-ai-title"><div><span class="home-eyebrow">AI 助手</span><h2 id="home-ai-title">带着问题，探索知识</h2><p>结合知识库与代码寻找答案，可选择仓库及子目录范围。</p></div>
     <form onsubmit="event.preventDefault();AIAssistant.open();document.querySelector('[data-ai-input]').value=this.querySelector('input').value;">
-      <label for="home-ai-question">AI 知识问答</label>
-      <input id="home-ai-question" placeholder="输入问题，结合知识库和代码寻找答案" required style="width:65%;padding:12px">
+      <label class="sr-only" for="home-ai-question">输入 AI 问题</label>
+      <input id="home-ai-question" placeholder="例如：这个模块的工作流程是什么？" required maxlength="16000">
       <button type="submit">选择范围并提问 →</button>
-    </form>
-    <div data-master-repositories>{''.join(sections)}</div>
-    <h2>参考文献</h2>
-    {''.join(reference_cards)}
-    <h2>参考网页</h2>
-    <div class="cards">{''.join(web_cards)}</div>
+    </form><p class="home-ai-note">登录服务器后可用 · 回答支持流式显示</p></section>
+    <section id="knowledge" class="home-knowledge" aria-labelledby="knowledge-title"><div class="home-section-caption"><div><h2 id="knowledge-title">浏览知识库</h2><p>按主题分组，选择一个知识库开始阅读。</p></div><a href="{HTML_PREFIX}{all_page}">全部文档 →</a></div>
+    <div data-master-repositories>{''.join(sections)}</div></section>
+    <section id="references" class="home-references" aria-labelledby="references-title"><div class="home-section-caption"><h2 id="references-title">参考资料</h2></div><div class="home-reference-grid"><div><h3>参考文献</h3>{''.join(reference_cards)}</div><div><h3>参考网页</h3><div class="cards">{''.join(web_cards)}</div></div></div></section>
+    </main><footer class="home-footer"><span>随时查阅，专注阅读</span><nav aria-label="帮助与管理"><a href="{HTML_PREFIX}md2web_feedback.html">读者反馈</a><a href="{HTML_PREFIX}md2web_recycle.html?mount=md">回收站</a><a href="{HTML_PREFIX}{config_page}">仓库配置</a><a href="#home-title">返回顶部 ↑</a></nav></footer>
   </div>
   <script>window.__MD2WEB_REPOS__ = {json.dumps(repos, ensure_ascii=False)};</script>
   <script>{MASTER_SCRIPT}</script>

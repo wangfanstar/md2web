@@ -693,3 +693,8 @@
 
 .ai-scope-bulk { display:flex; gap:8px; padding:8px 0; flex-wrap:wrap; }
 .ai-scope-dialog .ai-scope-bulk button { padding:5px 12px; font-size:13px; }
+
+.ai-resize-grip { position:absolute; left:0; top:0; bottom:0; width:8px; cursor:ew-resize; touch-action:none; z-index:3; border-radius:12px 0 0 12px; }
+.ai-resize-grip:hover,.ai-resize-grip:focus-visible { background:#2563eb44; }
+.ai-is-resizing,.ai-is-resizing * { cursor:ew-resize!important; user-select:none!important; }
+@media(max-width:640px) { .ai-resize-grip { display:none; } .ai-panel { width:auto!important; } }

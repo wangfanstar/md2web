@@ -1222,14 +1222,15 @@
   function login() {
     var username = query('[data-login-username]').value.trim();
     var password = query('[data-login-password]').value;
+    var mode = query('[data-login-mode]').value === 'svn' ? '' : 'admin';
     var siteAuth = window.SiteAuth;
     setStatus('正在登录…');
     var attempt = siteAuth && siteAuth.login
-      ? siteAuth.login(username, password, 'admin')
+      ? siteAuth.login(username, password, mode)
       : fetch('__auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: username, password: password, mode: 'admin' })
+        body: JSON.stringify({ username: username, password: password, mode: mode })
       }).then(function (response) {
         return response.json().catch(function () { return {}; }).then(function (payload) {
           if (!response.ok || payload.ok === false) {
