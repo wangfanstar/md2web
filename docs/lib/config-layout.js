@@ -40,9 +40,9 @@
   function update(){
     if(!bridge)return;trackCredentials();var s=bridge.state,changes=s.draft?s.draft.changes():[],names={repositories:'仓库管理',folderGroups:'仓库管理',auth:'账号与权限',ai:'AI 设置',cache:'缓存与性能',uploads:'缓存与性能',siteBackup:'备份与恢复'};
     var counts={};changes.forEach(function(c){var name=names[c.path.split('.')[0]]||'配置方案';counts[name]=(counts[name]||0)+1;});
-    q('[data-config-savebar]').hidden=(!changes.length&&!s.jsonDirty&&!s.pendingCredentials&&!saving)||!s.editable;
+    q('[data-config-savebar]').hidden=!s.editable;
     document.body.classList.toggle('config-has-draft',!q('[data-config-savebar]').hidden);
-    q('[data-config-dirty-label]').textContent=saving?'正在保存配置…':s.jsonDirty?'JSON 有未保存修改，请在配置方案中应用':Object.keys(counts).map(function(k){return k+' '+counts[k]+' 项';}).join('、')+(s.pendingCredentials?' · 同步凭据需单独验证保存':'');
+    q('[data-config-dirty-label]').textContent=saving?'正在保存配置…':s.jsonDirty?'JSON 有未保存修改，请在配置方案中应用':Object.keys(counts).map(function(k){return k+' '+counts[k]+' 项';}).join('、')+(s.pendingCredentials?' · 同步凭据需单独验证保存':'')||'所有修改已保存';
     q('[data-config-savebar] [data-action="save"]').disabled=saving||!!s.jsonDirty||!s.editable||!changes.length;
     q('[data-config-profile-label]').textContent='当前配置：'+((s.config||{}).profileName||'未加载')+(changes.length?' · 有待保存修改':' · 已保存');
     q('[data-config-identity]').textContent=s.user?s.user.username+' · '+(s.user.role==='admin'?'管理员':'普通用户'):'未登录';
@@ -74,6 +74,7 @@
     },true);
     window.addEventListener('hashchange',activate);window.addEventListener('popstate',activate);
     q('[data-local-password-save]').onclick=function(){bridge.changePassword(q('[data-current-password]').value,q('[data-new-password]').value).then(function(){q('[data-current-password]').value='';q('[data-new-password]').value='';notify('密码已修改，请重新登录。');}).catch(function(e){notify(e.message,true);});};
+    document.addEventListener('keydown',function(e){if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();synchronize();var save=q('[data-config-savebar] [data-action=save]');if(!save.disabled)save.click();}});
     activate();update();
   }
   window.ConfigLayout={connect:connect,refresh:function(){activate();update();},update:update,notify:notify,navigate:navigate,
@@ -83,7 +84,7 @@
     preview:function(data,name,compareDraft){var comparison=new window.ConfigDraft(compareDraft&&bridge.state.draft?bridge.state.draft.value():bridge.state.config),next=Object.assign({},bridge.state.config,data);delete next.schemaVersion;comparison.update(next);var host=q('[data-config-review-content]');host.textContent=compareDraft?'当前未保存内容 → 服务器最新配置（仅比较，编辑仍保留）：':'方案 '+name+' 相对当前已保存配置的差异（仅预览，不会应用）：';comparison.changes().forEach(function(c){var p=document.createElement('p');p.textContent=c.path+'：'+(c.before||'未设置')+' → '+(c.after||'移除');host.appendChild(p);});q('[data-config-review-dialog]').showModal();},
     beforeRender:closeDrawer,repositoriesRendered:function(){var select=q('[data-repo-group]'),value=select.value,groups=[];all('[data-group-label]').forEach(function(n){if(groups.indexOf(n.textContent)<0)groups.push(n.textContent);});select.textContent='';var first=document.createElement('option');first.value='';first.textContent='全部分组';select.appendChild(first);groups.sort().forEach(function(g){var o=document.createElement('option');o.value=g;o.textContent=g;select.appendChild(o);});select.value=groups.indexOf(value)>=0?value:'';filter();activate();},clearPrivate:clearPrivate,
     clearStatus:function(){all('[data-tab-status], [data-status], [data-profile-status], [data-config-notice], [data-drawer-status]').forEach(function(n){n.hidden=true;n.textContent='';});},
-    saving:function(value){saving=value;if(value){locked=all('[data-repo], [data-folder-group], [data-ai], [data-site-backup], [data-policy], [data-auth], [data-default], [data-site-credential], [data-profile-json]').map(function(n){var item={node:n,disabled:n.disabled};n.disabled=true;return item;});}else{locked.forEach(function(item){if(item.node.isConnected)item.node.disabled=item.disabled||!bridge.state.editable;});locked=[];}update();},capture:synchronize,openNew:function(){var rows=all('[data-repo-row]');if(rows.length)openDrawer(rows[rows.length-1]);},
-    jsonMode:function(value){bridge.state.jsonEditing=value;all('[data-repo], [data-folder-group], [data-ai], [data-site-backup], [data-policy], [data-auth="url"], [data-default], [data-site-credential] ').forEach(function(n){n.disabled=value||!bridge.state.editable;});}};
+    saving:function(value){saving=value;if(value){locked=all('[data-repo], [data-folder-group], [data-ai], [data-ai-form], [data-site-backup], [data-policy], [data-auth], [data-default], [data-site-credential], [data-profile-json]').map(function(n){var item={node:n,disabled:n.disabled};n.disabled=true;return item;});}else{locked.forEach(function(item){if(item.node.isConnected)item.node.disabled=item.disabled||!bridge.state.editable;});locked=[];}update();},capture:synchronize,openNew:function(){var rows=all('[data-repo-row]');if(rows.length)openDrawer(rows[rows.length-1]);},
+    jsonMode:function(value){bridge.state.jsonEditing=value;all('[data-repo], [data-folder-group], [data-ai], [data-ai-form], [data-site-backup], [data-policy], [data-auth="url"], [data-default], [data-site-credential] ').forEach(function(n){n.disabled=value||!bridge.state.editable;});}};
 })();
 

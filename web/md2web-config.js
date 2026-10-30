@@ -302,20 +302,24 @@
     var panel = query('[data-ai-panel]');
     if (!panel) return;
     panel.hidden = !state.editable;
-    all('[data-ai]').forEach(function (node) { var value=(state.config.ai || {})[node.getAttribute('data-ai')];node.value = value == null ? '' : value; });
-    var json=query('[data-public-ai-json]');if(json)json.value=JSON.stringify(state.config.ai || {},null,2);
+    var settings=(state.config.ai||{}).claude||{},form=query('[data-ai-config-form]');
+    if(form){form.textContent='';
+      [['enabled','启用 AI 问答','checkbox',false],['executable','Claude 命令','text','claude'],['timeoutSeconds','回答超时（秒）','number',120],['codeFolder','代码根目录','text','code'],['dailySyncEnabled','启用每日 SVN 更新','checkbox',true],['dailySyncTime','每日更新时间','time','03:00']].forEach(function(field){var label=document.createElement('label'),input=document.createElement('input');label.textContent=field[1];input.type=field[2];input.setAttribute('data-ai-form',field[0]);var value=settings[field[0]]===undefined?field[3]:settings[field[0]];if(input.type==='checkbox')input.checked=value;else input.value=value;if(field[0]==='timeoutSeconds'){input.min=5;input.max=600;}label.appendChild(input);form.appendChild(label);});
+      var note=document.createElement('p');note.className='hint';note.textContent='已配置 '+(settings.repositories||[]).length+' 个代码仓库。可在仓库管理中识别添加；修改后点击顶部「保存全部修改」。';form.appendChild(note);
+    }
+    var json=query('[data-public-ai-json]');if(json)json.value=JSON.stringify({claude:(state.config.ai || {}).claude || {}},null,2);
   }
 
   document.addEventListener('click',function(event){
     if(!event.target.matches||!event.target.matches('[data-public-ai-read], [data-public-ai-apply]')||!state.editable)return;
     var box=query('[data-public-ai-json]');
     try{
-      if(event.target.matches('[data-public-ai-read]')){box.value=JSON.stringify(serializeForm().ai,null,2);return;}
-      var value=JSON.parse(box.value),allowed=['provider','baseUrl','model','apiKey','useProxy','contextChars','sourcePath','temperature','systemPrompt','claude'];
+      if(event.target.matches('[data-public-ai-read]')){box.value=JSON.stringify({claude:(serializeForm().ai || {}).claude || {}},null,2);return;}
+      var value=JSON.parse(box.value),allowed=['claude'];
       if(!value||Array.isArray(value)||typeof value!=='object'||Object.keys(value).some(function(key){return allowed.indexOf(key)<0;}))throw new Error('JSON 必须为 AI 配置对象，不能含未知字段');
-      state.config.ai=Object.assign({},state.config.ai || {},value);renderAiPanel();
-      var field=query('[data-ai]');field.dispatchEvent(new Event('input',{bubbles:true}));
-      setStatus('公共 AI JSON 已填入表单，请点击「保存全部修改」写盘。');
+      state.config.ai={claude:value.claude||{}};renderAiPanel();
+      captureDraft();
+      setStatus('公共 AI JSON 已应用，请点击「保存全部修改」写盘。');
     }catch(error){setStatus('公共 AI JSON 无效：'+error.message,true);}
   });
 
@@ -1252,16 +1256,8 @@
     payload.siteBackup = readSiteBackup();
     var authUrl = query('[data-auth="url"]');
     if (authUrl) payload.auth = Object.assign({}, payload.auth || {}, { url: authUrl.value.trim() });
-    payload.ai = Object.assign({}, payload.ai || {});
-    all('[data-ai]').forEach(function (node) {
-      var key = node.getAttribute('data-ai');
-      var numeric = key === 'contextChars' || key === 'temperature';
-      var raw = node.value;
-      if (numeric && raw === '') {
-        return;  // 留空表示沿用现有值（0 是合法温度，不能当空处理）
-      }
-      payload.ai[key] = numeric ? Number(raw) : raw;
-    });
+    payload.ai = { claude: (payload.ai || {}).claude || {} };
+    all('[data-ai-form]').forEach(function(input){var key=input.getAttribute('data-ai-form');payload.ai.claude[key]=input.type==='checkbox'?input.checked:input.type==='number'?Number(input.value):input.value.trim();});
     payload.folderGroups = collectFolderGroups();
     payload.repositories = repos.map(function (repo) {
       var item = {
@@ -1587,6 +1583,20 @@
       return;
     }
     var action = target.getAttribute('data-action');
+    if(action==='discover-code'){
+      var output=query('[data-code-discovery]');output.textContent='正在识别代码目录…';
+      fetch('__admin/code-repositories',{credentials:'same-origin'}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.message||d.error);return d;});}).then(function(data){
+        output.textContent='识别结果按本地目录导入 AI 范围；SVN 地址供核对。导入不会拉取或覆盖代码，请保存配置后使用。';
+        (data.discovered||[]).forEach(function(repo){var row=document.createElement('p');row.textContent=repo.folder+' · '+(repo.url||'本地目录')+(repo.error?' · '+repo.error:'');var button=document.createElement('button');button.textContent=repo.configured?'已配置':'加入 AI 代码范围';button.disabled=repo.configured;button.onclick=function(){
+          state.config.ai=state.config.ai||{};var claude=state.config.ai.claude=state.config.ai.claude||{};claude.repositories=claude.repositories||[];
+          if(claude.repositories.some(function(r){return r.folder===repo.folder||r.folder.indexOf(repo.folder+'/')===0||repo.folder.indexOf(r.folder+'/')===0;})){button.textContent='已存在包含关系的代码库';button.disabled=true;return;}
+          var id='code-'+Date.now();claude.repositories.push({id:id,name:repo.name,folder:repo.folder,url:'',revision:'HEAD',dailySync:false});
+          renderAiPanel();captureDraft();button.disabled=true;button.textContent='已加入，请保存配置';
+        };row.appendChild(button);output.appendChild(row);});
+        if(!(data.discovered||[]).length)output.textContent='未发现代码库，请将代码目录放在 docs/code 下。';
+      }).catch(function(e){output.textContent=e.message;});return;
+    }
+
     if (action.indexOf('profile-') === 0) {
       changeProfile(action.slice(8));
     } else if (action === 'login') {

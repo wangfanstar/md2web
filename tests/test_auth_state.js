@@ -9,7 +9,7 @@ function load(){
   vm.runInNewContext(fs.readFileSync('web/auth.js','utf8'),{window,document,CustomEvent:function(){},localStorage:{setItem(){},removeItem(){}},fetch:(url,options)=>new Promise((resolve,reject)=>requests.push({url,options,resolve:(data,status=200)=>resolve({ok:status<400,status,json:async()=>data}),reject})),console});
   return {auth:window.SiteAuth,requests,events,timers,timeouts};
 }
-const session={authenticated:true,user:{username:'alice',role:'admin'},csrfToken:'token',features:{editDraft:true},site:{ai:{apiKey:'private'}}};
+const session={authenticated:true,user:{username:'alice',role:'admin'},csrfToken:'token',features:{editDraft:true},site:{ai:{enabled:true}}};
 test('failed session verification clears stale login and private state',async()=>{
   const t=load();let p=t.auth.refresh();t.requests.shift().resolve(session);await p;
   assert.equal(t.auth.isAuthenticated(),true);

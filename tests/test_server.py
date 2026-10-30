@@ -420,7 +420,7 @@ class ConfigTests(ServerTestBase):
             {"id": "svn", "mount": "md/svn", "url": "https://svn.example.invalid/svn/x/",
              "credential_group": "default"},
         ]
-        payload["ai"]["model"] = "deepseek-v4-flash"
+        payload["ai"]["claude"]["timeoutSeconds"] = 77
         loaded = server_config.save_config(path, payload, self.docs)
         repos = {repo["id"]: repo for repo in loaded["repositories"]}
         self.assertEqual(repos["local"]["source_mode"], "local")
@@ -430,7 +430,7 @@ class ConfigTests(ServerTestBase):
         self.assertEqual(repos["link"]["source_mode"], "symlink")
         self.assertEqual(repos["link"]["link_target"], str(target))
         self.assertEqual(repos["svn"]["source_mode"], "svn")
-        self.assertEqual(loaded["ai"]["model"], "deepseek-v4-flash")
+        self.assertEqual(loaded["ai"]["claude"]["timeoutSeconds"], 77)
 
     def test_save_config_keeps_client_supplied_repository_fields(self):
         path = self.write_config({"repositories": [
@@ -450,23 +450,22 @@ class ConfigTests(ServerTestBase):
             server_config.load_config(path, self.docs)
         self.assertIn("sourceMode", str(ctx.exception))
 
-    def test_ai_config_roundtrip_keeps_temperature_and_system_prompt(self):
+    def test_legacy_ai_api_fields_are_dropped(self):
         path = self.write_config({"ai": {
             "provider": "openai", "baseUrl": "https://api.example.invalid/v1",
             "model": "deepseek-v4-flash", "apiKey": "sk-test",
-            "temperature": 0.7, "systemPrompt": "你是文档助手"}})
+            "temperature": 0.7, "systemPrompt": "你是文档助手",
+            "claude": {"enabled": True, "timeoutSeconds": 30}}})
         config = server_config.load_config(path, self.docs)
-        self.assertEqual(config["ai"]["temperature"], 0.7)
-        self.assertEqual(config["ai"]["systemPrompt"], "你是文档助手")
+        self.assertEqual(set(config["ai"]), {"claude"})
+        self.assertEqual(config["ai"]["claude"]["timeoutSeconds"], 30)
         again = server_config.config_to_json(config)
-        self.assertEqual(again["ai"]["temperature"], 0.7)
-        self.assertEqual(again["ai"]["systemPrompt"], "你是文档助手")
+        self.assertEqual(set(again["ai"]), {"claude"})
 
-    def test_ai_config_rejects_invalid_temperature(self):
-        for value in (5, -1, "abc", True):
-            path = self.write_config({"ai": {"temperature": value}})
-            with self.assertRaises(server_config.ConfigError, msg=str(value)):
-                server_config.load_config(path, self.docs)
+    def test_ai_config_rejects_invalid_claude_timeout(self):
+        path = self.write_config({"ai": {"claude": {"timeoutSeconds": 999}}})
+        with self.assertRaises(server_config.ConfigError):
+            server_config.load_config(path, self.docs)
 
     def test_reconcile_manual_folder_deletion_updates_config_without_recreating_mounts(self):
         path = self.write_config({'repositories': [
@@ -1329,12 +1328,12 @@ class AdminConfigTests(ServerTestBase):
         csrf = self.admin_login()
         data = self.client.get('/__config/profile-content').get_json()['data']
         data['credentials'] = {'__default__': {'username': 'profile-user', 'password': ' profile-pass '}}
-        data['ai']['model'] = 'profile-model'
+        data['ai']['claude']['timeoutSeconds'] = 66
         data['auth']['url'] = 'https://svn.example.com/auth-check/'
         result = self.client.post('/__config/profiles', json={'action': 'write', 'data': data}, headers={'X-CSRF-Token': csrf})
         self.assertEqual(result.status_code, 200, result.get_data(as_text=True))
         self.assertEqual(self.auth.repo_sync_credential(self.config['repositories'][0]), ('profile-user', ' profile-pass '))
-        self.assertEqual(self.config['ai']['model'], 'profile-model')
+        self.assertEqual(self.config['ai']['claude']['timeoutSeconds'], 66)
         self.assertEqual(self.config['auth']['url'], data['auth']['url'])
         # 管理员读取配置时下发明文凭据，供配置页回填同步账号与密码
         exposed = self.client.get('/__config').get_json()['config']
@@ -1343,7 +1342,7 @@ class AdminConfigTests(ServerTestBase):
         self.assertEqual(reread['credentials'], data['credentials'])
         # SVN 认证路径随 JSON 方案一起读写，JSON 编辑框可见
         self.assertEqual(reread['auth']['url'], data['auth']['url'])
-        self.assertEqual(reread['ai']['model'], 'profile-model')
+        self.assertEqual(reread['ai']['claude']['timeoutSeconds'], 66)
         anonymous = self.app.test_client()
         self.assertEqual(anonymous.get('/__config/profile-content').status_code, 401)
         self.assertNotIn('profile-pass', anonymous.get('/__auth/session').get_data(as_text=True))
@@ -1375,27 +1374,27 @@ class AdminConfigTests(ServerTestBase):
         self.assertEqual(result['lastSuccessAt'], '2026-10-13T01:00:00Z')
         self.assertEqual(result['error'], 'auth_failed')
 
-    def test_ai_endpoint_writes_json_config_section(self):
-        self.assertEqual(self.client.put("/__admin/ai", json={"model": "x"}).status_code, 401)
+    def test_ai_endpoint_only_accepts_claude_cli_settings(self):
+        self.assertEqual(self.client.put("/__admin/ai", json={"claude": {"enabled": True}}).status_code, 401)
         csrf = self.admin_login()
-        self.assertEqual(self.client.put("/__admin/ai", json={"model": "x"}).status_code, 403)
-        result = self.client.put("/__admin/ai", json={
-            "provider": "openai", "baseUrl": "https://api.example.invalid/v1",
-            "model": "deepseek-v4-flash", "apiKey": "sk-test",
-            "temperature": 0.5, "systemPrompt": "你是文档助手", "unknown": "x"},
-            headers={"X-CSRF-Token": csrf})
+        self.assertEqual(self.client.put("/__admin/ai", json={"claude": {"enabled": True}}).status_code, 403)
+        legacy = self.client.put("/__admin/ai", json={"model": "deepseek-v4-flash"},
+                                 headers={"X-CSRF-Token": csrf})
+        self.assertEqual(legacy.status_code, 400)
+        self.assertEqual(legacy.get_json()["code"], "unknown_ai_field")
+        result = self.client.put("/__admin/ai", json={"claude": {"enabled": True, "timeoutSeconds": 45}},
+                                 headers={"X-CSRF-Token": csrf})
         self.assertEqual(result.status_code, 200, result.get_data(as_text=True))
         ai = result.get_json()["ai"]
-        self.assertEqual(ai["model"], "deepseek-v4-flash")
-        self.assertEqual(ai["temperature"], 0.5)
-        self.assertEqual(ai["systemPrompt"], "你是文档助手")
-        self.assertNotIn("unknown", ai)
-        # 已写进配置文件（运行配置与配置方案）
+        self.assertEqual(set(ai), {"claude"})
+        self.assertEqual(ai["claude"]["timeoutSeconds"], 45)
+        # 已写进配置文件（运行配置与配置方案），旧字段不会复活
         saved = json.loads(Path(self.config["path"]).read_text(encoding="utf-8"))
-        self.assertEqual(saved["ai"]["model"], "deepseek-v4-flash")
+        self.assertEqual(saved["ai"]["claude"]["timeoutSeconds"], 45)
+        self.assertEqual(set(saved["ai"]), {"claude"})
         profile = json.loads((self.docs / "html" / "md2web_config.json").read_text(encoding="utf-8"))
-        self.assertEqual(profile["ai"]["model"], "deepseek-v4-flash")
-        self.assertEqual(profile["ai"]["temperature"], 0.5)
+        self.assertEqual(profile["ai"]["claude"]["timeoutSeconds"], 45)
+        self.assertEqual(set(profile["ai"]), {"claude"})
 
     def test_settings_dialog_save_keeps_local_repository_and_updates_ai(self):
         """网页「服务设置」弹窗整体保存时不能把本地仓库误当成 SVN 仓库（url 为空 → 报错）。"""
@@ -1414,7 +1413,7 @@ class AdminConfigTests(ServerTestBase):
              'credential_group': repo.get('credential_group', ''),
              'syncIntervalSeconds': repo.get('syncIntervalSeconds')}
             for repo in current['repositories']]
-        current['ai']['model'] = 'deepseek-v4-flash'
+        current['ai']['claude']['timeoutSeconds'] = 55
         result = self.client.put('/__config', json=current, headers={'X-CSRF-Token': csrf})
         self.assertEqual(result.status_code, 200, result.get_data(as_text=True))
         saved = result.get_json()['config']
@@ -1424,7 +1423,7 @@ class AdminConfigTests(ServerTestBase):
         self.assertFalse(repos['local']['allowCommit'])
         self.assertEqual(repos['local']['group'], '硬件')
         self.assertEqual(repos['hardware']['sourceMode'], 'svn')
-        self.assertEqual(saved['ai']['model'], 'deepseek-v4-flash')
+        self.assertEqual(saved['ai']['claude']['timeoutSeconds'], 55)
 
     def setUp(self):
         super().setUp()
@@ -1613,29 +1612,33 @@ class AdminConfigTests(ServerTestBase):
         payload = self.client.get("/__config").get_json()["config"]
         self.assertEqual(payload["auth"]["url"], self.config["auth"]["url"])
         payload["auth"]["url"] = "https://svn.other.invalid/svn/accounts/auth-check/"
-        payload["ai"] = {"provider": "deepseek", "baseUrl": "https://api.deepseek.com/chat/completions",
-                         "model": "deepseek-chat", "apiKey": "sk-team", "useProxy": "auto", "contextChars": 5000}
+        payload["ai"] = {"claude": {"enabled": True, "timeoutSeconds": 90},
+                         "provider": "deepseek", "apiKey": "sk-team"}
         response = self.client.put("/__config", json=payload, headers={"X-CSRF-Token": csrf})
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         self.assertEqual(self.config["auth"]["url"], "https://svn.other.invalid/svn/accounts/auth-check/")
         on_disk = json.loads(Path(self.config["path"]).read_text(encoding="utf-8"))
-        self.assertEqual(on_disk["ai"]["model"], "deepseek-chat")
+        self.assertEqual(on_disk["ai"]["claude"]["timeoutSeconds"], 90)
+        self.assertEqual(set(on_disk["ai"]), {"claude"})
         # 认证源变化必须让 SVN 用户旧会话失效；管理员会话保留以便继续配置
         self.assertFalse(svn_client.get("/__auth/session").get_json()["authenticated"])
         session = self.client.get("/__auth/session").get_json()
         self.assertTrue(session["authenticated"])
-        self.assertNotIn("apiKey", session["site"]["ai"])
+        self.assertEqual(session["site"]["ai"], {"enabled": True})
+        self.assertNotIn("sk-team", json.dumps(session))
         self.assertEqual(session["site"]["authConfigured"], True)
 
-    def test_anonymous_session_hides_ai_key(self):
+    def test_anonymous_session_only_reports_ai_enabled(self):
         csrf = self.admin_login()
         payload = self.client.get("/__config").get_json()["config"]
-        payload["ai"] = {"provider": "openai", "baseUrl": "https://api.example.com/v1/chat/completions",
-                         "model": "m", "apiKey": "sk-secret", "useProxy": "auto", "contextChars": 6000}
+        payload["ai"] = {"claude": {"enabled": True, "repositories": [
+            {"id": "a", "folder": "a", "url": "https://svn.example.invalid/a",
+             "username": "sync-user", "password": "sync-secret"}]}}
         self.client.put("/__config", json=payload, headers={"X-CSRF-Token": csrf})
         self.client.post("/__auth/logout", json={}, headers={"X-CSRF-Token": self.client.get("/__auth/session").get_json()["csrfToken"]})
         site = self.client.get("/__auth/session").get_json()["site"]
-        self.assertNotIn("apiKey", site["ai"] or {})
+        self.assertEqual(site["ai"], {"enabled": True})
+        self.assertNotIn("sync-secret", json.dumps(site))
         self.assertFalse(site["authConfigured"] is None)
 
     def test_config_api_rejects_invalid_payload(self):
@@ -1799,7 +1802,8 @@ class ConfigFileTests(ServerTestBase):
         self.assertTrue(path.exists())
         self.assertEqual(loaded["auth"]["url"], "")
         self.assertEqual(loaded["repositories"], [])
-        self.assertEqual(loaded["ai"]["provider"], "openai")
+        self.assertEqual(set(loaded["ai"]), {"claude"})
+        self.assertFalse(loaded["ai"]["claude"]["enabled"])
 
     def test_saved_config_roundtrip_keeps_values(self):
         path = self.tmp / "config" / "server.local.json"

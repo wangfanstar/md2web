@@ -95,16 +95,15 @@ class ConfigProfileTests(unittest.TestCase):
         payload = config.config_to_json(self.loaded)
         payload['credentials'] = {'__default__': {'username': 'test-user', 'password': ' test password '}}
         payload['auth']['url'] = 'https://svn.example.com/auth'
-        payload['ai'].update({'model': 'test-model', 'apiKey': 'test-key-not-real'})
+        payload['ai']['claude']['timeoutSeconds'] = 88
         saved = config.save_config(self.path, payload, self.docs)
         data = profiles.read_profile(self.docs, profiles.DEFAULT_NAME)
         self.assertEqual(data['credentials']['__default__']['password'], ' test password ')
         self.assertEqual(data['auth']['url'], payload['auth']['url'])
-        self.assertEqual(data['ai']['apiKey'], 'test-key-not-real')
+        self.assertEqual(data['ai']['claude']['timeoutSeconds'], 88)
         restored = profiles.initialize(saved, self.docs)
         self.assertEqual(restored['credentials'], payload['credentials'])
         self.assertNotIn('test password', json.dumps(config.public_config(restored)))
-        self.assertNotIn('test-key-not-real', json.dumps(config.public_config(restored)))
 
     def test_startup_recovers_malformed_profile_from_last_saved_copy(self):
         mirror = self.docs / 'html/md2web_config.json'

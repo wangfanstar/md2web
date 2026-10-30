@@ -521,7 +521,8 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             except (ValueError, OSError):
                 ready = False
             repos.append({'id': repo['id'], 'name': repo.get('name') or repo['id'], 'ready': ready,
-                          'revision': revision})
+                          'revision': revision, 'path': settings['codeFolder'] + '/' + repo['folder'],
+                          'folders': code_qa.directory_choices(docs_root, settings['codeFolder'] + '/' + repo['folder']) if ready else []})
         folders = []
         for folder in settings['documentFolders']:
             try:
@@ -529,6 +530,9 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             except ValueError:
                 available = False
             folders.append({'path': folder, 'available': available})
+            if available:
+                folders.extend({'path': child, 'available': True} for child in code_qa.directory_choices(docs_root, folder))
+
         return jsonify(ok=True, enabled=bool(settings.get('enabled')), repositories=repos,
                        defaultRepository='', documentFolders=folders, defaultDocumentFolders=['md'])
 
@@ -538,7 +542,9 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         if rejected:
             return rejected
         from . import code_qa
-        return jsonify(ok=True, state=code_qa.read_sync_state(auth_service))
+        settings = code_qa.validate((config.get('ai') or {}).get('claude'))
+        return jsonify(ok=True, state=code_qa.read_sync_state(auth_service),
+                       discovered=code_qa.discover_repositories(docs_root, settings, auth_service.svn, str(Path(config['storage']['database']).parent / 'svn-discovery')))
 
     @app.post('/__admin/ai/personal-configs/clear')
     def clear_retired_ai_configs():
@@ -568,7 +574,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             return rejected
         from . import code_qa
         payload = request.get_json(silent=True)
-        if not isinstance(payload, dict) or set(payload) - {'messages', 'codeRepositoryId', 'documentFolders'}:
+        if not isinstance(payload, dict) or set(payload) - {'messages', 'codeRepositoryId', 'documentFolders', 'codeFolders'}:
             return json_error(400, 'invalid_request', '仅接受对话、代码库 ID 和开放的文档目录')
         if not code_qa.LOCK.acquire(False):
             return json_error(429, 'ai_busy', '正在问答或更新代码库，请稍后重试')
@@ -585,7 +591,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             except ValueError as error:
                 results.put(('error', {'message': str(error)}))
             except Exception:
-                results.put(('error', {'message': 'Claude 执行失败，请检查安装、中转及代码库'}))
+                results.put(('error', {'message': 'Claude 执行失败，请检查安装、权限及代码库'}))
             finally:
                 with ai_jobs_lock:
                     ai_jobs.pop(job_id, None)
@@ -657,13 +663,17 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             return json_error(400, "invalid_request", "AI 配置必须是 JSON 对象")
+        unknown = set(payload) - set(server_config.AI_FIELDS) - {'expectedConfigVersion'}
+        if unknown:
+            return json_error(400, "unknown_ai_field", "AI 配置只接受 claude 字段；旧 API/Key/模型字段已移除")
         current = config_to_json(config)
         if payload.get('expectedConfigVersion') and payload['expectedConfigVersion'] != policy.version(current):
             return json_error(409, 'config_conflict', '配置已变化，请关闭并重新打开配置后再保存')
-        ai = dict(current.get("ai") or {})
-        for key in server_config.AI_FIELDS:
-            if key in payload:
-                ai[key] = payload[key]
+        ai = {}
+        if 'claude' in payload:
+            ai['claude'] = payload['claude']
+        elif (current.get("ai") or {}).get('claude') is not None:
+            ai['claude'] = current['ai']['claude']
         current["ai"] = ai
         try:
             loaded = save_config(config["path"], current, docs_root)

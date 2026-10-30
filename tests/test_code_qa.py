@@ -16,17 +16,38 @@ class CodeQaTests(unittest.TestCase):
         self.settings = {'enabled': True, 'defaultRepository': 'a', 'repositories': [
             {'id': 'a', 'folder': 'a', 'url': 'https://svn.example.com/a', 'revision': '12'}]}
         self.f.config['ai']['claude'] = self.settings
-        self.f.config['ai']['baseUrl'] = 'http://127.0.0.1:8787'
         self.path = self.f.docs / 'code' / 'a'
         self.path.mkdir(parents=True)
         (self.path / '.md2web-revision').write_text('12', encoding='utf-8')
         (self.path / 'main.py').write_text('def frobnicate():\n    return 42\n', encoding='utf-8')
 
+    def test_subfolder_choices_exclude_private_and_links(self):
+        (self.path / 'src').mkdir()
+        (self.path / '.svn').mkdir()
+        (self.path / 'node_modules').mkdir()
+        choices = code_qa.directory_choices(self.f.docs, 'code/a')
+        self.assertIn('code/a/src', choices)
+        self.assertNotIn('code/a/.svn', choices)
+        self.assertNotIn('code/a/node_modules', choices)
+
+    def test_discovery_reads_working_copy_url(self):
+        (self.path / '.svn').mkdir()
+        (self.path / 'src').mkdir()
+        (self.path / 'src' / '.svn').mkdir()
+        svn = mock.Mock()
+        svn.info.return_value = {'url': 'https://svn.example.com/trunk', 'revision': '42'}
+        settings = code_qa.validate(self.settings)
+        found = code_qa.discover_repositories(self.f.docs, settings, svn, 'private-config')
+        self.assertEqual(found[0]['url'], 'https://svn.example.com/trunk')
+        self.assertTrue(found[0]['configured'])
+        self.assertEqual(len(found), 1)
+        svn.info.assert_called_once()
+
     def test_public_permissions_secrets_and_retired_config(self):
         f = self.f
         self.assertEqual(f.client.get('/__ai/public').status_code, 401)
         csrf = f.login()
-        f.config['ai']['apiKey'] = 'never-publish-me'
+        f.config['ai']['claude']['repositories'][0].update(username='sync-user', password='never-publish-me')
         self.assertNotIn('never-publish-me', f.client.get('/__auth/session').get_data(as_text=True))
         public = f.client.get('/__ai/public').get_json()
         self.assertEqual(public['repositories'][0]['revision'], '12')
@@ -36,20 +57,61 @@ class CodeQaTests(unittest.TestCase):
         self.assertEqual(f.client.get('/code/a/main.py').status_code, 404)
         self.assertEqual(f.client.post('/__ai/chat', json={'path': '/etc'}, headers={'X-CSRF-Token': csrf}).status_code, 400)
 
-    def test_real_retrieval_and_tool_free_process(self):
+    def test_multiple_code_scopes_and_nested_documents_are_validated(self):
+        (self.path / 'src').mkdir()
+        (self.f.docs / 'md' / 'nested').mkdir()
+        payload = {'messages': [{'role': 'user', 'content': 'explain'}],
+                   'documentFolders': ['md/nested'], 'codeFolders': ['code/a/src']}
+        with mock.patch('server.code_qa.subprocess.Popen', return_value=self.fake_process()):
+            data = code_qa.answer(self.f.docs, self.f.config['ai'], payload)
+        self.assertEqual(data['directories'], ['code/a/src', 'md/nested'])
+        for invalid in ('code/other', 'code/a/../private', 'code/a/.svn'):
+            payload['codeFolders'] = [invalid]
+            with self.assertRaises(ValueError):
+                code_qa.answer(self.f.docs, self.f.config['ai'], payload)
+
+    def test_direct_cli_handoff_inherits_server_configuration(self):
         process = mock.Mock(returncode=0)
         process.poll.return_value = 0
         process.communicate.return_value = (json.dumps({'result': '42'}).encode('utf-8'), b'')
-        with mock.patch('server.code_qa.subprocess.Popen', return_value=process) as launch:
+        with mock.patch.dict('os.environ', {'ANTHROPIC_BASE_URL': 'http://cli-configured/', 'ANTHROPIC_AUTH_TOKEN': 'cli-token'}), mock.patch('server.code_qa.subprocess.Popen', return_value=process) as launch:
             data = code_qa.answer(self.f.docs, self.f.config['ai'], {'messages': [{'role': 'user', 'content': 'frobnicate'}], 'codeRepositoryId': 'a'})
         self.assertEqual(data['revision'], '12')
-        self.assertEqual(data['sources'], ['main.py'])
+        self.assertEqual(data['directories'], ['code/a', 'md'])
         self.assertEqual(data['answer'], '42')
-        self.assertIn(b'return 42', process.communicate.call_args[0][0])
+        self.assertNotIn(b'return 42', process.communicate.call_args[0][0])
+        self.assertIn(b'code/a', process.communicate.call_args[0][0])
+        self.assertIn(b'frobnicate', process.communicate.call_args[0][0])
         args = launch.call_args[0][0]
-        self.assertEqual(args[args.index('--tools') + 1], '')
+        self.assertEqual(args[args.index('--tools') + 1], 'Read,Glob,Grep')
+        for flag in ('--bare', '--setting-sources', '--model', '--max-turns'):
+            self.assertNotIn(flag, args)
+        self.assertEqual(launch.call_args[1]['env']['ANTHROPIC_BASE_URL'], 'http://cli-configured/')
+        self.assertEqual(launch.call_args[1]['env']['ANTHROPIC_AUTH_TOKEN'], 'cli-token')
         self.assertNotIn('--dangerously-skip-permissions', args)
         self.assertEqual(launch.call_args[1]['cwd'], str(self.f.docs.resolve()))
+
+    def test_long_prompt_is_written_in_a_single_communicate(self):
+        process = mock.Mock(returncode=0)
+        process.poll.return_value = 0
+        process.communicate.return_value = (json.dumps({'result': 'ok'}).encode('utf-8'), b'')
+        question = 'x' * 30000
+        with mock.patch('server.code_qa.subprocess.Popen', return_value=process):
+            code_qa.answer(self.f.docs, self.f.config['ai'], {'messages': [{'role': 'user', 'content': question}]})
+        self.assertEqual(process.communicate.call_count, 1)
+        self.assertIn(question.encode('utf-8'), process.communicate.call_args[0][0])
+        self.assertEqual(process.communicate.call_args[1]['timeout'], 120)
+
+    def test_missing_executable_reports_clear_error(self):
+        with mock.patch('server.code_qa.subprocess.Popen', side_effect=FileNotFoundError(2, 'No such file')):
+            with self.assertRaises(ValueError) as caught:
+                code_qa.answer(self.f.docs, self.f.config['ai'], {'messages': [{'role': 'user', 'content': 'frobnicate'}]})
+        self.assertIn('无法启动 Claude 命令', str(caught.exception))
+
+    def test_corrupt_sync_state_is_treated_as_empty(self):
+        code_qa.state_path(self.f.auth).parent.mkdir(parents=True, exist_ok=True)
+        code_qa.state_path(self.f.auth).write_text('{not-json', encoding='utf-8')
+        self.assertEqual(code_qa.read_sync_state(self.f.auth), {})
 
     def test_cancel_terminates_process(self):
         import threading
@@ -62,12 +124,7 @@ class CodeQaTests(unittest.TestCase):
                 code_qa.answer(self.f.docs, self.f.config['ai'], {'messages': [{'role': 'user', 'content': 'frobnicate'}]}, cancel)
         stop.assert_called_once_with(process)
 
-    def test_private_files_and_path_validation(self):
-        (self.path / '.env').write_text('frobnicate secret', encoding='utf-8')
-        (self.path / 'credentials.json').write_text('frobnicate secret', encoding='utf-8')
-        content, sources = code_qa.retrieve(self.path, 'frobnicate')
-        self.assertNotIn('secret', content)
-        self.assertEqual(sources, ['main.py'])
+    def test_path_validation(self):
         for field, value in [('folder', '../escape'), ('id', ''), ('revision', '-1'), ('url', 'file:///etc')]:
             settings = json.loads(json.dumps(self.settings))
             settings['repositories'][0][field] = value
@@ -127,11 +184,12 @@ class CodeQaTests(unittest.TestCase):
         with mock.patch('server.code_qa.subprocess.Popen', return_value=process):
             data = code_qa.answer(self.f.docs, self.f.config['ai'], {'messages': [{'role': 'user', 'content': 'frobnicate'}]})
         prompt = process.communicate.call_args[0][0].decode('utf-8')
-        self.assertIn('document-only', prompt)
+        self.assertNotIn('document-only', prompt)
+        self.assertEqual(data['directories'], ['md'])
         self.assertNotIn('return 42', prompt)
         self.assertEqual(data['repository'], '')
         self.assertEqual(data['documentFolders'], ['md'])
-        self.assertIn('md/guide.md', data['documentSources'])
+        self.assertEqual(data['documentSources'], [])
 
     def test_selected_extra_folder_excludes_unselected_md_and_code(self):
         (self.f.docs / 'md' / 'guide.md').write_text('frobnicate excluded-default', encoding='utf-8')
@@ -144,10 +202,11 @@ class CodeQaTests(unittest.TestCase):
         with mock.patch('server.code_qa.subprocess.Popen', return_value=process):
             data = code_qa.answer(self.f.docs, self.f.config['ai'], payload)
         prompt = process.communicate.call_args[0][0].decode('utf-8')
-        self.assertIn('selected-manual', prompt)
+        self.assertIn('manuals', prompt)
+        self.assertNotIn('selected-manual', prompt)
         self.assertNotIn('excluded-default', prompt)
         self.assertNotIn('return 42', prompt)
-        self.assertEqual(data['documentSources'], ['manuals/guide.txt'])
+        self.assertEqual(data['directories'], ['manuals'])
         for folder in ('../private', 'code', 'html', 'unconfigured'):
             payload['documentFolders'] = [folder]
             with self.assertRaises(ValueError):
@@ -162,7 +221,7 @@ class CodeQaTests(unittest.TestCase):
         with mock.patch('server.code_qa.subprocess.Popen', return_value=self.fake_process()):
             data = code_qa.answer(self.f.docs, self.f.config['ai'], {'messages': [{'role': 'user', 'content': 'frobnicate'}], 'codeRepositoryId': 'local'})
         self.assertEqual(data['revision'], 'local')
-        self.assertEqual(data['sources'], ['main.c'])
+        self.assertEqual(data['directories'], ['code/versions/项目/v1', 'md'])
 
     def test_daily_sync_uses_account_once_per_day_and_persists(self):
         from datetime import datetime, timedelta

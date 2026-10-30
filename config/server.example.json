@@ -37,9 +37,6 @@
     }
   ],
   "ai": {
-    "baseUrl": "http://WINDOWS_RELAY_HOST:8787/",
-    "model": "",
-    "apiKey": "",
     "claude": {
       "enabled": false,
       "executable": "claude",

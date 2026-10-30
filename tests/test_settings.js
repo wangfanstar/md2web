@@ -36,13 +36,13 @@ function load(options) {
   vm.runInContext(source.replace(
     '  window.Settings = { open: open, close: close, load: loadConfig, save: saveConfig };',
     '  globalThis.subject = { readConfig: readConfig, repositoryRow: repositoryRow, state: state,\n'
-    + '    applyAiJson: applyAiJson, renderAiJson: renderAiJson, savePersonalAi: savePersonalAi };'
+    + '    applyAiJson: applyAiJson, renderAiJson: renderAiJson };'
     + '\n  window.Settings = {};'), context);
   context.saved = saved;
   return context.subject;
 }
 
-// 构造 settings-dialog 的最小 DOM：仓库行 + [data-config]/[data-ai-chip] 字段 + AI JSON 文本框。
+// 构造 settings-dialog 的最小 DOM：仓库行 + [data-config] 字段 + AI JSON 文本框。
 function overlay(rows, fields, extra) {
   const values = Object.assign({}, fields);
   const objects = {};
@@ -81,7 +81,7 @@ function overlay(rows, fields, extra) {
 function config(repositories) {
   return {
     auth: { url: 'https://svn.example.invalid/auth/', credential_group: 'default' },
-    ai: { provider: 'openai', baseUrl: '', model: '', apiKey: '', useProxy: 'auto', contextChars: 6000 },
+    ai: { claude: { enabled: false, executable: 'claude', timeoutSeconds: 120, repositories: [] } },
     sync: { credential_name: '', interval_seconds: 120 },
     repositories,
   };
@@ -149,94 +149,24 @@ test('repository rows mark the source mode and disable SVN-only fields', () => {
   assert.doesNotMatch(svn, /data-repo="url"[^>]*disabled/);
 });
 
-test('AI 配置 JSON 可直接编辑并填回表单', () => {
-  const subject = load();
-  subject.state.config = config([]);
-  subject.state.config.ai = { provider: 'openai', model: 'old', contextChars: 6000 };
-  const view = overlay([], { 'ai.model': 'old', 'ai.contextChars': '6000' }, {
-    json: JSON.stringify({ provider: 'openai', model: 'deepseek-v4-flash', temperature: 0.7,
-      systemPrompt: '你是文档助手' }, null, 2),
-  });
-  subject.state.overlay = view;
-
-  subject.applyAiJson();
-  assert.equal(subject.state.config.ai.model, 'deepseek-v4-flash');
-  assert.equal(subject.state.config.ai.temperature, 0.7);
-  assert.equal(subject.state.config.ai.systemPrompt, '你是文档助手');
-  assert.equal(view.querySelector('[data-config="ai.model"]').value, 'deepseek-v4-flash');
-  // 表单保存时仍带上 JSON 里的额外字段
-  const saved = subject.readConfig();
-  assert.equal(saved.ai.temperature, 0.7);
-  assert.equal(saved.ai.systemPrompt, '你是文档助手');
+test('Claude 目录配置 JSON 保存时不需要 API 设置', () => {
+  const subject=load();subject.state.config=config([]);
+  const view=overlay([],{}, {json:JSON.stringify({claude:{enabled:true,documentFolders:['md','manuals'],codeFolder:'code'}})});
+  subject.state.overlay=view;subject.applyAiJson();
+  const saved=subject.readConfig();
+  assert.equal(saved.ai.claude.enabled,true);
+  assert.equal(saved.ai.claude.codeFolder,'code');
+  assert.equal(JSON.parse(view.querySelector('[data-ai-json]').value).claude.documentFolders[1],'manuals');
 });
 
 test('AI 配置 JSON 含未知字段时不应用', () => {
   const subject = load();
   subject.state.config = config([]);
-  subject.state.config.ai = { provider: 'openai', model: 'old' };
+  subject.state.config.ai = { claude: { enabled: false, executable: 'claude', timeoutSeconds: 120, repositories: [] } };
   const view = overlay([], {}, { json: JSON.stringify({ model: 'x', evil: 1 }) });
   subject.state.overlay = view;
 
   subject.applyAiJson();
-  assert.equal(subject.state.config.ai.model, 'old');
+  assert.equal(subject.state.config.ai.claude.timeoutSeconds, 120);
   assert.match(view.status.textContent, /未知字段/);
-});
-
-test('管理员保存我的 AI 设置时同时写入服务器配置 JSON', async () => {
-  const calls = [];
-  const subject = load({
-    siteAuth: { isAdmin: () => true, csrfToken: () => 'csrf-1' },
-    fetch: (url, options) => {
-      calls.push({ url, options });
-      return Promise.resolve({
-        ok: true, status: 200,
-        json: () => Promise.resolve({ ok: true, ai: { model: 'deepseek-v4-flash' } }),
-      });
-    },
-  });
-  subject.state.config = config([]);
-  const view = overlay([], {
-    provider: 'openai', model: 'deepseek-v4-flash',
-    baseUrl: 'https://api.example.invalid/v1', apiKey: 'sk-test',
-    useProxy: 'auto', contextChars: '100000',
-    sourcePath: 'D:/repo', writeServer: 'on',
-  });
-  view.querySelector = ((original) => selector => {
-    const match = selector.match(/^\[data-ai-chip="([^"]+)"\]$/);
-    if (match && match[1] === 'writeServer') {
-      return { checked: true, value: 'on' };
-    }
-    return original(selector);
-  })(view.querySelector);
-  subject.state.overlay = view;
-
-  subject.savePersonalAi();
-  await new Promise(resolve => setTimeout(resolve, 10));
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, '__admin/ai');
-  assert.equal(calls[0].options.method, 'PUT');
-  assert.equal(calls[0].options.headers['X-CSRF-Token'], 'csrf-1');
-  const payload = JSON.parse(calls[0].options.body);
-  assert.equal(payload.model, 'deepseek-v4-flash');
-  assert.equal(payload.baseUrl, 'https://api.example.invalid/v1');
-  assert.match(view.status.textContent, /服务器配置/);
-});
-
-test('非管理员保存个人 AI 设置不修改公共 JSON', async () => {
-  const calls = [];
-  const subject = load({
-    siteAuth: { isAdmin: () => false, csrfToken: () => 'csrf-1' },
-    fetch: (url, options) => {
-      calls.push({ url, options });
-      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true }) });
-    },
-  });
-  subject.state.config = config([]);
-  const view = overlay([], { model: 'deepseek-v4-flash' });
-  subject.state.overlay = view;
-
-  subject.savePersonalAi();
-  await new Promise(resolve => setTimeout(resolve, 10));
-  assert.equal(calls.length, 0);
-  assert.match(view.status.textContent, /未写入服务器配置/);
 });

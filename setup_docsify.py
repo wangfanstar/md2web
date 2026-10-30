@@ -2116,6 +2116,11 @@ def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.h
     </div>
     <p class="hint">当前搜索范围：<strong>全部仓库</strong>；默认模式：<strong>文档名和全文</strong>，结果按两类分组显示。</p>
     <div class="results" data-master-results></div>
+    <form onsubmit="event.preventDefault();AIAssistant.open();document.querySelector('[data-ai-input]').value=this.querySelector('input').value;">
+      <label for="home-ai-question">AI 知识问答</label>
+      <input id="home-ai-question" placeholder="输入问题，结合知识库和代码寻找答案" required style="width:65%;padding:12px">
+      <button type="submit">选择范围并提问 →</button>
+    </form>
     <div data-master-repositories>{''.join(sections)}</div>
     <h2>参考文献</h2>
     {''.join(reference_cards)}
@@ -2124,6 +2129,12 @@ def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.h
   </div>
   <script>window.__MD2WEB_REPOS__ = {json.dumps(repos, ensure_ascii=False)};</script>
   <script>{MASTER_SCRIPT}</script>
+  <link rel="stylesheet" href="lib/ai-assistant.css">
+  <script src="lib/purify.min.js"></script>
+  <script src="lib/marked.min.js"></script>
+  <script src="lib/sanitize.js"></script>
+  <script src="lib/ai-retrieval.js"></script>
+  <script src="lib/ai-assistant.js"></script>
   <script src="lib/home-repositories.js"></script>
   <script src="lib/auth.js"></script>
   <script src="lib/md2web-feedback.js"></script>

@@ -100,3 +100,7 @@ AI 面板的管理员「配置」入口可管理 `ai.claude`：
 以 README.md 和 AGENTS.md 的 2026-10-30「范围与每日更新」约定为准：默认仅检索 docs/md，不再使用 defaultRepository 自动选择代码库。已增加文档范围白名单、codeFolder、可选本地代码版本、SVN 单库账号、北京时间每日同步与持久化去重。上文「自动同步尚未实现」属于首版记录，现已由本次更新实现；任务队列和逐 token 输出仍保持原有边界。
 
 本次验证：Python 3.6.8 全量 610 项（跳过 1 项）、相关 Node 测试 79 项、离线构建与 Edge/Playwright 范围切换和管理员 JSON 回归通过；真实 SVN 与模型中转仍需按部署环境账号完成连通性验证，测试未向生产模型发送代码。
+
+## 调用方式修订：直接使用服务器 Claude
+
+按用户最新要求，md2web 无需 API 配置。网站在 docs 工作目录直接启动服务账号已有的 claude -p，继承该账号环境与 Claude 配置，通过 stdin 传递指定目录、版本和问题，收集 JSON result。认证、模型和 Windows 中转由服务器 Claude 自身管理，网页移除 API/Key/模型字段。Claude 使用只读 Read/Glob/Grep 自行读取搜索所选目录，不再由 Python 截取检索片段；上述首版 API 注入、禁用全部工具和片段数量限制均已废止。默认范围、目录校验、SVN 每日更新、互斥、独立会话与取消逻辑保留。

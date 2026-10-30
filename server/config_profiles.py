@@ -164,6 +164,10 @@ def validate_data(data):
     if not isinstance(data, dict):
         raise ConfigError('方案必须是 JSON 对象')
     data = dict(data)
+    ai = data.get('ai')
+    if isinstance(ai, dict):
+        claude = ai.get('claude')
+        data['ai'] = {} if claude is None else {'claude': claude}
     for key in ('authorization', 'cache', 'historyCompare', 'uploads', 'pathAliases', 'entryAliases'):
         data.setdefault(key, {})
     data.setdefault('configSchemaVersion', 2)

@@ -18,21 +18,8 @@ DEFAULT_IDLE_MINUTES = 30
 DEFAULT_SYNC_INTERVAL = 120
 ALLOWED_URL_SCHEMES = ("http", "https")
 URL_RE = re.compile(r"^https?://[^\s/]+/", re.IGNORECASE)
-DEFAULT_AI = {
-    "provider": "openai",
-    "baseUrl": "",
-    "model": "",
-    "apiKey": "",
-    "useProxy": "auto",
-    "contextChars": 6000,
-    "sourcePath": "",
-    "temperature": 0.2,
-    "systemPrompt": "",
-}
-
-# AI 配置允许从接口写入的字段（防止客户端往配置里塞未知键）。
-AI_FIELDS = ("provider", "baseUrl", "model", "apiKey", "useProxy", "contextChars",
-             "sourcePath", "temperature", "systemPrompt", "claude")
+# AI 配置只保留 Claude 命令/目录/代码库；旧 API/Key/模型字段已移除。
+AI_FIELDS = ("claude",)
 
 # 网页「服务设置」弹窗只编辑仓库的部分字段（SVN 地址、凭据分组、更新频率），
 # 整体回传时若缺少来源类型/权限等字段，必须沿用磁盘上的既有值：
@@ -297,41 +284,12 @@ def load_config(path, docs_dir, allow_incomplete=False, create_mounts=False):
     ai_raw = raw.get("ai") or {}
     if not isinstance(ai_raw, dict):
         raise ConfigError('ai 必须为 JSON 对象')
-    try:
-        context_chars = int(ai_raw.get('contextChars') or DEFAULT_AI['contextChars'])
-    except (ValueError, TypeError, OverflowError):
-        raise ConfigError('ai.contextChars 必须为整数')
-    if isinstance(ai_raw.get('contextChars'), bool) or not 1000 <= context_chars <= 2000000:
-        raise ConfigError('ai.contextChars 必须在 1000–2000000 之间')
-    temperature = ai_raw.get("temperature", DEFAULT_AI["temperature"])
-    if isinstance(temperature, bool):
-        raise ConfigError("ai.temperature 必须是数值")
-    try:
-        temperature = float(temperature)
-    except (TypeError, ValueError):
-        raise ConfigError("ai.temperature 必须是数值")
-    if not math.isfinite(temperature) or not 0 <= temperature <= 2:
-        raise ConfigError("ai.temperature 必须在 0-2 之间")
-    ai = {
-        "provider": str(ai_raw.get("provider") or DEFAULT_AI["provider"]).strip() or DEFAULT_AI["provider"],
-        "baseUrl": str(ai_raw.get("baseUrl") or "").strip(),
-        "model": str(ai_raw.get("model") or "").strip(),
-        "apiKey": str(ai_raw.get("apiKey") or "").strip(),
-        "useProxy": str(ai_raw.get("useProxy") or DEFAULT_AI["useProxy"]).strip() or DEFAULT_AI["useProxy"],
-        "contextChars": context_chars,
-        "sourcePath": str(ai_raw.get("sourcePath") or "").strip()[:500],
-        "temperature": temperature,
-        "systemPrompt": str(ai_raw.get("systemPrompt") or "")[:4000],
-    }
+    # 旧 ai.provider/baseUrl/model/apiKey 等字段不再读取，保存时也不会写回。
     from . import code_qa
     try:
-        ai['claude'] = code_qa.validate(ai_raw.get('claude'))
+        ai = {'claude': code_qa.validate(ai_raw.get('claude'))}
     except ValueError as error:
         raise ConfigError(str(error))
-    if ai["baseUrl"]:
-        if re.match(r'^https?://[^/\s?#]+$', ai['baseUrl'], re.I):
-            ai['baseUrl'] += '/'
-        ai["baseUrl"] = _check_url(ai["baseUrl"], "ai.baseUrl")
 
     from . import policy
     try:
@@ -480,6 +438,12 @@ def save_config(path, payload, docs_dir, create_mounts=True, sync_profiles=True)
     if not isinstance(payload, dict):
         raise ConfigError("配置必须是 JSON 对象")
     payload = json.loads(json.dumps(payload))
+    if 'ai' in payload:
+        if not isinstance(payload['ai'], dict):
+            raise ConfigError('ai 必须为 JSON 对象')
+        # 旧 API/Key/模型字段不再落盘，只保留 claude。
+        claude = payload['ai'].get('claude')
+        payload['ai'] = {} if claude is None else {'claude': claude}
     from . import config_profiles
     if Path(path).is_file():
         old = json.loads(Path(path).read_text(encoding='utf-8'))
@@ -591,8 +555,14 @@ def default_config():
         "siteBackup": {"enabled": False, "url": "", "intervalSeconds": 3600, "include": ["docs"],
                        "message": "site backup"},
         "repositories": [],
-        "ai": dict(DEFAULT_AI),
+        "ai": default_ai(),
     }
+
+
+def default_ai():
+    """默认只启用 Claude 命令配置；旧 API/Key/模型字段不存在。"""
+    from . import code_qa
+    return {"claude": code_qa.validate(None)}
 
 
 def match_repository(config, document_path):
@@ -626,8 +596,7 @@ def public_config(config):
         "sessionHours": config["auth"]["session_hours"],
         "idleMinutes": config["auth"]["idle_minutes"],
         "authConfigured": bool(config["auth"]["url"]),
-        "ai": {"model": ai.get("model", ""),
-               "enabled": bool((ai.get('claude') or {}).get('enabled'))},
+        "ai": {"enabled": bool((ai.get('claude') or {}).get('enabled'))},
     }
 
 

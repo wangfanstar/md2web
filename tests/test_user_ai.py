@@ -18,10 +18,11 @@ class UserAiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 410)
         self.assertEqual(f.conn.execute('SELECT COUNT(*) FROM user_ai_configs').fetchone()[0], 0)
 
-    def test_public_ai_json_rejects_invalid_context_without_server_error(self):
+    def test_admin_ai_endpoint_rejects_legacy_fields(self):
         f = self.f
         test_server.server_database.ensure_admin(f.conn)
         f.client.post('/__auth/login',json={'username':'admin','password':'admin','mode':'admin'})
         csrf=f.client.get('/__auth/session').get_json()['csrfToken']
         response=f.client.put('/__admin/ai',json={'contextChars':'bad'},headers={'X-CSRF-Token':csrf})
         self.assertEqual(response.status_code,400,response.get_json())
+        self.assertEqual(response.get_json()['code'],'unknown_ai_field')

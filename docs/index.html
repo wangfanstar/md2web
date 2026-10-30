@@ -84,6 +84,11 @@
     </div>
     <p class="hint">当前搜索范围：<strong>全部仓库</strong>；默认模式：<strong>文档名和全文</strong>，结果按两类分组显示。</p>
     <div class="results" data-master-results></div>
+    <form onsubmit="event.preventDefault();AIAssistant.open();document.querySelector('[data-ai-input]').value=this.querySelector('input').value;">
+      <label for="home-ai-question">AI 知识问答</label>
+      <input id="home-ai-question" placeholder="输入问题，结合知识库和代码寻找答案" required style="width:65%;padding:12px">
+      <button type="submit">选择范围并提问 →</button>
+    </form>
     <div data-master-repositories><h2>默认</h2><div class="cards"><a class="card" href="html/index_使用说明.html"><strong>使用说明<span class="badge local">本地文件夹</span></strong><span>目录：md/使用说明</span><span>本地文件夹（不连接 SVN）</span></a></div></div>
     <h2>参考文献</h2>
     <a class="card" href="html/reference_library.html"><strong>参考文献库</strong><span>PDF、Word、Excel、PPT 统一管理与预览</span></a>
@@ -293,6 +298,12 @@
   }
   if (modeSelect) { modeSelect.addEventListener('change', function () { search(input && input.value); }); }
 </script>
+  <link rel="stylesheet" href="lib/ai-assistant.css?v=80a82f3003">
+  <script src="lib/purify.min.js?v=577622c109"></script>
+  <script src="lib/marked.min.js?v=90d4825b21"></script>
+  <script src="lib/sanitize.js?v=3f9c8610e4"></script>
+  <script src="lib/ai-retrieval.js?v=08c93fbbca"></script>
+  <script src="lib/ai-assistant.js?v=3498f12965"></script>
   <script src="lib/home-repositories.js?v=bdd64bef32"></script>
   <script src="lib/auth.js?v=dc4784aa8b"></script>
   <script src="lib/md2web-feedback.js?v=9aca95501d"></script>

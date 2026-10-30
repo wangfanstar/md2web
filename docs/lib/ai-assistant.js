@@ -7,52 +7,18 @@
 
   var STORAGE_KEY = 'md2web:ai-config';
   var GUEST_STORAGE_KEY = 'md2web:ai-config:guest';
-  var configIdentity = '', configEpoch = 0, configReady = false, configLoad = Promise.resolve(), saveQueue = Promise.resolve(), hasPersonalConfig=false, publicSignature='', legacyImportPending=false;
 
   function accountIdentity() {
     var user = window.SiteAuth && SiteAuth.snapshot().user;
     return user ? String(user.id || (user.authSourceId || '') + ':' + user.username) : '';
   }
   function syncPersonalConfig() {
+    // 清除已停用的浏览器端 AI 服务配置（旧版本遗留），不再读取。
     try { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(GUEST_STORAGE_KEY); } catch (_) {}
-    state.config = defaults(); configReady = true;
+    state.config = defaults();
     if (!isAdmin() && state.configOverlay) closeConfig();
     return Promise.resolve(true);
   }
-
-
-  var HISTORY_LIMIT = 8;
-  var UPLOAD_FILE_LIMIT = 256 * 1024;
-  var UPLOAD_TOTAL_LIMIT = 512 * 1024;
-  var DEFAULT_SYSTEM = '你是文档站助手。只依据「参考资料」回答问题，给出简洁准确的中文回答；资料不足时明确说明，不要编造。回答末尾无需重复资料清单。';
-
-  var PROVIDERS = {
-    openai: {
-      label: 'OpenAI 兼容（OpenAI/DeepSeek/Moonshot/vLLM/one-api…）',
-      baseUrl: 'https://api.openai.com/v1/chat/completions',
-      model: 'gpt-4o-mini',
-      style: 'openai'
-    },
-    deepseek: {
-      label: 'DeepSeek',
-      baseUrl: 'https://api.deepseek.com/chat/completions',
-      model: 'deepseek-chat',
-      style: 'openai'
-    },
-    ollama: {
-      label: 'Ollama（本机，无需 Key）',
-      baseUrl: 'http://127.0.0.1:11434/v1/chat/completions',
-      model: 'qwen2.5:7b',
-      style: 'openai'
-    },
-    anthropic: {
-      label: 'Anthropic Claude',
-      baseUrl: 'https://api.anthropic.com/v1/messages',
-      model: 'claude-3-5-sonnet-latest',
-      style: 'anthropic'
-    },
-    custom: { label: '自定义（OpenAI 兼容）', baseUrl: '', model: '', style: 'openai' }
-  };
 
   var state = {
     overlay: null,
@@ -67,80 +33,14 @@
     busy: false
   };
 
-  function serverAiDefaults() {
-    return (window.SiteAuth && window.SiteAuth.aiDefaults && window.SiteAuth.aiDefaults()) || null;
-  }
-
   function isAdmin() {
     var siteAuth = window.SiteAuth;
     return !!(siteAuth && siteAuth.isAdmin && siteAuth.isAdmin());
   }
 
-  function defaults() {
-    var external = window.AI_ASSISTANT_CONFIG || {};
-    var base = {
-      provider: 'openai',
-      baseUrl: PROVIDERS.openai.baseUrl,
-      model: PROVIDERS.openai.model,
-      apiKey: '',
-      temperature: 0.2,
-      contextChars: 6000,
-      systemPrompt: DEFAULT_SYSTEM,
-      useProxy: 'auto',
-      sourcePath: '',
-      scope: [],
-      uploads: []
-    };
-    // 服务端设置（管理员在「设置」中配置）优先于内置默认值，浏览器本地配置优先级最高
-    var server = serverAiDefaults();
-    if (server) {
-      Object.keys(PROVIDERS).forEach(function (name) {
-        if (server.provider === name) {
-          base.provider = name;
-        }
-      });
-      if (server.baseUrl) {
-        base.baseUrl = server.baseUrl;
-      }
-      if (server.model) {
-        base.model = server.model;
-      }
-      if (server.apiKey) {
-        base.apiKey = server.apiKey;
-      }
-      if (server.useProxy) {
-        base.useProxy = server.useProxy;
-      }
-      if (server.contextChars) {
-        base.contextChars = server.contextChars;
-      }
-      if (server.sourcePath) {
-        base.sourcePath = server.sourcePath;
-      }
-      if (server.temperature !== undefined && server.temperature !== null && server.temperature !== '') {
-        base.temperature = Number(server.temperature);
-      }
-      if (server.systemPrompt) {
-        base.systemPrompt = server.systemPrompt;
-      }
-    }
-    Object.keys(PROVIDERS).forEach(function (name) {
-      if (external.provider === name) {
-        base.provider = name;
-      }
-    });
-    return Object.assign(base, external);
-  }
+  function defaults() { return { scope: [], uploads: [] }; }
 
   function loadConfig() { return defaults(); }
-
-
-  function persistConfig() {
-    if (!isAdmin()) return Promise.resolve(false);
-    return fetch('__admin/ai', {method:'PUT', credentials:'same-origin', headers:{'Content-Type':'application/json','X-CSRF-Token':SiteAuth.csrfToken()},body:JSON.stringify(state.config)})
-      .then(function(r){if(!r.ok)throw new Error('公共配置保存失败');return true;});
-  }
-
 
   function configured() { return !!accountIdentity() && location.protocol !== 'file:'; }
 
@@ -309,7 +209,8 @@
     if (!accountIdentity()) { setStatus('请先登录后使用公共 AI 问答'); return Promise.resolve(); }
     var folders=Array.prototype.map.call(state.overlay.querySelectorAll('[data-document-folder]:checked'),function(input){return input.value;});
     var selected=state.overlay.querySelector('[data-code-repository]');
-    var scopeKey=JSON.stringify([accountIdentity(),selected ? selected.value : '',folders]);
+    var codeFolders=Array.prototype.map.call(state.overlay.querySelectorAll('[data-code-folder]:checked'),function(input){return input.value;});
+    var scopeKey=JSON.stringify([accountIdentity(),codeFolders,folders]);
     var current=ensureConversation();
     if(current.scopeKey!==scopeKey && state.messages.length)current=startConversation();
     current.scopeKey=scopeKey;
@@ -317,7 +218,7 @@
     var bubble = appendMessage('assistant', '正在检索并请求 Claude…');
     var selected = state.overlay.querySelector('[data-code-repository]');
     return fetch('__ai/chat', {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':SiteAuth.csrfToken()},
-      body:JSON.stringify({messages:state.messages.slice(-8).concat([{role:'user',content:text}]),codeRepositoryId:selected ? selected.value : '',documentFolders:folders})})
+      body:JSON.stringify({messages:state.messages.slice(-8).concat([{role:'user',content:text}]),codeRepositoryId:selected ? selected.value : '',documentFolders:folders,codeFolders:codeFolders})})
        .then(function(r){
         if(!r.ok)return r.json().then(function(data){throw new Error(data.message||data.error);});
         var reader=r.body.getReader(),decoder=new TextDecoder(),buffer='',result=null;
@@ -332,7 +233,7 @@
         });}return pump();
       })
       .then(function(data){bubble.innerHTML=safeMarkdown(data.answer);enhance(bubble);
-        var source=document.createElement('p');source.textContent=(data.repository ? '代码库 '+data.repository+' @ '+(data.revision==='local'?'local':'r'+data.revision)+'；' : '未使用代码库；')+'文档范围：'+(data.documentFolders||[]).join('、')+'；来源：'+(data.documentSources||[]).concat(data.sources||[]).join('、');bubble.appendChild(source);
+        var source=document.createElement('p');source.textContent=(data.repository ? '代码库 '+data.repository+' @ '+(data.revision==='local'?'local':'r'+data.revision)+'；' : '未使用代码库；')+'文档范围：'+(data.documentFolders||[]).join('、')+'；文件引用请见 Claude 回答';bubble.appendChild(source);
         state.messages.push({role:'user',content:text},{role:'assistant',content:data.answer});persistMessages();setStatus('');})
       .catch(function(e){bubble.textContent='请求失败：'+message(e);}).then(function(){state.busy=false;state.jobId=null;});
   }
@@ -357,8 +258,8 @@
       '<button type="button" data-ai-action="clear">清空</button>',
       '<button type="button" data-ai-action="close">关闭</button>',
       '</header>',
-      '<label>代码库 <select data-code-repository><option value="">不使用代码库（默认）</option></select></label>',
-      '<fieldset data-document-scopes><legend>文档范围（docs/ 下）</legend><label><input type="checkbox" data-document-folder value="md" checked>md（默认）</label></fieldset>',
+      '<details class="ai-scope-picker"><summary>选择代码仓库与知识库范围 ▾</summary><input type="search" placeholder="筛选目录" oninput="var q=this.value.toLowerCase();this.parentNode.querySelectorAll(&quot;fieldset label&quot;).forEach(function(e){e.hidden=e.textContent.toLowerCase().indexOf(q)<0;});"><label hidden>代码库 <select data-code-repository><option value="">不使用代码库（默认）</option></select></label>',
+      '<fieldset data-code-scopes><legend>代码仓库（可多选到子目录）</legend></fieldset><fieldset data-document-scopes><legend>文档范围（docs/ 下）</legend><label><input type="checkbox" data-document-folder value="md" checked>md（默认）</label></fieldset></details>',
       '<div class="ai-messages" data-ai-messages></div>',
       '<div class="ai-status" data-ai-status></div>',
       '<div class="ai-actions">',
@@ -378,6 +279,18 @@
     state.messagesEl = overlay.querySelector('[data-ai-messages]');
     state.statusEl = overlay.querySelector('[data-ai-status]');
     state.inputEl = overlay.querySelector('[data-ai-input]');
+    var picker=overlay.querySelector('.ai-scope-picker');
+    var scopeButton=document.createElement('button');scopeButton.type='button';scopeButton.textContent='选择知识库 / 代码仓库 / 子文件夹 ▾';
+    scopeButton.className='ai-scope-trigger';
+    var scopeDialog=document.createElement('dialog');scopeDialog.className='ai-scope-dialog';scopeDialog.setAttribute('aria-label','选择 AI 查询范围');
+    picker.parentNode.insertBefore(scopeButton,picker);picker.parentNode.insertBefore(scopeDialog,picker);scopeDialog.appendChild(picker);picker.open=true;
+    picker.querySelector('summary').hidden=true;
+    var heading=document.createElement('header');heading.className='ai-scope-header';heading.innerHTML='<h2>选择查询范围</h2><p>选择知识库或代码仓库；展开仓库可指定子目录。选择上级目录会包含其全部内容。</p>';scopeDialog.insertBefore(heading,picker);
+    var scopeFooter=document.createElement('footer');scopeFooter.className='ai-scope-footer';scopeDialog.appendChild(scopeFooter);
+    var clear=document.createElement('button');clear.type='button';clear.textContent='清空选择';clear.onclick=function(){picker.querySelectorAll('input[type=checkbox]').forEach(function(i){i.checked=false;});};scopeFooter.appendChild(clear);
+    var done=document.createElement('button');done.type='button';done.textContent='完成选择';done.className='ai-scope-primary';scopeFooter.appendChild(done);
+    scopeButton.onclick=function(){scopeDialog.showModal();};done.onclick=function(){scopeDialog.close();var count=picker.querySelectorAll('input:checked').length;scopeButton.textContent='查询范围：已选 '+count+' 项 · 修改 ▾';};
+
     bindOverlay();
   }
 
@@ -610,11 +523,22 @@
       if(location.protocol==='file:' || !accountIdentity())return;
       fetch('__ai/public',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(data){
         if(!select)return;select.textContent='';
+        var chosen={};Array.prototype.forEach.call(state.overlay.querySelectorAll('[data-document-folder]'),function(input){if(input.checked)chosen[input.value]=true;});
         var empty=document.createElement('option');empty.value='';empty.textContent='不使用代码库（默认）';select.appendChild(empty);
         (data.repositories||[]).forEach(function(repo){var option=document.createElement('option');option.value=repo.id;option.textContent=repo.name+(repo.ready?' @ '+repo.revision:'（目录未就绪）');select.appendChild(option);});select.value='';
+        var codes=state.overlay.querySelector('[data-code-scopes]');
+        var previous={};codes.querySelectorAll('input:checked').forEach(function(e){previous[e.value]=true;});
+        codes.textContent='';var codeLegend=document.createElement('legend');codeLegend.textContent='代码仓库（可多选到子目录）';codes.appendChild(codeLegend);
+        (data.repositories||[]).forEach(function(repo){
+          var group=document.createElement('details'),title=document.createElement('summary');title.textContent=repo.name+(repo.ready?' · '+(repo.revision||'本地代码'):'（目录未就绪）');group.appendChild(title);
+          [repo.path].concat(repo.folders||[]).forEach(function(path){if(!path)return;var label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.setAttribute('data-code-folder','');input.value=path;input.checked=!!previous[path];input.disabled=!repo.ready;label.appendChild(input);label.appendChild(document.createTextNode(path));group.appendChild(label);});codes.appendChild(group);
+          if(!repo.folders||!repo.folders.length)group.open=true;
+        });
+        if(!(data.repositories||[]).length){var emptyCode=document.createElement('p');emptyCode.className='ai-scope-empty';emptyCode.textContent='尚未配置代码仓库，请在仓库管理中识别并加入。';codes.appendChild(emptyCode);}
         var scopes=state.overlay.querySelector('[data-document-scopes]');scopes.textContent='';
         var legend=document.createElement('legend');legend.textContent='文档范围（docs/ 下）';scopes.appendChild(legend);
-        (data.documentFolders||[{path:'md',available:true}]).forEach(function(folder){var label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.setAttribute('data-document-folder','');input.value=folder.path;input.checked=folder.path==='md';input.disabled=!folder.available;label.appendChild(input);label.appendChild(document.createTextNode(folder.path+(folder.available?'':'（目录不可用）')));scopes.appendChild(label);});
+        (data.documentFolders||[{path:'md',available:true}]).forEach(function(folder){var label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.setAttribute('data-document-folder','');input.value=folder.path;input.checked=!!chosen[folder.path];input.disabled=!folder.available;label.appendChild(input);label.style.paddingLeft=(12+Math.min(folder.path.split('/').length-1,5)*16)+'px';label.appendChild(document.createTextNode(folder.path+(folder.available?'':'（目录不可用）')));scopes.appendChild(label);});
+        if(data.enabled===false)setStatus('管理员尚未启用 Claude 问答，请联系管理员在「配置」中启用。');
       }).catch(function(){setStatus('公共 AI 状态读取失败');});
     },0);
     if (!state.overlay) {
@@ -641,11 +565,15 @@
   // ---------- AI 配置弹窗（独立于聊窗） ----------
 
   function openConfig() {
+    window.location.href='html/md2web_config.html#tab=ai';return;
     if (!isAdmin()) { setStatus('AI 服务由管理员统一配置，请选择文档范围后提问'); return; }
     if (state.configOverlay) state.configOverlay.remove();
     var box=document.createElement('div');box.className='ai-config-dialog is-open';
     box.innerHTML='<div class="ai-config-backdrop"></div><section class="ai-config-panel"><header class="ai-config-head">公共 Claude 与检索范围 <button data-close>关闭</button></header><div class="ai-config-body">'
-      +'<p>baseUrl 为 Windows 中转根地址，apiKey 为中转令牌。以下设置与代码库账号均保存到私有配置 JSON。普通用户默认仅检索 docs/md，不选择代码库。</p>'
+      +'<p>调用服务账号已配置好的 claude，在 docs 目录传入所选目录和问题并收集回答；无需 API 地址、Key 或模型设置。以下目录与 SVN 账号配置保存到私有 JSON。默认仅使用 docs/md。</p>'
+      +'<label><input type="checkbox" data-claude-enabled>启用 Claude 问答（未启用时普通用户提问会被拒绝）</label>'
+      +'<label>Claude 命令<input data-claude-executable value="claude" placeholder="claude 或绝对路径"></label>'
+      +'<label>超时（秒，5–600）<input type="number" min="5" max="600" step="5" data-claude-timeout value="120"></label>'
       +'<label>代码根目录（相对 docs，code 或 code/子目录）<input data-code-folder value="code"></label>'
       +'<label>开放给用户的文档目录（相对 docs，每行一个；md 始终可选）<textarea data-document-folders rows="3">md</textarea></label>'
       +'<label><input type="checkbox" data-daily-enabled checked>启用 SVN 每日更新</label> <label>更新时间（北京时间）<input type="time" data-daily-time value="03:00"></label>'
@@ -657,10 +585,13 @@
     box.querySelector('[data-close]').onclick=closeConfig;
     var area=box.querySelector('[data-json]'),status=box.querySelector('[data-status]'),version='',syncState={};
     function api(url,method,body){return fetch(url,{method:method||'GET',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':SiteAuth.csrfToken()},body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.message||d.error);return d;});});}
-    function read(){var value=JSON.parse(area.value);value.claude=value.claude||{};value.claude.repositories=value.claude.repositories||[];return value;}
+    function read(){var value=JSON.parse(area.value);if(Object.keys(value).some(function(key){return key!=='claude';}))throw new Error('这里只配置 claude 命令与目录，不配置 API');value.claude=value.claude||{};value.claude.repositories=value.claude.repositories||[];return value;}
     function write(value){area.value=JSON.stringify(value,null,2);}
     function render(){
       var value=read(),settings=value.claude;
+      box.querySelector('[data-claude-enabled]').checked=settings.enabled===true;
+      box.querySelector('[data-claude-executable]').value=settings.executable||'claude';
+      box.querySelector('[data-claude-timeout]').value=settings.timeoutSeconds||120;
       box.querySelector('[data-code-folder]').value=settings.codeFolder||'code';
       box.querySelector('[data-document-folders]').value=(settings.documentFolders||['md']).join('\n');
       box.querySelector('[data-daily-enabled]').checked=settings.dailySyncEnabled!==false;
@@ -678,24 +609,17 @@
         var info=document.createElement('p'),record=syncState[repo.id]||{};info.textContent=record.error|| (record.lastSuccessDate?'最近成功：'+record.lastSuccessDate+'，版本 '+record.revision:'尚无更新记录');card.appendChild(info);host.appendChild(card);
       });
     }
-    function controls(){try{var value=read();value.claude.codeFolder=box.querySelector('[data-code-folder]').value.trim();value.claude.documentFolders=box.querySelector('[data-document-folders]').value.split(/\r?\n/).map(function(p){return p.trim();}).filter(Boolean);value.claude.dailySyncEnabled=box.querySelector('[data-daily-enabled]').checked;value.claude.dailySyncTime=box.querySelector('[data-daily-time]').value;write(value);}catch(e){status.textContent='请先修正 JSON：'+e.message;}}
-    ['[data-code-folder]','[data-document-folders]','[data-daily-enabled]','[data-daily-time]'].forEach(function(selector){box.querySelector(selector).oninput=controls;});
+    function controls(){try{var value=read();value.claude.enabled=box.querySelector('[data-claude-enabled]').checked;value.claude.executable=box.querySelector('[data-claude-executable]').value.trim()||'claude';var timeout=Math.round(Number(box.querySelector('[data-claude-timeout]').value));value.claude.timeoutSeconds=isFinite(timeout)&&timeout?Math.min(600,Math.max(5,timeout)):120;value.claude.codeFolder=box.querySelector('[data-code-folder]').value.trim();value.claude.documentFolders=box.querySelector('[data-document-folders]').value.split(/\r?\n/).map(function(p){return p.trim();}).filter(Boolean);value.claude.dailySyncEnabled=box.querySelector('[data-daily-enabled]').checked;value.claude.dailySyncTime=box.querySelector('[data-daily-time]').value;write(value);}catch(e){status.textContent='请先修正 JSON：'+e.message;}}
+    ['[data-claude-enabled]','[data-claude-executable]','[data-claude-timeout]','[data-code-folder]','[data-document-folders]','[data-daily-enabled]','[data-daily-time]'].forEach(function(selector){box.querySelector(selector).oninput=controls;});
     area.onchange=function(){try{render();}catch(e){status.textContent='JSON 格式错误：'+e.message;}};
     box.querySelector('[data-add-repo]').onclick=function(){try{var value=read(),number=value.claude.repositories.length+1,id='code-'+number;while(value.claude.repositories.some(function(r){return r.id===id;})){id='code-'+(++number);}value.claude.repositories.push({id:id,name:'代码版本 '+number,folder:id,url:'',revision:'HEAD',username:'',password:'',dailySync:true});write(value);render();}catch(e){status.textContent=e.message;}};
-    api('__config').then(function(data){version=(data.config||data).expectedConfigVersion||'';var ai=(data.config||data).ai||{};ai.claude=ai.claude||{enabled:false,executable:'claude',timeoutSeconds:120,repositories:[]};write(ai);render();return api('__admin/code-repositories');}).then(function(data){syncState=data.state||{};render();}).catch(function(e){status.textContent=e.message;});
+    api('__config').then(function(data){version=(data.config||data).expectedConfigVersion||'';var ai={claude:((data.config||data).ai||{}).claude};ai.claude=ai.claude||{enabled:false,executable:'claude',timeoutSeconds:120,repositories:[]};write(ai);render();return api('__admin/code-repositories');}).then(function(data){syncState=data.state||{};render();}).catch(function(e){status.textContent=e.message;});
     box.querySelector('[data-purge]').onclick=function(){api('__admin/ai/personal-configs/clear','POST',{}).then(function(d){status.textContent='已清理 '+d.cleared+' 项旧个人配置';}).catch(function(e){status.textContent=e.message;});};
-    box.querySelector('[data-save]').onclick=function(){try{var value=read();value.claude.defaultRepository='';value.expectedConfigVersion=version;api('__admin/ai','PUT',value).then(function(data){version=(data.config||{}).expectedConfigVersion||version;write(data.ai);render();status.textContent='已保存到私有 JSON，每日更新配置立即生效';}).catch(function(e){status.textContent=e.message;});}catch(e){status.textContent='JSON 格式错误：'+e.message;}};
+    box.querySelector('[data-save]').onclick=function(){try{var value=read();value.claude.defaultRepository='';value.expectedConfigVersion=version;api('__admin/ai','PUT',value).then(function(data){version=(data.config||{}).expectedConfigVersion||version;write({claude:data.ai.claude});render();status.textContent='已保存到私有 JSON，Claude 问答与每日更新配置立即生效';}).catch(function(e){status.textContent=e.message;});}catch(e){status.textContent='JSON 格式错误：'+e.message;}};
   }
 
   function closeConfig() {
     if (state.configOverlay) { state.configOverlay.remove();state.configOverlay=null; }
-  }
-
-  function configure(config) {
-    state.config = Object.assign({}, state.config || defaults(), config || {});
-    if(!isAdmin())return Promise.resolve(false);
-    var saving=persistConfig();
-    return saving;
   }
 
   function init() {
@@ -719,6 +643,7 @@
     syncPersonalConfig();
     document.addEventListener('keydown', function (event) {
       if (event.key === 'Escape') {
+        var scopeDialog=state.overlay && state.overlay.querySelector('.ai-scope-dialog[open]');if(scopeDialog){scopeDialog.close();event.preventDefault();return;}
         if (state.configOverlay && state.configOverlay.classList.contains('is-open')) {
           closeConfig();
         } else if (state.overlay && state.overlay.classList.contains('is-open')) {
@@ -744,14 +669,10 @@
     openConfig: openConfig,
     closeConfig: closeConfig,
     ask: ask,
-    configure: configure,
     ready: function(){return syncPersonalConfig();},
-    addUploads: function () { return Promise.resolve(false); },
-    getConfig: function () { return state.config; },
-    providers: PROVIDERS,
     buildContext: function (question, limit) {
       return retrieve(question, limit).then(function (hits) {
-        return { hits: hits, context: window.AIRetrieval.buildContext(hits, state.config.contextChars) };
+        return { hits: hits, context: window.AIRetrieval.buildContext(hits, 6000) };
       });
     },
     scopeTree: function () {

@@ -34,6 +34,8 @@ try:
     page = fixture.docs / 'html/index_server_only.html'
     page.write_text(html, encoding='utf-8')
     (fixture.docs / 'md/old/math.md').write_text(os.environ['MD2WEB_MATH_SOURCE'], encoding='utf-8')
+    if os.environ.get('MD2WEB_USER_AI'):
+        shutil.copyfile(str(root / 'web/md2web_config.html'), str(fixture.docs / 'html/md2web_config.html'))
     if os.environ.get('MD2WEB_REFERENCE_UPLOAD'):
         fixture.config['uploads'] = {'maxFileMB': 1}
         shutil.copyfile(str(root / 'web/reference_library.html'), str(fixture.docs / 'html/reference_library.html'))
