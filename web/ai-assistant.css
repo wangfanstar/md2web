@@ -698,3 +698,12 @@
 .ai-resize-grip:hover,.ai-resize-grip:focus-visible { background:#2563eb44; }
 .ai-is-resizing,.ai-is-resizing * { cursor:ew-resize!important; user-select:none!important; }
 @media(max-width:640px) { .ai-resize-grip { display:none; } .ai-panel { width:auto!important; } }
+
+.ai-scope-tree { min-width:0; }
+.ai-tree-row { display:flex; align-items:center; gap:3px; min-height:36px; border-radius:6px; }
+.ai-tree-row:hover { background:#edf4ff; }
+.ai-tree-row label { flex:1; min-width:0; padding:5px 4px!important; overflow-wrap:anywhere; }
+.ai-scope-dialog .ai-tree-toggle { flex:0 0 26px; width:26px; height:28px; padding:0; border:0; background:transparent; color:#64748b; font-size:16px; }
+.ai-tree-children { margin-left:14px; padding-left:10px; border-left:1px solid #e2e8f0; }
+.ai-tree-node[hidden],.ai-tree-children[hidden] { display:none!important; }
+.ai-scope-dialog .ai-scope-picker > fieldset { align-self:start; }
