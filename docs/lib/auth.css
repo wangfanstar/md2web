@@ -186,3 +186,9 @@
 .site-auth-fixed .site-auth-user {
   max-width: 160px;
 }
+
+/* Keep identity separate from the search controls, including after sidebar rebuilds. */
+.site-auth-row { display:flex; align-items:center; justify-content:flex-end; width:100%; box-sizing:border-box; padding:5px 16px 10px; min-height:30px; }
+.site-auth-row .site-auth-indicator { display:flex; min-width:0; max-width:100%; gap:8px; }
+.site-auth-row .site-auth-user { max-width:none; min-width:0; overflow-wrap:anywhere; white-space:normal; }
+.site-auth-row .site-auth-login { flex-shrink:0; }

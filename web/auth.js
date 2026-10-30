@@ -250,10 +250,6 @@
   }
 
   function hostRow() {
-    var row = document.querySelector('.custom-search-top-row');
-    if (row) {
-      return row;
-    }
     var aside = document.querySelector('aside.sidebar') || document.querySelector('.sidebar');
     if (!aside) {
       return null;
@@ -293,6 +289,19 @@
 
   // docsify 侧栏（含登录指示器）稍后才渲染：出现后收起固定入口，避免重复
   function watchForSidebar() {
+    if (window.MutationObserver && document.body) {
+      if (watchForSidebar.observer) return;
+      watchForSidebar.observer = new window.MutationObserver(function(records){
+        var relevant=records.some(function(record){
+          if(record.target.closest && record.target.closest('.sidebar'))return true;
+          return Array.prototype.some.call(record.addedNodes,function(node){return node.nodeType===1 && (node.matches('.sidebar, .app-name, .custom-search-top-row, .site-auth-row, [data-site-auth-fixed]') || node.querySelector('.sidebar, .app-name, .site-auth-row'));}) ||
+            Array.prototype.some.call(record.removedNodes,function(node){return node.nodeType===1 && (node.matches('.sidebar, .app-name, .site-auth-row, [data-site-auth], [data-site-auth-fixed]') || node.querySelector('.sidebar, .app-name, [data-site-auth]'));});
+        });
+        if(relevant)renderIndicator();
+      });
+      watchForSidebar.observer.observe(document.body,{childList:true,subtree:true});
+      return;
+    }
     if (watchForSidebar.timer) {
       return;
     }
@@ -327,6 +336,9 @@
       host.setAttribute('data-site-auth', '');
       row.appendChild(host);
     }
+    var viewKey=JSON.stringify([isFileMode(),state.authenticated,state.user]);
+    if(host.getAttribute('data-auth-view')===viewKey && host.firstChild)return;
+    host.setAttribute('data-auth-view',viewKey);
     if (isFileMode()) {
       host.innerHTML = '<span class="site-auth-badge" title="离线只读">离线只读</span>';
       return;
@@ -338,9 +350,9 @@
     }
     var name = state.user && (state.user.displayName || state.user.username) || '已登录';
     var isAdmin = !!(state.user && state.user.role === 'admin');
-    var label = isAdmin ? name + '（本机）' : name;
+    var label = isAdmin ? name + '（管理员）' : name;
     var hint = isAdmin
-      ? '本机管理员：可本地编辑（草稿）；合入 SVN 需要 SVN 账号'
+      ? '管理员：可管理站点；SVN 操作权限按账号和仓库配置判断'
       : '已登录';
     host.innerHTML = '<span class="site-auth-user" title="' + escapeHtml(hint) + '">' + escapeHtml(label) + '</span>'
       + '<button type="button" class="site-auth-login" title="退出登录">退出</button>';
@@ -356,6 +368,7 @@
   }
 
   function init() {
+    watchForSidebar();
     refresh();
     window.addEventListener('hashchange', function () {
       refresh();
