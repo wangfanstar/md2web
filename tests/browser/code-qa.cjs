@@ -3,7 +3,7 @@ const {spawn}=require('node:child_process');
 const readline=require('node:readline');
 const assert=require('node:assert/strict');
 (async()=>{
- const server=spawn('C:/Python36/python.exe',['tests/browser/site-math-server.py'],{env:{...process.env,MD2WEB_MATH_SOURCE:'# AI'},stdio:['pipe','pipe','pipe']});
+ const server=spawn(process.env.MD2WEB_PYTHON||(process.platform==='win32'?'python':'python3'),['tests/browser/site-math-server.py'],{env:{...process.env,MD2WEB_MATH_SOURCE:'# AI'},stdio:['pipe','pipe','pipe']});
  let browser,stderr='';server.stderr.on('data',d=>stderr+=d);
  try{
   const base=await new Promise((resolve,reject)=>{readline.createInterface({input:server.stdout}).on('line',line=>{try{const d=JSON.parse(line);if(d.url)resolve(d.url);}catch{}});server.on('exit',()=>reject(new Error(stderr)));});
@@ -37,6 +37,8 @@ const assert=require('node:assert/strict');
   await page.waitForFunction(()=>document.querySelector('[data-status]').textContent.includes('已保存'));
   await page.locator('[data-purge]').click();
   await page.waitForFunction(()=>document.querySelector('[data-status]').textContent.includes('已清理'));
+  await page.evaluate(()=>SiteAuth.logout());
+  assert.equal(await page.locator('[data-json]').count(),0,'logout clears administrator secrets');
   assert.deepEqual(errors,[]);
   console.log('Public AI browser checks passed');
  }finally{if(browser)await browser.close();server.stdin.end('\n');}

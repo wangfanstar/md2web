@@ -16,6 +16,7 @@
   function syncPersonalConfig() {
     try { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(GUEST_STORAGE_KEY); } catch (_) {}
     state.config = defaults(); configReady = true;
+    if (!isAdmin() && state.configOverlay) closeConfig();
     return Promise.resolve(true);
   }
 
