@@ -292,7 +292,8 @@
     var selected=state.overlay.querySelector('[data-code-repository]');
     var codeFolders=Array.prototype.map.call(state.overlay.querySelectorAll('[data-code-folder]:checked'),function(input){return input.value;});
     folders=compactScopes(folders);codeFolders=compactScopes(codeFolders);
-    var scopeKey=JSON.stringify([accountIdentity(),codeFolders,folders]);
+    var model=state.overlay.querySelector('[data-ai-model]').value;
+    var scopeKey=JSON.stringify([accountIdentity(),codeFolders,folders,model]);
     var current=ensureConversation();
     if(current.scopeKey!==scopeKey && state.messages.length)current=startConversation();
     current.scopeKey=scopeKey;
@@ -310,7 +311,7 @@
 
     var selected = state.overlay.querySelector('[data-code-repository]');
     return fetch('__ai/chat', {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':SiteAuth.csrfToken()},
-      body:JSON.stringify({messages:state.messages.slice(-8).concat([{role:'user',content:text}]),codeRepositoryId:selected ? selected.value : '',documentFolders:folders,codeFolders:codeFolders})})
+      body:JSON.stringify({messages:state.messages.slice(-8).concat([{role:'user',content:text}]),codeRepositoryId:selected ? selected.value : '',documentFolders:folders,codeFolders:codeFolders,model:model})})
        .then(function(r){
         if(!r.ok)return r.json().then(function(data){throw new Error(data.message||data.error);});
         var reader=r.body.getReader(),decoder=new TextDecoder(),buffer='',result=null,partial='';
@@ -327,7 +328,7 @@
         });}return pump();
       })
       .then(function(data){processTitle.textContent='执行过程 · 已完成 '+Object.keys(toolRows).length+' 次工具调用';processBox.open=false;bubble.style.whiteSpace='';bubble.innerHTML=safeMarkdown(data.answer);enhance(bubble);addAnswerCopy(bubble,data.answer);
-        var source=document.createElement('p');source.textContent=(data.repository ? '代码库 '+data.repository+' @ '+(data.revision==='local'?'local':'r'+data.revision)+'；' : '未使用代码库；')+'文档范围：'+(data.documentFolders||[]).join('、')+'；文件引用请见 Claude 回答';bubble.appendChild(source);
+        var source=document.createElement('p');source.textContent='模型：'+(data.model||'服务默认')+'；'+(data.repository ? '代码库 '+data.repository+' @ '+(data.revision==='local'?'local':'r'+data.revision)+'；' : '未使用代码库；')+'文档范围：'+(data.documentFolders||[]).join('、')+'；文件引用请见 Claude 回答';bubble.appendChild(source);
         state.messages.push({role:'user',content:text},{role:'assistant',content:data.answer});persistMessages();setStatus('');})
       .catch(function(e){processTitle.textContent='执行过程 · 请求中止';var partial=bubble.textContent;bubble.textContent=(partial&&partial.indexOf('正在检索')!==0?partial+'\n\n':'')+'请求失败：'+message(e);}).then(function(){state.busy=false;state.jobId=null;});
   }
@@ -352,6 +353,7 @@
       '<button type="button" data-ai-action="clear">清空</button>',
       '<button type="button" data-ai-action="close">关闭</button>',
       '</header>',
+      '<label class="ai-model-picker">回答模型 <select data-ai-model aria-label="回答模型"><option value="">服务默认</option></select></label>',
       '<details class="ai-scope-picker"><summary>选择代码仓库与知识库范围 ▾</summary><input type="search" placeholder="筛选目录"><label hidden>代码库 <select data-code-repository><option value="">不使用代码库（默认）</option></select></label>',
       '<fieldset data-code-scopes><legend>代码仓库（可多选到子目录）</legend></fieldset><fieldset data-document-scopes><legend>文档范围（docs/ 下）</legend><label><input type="checkbox" data-document-folder value="md" checked>md（默认）</label></fieldset></details>',
       '<div class="ai-messages" data-ai-messages></div>',
@@ -645,6 +647,11 @@
       if(location.protocol==='file:' || !accountIdentity())return;
       fetch('__ai/public',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(data){
         if(!select)return;select.textContent='';
+        var modelSelect=state.overlay.querySelector('[data-ai-model]'),chosenModel=modelSelect.value;
+        modelSelect.textContent='';var defaultModel=document.createElement('option');defaultModel.value='';defaultModel.textContent='服务默认';modelSelect.appendChild(defaultModel);
+        (data.models||[]).forEach(function(model){var option=document.createElement('option');option.value=model;option.textContent=model;modelSelect.appendChild(option);});
+        modelSelect.value=(data.models||[]).indexOf(chosenModel)>=0?chosenModel:'';
+
         var chosen={};Array.prototype.forEach.call(state.overlay.querySelectorAll('[data-document-folder]'),function(input){if(input.checked)chosen[input.value]=true;});
         var empty=document.createElement('option');empty.value='';empty.textContent='不使用代码库（默认）';select.appendChild(empty);
         (data.repositories||[]).forEach(function(repo){var option=document.createElement('option');option.value=repo.id;option.textContent=repositoryLabel(repo)+(repo.ready?' @ '+repo.revision:'（目录未就绪）');select.appendChild(option);});select.value='';

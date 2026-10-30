@@ -534,7 +534,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 folders.extend({'path': child, 'available': True} for child in code_qa.directory_choices(docs_root, folder))
 
         return jsonify(ok=True, enabled=bool(settings.get('enabled')), repositories=repos,
-                       defaultRepository='', documentFolders=folders, defaultDocumentFolders=['md'])
+                       defaultRepository='', documentFolders=folders, defaultDocumentFolders=['md'], models=settings['models'])
 
     @app.get('/__admin/code-repositories')
     def code_repository_status():
@@ -574,7 +574,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             return rejected
         from . import code_qa
         payload = request.get_json(silent=True)
-        if not isinstance(payload, dict) or set(payload) - {'messages', 'codeRepositoryId', 'documentFolders', 'codeFolders'}:
+        if not isinstance(payload, dict) or set(payload) - {'messages', 'codeRepositoryId', 'documentFolders', 'codeFolders', 'model'}:
             return json_error(400, 'invalid_request', '仅接受对话、代码库 ID 和开放的文档目录')
         if not code_qa.LOCK.acquire(False):
             return json_error(429, 'ai_busy', '正在问答或更新代码库，请稍后重试')

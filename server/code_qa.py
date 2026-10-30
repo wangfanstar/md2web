@@ -53,12 +53,18 @@ def validate(raw):
         raise ValueError('claude 必须为对象')
     result = dict(value)
     allowed = {'executable', 'enabled', 'timeoutSeconds', 'defaultRepository', 'repositories',
-               'codeFolder', 'documentFolders', 'dailySyncEnabled', 'dailySyncTime'}
+               'codeFolder', 'documentFolders', 'dailySyncEnabled', 'dailySyncTime', 'models'}
     if set(result) - allowed:
         raise ValueError('claude 含未知字段')
     if not isinstance(result.get('enabled', False), bool):
         raise ValueError('enabled 必须为布尔值')
     result.setdefault('enabled', False)
+    models = result.get('models', ['sonnet', 'opus', 'haiku'])
+    if (not isinstance(models, list) or len(models) > 30 or
+            any(not isinstance(model, str) or not re.match(r'^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$', model) for model in models)):
+        raise ValueError('models 必须为最多 30 个有效模型名称的数组')
+    result['models'] = list(dict.fromkeys(models))
+
     executable = result.get('executable', 'claude')
     if not isinstance(executable, str) or not executable or len(executable) > 500:
         raise ValueError('Claude 可执行文件无效')
@@ -408,6 +414,9 @@ def answer(docs, ai, payload, cancel=None, on_delta=None, on_progress=None):
     settings = validate(ai.get('claude'))
     if not settings.get('enabled'):
         raise ValueError('管理员尚未启用 Claude 问答')
+    selected_model = payload.get('model', '')
+    if not isinstance(selected_model, str) or (selected_model and selected_model not in settings['models']):
+        raise ValueError('请选择管理员开放的 AI 模型')
     messages = payload.get('messages')
     if not isinstance(messages, list) or not 1 <= len(messages) <= 9:
         raise ValueError('消息数量须为 1–9')
@@ -479,6 +488,8 @@ def answer(docs, ai, payload, cancel=None, on_delta=None, on_progress=None):
     args = [settings['executable'], '-p', '--no-session-persistence', '--output-format', 'json',
             '--tools', 'Read,Glob,Grep', '--allowedTools', 'Read,Glob,Grep',
             '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}']
+    if selected_model:
+        args += ['--model', selected_model]
     if on_delta is not None:
         args[args.index('--output-format') + 1] = 'stream-json'
         args += ['--verbose', '--include-partial-messages']
@@ -533,4 +544,4 @@ def answer(docs, ai, payload, cancel=None, on_delta=None, on_progress=None):
         raise ValueError('Claude 输出协议不兼容')
     if data.get('is_error') or not isinstance(data.get('result'), str):
         raise ValueError('Claude 未返回有效结果')
-    return {'answer': data['result'], 'repository': repo['id'] if repo else '', 'revision': revision, 'sources': sources, 'documentSources': [], 'documentFolders': selected_folders, 'directories': directories}
+    return {'answer': data['result'], 'model': selected_model, 'repository': repo['id'] if repo else '', 'revision': revision, 'sources': sources, 'documentSources': [], 'documentFolders': selected_folders, 'directories': directories}

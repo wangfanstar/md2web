@@ -310,3 +310,7 @@ claude -p "请阅读 md 目录并简述其文档内容"
 网站以同一服务账号、工作目录 `docs/` 和继承的环境调用 `claude -p`，通过标准输入发送所选目录、版本和问题，收集 JSON 中的回答。认证与模型设置沿用该账号现有 Claude 配置（包括 HOME、CLAUDE_CONFIG_DIR 和相关环境变量，以及该配置自身可能使用的网络中转）；md2web 不注入 API 参数或覆盖模型。网页只配置命令路径、启用状态、超时、可选目录及 SVN 更新账号。首次使用需在管理员「配置」中勾选「启用 Claude 问答」。
 
 Claude 可使用 Read、Glob、Grep 直接读取和搜索文件；网站不再先截取文件片段，不提供写入、Shell 或额外 MCP 工具。所选目录作为经校验的读取范围传给 Claude，实际文件权限由部署服务账号控制。保留独立会话、超时取消和版本锁，页面显示 Claude 的回答与文件引用。
+
+### AI model selection
+
+The answer model selector defaults to the service account configuration (no CLI override). Administrators can edit the comma-separated model list in AI settings, stored as `ai.claude.models`. When absent, the list is `sonnet`, `opus`, `haiku`; an empty array allows only the service default. Configure names supported by your Claude CLI or relay gateway; listing a model does not verify upstream availability. Selected values are validated against this list and passed via `--model`. No API credentials or endpoint settings are added.

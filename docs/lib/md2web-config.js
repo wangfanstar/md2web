@@ -304,7 +304,7 @@
     panel.hidden = !state.editable;
     var settings=(state.config.ai||{}).claude||{},form=query('[data-ai-config-form]');
     if(form){form.textContent='';
-      [['enabled','启用 AI 问答','checkbox',false],['executable','Claude 命令','text','claude'],['timeoutSeconds','回答超时（秒）','number',120],['codeFolder','代码根目录','text','code'],['dailySyncEnabled','启用每日 SVN 更新','checkbox',true],['dailySyncTime','每日更新时间','time','03:00']].forEach(function(field){var label=document.createElement('label'),input=document.createElement('input');label.textContent=field[1];input.type=field[2];input.setAttribute('data-ai-form',field[0]);var value=settings[field[0]]===undefined?field[3]:settings[field[0]];if(input.type==='checkbox')input.checked=value;else input.value=value;if(field[0]==='timeoutSeconds'){input.min=5;input.max=600;}label.appendChild(input);form.appendChild(label);});
+      [['enabled','启用 AI 问答','checkbox',false],['executable','Claude 命令','text','claude'],['timeoutSeconds','回答超时（秒）','number',120],['models','可选模型（逗号分隔，须为服务支持的模型）','text',['sonnet','opus','haiku']],['codeFolder','代码根目录','text','code'],['dailySyncEnabled','启用每日 SVN 更新','checkbox',true],['dailySyncTime','每日更新时间','time','03:00']].forEach(function(field){var label=document.createElement('label'),input=document.createElement('input');label.textContent=field[1];input.type=field[2];input.setAttribute('data-ai-form',field[0]);var value=settings[field[0]]===undefined?field[3]:settings[field[0]];if(input.type==='checkbox')input.checked=value;else input.value=Array.isArray(value)?value.join(', '):value;if(field[0]==='timeoutSeconds'){input.min=5;input.max=600;}label.appendChild(input);form.appendChild(label);});
       var note=document.createElement('p');note.className='hint';note.textContent='已配置 '+(settings.repositories||[]).length+' 个代码仓库。可在仓库管理中识别添加；修改后点击顶部「保存全部修改」。';form.appendChild(note);
     }
     var json=query('[data-public-ai-json]');if(json)json.value=JSON.stringify({claude:(state.config.ai || {}).claude || {}},null,2);
@@ -1258,7 +1258,7 @@
     var authUrl = query('[data-auth="url"]');
     if (authUrl) payload.auth = Object.assign({}, payload.auth || {}, { url: authUrl.value.trim() });
     payload.ai = { claude: (payload.ai || {}).claude || {} };
-    all('[data-ai-form]').forEach(function(input){var key=input.getAttribute('data-ai-form');payload.ai.claude[key]=input.type==='checkbox'?input.checked:input.type==='number'?Number(input.value):input.value.trim();});
+    all('[data-ai-form]').forEach(function(input){var key=input.getAttribute('data-ai-form');payload.ai.claude[key]=key==='models'?input.value.split(/[,，\n]/).map(function(v){return v.trim();}).filter(Boolean):input.type==='checkbox'?input.checked:input.type==='number'?Number(input.value):input.value.trim();});
     payload.folderGroups = collectFolderGroups();
     payload.repositories = repos.map(function (repo) {
       var item = {

@@ -125,6 +125,28 @@ class CodeQaTests(unittest.TestCase):
         self.assertIn('--include-partial-messages', launch.call_args[0][0])
         process.communicate.assert_not_called()
 
+    def test_selected_model_is_validated_and_passed_to_cli(self):
+        payload = {'messages': [{'role': 'user', 'content': 'hello'}], 'model': 'opus'}
+        with mock.patch('server.code_qa.subprocess.Popen', return_value=self.fake_process()) as launch:
+            result = code_qa.answer(self.f.docs, self.f.config['ai'], payload)
+        args = launch.call_args[0][0]
+        self.assertEqual(args[args.index('--model') + 1], 'opus')
+        self.assertEqual(result['model'], 'opus')
+        for invalid in ('--dangerous', 'not-approved', None, ['opus']):
+            payload['model'] = invalid
+            with mock.patch('server.code_qa.subprocess.Popen') as launch:
+                with self.assertRaises(ValueError):
+                    code_qa.answer(self.f.docs, self.f.config['ai'], payload)
+                launch.assert_not_called()
+
+    def test_admin_model_list_supports_gateway_models(self):
+        settings = code_qa.validate(dict(self.settings, models=['gateway/model-v1', 'gateway/model-v1']))
+        self.assertEqual(settings['models'], ['gateway/model-v1'])
+        self.assertEqual(code_qa.validate(dict(self.settings, models=[]))['models'], [])
+        for invalid in ('opus', ['--flag'], ['bad model']):
+            with self.assertRaises(ValueError):
+                code_qa.validate(dict(self.settings, models=invalid))
+
     def test_direct_cli_handoff_inherits_server_configuration(self):
         process = mock.Mock(returncode=0)
         process.poll.return_value = 0

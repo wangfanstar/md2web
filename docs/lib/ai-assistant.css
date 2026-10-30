@@ -715,3 +715,6 @@
 
 .ai-copy-answer { display:block; margin-top:12px; padding:5px 10px; border:1px solid #d4dfed; border-radius:6px; background:#fff; color:#42688f; cursor:pointer; font-size:12px; }
 .ai-actions { flex-wrap:wrap; }
+
+.ai-model-picker { display:flex; align-items:center; gap:12px; margin:10px 16px 0; font-size:13px; color:#536b88; }
+.ai-model-picker select { min-width:0; flex:1; padding:7px 10px; border:1px solid #ced9e8; border-radius:7px; background:#fff; color:#243e62; }
