@@ -168,7 +168,7 @@
     state.messagesEl.scrollTop = state.messagesEl.scrollHeight;
     if (role === 'assistant') {
       enhance(bubble);
-    }
+    } else {addMessageActions(bubble,content);}
     return bubble;
   }
 
@@ -207,8 +207,30 @@
     promise.then(function(){setStatus('已复制');}).catch(function(e){setStatus('复制失败：'+e.message);});
   }
 
-  function addAnswerCopy(bubble,text) {
-    var button=document.createElement('button');button.type='button';button.className='ai-copy-answer';button.textContent='复制回答';button.onclick=function(){copyText(text);};bubble.appendChild(button);
+  function quoteMessage(text) {
+    return String(text).split('\n').map(function(line){return '> '+line;}).join('\n');
+  }
+
+  function putMessageInInput(text, quote) {
+    var input=state.inputEl,existing=input.value;
+    if(quote){input.value=existing+(existing?'\n\n':'')+quoteMessage(text)+'\n\n';}
+    else {
+      if(existing.trim()&&existing!==text&&!confirm('输入框中有未发送内容，是否替换为这条消息？'))return;
+      input.value=text;
+    }
+    input.focus();input.selectionStart=input.selectionEnd=input.value.length;
+    input.dispatchEvent(new Event('input',{bubbles:true}));
+    setStatus(quote?'已引用到输入框，可继续填写问题':'已放回输入框，历史消息保留，可编辑后发送');
+  }
+
+  function addMessageActions(bubble,text) {
+    bubble.tabIndex=0;
+    var bar=document.createElement('div');bar.className='ai-message-actions';bar.setAttribute('role','toolbar');bar.setAttribute('aria-label','消息操作');
+    [['复制','复制消息原文',function(){copyText(text);}],
+     ['撤回到输入框','放回输入框，不删除历史消息',function(){putMessageInInput(text,false);}],
+     ['引用','引用消息或当前选中文字',function(){var selection=window.getSelection(),selected='';if(selection&&selection.rangeCount&&bubble.contains(selection.getRangeAt(0).commonAncestorContainer))selected=selection.toString().trim();putMessageInInput(selected||text,true);}]
+    ].forEach(function(action){var button=document.createElement('button');button.type='button';button.textContent=action[0];button.title=action[1];button.setAttribute('aria-label',action[1]);button.onclick=function(event){event.stopPropagation();action[2]();};bar.appendChild(button);});
+    bubble.appendChild(bar);
   }
 
   function historyAction(target) {
@@ -327,8 +349,8 @@
           if(part.done){if(!result)throw new Error('问答连接中断');return result;}return pump();
         });}return pump();
       })
-      .then(function(data){processTitle.textContent='执行过程 · 已完成 '+Object.keys(toolRows).length+' 次工具调用';processBox.open=false;bubble.style.whiteSpace='';bubble.innerHTML=safeMarkdown(data.answer);enhance(bubble);addAnswerCopy(bubble,data.answer);
-        var source=document.createElement('p');source.textContent='模型：'+(data.model||'服务默认')+'；'+(data.repository ? '代码库 '+data.repository+' @ '+(data.revision==='local'?'local':'r'+data.revision)+'；' : '未使用代码库；')+'文档范围：'+(data.documentFolders||[]).join('、')+'；文件引用请见 Claude 回答';bubble.appendChild(source);
+      .then(function(data){processTitle.textContent='执行过程 · 已完成 '+Object.keys(toolRows).length+' 次工具调用';processBox.open=false;bubble.style.whiteSpace='';bubble.innerHTML=safeMarkdown(data.answer);enhance(bubble);
+        var source=document.createElement('p');source.textContent='模型：'+(data.model||'服务默认')+'；'+(data.repository ? '代码库 '+data.repository+' @ '+(data.revision==='local'?'local':'r'+data.revision)+'；' : '未使用代码库；')+'文档范围：'+(data.documentFolders||[]).join('、')+'；文件引用请见 Claude 回答';bubble.appendChild(source);addMessageActions(bubble,data.answer);
         state.messages.push({role:'user',content:text},{role:'assistant',content:data.answer});persistMessages();setStatus('');})
       .catch(function(e){processTitle.textContent='执行过程 · 请求中止';var partial=bubble.textContent;bubble.textContent=(partial&&partial.indexOf('正在检索')!==0?partial+'\n\n':'')+'请求失败：'+message(e);}).then(function(){state.busy=false;state.jobId=null;});
   }
@@ -583,8 +605,9 @@
         : safeMarkdown(item.content);
       state.messagesEl.appendChild(bubble);
       if (item.role === 'assistant') {
-        enhance(bubble);addAnswerCopy(bubble,item.content);
+        enhance(bubble);
       }
+      addMessageActions(bubble,item.content);
     });
     state.messagesEl.scrollTop = state.messagesEl.scrollHeight;
   }

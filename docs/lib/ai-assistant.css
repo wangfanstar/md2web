@@ -718,3 +718,12 @@
 
 .ai-model-picker { display:flex; align-items:center; gap:12px; margin:10px 16px 0; font-size:13px; color:#536b88; }
 .ai-model-picker select { min-width:0; flex:1; padding:7px 10px; border:1px solid #ced9e8; border-radius:7px; background:#fff; color:#243e62; }
+
+/* Message tools appear on hover/focus, remaining available on touch screens. */
+.ai-message-actions { display:flex; flex-wrap:wrap; gap:4px; margin-top:10px; padding-top:7px; border-top:1px solid #dbe4ef66; opacity:0; pointer-events:none; transition:opacity .12s; }
+.ai-message:hover .ai-message-actions,.ai-message:focus-within .ai-message-actions { opacity:1; pointer-events:auto; }
+.ai-message-actions button { font-family:inherit; font-size:12px; line-height:1.5; padding:4px 8px; border:0; border-radius:5px; background:transparent; color:#536b88; cursor:pointer; }
+.ai-message-actions button:hover,.ai-message-actions button:focus-visible { background:#e6eef9; color:#1f5fab; }
+.ai-message:focus-visible { outline:2px solid #8db3ec; outline-offset:3px; }
+@media(hover:none),(pointer:coarse) { .ai-message-actions { opacity:1; pointer-events:auto; } }
+@media(prefers-reduced-motion:reduce) { .ai-message-actions { transition:none; } }
