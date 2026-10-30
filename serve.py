@@ -372,6 +372,13 @@ def start_repo_sync(auth_service, md_dir, interval=15.0):
             except Exception as error:
                 print(f"警告: 定时同步 SVN 失败: {error}")
             try:
+                from server import code_qa
+                for result in code_qa.sync_daily(auth_service, Path(md_dir).parent):
+                    if not result['ok']:
+                        logger('代码库 %s 每日更新失败，请在管理员 AI 配置中检查' % result['id'])
+            except Exception:
+                logger('代码库每日同步失败，请检查配置与同步状态文件')
+            try:
                 settings = (getattr(auth_service, "config", {}) or {}).get("site_backup") or {}
                 if settings.get("enabled") and settings.get("url"):
                     if site_backup_due(last_backup["at"], settings.get("interval_seconds")):

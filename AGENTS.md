@@ -265,3 +265,13 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 代码库根固定为 `docs/code/`，其下每个独立子目录可对应不同 SVN 版本库和指定 revision。管理员管理、更新和设置默认库；普通用户可选择允许使用的代码库进行只读搜索问答，不可提交任意服务器路径或 SVN 地址。
 - `docs/code/` 为私有运行数据，必须在静态服务、构建/离线快照、搜索索引、网站备份与 Git 提交中排除；Claude 的工作目录不是访问隔离，必须另行落实只读范围与进程权限。
 - 实施方案见 `specs/2026-10-30-claude-relay-code-qa-design.md`。本节取代前文个人 AI 配置设计；已实现公共配置、受控检索、SVN 指定版本同步和可取消 SSE 任务。实施与部署边界见方案末尾。
+
+## 2026-10-30 AI 文档范围与代码版本每日更新约定
+
+- 本节优先于上文「默认代码库」的旧设计：普通用户问答缺省 `documentFolders=['md']`、`codeRepositoryId=''`；即使旧 JSON 有 `defaultRepository`，也不得自动加载代码库。空范围且未选代码库时明确报错。
+- 管理员的 `ai.claude` JSON 保存 `codeFolder`（默认 `code`，只允许 `code` 或其子目录）、`documentFolders`（docs 相对目录，固定包含 md）、`dailySyncEnabled`、`dailySyncTime`（北京时间 HH:MM，默认 03:00）及 `repositories`。每个代码库包含 `id/name/folder/url/revision/username/password/dailySync`；folder 可为多层中文版本目录，URL 为空即本地目录，非空即 SVN。代码库根不得互相包含，目录链接与路径逃逸均拒绝。
+- 管理员 AI 配置界面必须有代码根目录、文档目录清单、每日更新时间和代码版本目录/账号输入控件，且与 JSON 编辑框双向同步；所有值走 `PUT /__admin/ai` 写入当前私有方案，保持配置版本冲突检查。普通用户只选择开放的文档目录与可选的单个代码库，不得写服务器路径、URL 或账号。
+- 服务器先校验本次选定目录属于管理员开放清单，再检索相应文件；只把选定范围的片段交给禁用工具的 Claude。md 扫描复用 folder_sources.walk_paths，只允许 docs/md 一级目录链接，不展开嵌套链接；额外目录与代码库拒绝链接。范围切换不能复用前一范围的对话上下文。公开接口不得泄露同步凭据。
+- `code_qa.sync_daily` 接入 serve.start_repo_sync 的认证服务后台循环；北京时间每天到点后每库成功一次，未运行时当天恢复后补执行。保存成功日期与配置签名到数据库目录下的 code-qa-sync.json；失败脱敏并每 15 分钟重试，问答忙碌时延后。固定 revision 仍按固定版本更新；本地目录和关闭 dailySync 的 SVN 库跳过。
+- 手动与每日同步共用 code_qa.sync_repository / SVN 唯一子进程入口、暂存校验发布与内容锁。显式 username/password 优先，否则 code-<id> → 默认凭据；每日同步缺少账号必须报错，不能匿名拉取。账号密码可写被 Git 忽略的私有 JSON，不写示例文件、普通会话、运行状态、离线资源或 Git。
+- README.md 的「公共 AI 范围与代码库每日更新」描述为当前部署约定；回归覆盖默认无代码、额外目录白名单、不同本地/远端代码版本、JSON/账号回显、每日去重、重启持久化、失败重试和范围切换。

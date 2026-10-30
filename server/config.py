@@ -329,6 +329,8 @@ def load_config(path, docs_dir, allow_incomplete=False, create_mounts=False):
     except ValueError as error:
         raise ConfigError(str(error))
     if ai["baseUrl"]:
+        if re.match(r'^https?://[^/\s?#]+$', ai['baseUrl'], re.I):
+            ai['baseUrl'] += '/'
         ai["baseUrl"] = _check_url(ai["baseUrl"], "ai.baseUrl")
 
     from . import policy

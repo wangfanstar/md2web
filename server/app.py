@@ -512,13 +512,33 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         settings = code_qa.validate((config.get('ai') or {}).get('claude'))
         repos = []
         for repo in settings.get('repositories', []):
-            path = code_qa.code_path(docs_root, repo)
-            marker = path / '.md2web-revision'
-            repos.append({'id': repo['id'], 'name': repo.get('name') or repo['id'],
-                          'ready': marker.is_file() and not marker.is_symlink(),
-                          'revision': marker.read_text(encoding='utf-8').strip() if marker.is_file() and not marker.is_symlink() else ''})
+            ready, revision = False, ''
+            try:
+                path = code_qa.code_path(docs_root, repo, settings)
+                marker = path / '.md2web-revision'
+                ready = path.is_dir() and (not repo.get('url') or (marker.is_file() and not marker.is_symlink()))
+                revision = (marker.read_text(encoding='utf-8').strip() if repo.get('url') else 'local') if ready else ''
+            except (ValueError, OSError):
+                ready = False
+            repos.append({'id': repo['id'], 'name': repo.get('name') or repo['id'], 'ready': ready,
+                          'revision': revision})
+        folders = []
+        for folder in settings['documentFolders']:
+            try:
+                available = code_qa.contained_folder(docs_root, folder).is_dir()
+            except ValueError:
+                available = False
+            folders.append({'path': folder, 'available': available})
         return jsonify(ok=True, enabled=bool(settings.get('enabled')), repositories=repos,
-                       defaultRepository=settings.get('defaultRepository', ''))
+                       defaultRepository='', documentFolders=folders, defaultDocumentFolders=['md'])
+
+    @app.get('/__admin/code-repositories')
+    def code_repository_status():
+        session, rejected = require_admin()
+        if rejected:
+            return rejected
+        from . import code_qa
+        return jsonify(ok=True, state=code_qa.read_sync_state(auth_service))
 
     @app.post('/__admin/ai/personal-configs/clear')
     def clear_retired_ai_configs():
@@ -538,6 +558,8 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
 
     @app.post('/__ai/chat')
     def code_chat():
+        if request.content_length and request.content_length > 256 * 1024:
+            return json_error(413, 'ai_request_too_large', 'AI 问答请求不能超过 256 KB')
         session, rejected = require_session()
         if rejected:
             return rejected
@@ -546,8 +568,8 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             return rejected
         from . import code_qa
         payload = request.get_json(silent=True)
-        if not isinstance(payload, dict) or set(payload) - {'messages', 'codeRepositoryId'}:
-            return json_error(400, 'invalid_request', '仅接受对话和代码库 ID')
+        if not isinstance(payload, dict) or set(payload) - {'messages', 'codeRepositoryId', 'documentFolders'}:
+            return json_error(400, 'invalid_request', '仅接受对话、代码库 ID 和开放的文档目录')
         if not code_qa.LOCK.acquire(False):
             return json_error(429, 'ai_busy', '正在问答或更新代码库，请稍后重试')
         job_id = uuid.uuid4().hex
@@ -612,48 +634,14 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         from . import code_qa
         if not code_qa.LOCK.acquire(False):
             return json_error(409, 'ai_busy', '正在问答或同步，请稍后重试')
-        stage = None
-        preserve_stage = False
         try:
             settings = code_qa.validate((config.get('ai') or {}).get('claude'))
-            repo = code_qa.repository(settings, repo_id)
-            target = code_qa.code_path(docs_root, repo)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            stage = Path(tempfile.mkdtemp(prefix='.sync-', dir=str(target.parent)))
-            with auth_service._db_lock:
-                credential = auth_service.repo_sync_credential({'id': 'code-' + repo_id}) or (None, None)
-            info = auth_service.svn.info(repo['url'], str(stage / 'svn-config'),
-                                         username=credential[0], password=credential[1])
-            revision = str(repo.get('revision', 'HEAD'))
-            if revision == 'HEAD':
-                revision = str(info['revision'])
-            exported = stage / 'export'
-            auth_service.svn.export(repo['url'], exported, revision=revision,
-                                    config_dir=str(stage / 'svn-config'),
-                                    username=credential[0], password=credential[1])
-            code_qa.validate_snapshot(exported)
-            (exported / '.md2web-revision').write_text(revision, encoding='utf-8')
-            previous = stage / 'previous'
-            if target.exists():
-                target.rename(previous)
-            try:
-                exported.rename(target)
-            except OSError:
-                if previous.exists():
-                    try:
-                        previous.rename(target)
-                    except OSError:
-                        preserve_stage = True
-                        raise ValueError('发布与回滚失败，旧版本保留在 ' + str(previous))
-                raise
-            return jsonify(ok=True, revision=revision)
+            return jsonify(**code_qa.sync_repository(auth_service, docs_root, settings, repo_id))
         except ValueError as error:
             return json_error(400, 'code_sync_failed', str(error))
         except Exception:
-            return json_error(502, 'code_sync_failed', '代码库同步失败，请检查 SVN 地址、版本和默认同步凭据')
+            return json_error(502, 'code_sync_failed', '代码库同步失败，请检查 SVN 地址、版本和同步账号')
         finally:
-            if stage is not None and not preserve_stage:
-                shutil.rmtree(str(stage), ignore_errors=True)
             code_qa.LOCK.release()
 
     @app.put("/__admin/ai")

@@ -643,3 +643,15 @@
   font-size: 11px;
   margin: 4px;
 }
+
+/* Shared public scopes and administrator code repository controls. */
+[data-document-scopes] { margin: 8px 16px; border: 1px solid #d5dee8; border-radius: 6px; }
+[data-document-scopes] label { display: inline-flex; align-items: center; gap: 4px; margin: 4px 14px 4px 0; }
+.ai-config-body > label { display: block; margin: 12px 0; }
+.ai-config-body > label > textarea { display: block; width: 100%; box-sizing: border-box; }
+[data-repos] fieldset { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 16px 0; border: 1px solid #d5dee8; border-radius: 6px; }
+[data-repos] fieldset label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+[data-repos] fieldset input:not([type="checkbox"]) { width: 100%; box-sizing: border-box; }
+[data-repos] fieldset input[type="checkbox"] { align-self: flex-start; }
+[data-repos] fieldset p { grid-column: 1 / -1; overflow-wrap: anywhere; }
+@media (max-width: 600px) { [data-repos] fieldset { grid-template-columns: 1fr; } }

@@ -307,11 +307,17 @@
     if (!state.overlay) buildOverlay();
     if (location.protocol === 'file:') { setStatus('离线页面无法问答，请打开服务器站点'); return Promise.resolve(); }
     if (!accountIdentity()) { setStatus('请先登录后使用公共 AI 问答'); return Promise.resolve(); }
+    var folders=Array.prototype.map.call(state.overlay.querySelectorAll('[data-document-folder]:checked'),function(input){return input.value;});
+    var selected=state.overlay.querySelector('[data-code-repository]');
+    var scopeKey=JSON.stringify([accountIdentity(),selected ? selected.value : '',folders]);
+    var current=ensureConversation();
+    if(current.scopeKey!==scopeKey && state.messages.length)current=startConversation();
+    current.scopeKey=scopeKey;
     appendMessage('user', text); state.inputEl.value = ''; state.busy = true;
     var bubble = appendMessage('assistant', '正在检索并请求 Claude…');
     var selected = state.overlay.querySelector('[data-code-repository]');
     return fetch('__ai/chat', {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':SiteAuth.csrfToken()},
-      body:JSON.stringify({messages:state.messages.slice(-8).concat([{role:'user',content:text}]),codeRepositoryId:selected ? selected.value : ''})})
+      body:JSON.stringify({messages:state.messages.slice(-8).concat([{role:'user',content:text}]),codeRepositoryId:selected ? selected.value : '',documentFolders:folders})})
        .then(function(r){
         if(!r.ok)return r.json().then(function(data){throw new Error(data.message||data.error);});
         var reader=r.body.getReader(),decoder=new TextDecoder(),buffer='',result=null;
@@ -326,7 +332,7 @@
         });}return pump();
       })
       .then(function(data){bubble.innerHTML=safeMarkdown(data.answer);enhance(bubble);
-        var source=document.createElement('p');source.textContent='代码库 '+data.repository+' @ r'+data.revision+'；来源：'+data.sources.join('、');bubble.appendChild(source);
+        var source=document.createElement('p');source.textContent=(data.repository ? '代码库 '+data.repository+' @ '+(data.revision==='local'?'local':'r'+data.revision)+'；' : '未使用代码库；')+'文档范围：'+(data.documentFolders||[]).join('、')+'；来源：'+(data.documentSources||[]).concat(data.sources||[]).join('、');bubble.appendChild(source);
         state.messages.push({role:'user',content:text},{role:'assistant',content:data.answer});persistMessages();setStatus('');})
       .catch(function(e){bubble.textContent='请求失败：'+message(e);}).then(function(){state.busy=false;state.jobId=null;});
   }
@@ -351,7 +357,8 @@
       '<button type="button" data-ai-action="clear">清空</button>',
       '<button type="button" data-ai-action="close">关闭</button>',
       '</header>',
-      '<label>代码库 <select data-code-repository><option value="">管理员默认代码库</option></select></label>',
+      '<label>代码库 <select data-code-repository><option value="">不使用代码库（默认）</option></select></label>',
+      '<fieldset data-document-scopes><legend>文档范围（docs/ 下）</legend><label><input type="checkbox" data-document-folder value="md" checked>md（默认）</label></fieldset>',
       '<div class="ai-messages" data-ai-messages></div>',
       '<div class="ai-status" data-ai-status></div>',
       '<div class="ai-actions">',
@@ -602,7 +609,12 @@
       var configButton=state.overlay.querySelector('[data-ai-action="config"]');if(configButton)configButton.hidden=!isAdmin();
       if(location.protocol==='file:' || !accountIdentity())return;
       fetch('__ai/public',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(data){
-        if(!select)return;select.textContent='';(data.repositories||[]).forEach(function(repo){var option=document.createElement('option');option.value=repo.id;option.textContent=repo.name+(repo.ready?' @ r'+repo.revision:'（未拉取）');select.appendChild(option);});select.value=data.defaultRepository||'';
+        if(!select)return;select.textContent='';
+        var empty=document.createElement('option');empty.value='';empty.textContent='不使用代码库（默认）';select.appendChild(empty);
+        (data.repositories||[]).forEach(function(repo){var option=document.createElement('option');option.value=repo.id;option.textContent=repo.name+(repo.ready?' @ '+repo.revision:'（目录未就绪）');select.appendChild(option);});select.value='';
+        var scopes=state.overlay.querySelector('[data-document-scopes]');scopes.textContent='';
+        var legend=document.createElement('legend');legend.textContent='文档范围（docs/ 下）';scopes.appendChild(legend);
+        (data.documentFolders||[{path:'md',available:true}]).forEach(function(folder){var label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.setAttribute('data-document-folder','');input.value=folder.path;input.checked=folder.path==='md';input.disabled=!folder.available;label.appendChild(input);label.appendChild(document.createTextNode(folder.path+(folder.available?'':'（目录不可用）')));scopes.appendChild(label);});
       }).catch(function(){setStatus('公共 AI 状态读取失败');});
     },0);
     if (!state.overlay) {
@@ -629,22 +641,51 @@
   // ---------- AI 配置弹窗（独立于聊窗） ----------
 
   function openConfig() {
-    if (!isAdmin()) { setStatus('AI 服务由管理员统一配置，请直接选择代码库提问'); return; }
+    if (!isAdmin()) { setStatus('AI 服务由管理员统一配置，请选择文档范围后提问'); return; }
     if (state.configOverlay) state.configOverlay.remove();
     var box=document.createElement('div');box.className='ai-config-dialog is-open';
-    box.innerHTML='<div class="ai-config-backdrop"></div><section class="ai-config-panel"><header class="ai-config-head">公共 Claude 配置 <button data-close>关闭</button></header><div class="ai-config-body"><p>仅管理员可配置。baseUrl 为 Windows 中转根地址，apiKey 为中转令牌。代码库使用默认 SVN 同步凭据。保存后点击同步拉取指定版本。</p><textarea data-json rows="22" style="width:100%;font-family:monospace"></textarea><button data-save>保存公共配置</button><button data-purge>清理停用的个人配置</button><div data-repos></div><p data-status></p></div></section>';
+    box.innerHTML='<div class="ai-config-backdrop"></div><section class="ai-config-panel"><header class="ai-config-head">公共 Claude 与检索范围 <button data-close>关闭</button></header><div class="ai-config-body">'
+      +'<p>baseUrl 为 Windows 中转根地址，apiKey 为中转令牌。以下设置与代码库账号均保存到私有配置 JSON。普通用户默认仅检索 docs/md，不选择代码库。</p>'
+      +'<label>代码根目录（相对 docs，code 或 code/子目录）<input data-code-folder value="code"></label>'
+      +'<label>开放给用户的文档目录（相对 docs，每行一个；md 始终可选）<textarea data-document-folders rows="3">md</textarea></label>'
+      +'<label><input type="checkbox" data-daily-enabled checked>启用 SVN 每日更新</label> <label>更新时间（北京时间）<input type="time" data-daily-time value="03:00"></label>'
+      +'<p>每个版本目录可以填写 SVN URL、revision（HEAD 或数字）及同步账号。URL 留空表示已有本地代码目录；账号和密码同时留空时沿用默认同步凭据。</p>'
+      +'<div data-repos></div><button data-add-repo>新增代码版本目录</button>'
+      +'<details open><summary>公共 AI 配置 JSON（可直接编辑）</summary><textarea data-json rows="16" style="width:100%;font-family:monospace"></textarea></details>'
+      +'<button data-save>保存公共配置</button><button data-purge>清理停用的个人配置</button><p data-status role="status"></p></div></section>';
     document.body.appendChild(box);state.configOverlay=box;
-    box.querySelector('[data-close]').onclick=function(){box.remove();state.configOverlay=null;};
-    var area=box.querySelector('[data-json]'),status=box.querySelector('[data-status]'),version='';
+    box.querySelector('[data-close]').onclick=closeConfig;
+    var area=box.querySelector('[data-json]'),status=box.querySelector('[data-status]'),version='',syncState={};
     function api(url,method,body){return fetch(url,{method:method||'GET',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':SiteAuth.csrfToken()},body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.message||d.error);return d;});});}
-    api('__config').then(function(data){version=(data.config||data).expectedConfigVersion||'';var ai=data.config ? data.config.ai : data.ai;area.value=JSON.stringify(ai || {},null,2);
-      if(!ai.claude || !ai.claude.repositories.length){var value=ai || {};value.claude={enabled:false,executable:'claude',timeoutSeconds:120,defaultRepository:'example',repositories:[{id:'example',name:'示例代码库',folder:'example',url:'https://svn.example.com/repo',revision:'HEAD'}]};area.value=JSON.stringify(value,null,2);}
-      ((ai.claude||{}).repositories||[]).forEach(function(repo){var btn=document.createElement('button');btn.textContent='同步 '+(repo.name||repo.id);btn.onclick=function(){btn.disabled=true;status.textContent='正在拉取…';api('__admin/code-repositories/'+encodeURIComponent(repo.id)+'/sync','POST',{}).then(function(d){status.textContent='同步成功 r'+d.revision;}).catch(function(e){status.textContent=e.message;}).then(function(){btn.disabled=false;});};box.querySelector('[data-repos]').appendChild(btn);});
-    }).catch(function(e){status.textContent=e.message;});
+    function read(){var value=JSON.parse(area.value);value.claude=value.claude||{};value.claude.repositories=value.claude.repositories||[];return value;}
+    function write(value){area.value=JSON.stringify(value,null,2);}
+    function render(){
+      var value=read(),settings=value.claude;
+      box.querySelector('[data-code-folder]').value=settings.codeFolder||'code';
+      box.querySelector('[data-document-folders]').value=(settings.documentFolders||['md']).join('\n');
+      box.querySelector('[data-daily-enabled]').checked=settings.dailySyncEnabled!==false;
+      box.querySelector('[data-daily-time]').value=settings.dailySyncTime||'03:00';
+      var host=box.querySelector('[data-repos]');host.textContent='';
+      settings.repositories.forEach(function(repo,index){
+        var card=document.createElement('fieldset'),legend=document.createElement('legend');legend.textContent='代码版本 '+(repo.name||repo.id);card.appendChild(legend);
+        [['id','ID'],['name','名称'],['folder','代码根目录下的相对目录'],['url','SVN URL（本地目录留空）'],['revision','SVN 版本'],['username','同步账号'],['password','同步密码']].forEach(function(field){
+          var label=document.createElement('label'),input=document.createElement('input');label.textContent=field[1]+' ';input.type=field[0]==='password'?'password':'text';input.autocomplete='off';input.value=repo[field[0]]||'';input.setAttribute('data-code-repo-field',field[0]);
+          input.oninput=function(){try{var current=read();current.claude.repositories[index][field[0]]=input.value;write(current);}catch(e){status.textContent='请先修正 JSON：'+e.message;}};label.appendChild(input);card.appendChild(label);
+        });
+        var daily=document.createElement('input'),label=document.createElement('label');daily.type='checkbox';daily.checked=repo.dailySync!==false;daily.onchange=function(){var current=read();current.claude.repositories[index].dailySync=daily.checked;write(current);};label.appendChild(daily);label.appendChild(document.createTextNode('此 SVN 库每日更新'));card.appendChild(label);
+        var sync=document.createElement('button');sync.textContent='同步已保存的 SVN 配置';sync.disabled=!repo.url;sync.onclick=function(){sync.disabled=true;status.textContent='正在更新已保存配置对应的 SVN 库…';api('__admin/code-repositories/'+encodeURIComponent(repo.id)+'/sync','POST',{}).then(function(d){status.textContent='同步成功 r'+d.revision;}).catch(function(e){status.textContent=e.message;}).then(function(){sync.disabled=!repo.url;});};card.appendChild(sync);
+        var remove=document.createElement('button');remove.textContent='移除配置（保留磁盘目录）';remove.onclick=function(){var current=read();current.claude.repositories.splice(index,1);current.claude.defaultRepository='';write(current);render();};card.appendChild(remove);
+        var info=document.createElement('p'),record=syncState[repo.id]||{};info.textContent=record.error|| (record.lastSuccessDate?'最近成功：'+record.lastSuccessDate+'，版本 '+record.revision:'尚无更新记录');card.appendChild(info);host.appendChild(card);
+      });
+    }
+    function controls(){try{var value=read();value.claude.codeFolder=box.querySelector('[data-code-folder]').value.trim();value.claude.documentFolders=box.querySelector('[data-document-folders]').value.split(/\r?\n/).map(function(p){return p.trim();}).filter(Boolean);value.claude.dailySyncEnabled=box.querySelector('[data-daily-enabled]').checked;value.claude.dailySyncTime=box.querySelector('[data-daily-time]').value;write(value);}catch(e){status.textContent='请先修正 JSON：'+e.message;}}
+    ['[data-code-folder]','[data-document-folders]','[data-daily-enabled]','[data-daily-time]'].forEach(function(selector){box.querySelector(selector).oninput=controls;});
+    area.onchange=function(){try{render();}catch(e){status.textContent='JSON 格式错误：'+e.message;}};
+    box.querySelector('[data-add-repo]').onclick=function(){try{var value=read(),number=value.claude.repositories.length+1,id='code-'+number;while(value.claude.repositories.some(function(r){return r.id===id;})){id='code-'+(++number);}value.claude.repositories.push({id:id,name:'代码版本 '+number,folder:id,url:'',revision:'HEAD',username:'',password:'',dailySync:true});write(value);render();}catch(e){status.textContent=e.message;}};
+    api('__config').then(function(data){version=(data.config||data).expectedConfigVersion||'';var ai=(data.config||data).ai||{};ai.claude=ai.claude||{enabled:false,executable:'claude',timeoutSeconds:120,repositories:[]};write(ai);render();return api('__admin/code-repositories');}).then(function(data){syncState=data.state||{};render();}).catch(function(e){status.textContent=e.message;});
     box.querySelector('[data-purge]').onclick=function(){api('__admin/ai/personal-configs/clear','POST',{}).then(function(d){status.textContent='已清理 '+d.cleared+' 项旧个人配置';}).catch(function(e){status.textContent=e.message;});};
-    box.querySelector('[data-save]').onclick=function(){try{var value=JSON.parse(area.value);value.expectedConfigVersion=version;api('__admin/ai','PUT',value).then(function(data){version=(data.config||{}).expectedConfigVersion||version;status.textContent='已保存。重新打开配置可同步新代码库';}).catch(function(e){status.textContent=e.message;});}catch(e){status.textContent='JSON 格式错误：'+e.message;}};
+    box.querySelector('[data-save]').onclick=function(){try{var value=read();value.claude.defaultRepository='';value.expectedConfigVersion=version;api('__admin/ai','PUT',value).then(function(data){version=(data.config||{}).expectedConfigVersion||version;write(data.ai);render();status.textContent='已保存到私有 JSON，每日更新配置立即生效';}).catch(function(e){status.textContent=e.message;});}catch(e){status.textContent='JSON 格式错误：'+e.message;}};
   }
-
 
   function closeConfig() {
     if (state.configOverlay) { state.configOverlay.remove();state.configOverlay=null; }

@@ -1,5 +1,7 @@
 {
-  "uploads": {"maxFileMB": 500},
+  "uploads": {
+    "maxFileMB": 500
+  },
   "server": {
     "bind": "0.0.0.0",
     "port": 8882,
@@ -33,5 +35,22 @@
       "url": "https://svn.example.invalid/svn/verification/trunk/manual/",
       "credential_group": "engineering"
     }
-  ]
+  ],
+  "ai": {
+    "baseUrl": "http://WINDOWS_RELAY_HOST:8787/",
+    "model": "",
+    "apiKey": "",
+    "claude": {
+      "enabled": false,
+      "executable": "claude",
+      "timeoutSeconds": 120,
+      "codeFolder": "code",
+      "documentFolders": [
+        "md"
+      ],
+      "dailySyncEnabled": true,
+      "dailySyncTime": "03:00",
+      "repositories": []
+    }
+  }
 }
