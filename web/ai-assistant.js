@@ -201,6 +201,16 @@
     state.messagesEl.scrollTop = state.messagesEl.scrollHeight;
   }
 
+  function compactScopes(paths) {
+    return paths.filter(function(path,index){return paths.indexOf(path)===index && !paths.some(function(parent){return parent!==path && path.indexOf(parent+'/')===0;});});
+  }
+
+  function addScopeActions(host) {
+    var bar=document.createElement('div');bar.className='ai-scope-bulk';
+    [['全选',true],['清空',false]].forEach(function(action){var button=document.createElement('button');button.type='button';button.textContent=action[0];button.onclick=function(){host.querySelectorAll('input[type=checkbox]').forEach(function(input){var label=input.closest('label');if(!input.disabled && (!label||!label.hidden))input.checked=action[1];});};bar.appendChild(button);});
+    host.appendChild(bar);
+  }
+
   function ask(question) {
     var text = String(question || '').trim();
     if (!text || state.busy) return Promise.resolve();
@@ -210,6 +220,7 @@
     var folders=Array.prototype.map.call(state.overlay.querySelectorAll('[data-document-folder]:checked'),function(input){return input.value;});
     var selected=state.overlay.querySelector('[data-code-repository]');
     var codeFolders=Array.prototype.map.call(state.overlay.querySelectorAll('[data-code-folder]:checked'),function(input){return input.value;});
+    folders=compactScopes(folders);codeFolders=compactScopes(codeFolders);
     var scopeKey=JSON.stringify([accountIdentity(),codeFolders,folders]);
     var current=ensureConversation();
     if(current.scopeKey!==scopeKey && state.messages.length)current=startConversation();
@@ -286,9 +297,9 @@
     var scopeDialog=document.createElement('dialog');scopeDialog.className='ai-scope-dialog';scopeDialog.setAttribute('aria-label','选择 AI 查询范围');
     picker.parentNode.insertBefore(scopeButton,picker);picker.parentNode.insertBefore(scopeDialog,picker);scopeDialog.appendChild(picker);picker.open=true;
     picker.querySelector('summary').hidden=true;
-    var heading=document.createElement('header');heading.className='ai-scope-header';heading.innerHTML='<h2>选择查询范围</h2><p>选择知识库或代码仓库；展开仓库可指定子目录。选择上级目录会包含其全部内容。</p>';scopeDialog.insertBefore(heading,picker);
+    var heading=document.createElement('header');heading.className='ai-scope-header';heading.innerHTML='<h2>选择查询范围</h2><p>选择知识库或代码仓库；展开仓库可指定子目录。选择上级目录会包含其全部内容；筛选后全选仅勾选匹配项。</p>';scopeDialog.insertBefore(heading,picker);
     var scopeFooter=document.createElement('footer');scopeFooter.className='ai-scope-footer';scopeDialog.appendChild(scopeFooter);
-    var clear=document.createElement('button');clear.type='button';clear.textContent='清空选择';clear.onclick=function(){picker.querySelectorAll('input[type=checkbox]').forEach(function(i){i.checked=false;});};scopeFooter.appendChild(clear);
+    addScopeActions(picker);var globalActions=picker.lastChild;scopeFooter.appendChild(globalActions);globalActions.querySelectorAll('button')[0].textContent='全选范围';globalActions.querySelectorAll('button')[1].textContent='清空选择';
     var done=document.createElement('button');done.type='button';done.textContent='完成选择';done.className='ai-scope-primary';scopeFooter.appendChild(done);
     scopeButton.onclick=function(){scopeDialog.showModal();};done.onclick=function(){scopeDialog.close();var count=picker.querySelectorAll('input:checked').length;scopeButton.textContent='查询范围：已选 '+count+' 项 · 修改 ▾';};
 
@@ -534,15 +545,15 @@
         (data.repositories||[]).forEach(function(repo){var option=document.createElement('option');option.value=repo.id;option.textContent=repositoryLabel(repo)+(repo.ready?' @ '+repo.revision:'（目录未就绪）');select.appendChild(option);});select.value='';
         var codes=state.overlay.querySelector('[data-code-scopes]');
         var previous={};codes.querySelectorAll('input:checked').forEach(function(e){previous[e.value]=true;});
-        codes.textContent='';var codeLegend=document.createElement('legend');codeLegend.textContent='代码仓库（可多选到子目录）';codes.appendChild(codeLegend);
+        codes.textContent='';var codeLegend=document.createElement('legend');codeLegend.textContent='代码仓库（可多选到子目录）';codes.appendChild(codeLegend);addScopeActions(codes);
         (data.repositories||[]).forEach(function(repo){
-          var group=document.createElement('details'),title=document.createElement('summary');title.textContent=repositoryLabel(repo)+(repo.ready?' · '+(repo.revision||'本地代码'):'（目录未就绪）');group.appendChild(title);
+          var group=document.createElement('details'),title=document.createElement('summary');title.textContent=repositoryLabel(repo)+(repo.ready?' · '+(repo.revision||'本地代码'):'（目录未就绪）');group.appendChild(title);addScopeActions(group);
           [repo.path].concat(repo.folders||[]).forEach(function(path){if(!path)return;var label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.setAttribute('data-code-folder','');input.value=path;input.checked=!!previous[path];input.disabled=!repo.ready;label.appendChild(input);label.appendChild(document.createTextNode(path));group.appendChild(label);});codes.appendChild(group);
           if(!repo.folders||!repo.folders.length)group.open=true;
         });
         if(!(data.repositories||[]).length){var emptyCode=document.createElement('p');emptyCode.className='ai-scope-empty';emptyCode.textContent='尚未配置代码仓库，请在仓库管理中识别并加入。';codes.appendChild(emptyCode);}
         var scopes=state.overlay.querySelector('[data-document-scopes]');scopes.textContent='';
-        var legend=document.createElement('legend');legend.textContent='文档范围（docs/ 下）';scopes.appendChild(legend);
+        var legend=document.createElement('legend');legend.textContent='文档范围（docs/ 下）';scopes.appendChild(legend);addScopeActions(scopes);
         (data.documentFolders||[{path:'md',available:true}]).forEach(function(folder){var label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.setAttribute('data-document-folder','');input.value=folder.path;input.checked=!!chosen[folder.path];input.disabled=!folder.available;label.appendChild(input);label.style.paddingLeft=(12+Math.min(folder.path.split('/').length-1,5)*16)+'px';label.appendChild(document.createTextNode(folder.path+(folder.available?'':'（目录不可用）')));scopes.appendChild(label);});
         if(data.enabled===false)setStatus('管理员尚未启用 Claude 问答，请联系管理员在「配置」中启用。');
       }).catch(function(){setStatus('公共 AI 状态读取失败');});
