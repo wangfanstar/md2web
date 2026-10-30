@@ -2125,6 +2125,7 @@ def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.h
     </form><p class="home-ai-note">登录服务器后可用 · 回答支持流式显示</p></section>
     <section id="knowledge" class="home-knowledge" aria-labelledby="knowledge-title"><div class="home-section-caption"><div><h2 id="knowledge-title">浏览知识库</h2><p>按主题分组，选择一个知识库开始阅读。</p></div><a href="{HTML_PREFIX}{all_page}">全部文档 →</a></div>
     <div data-master-repositories>{''.join(sections)}</div></section>
+    <section id="code-repositories" class="home-knowledge" aria-labelledby="code-repositories-title"><div class="home-section-caption"><div><h2 id="code-repositories-title">代码库信息</h2><p>当前已同步的代码版本与 SVN 来源</p></div></div><div data-code-repository-info>登录服务器后查看代码库信息；离线页面不保存代码库配置。</div></section>
     <section id="references" class="home-references" aria-labelledby="references-title"><div class="home-section-caption"><h2 id="references-title">参考资料</h2></div><div class="home-reference-grid"><div><h3>参考文献</h3>{''.join(reference_cards)}</div><div><h3>参考网页</h3><div class="cards">{''.join(web_cards)}</div></div></div></section>
     </main><footer class="home-footer"><span>随时查阅，专注阅读</span><nav aria-label="帮助与管理"><a href="{HTML_PREFIX}md2web_feedback.html">读者反馈</a><a href="{HTML_PREFIX}md2web_recycle.html?mount=md">回收站</a><a href="{HTML_PREFIX}{config_page}">仓库配置</a><a href="#home-title">返回顶部 ↑</a></nav></footer>
   </div>

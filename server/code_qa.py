@@ -264,7 +264,7 @@ def sync_repository(auth_service, docs, settings, repo_id, require_account=False
         state = read_sync_state(auth_service)
         date = now or (datetime.utcnow() + timedelta(hours=8))
         state[repo_id] = {'signature': repository_signature(settings, repo), 'lastSuccessDate': date.strftime('%Y-%m-%d'),
-                          'lastAttempt': date.isoformat(), 'revision': revision, 'error': ''}
+                          'lastAttempt': date.isoformat(), 'lastSuccessAt': date.isoformat(), 'revision': revision, 'error': ''}
         save_sync_state(auth_service, state)
         return {'ok': True, 'revision': revision}
     finally:

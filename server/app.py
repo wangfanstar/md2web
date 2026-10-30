@@ -510,6 +510,8 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             return rejected
         from . import code_qa
         settings = code_qa.validate((config.get('ai') or {}).get('claude'))
+        from urllib.parse import urlsplit, urlunsplit
+        sync_state = code_qa.read_sync_state(auth_service)
         repos = []
         for repo in settings.get('repositories', []):
             ready, revision = False, ''
@@ -520,7 +522,11 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 revision = (marker.read_text(encoding='utf-8').strip() if repo.get('url') else 'local') if ready else ''
             except (ValueError, OSError):
                 ready = False
+            svn_url = urlsplit(repo.get('url', ''))
+            safe_svn_url = urlunsplit((svn_url.scheme, svn_url.netloc.rsplit('@', 1)[-1], svn_url.path, '', ''))
             repos.append({'id': repo['id'], 'name': repo.get('name') or repo['folder'], 'folder': repo['folder'], 'ready': ready,
+                          'svnUrl': safe_svn_url,
+                          'lastUpdated': (sync_state.get(repo['id'], {}).get('lastSuccessAt', '') if sync_state.get(repo['id'], {}).get('signature') == code_qa.repository_signature(settings, repo) and not sync_state.get(repo['id'], {}).get('error') else ''),
                           'revision': revision, 'path': settings['codeFolder'] + '/' + repo['folder'],
                           'folders': code_qa.directory_choices(docs_root, settings['codeFolder'] + '/' + repo['folder']) if ready else []})
         folders = []
