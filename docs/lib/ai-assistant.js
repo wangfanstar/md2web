@@ -319,7 +319,7 @@
       '<button type="button" data-ai-action="clear">清空</button>',
       '<button type="button" data-ai-action="close">关闭</button>',
       '</header>',
-      '<details class="ai-scope-picker"><summary>选择代码仓库与知识库范围 ▾</summary><input type="search" placeholder="筛选目录""><label hidden>代码库 <select data-code-repository><option value="">不使用代码库（默认）</option></select></label>',
+      '<details class="ai-scope-picker"><summary>选择代码仓库与知识库范围 ▾</summary><input type="search" placeholder="筛选目录"><label hidden>代码库 <select data-code-repository><option value="">不使用代码库（默认）</option></select></label>',
       '<fieldset data-code-scopes><legend>代码仓库（可多选到子目录）</legend></fieldset><fieldset data-document-scopes><legend>文档范围（docs/ 下）</legend><label><input type="checkbox" data-document-folder value="md" checked>md（默认）</label></fieldset></details>',
       '<div class="ai-messages" data-ai-messages></div>',
       '<div class="ai-status" data-ai-status></div>',
