@@ -607,7 +607,8 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                     emit('delta', {'text': text})
                     if cancel.is_set():
                         raise ValueError('请求已取消')
-                result = code_qa.answer(docs_root, ai_snapshot, payload, cancel, on_delta=send_delta)
+                result = code_qa.answer(docs_root, ai_snapshot, payload, cancel, on_delta=send_delta,
+                                        on_progress=lambda data: emit('progress', data))
                 emit('complete', result)
             except ValueError as error:
                 emit('error', {'message': str(error)})

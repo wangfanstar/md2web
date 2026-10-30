@@ -75,14 +75,36 @@ class CodeQaTests(unittest.TestCase):
     def test_http_stream_forwards_deltas_before_complete(self):
         csrf = self.f.login()
         def respond(*args, **kwargs):
+            kwargs['on_progress']({'kind': 'scope', 'directories': ['md']})
             kwargs['on_delta']('部分回答')
             return {'answer': '完整回答'}
         with mock.patch('server.code_qa.answer', side_effect=respond):
             response = self.f.client.post('/__ai/chat', json={'messages': [{'role': 'user', 'content': 'hello'}]}, headers={'X-CSRF-Token': csrf})
             body = response.get_data(as_text=True)
         self.assertEqual(response.status_code, 200)
+        self.assertLess(body.index('event: progress'), body.index('event: delta'))
         self.assertLess(body.index('event: delta'), body.index('event: complete'))
         self.assertIn('部分回答', body)
+
+    def test_progress_only_exposes_allowed_tools_and_public_locations(self):
+        import io
+        events = [
+            {'type': 'assistant', 'message': {'content': [
+                {'type': 'thinking', 'thinking': 'PRIVATE_THINKING'},
+                {'type': 'tool_use', 'id': 'read1', 'name': 'Read', 'input': {'file_path': 'md/a.md', 'secret': 'PRIVATE_SECRET'}},
+                {'type': 'tool_use', 'id': 'bash1', 'name': 'Bash', 'input': {'command': 'PRIVATE_COMMAND'}}]}},
+            {'type': 'user', 'message': {'content': [{'type': 'tool_result', 'tool_use_id': 'read1', 'content': 'PRIVATE_TOOL_OUTPUT'}]}},
+            {'type': 'result', 'result': 'answer'}]
+        process = self.fake_process()
+        process.stdin = io.BytesIO()
+        process.stdout = io.BytesIO(('\n'.join(json.dumps(e) for e in events)+'\n').encode('utf-8'))
+        process.stderr = io.BytesIO()
+        progress = []
+        with mock.patch('server.code_qa.subprocess.Popen', return_value=process):
+            code_qa.answer(self.f.docs, self.f.config['ai'], {'messages': [{'role': 'user', 'content': 'hello'}]}, on_delta=lambda text: None, on_progress=progress.append)
+        self.assertEqual(progress[0]['kind'], 'scope')
+        self.assertEqual([p['status'] for p in progress if p['kind'] == 'tool'], ['running', 'completed'])
+        self.assertNotIn('PRIVATE_', json.dumps(progress))
 
     def test_streaming_emits_text_before_final_result(self):
         import io

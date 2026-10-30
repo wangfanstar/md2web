@@ -707,3 +707,11 @@
 .ai-tree-children { margin-left:14px; padding-left:10px; border-left:1px solid #e2e8f0; }
 .ai-tree-node[hidden],.ai-tree-children[hidden] { display:none!important; }
 .ai-scope-dialog .ai-scope-picker > fieldset { align-self:start; }
+
+.ai-execution { margin:10px 0; padding:10px 12px; border:1px solid #dce6f2; border-radius:9px; background:#f6f9fd; font-size:12px; color:#596e89; }
+.ai-execution summary { cursor:pointer; font-weight:600; }
+.ai-execution > div { max-height:210px; overflow:auto; overflow-wrap:anywhere; }
+.ai-execution p { margin:6px 0; }
+
+.ai-copy-answer { display:block; margin-top:12px; padding:5px 10px; border:1px solid #d4dfed; border-radius:6px; background:#fff; color:#42688f; cursor:pointer; font-size:12px; }
+.ai-actions { flex-wrap:wrap; }

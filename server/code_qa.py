@@ -321,7 +321,7 @@ def terminate(process):
         os.killpg(process.pid, signal.SIGKILL)
 
 
-def collect_stream(process, prompt, timeout, on_delta):
+def collect_stream(process, prompt, timeout, on_delta, on_progress=None):
     """Drain all pipes concurrently so large prompts and diagnostics cannot deadlock."""
     expired = threading.Event()
     errors = []
@@ -345,6 +345,7 @@ def collect_stream(process, prompt, timeout, on_delta):
     diagnostics.start()
     timer.start()
     result, total = None, 0
+    tools = {}
     try:
         while True:
             line = process.stdout.readline(2 * 1024 * 1024 + 1)
@@ -359,6 +360,27 @@ def collect_stream(process, prompt, timeout, on_delta):
                 raise ValueError('Claude 输出协议不兼容')
             if not isinstance(event, dict):
                 raise ValueError('Claude 输出协议不兼容')
+            if on_progress is not None and event.get('type') in ('assistant', 'user'):
+                message = event.get('message') or {}
+                for block in message.get('content', []) if isinstance(message.get('content'), list) else []:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get('type') == 'tool_use' and block.get('name') in ('Read', 'Glob', 'Grep'):
+                        tool_id = block.get('id')
+                        if not isinstance(tool_id, str) or tool_id in tools:
+                            continue
+                        name = block['name']
+                        values = block.get('input') or {}
+                        # Only expose file/search locations; never forward raw tool payloads/results.
+                        target = values.get('file_path') or values.get('path') or ''
+                        target = target[:1000] if isinstance(target, str) else ''
+                        tools[tool_id] = (name, target)
+                        on_progress({'kind': 'tool', 'id': tool_id, 'tool': name, 'target': target, 'status': 'running'})
+                    elif block.get('type') == 'tool_result' and block.get('tool_use_id') in tools:
+                        tool_id = block['tool_use_id']
+                        name, target = tools[tool_id]
+                        on_progress({'kind': 'tool', 'id': tool_id, 'tool': name, 'target': target,
+                                     'status': 'failed' if block.get('is_error') else 'completed'})
             if event.get('type') == 'stream_event':
                 detail = event.get('event') or {}
                 delta = detail.get('delta') or {}
@@ -382,7 +404,7 @@ def collect_stream(process, prompt, timeout, on_delta):
         diagnostics.join(1)
 
 
-def answer(docs, ai, payload, cancel=None, on_delta=None):
+def answer(docs, ai, payload, cancel=None, on_delta=None, on_progress=None):
     settings = validate(ai.get('claude'))
     if not settings.get('enabled'):
         raise ValueError('管理员尚未启用 Claude 问答')
@@ -449,6 +471,8 @@ def answer(docs, ai, payload, cancel=None, on_delta=None):
               '\n指定目录（相对当前 docs）：\n%s\n所选代码库版本：%s\n对话与当前问题：\n%s'
               % (json.dumps(directories, ensure_ascii=False), revision or '未选择代码库',
                  json.dumps(messages, ensure_ascii=False)))
+    if on_progress is not None:
+        on_progress({'kind': 'scope', 'directories': directories})
     env = os.environ.copy()
     # Inherit the service account's Claude authentication/model/relay configuration.
     # md2web never supplies API credentials, endpoints or model overrides.
@@ -487,7 +511,7 @@ def answer(docs, ai, payload, cancel=None, on_delta=None):
         if on_delta is None:
             stdout, _ = process.communicate(prompt.encode('utf-8'), timeout=settings['timeoutSeconds'])
         else:
-            stdout = collect_stream(process, prompt, settings['timeoutSeconds'], on_delta)
+            stdout = collect_stream(process, prompt, settings['timeoutSeconds'], on_delta, on_progress)
     except subprocess.TimeoutExpired:
         raise ValueError('Claude 请求超时')
     finally:

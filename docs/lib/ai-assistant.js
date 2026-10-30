@@ -201,6 +201,28 @@
     state.messagesEl.scrollTop = state.messagesEl.scrollHeight;
   }
 
+  function copyText(text) {
+    function fallback(){var area=document.createElement('textarea');area.value=text;area.style.position='fixed';area.style.opacity='0';document.body.appendChild(area);area.select();var ok=document.execCommand('copy');area.remove();if(!ok)throw new Error('请手动选择文字复制');}
+    var promise=navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(text).catch(fallback):Promise.resolve().then(fallback);
+    promise.then(function(){setStatus('已复制');}).catch(function(e){setStatus('复制失败：'+e.message);});
+  }
+
+  function addAnswerCopy(bubble,text) {
+    var button=document.createElement('button');button.type='button';button.className='ai-copy-answer';button.textContent='复制回答';button.onclick=function(){copyText(text);};bubble.appendChild(button);
+  }
+
+  function historyAction(target) {
+    var remove=target.closest('[data-ai-history-delete]');
+    if(remove)return {remove:remove.getAttribute('data-ai-history-delete')};
+    var item=target.closest('[data-ai-history-id]');
+    return item?{id:item.getAttribute('data-ai-history-id')}:{};
+  }
+
+  function lastTurnIndex() {
+    for(var i=state.messages.length-1;i>=0;i--)if(state.messages[i].role==='user')return i;
+    return -1;
+  }
+
   function compactScopes(paths) {
     return paths.filter(function(path,index){return paths.indexOf(path)===index && !paths.some(function(parent){return parent!==path && path.indexOf(parent+'/')===0;});});
   }
@@ -274,8 +296,18 @@
     var current=ensureConversation();
     if(current.scopeKey!==scopeKey && state.messages.length)current=startConversation();
     current.scopeKey=scopeKey;
+    state.undoTurn=null;
     appendMessage('user', text); state.inputEl.value = ''; state.busy = true;
     var bubble = appendMessage('assistant', '正在检索并请求 Claude…');
+    var processBox=document.createElement('details'),processTitle=document.createElement('summary'),processLog=document.createElement('div'),toolRows=Object.create(null);
+    processBox.className='ai-execution';processBox.open=true;processTitle.textContent='执行过程 · 正在准备';processBox.appendChild(processTitle);processBox.appendChild(processLog);bubble.parentNode.insertBefore(processBox,bubble);
+    function progress(value){
+      var row;
+      if(value.kind==='scope'){row=document.createElement('p');row.textContent='查询范围：'+(value.directories||[]).join('、');processLog.appendChild(row);}
+      if(value.kind==='tool'){row=toolRows[value.id];if(!row){row=document.createElement('p');toolRows[value.id]=row;processLog.appendChild(row);}var names={Read:'读取文件',Glob:'查找文件',Grep:'检索内容'},statuses={running:'进行中',completed:'已完成',failed:'失败'};row.textContent=(statuses[value.status]||value.status)+' · '+(names[value.tool]||value.tool)+(value.target?' · '+value.target:'');}
+      processTitle.textContent='执行过程 · '+Object.keys(toolRows).length+' 次工具调用';
+    }
+
     var selected = state.overlay.querySelector('[data-code-repository]');
     return fetch('__ai/chat', {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':SiteAuth.csrfToken()},
       body:JSON.stringify({messages:state.messages.slice(-8).concat([{role:'user',content:text}]),codeRepositoryId:selected ? selected.value : '',documentFolders:folders,codeFolders:codeFolders})})
@@ -286,6 +318,7 @@
           buffer+=decoder.decode(part.value||new Uint8Array(),{stream:!part.done});
           var split;while((split=buffer.indexOf('\n\n'))>=0){var event=buffer.slice(0,split);buffer=buffer.slice(split+2);var kind=/event: (.*)/.exec(event),data=/data: (.*)/.exec(event);if(!data)continue;var value=JSON.parse(data[1]);
             if(kind&&kind[1]==='start')state.jobId=value.jobId;
+            if(kind&&kind[1]==='progress')progress(value);
             if(kind&&kind[1]==='delta'){partial+=value.text||'';bubble.style.whiteSpace='pre-wrap';bubble.textContent=partial;state.messagesEl.scrollTop=state.messagesEl.scrollHeight;}
             if(kind&&kind[1]==='error')throw new Error(value.message);
             if(kind&&kind[1]==='complete')result=value;
@@ -293,10 +326,10 @@
           if(part.done){if(!result)throw new Error('问答连接中断');return result;}return pump();
         });}return pump();
       })
-      .then(function(data){bubble.style.whiteSpace='';bubble.innerHTML=safeMarkdown(data.answer);enhance(bubble);
+      .then(function(data){processTitle.textContent='执行过程 · 已完成 '+Object.keys(toolRows).length+' 次工具调用';processBox.open=false;bubble.style.whiteSpace='';bubble.innerHTML=safeMarkdown(data.answer);enhance(bubble);addAnswerCopy(bubble,data.answer);
         var source=document.createElement('p');source.textContent=(data.repository ? '代码库 '+data.repository+' @ '+(data.revision==='local'?'local':'r'+data.revision)+'；' : '未使用代码库；')+'文档范围：'+(data.documentFolders||[]).join('、')+'；文件引用请见 Claude 回答';bubble.appendChild(source);
         state.messages.push({role:'user',content:text},{role:'assistant',content:data.answer});persistMessages();setStatus('');})
-      .catch(function(e){var partial=bubble.textContent;bubble.textContent=(partial&&partial.indexOf('正在检索')!==0?partial+'\n\n':'')+'请求失败：'+message(e);}).then(function(){state.busy=false;state.jobId=null;});
+      .catch(function(e){processTitle.textContent='执行过程 · 请求中止';var partial=bubble.textContent;bubble.textContent=(partial&&partial.indexOf('正在检索')!==0?partial+'\n\n':'')+'请求失败：'+message(e);}).then(function(){state.busy=false;state.jobId=null;});
   }
 
 
@@ -323,6 +356,7 @@
       '<fieldset data-code-scopes><legend>代码仓库（可多选到子目录）</legend></fieldset><fieldset data-document-scopes><legend>文档范围（docs/ 下）</legend><label><input type="checkbox" data-document-folder value="md" checked>md（默认）</label></fieldset></details>',
       '<div class="ai-messages" data-ai-messages></div>',
       '<div class="ai-status" data-ai-status></div>',
+      '<div class="ai-actions"><button type="button" data-ai-action="copyAll">复制对话</button><button type="button" data-ai-action="retry">重新生成</button><button type="button" data-ai-action="undoTurn">撤回上一轮</button><button type="button" data-ai-action="redoTurn">恢复撤回</button></div>',
       '<div class="ai-actions">',
       '<button type="button" data-ai-quick="总结本页">总结本页</button>',
       '<button type="button" data-ai-quick="这篇文档讲了什么？">文档概览</button>',
@@ -382,17 +416,30 @@
         ask(quick);
         return;
       }
+      if(action==='copyAll'){copyText(state.messages.map(function(item){return (item.role==='user'?'我：':'AI：')+'\n'+item.content;}).join('\n\n'));return;}
+      if(state.busy&&['retry','undoTurn','redoTurn','newChat','clear'].indexOf(action)>=0){setStatus('请先取消请求或等待回答完成');return;}
+      if(action==='undoTurn'||action==='retry'){
+        var index=lastTurnIndex();if(index<0){setStatus('还没有可操作的对话');return;}
+        var question=state.messages[index].content;
+        state.undoTurn=state.messages.slice(index);state.messages=state.messages.slice(0,index);persistMessages();renderMessages();state.inputEl.value=question;state.inputEl.focus();
+        if(action==='retry')ask(question);else setStatus('已撤回上一轮，问题已恢复到输入框，可修改后重新发送或恢复撤回');return;
+      }
+      if(action==='redoTurn'){
+        if(!state.undoTurn){setStatus('没有可恢复的撤回');return;}
+        state.messages=state.messages.concat(state.undoTurn);state.undoTurn=null;persistMessages();renderMessages();state.inputEl.value='';setStatus('已恢复上一轮对话');return;
+      }
       if (action === 'config') {
         openConfig();
       } else if (action === 'history') {
         toggleHistory();
       } else if (action === 'newChat') {
-        startConversation();
+        state.undoTurn=null;startConversation();
       } else if (action === 'close') {
         closePanel();
       } else if (action === 'send') {
         ask(state.inputEl.value);
       } else if (action === 'clear') {
+        state.undoTurn=null;
         state.messages = [];
         state.messagesEl.innerHTML = '';
         var conversation = activeConversation();
@@ -405,14 +452,15 @@
       }
     });
     overlay.addEventListener('click', function (event) {
-      var historyId = event.target.getAttribute && event.target.getAttribute('data-ai-history-id');
-      var historyDelete = event.target.getAttribute && event.target.getAttribute('data-ai-history-delete');
+      var selectedHistory=historyAction(event.target),historyId=selectedHistory.id,historyDelete=selectedHistory.remove;
+      if((historyId||historyDelete)&&state.busy){setStatus('请先取消请求或等待回答完成');return;}
       if (historyDelete) {
         deleteConversation(historyDelete);
         return;
       }
+      if (historyId && state.busy) {setStatus('请先取消请求或等待回答完成');return;}
       if (historyId) {
-        switchConversation(historyId);
+        state.undoTurn=null;switchConversation(historyId);
       }
     });
     state.inputEl.addEventListener('keydown', function (event) {
@@ -533,7 +581,7 @@
         : safeMarkdown(item.content);
       state.messagesEl.appendChild(bubble);
       if (item.role === 'assistant') {
-        enhance(bubble);
+        enhance(bubble);addAnswerCopy(bubble,item.content);
       }
     });
     state.messagesEl.scrollTop = state.messagesEl.scrollHeight;
