@@ -70,6 +70,37 @@ class CodeQaTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 code_qa.answer(self.f.docs, self.f.config['ai'], payload)
 
+    def test_http_stream_forwards_deltas_before_complete(self):
+        csrf = self.f.login()
+        def respond(*args, **kwargs):
+            kwargs['on_delta']('部分回答')
+            return {'answer': '完整回答'}
+        with mock.patch('server.code_qa.answer', side_effect=respond):
+            response = self.f.client.post('/__ai/chat', json={'messages': [{'role': 'user', 'content': 'hello'}]}, headers={'X-CSRF-Token': csrf})
+            body = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertLess(body.index('event: delta'), body.index('event: complete'))
+        self.assertIn('部分回答', body)
+
+    def test_streaming_emits_text_before_final_result(self):
+        import io
+        events = [
+            {'type': 'stream_event', 'event': {'type': 'content_block_delta', 'delta': {'type': 'text_delta', 'text': '第一段'}}},
+            {'type': 'stream_event', 'event': {'type': 'content_block_delta', 'delta': {'type': 'text_delta', 'text': '第二段'}}},
+            {'type': 'result', 'result': '第一段第二段'}]
+        process = self.fake_process()
+        process.stdin = io.BytesIO()
+        process.stdout = io.BytesIO(('\n'.join(json.dumps(e) for e in events) + '\n').encode('utf-8'))
+        process.stderr = io.BytesIO()
+        chunks = []
+        with mock.patch('server.code_qa.subprocess.Popen', return_value=process) as launch:
+            data = code_qa.answer(self.f.docs, self.f.config['ai'], {'messages': [{'role': 'user', 'content': 'hello'}]}, on_delta=chunks.append)
+        self.assertEqual(chunks, ['第一段', '第二段'])
+        self.assertEqual(data['answer'], ''.join(chunks))
+        self.assertIn('stream-json', launch.call_args[0][0])
+        self.assertIn('--include-partial-messages', launch.call_args[0][0])
+        process.communicate.assert_not_called()
+
     def test_direct_cli_handoff_inherits_server_configuration(self):
         process = mock.Mock(returncode=0)
         process.poll.return_value = 0

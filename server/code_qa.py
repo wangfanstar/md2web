@@ -321,7 +321,68 @@ def terminate(process):
         os.killpg(process.pid, signal.SIGKILL)
 
 
-def answer(docs, ai, payload, cancel=None):
+def collect_stream(process, prompt, timeout, on_delta):
+    """Drain all pipes concurrently so large prompts and diagnostics cannot deadlock."""
+    expired = threading.Event()
+    errors = []
+    def write_prompt():
+        try:
+            process.stdin.write(prompt.encode('utf-8'))
+            process.stdin.close()
+        except (OSError, ValueError) as error:
+            errors.append(error)
+    def drain_errors():
+        while process.stderr.read(8192):
+            pass
+    def expire():
+        expired.set()
+        terminate(process)
+    writer = threading.Thread(target=write_prompt, daemon=True)
+    diagnostics = threading.Thread(target=drain_errors, daemon=True)
+    timer = threading.Timer(timeout, expire)
+    timer.daemon = True
+    writer.start()
+    diagnostics.start()
+    timer.start()
+    result, total = None, 0
+    try:
+        while True:
+            line = process.stdout.readline(2 * 1024 * 1024 + 1)
+            if not line:
+                break
+            total += len(line)
+            if total > 8 * 1024 * 1024 or len(line) > 2 * 1024 * 1024:
+                raise ValueError('Claude 返回内容过大')
+            try:
+                event = json.loads(line.decode('utf-8'))
+            except (ValueError, UnicodeError):
+                raise ValueError('Claude 输出协议不兼容')
+            if not isinstance(event, dict):
+                raise ValueError('Claude 输出协议不兼容')
+            if event.get('type') == 'stream_event':
+                detail = event.get('event') or {}
+                delta = detail.get('delta') or {}
+                if detail.get('type') == 'content_block_delta' and delta.get('type') == 'text_delta':
+                    text = delta.get('text')
+                    if isinstance(text, str) and text:
+                        on_delta(text)
+            elif event.get('type') == 'result':
+                result = event
+        process.wait()
+        if expired.is_set():
+            raise ValueError('Claude 请求超时')
+        if result is None:
+            raise ValueError('Claude 未返回有效结果')
+        return json.dumps(result, ensure_ascii=False).encode('utf-8')
+    finally:
+        timer.cancel()
+        if process.poll() is None:
+            terminate(process)
+        writer.join(1)
+        diagnostics.join(1)
+
+
+def answer(docs, ai, payload, cancel=None, on_delta=None):
     settings = validate(ai.get('claude'))
     if not settings.get('enabled'):
         raise ValueError('管理员尚未启用 Claude 问答')
@@ -394,6 +455,9 @@ def answer(docs, ai, payload, cancel=None):
     args = [settings['executable'], '-p', '--no-session-persistence', '--output-format', 'json',
             '--tools', 'Read,Glob,Grep', '--allowedTools', 'Read,Glob,Grep',
             '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}']
+    if on_delta is not None:
+        args[args.index('--output-format') + 1] = 'stream-json'
+        args += ['--verbose', '--include-partial-messages']
     options = {'start_new_session': True} if os.name != 'nt' else {}
     try:
         process = subprocess.Popen(args, cwd=str(Path(docs).resolve()), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **options)
@@ -420,7 +484,10 @@ def answer(docs, ai, payload, cancel=None):
             raise ValueError('请求已取消')
         # 一次 communicate 写完 stdin 并读回 stdout。按 1 秒重试会在提示词
         # 超过管道缓冲区时丢掉尚未写完的部分，Claude 会一直等 EOF。
-        stdout, _ = process.communicate(prompt.encode('utf-8'), timeout=settings['timeoutSeconds'])
+        if on_delta is None:
+            stdout, _ = process.communicate(prompt.encode('utf-8'), timeout=settings['timeoutSeconds'])
+        else:
+            stdout = collect_stream(process, prompt, settings['timeoutSeconds'], on_delta)
     except subprocess.TimeoutExpired:
         raise ValueError('Claude 请求超时')
     finally:

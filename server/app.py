@@ -580,18 +580,39 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             return json_error(429, 'ai_busy', '正在问答或更新代码库，请稍后重试')
         job_id = uuid.uuid4().hex
         cancel = threading.Event()
-        results = queue.Queue(maxsize=1)
+        results = queue.Queue(maxsize=128)
         ai_snapshot = json.loads(json.dumps(config.get('ai') or {}))
         with ai_jobs_lock:
             ai_jobs[job_id] = (session['user']['id'], cancel)
+        def emit(kind, data):
+            while not cancel.is_set():
+                try:
+                    results.put((kind, data), timeout=0.2)
+                    return
+                except queue.Full:
+                    continue
+            if kind in ('complete', 'error'):
+                try:
+                    results.put_nowait(('error', {'message': '请求已取消'}))
+                except queue.Full:
+                    # Reserve a terminal event even if a slow consumer filled the queue.
+                    try:
+                        results.get_nowait()
+                    except queue.Empty:
+                        pass
+                    results.put_nowait(('error', {'message': '请求已取消'}))
         def run():
             try:
-                result = code_qa.answer(docs_root, ai_snapshot, payload, cancel)
-                results.put(('complete', result))
+                def send_delta(text):
+                    emit('delta', {'text': text})
+                    if cancel.is_set():
+                        raise ValueError('请求已取消')
+                result = code_qa.answer(docs_root, ai_snapshot, payload, cancel, on_delta=send_delta)
+                emit('complete', result)
             except ValueError as error:
-                results.put(('error', {'message': str(error)}))
+                emit('error', {'message': str(error)})
             except Exception:
-                results.put(('error', {'message': 'Claude 执行失败，请检查安装、权限及代码库'}))
+                emit('error', {'message': 'Claude 执行失败，请检查安装、权限及代码库'})
             finally:
                 with ai_jobs_lock:
                     ai_jobs.pop(job_id, None)
@@ -607,10 +628,11 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                         yield ': waiting\n\n'
                         continue
                     yield 'event: %s\ndata: %s\n\n' % (kind, json.dumps(data, ensure_ascii=False))
-                    break
+                    if kind in ('complete', 'error'):
+                        break
             finally:
                 cancel.set()
-        return Response(events(), mimetype='text/event-stream', headers={'X-Accel-Buffering': 'no'})
+        return Response(events(), mimetype='text/event-stream', headers={'X-Accel-Buffering': 'no', 'Cache-Control': 'no-cache'})
 
     @app.post('/__ai/jobs/<job_id>/cancel')
     def cancel_ai_job(job_id):

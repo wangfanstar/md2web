@@ -221,21 +221,22 @@
       body:JSON.stringify({messages:state.messages.slice(-8).concat([{role:'user',content:text}]),codeRepositoryId:selected ? selected.value : '',documentFolders:folders,codeFolders:codeFolders})})
        .then(function(r){
         if(!r.ok)return r.json().then(function(data){throw new Error(data.message||data.error);});
-        var reader=r.body.getReader(),decoder=new TextDecoder(),buffer='',result=null;
+        var reader=r.body.getReader(),decoder=new TextDecoder(),buffer='',result=null,partial='';
         function pump(){return reader.read().then(function(part){
           buffer+=decoder.decode(part.value||new Uint8Array(),{stream:!part.done});
           var split;while((split=buffer.indexOf('\n\n'))>=0){var event=buffer.slice(0,split);buffer=buffer.slice(split+2);var kind=/event: (.*)/.exec(event),data=/data: (.*)/.exec(event);if(!data)continue;var value=JSON.parse(data[1]);
             if(kind&&kind[1]==='start')state.jobId=value.jobId;
+            if(kind&&kind[1]==='delta'){partial+=value.text||'';bubble.style.whiteSpace='pre-wrap';bubble.textContent=partial;state.messagesEl.scrollTop=state.messagesEl.scrollHeight;}
             if(kind&&kind[1]==='error')throw new Error(value.message);
             if(kind&&kind[1]==='complete')result=value;
           }
           if(part.done){if(!result)throw new Error('问答连接中断');return result;}return pump();
         });}return pump();
       })
-      .then(function(data){bubble.innerHTML=safeMarkdown(data.answer);enhance(bubble);
+      .then(function(data){bubble.style.whiteSpace='';bubble.innerHTML=safeMarkdown(data.answer);enhance(bubble);
         var source=document.createElement('p');source.textContent=(data.repository ? '代码库 '+data.repository+' @ '+(data.revision==='local'?'local':'r'+data.revision)+'；' : '未使用代码库；')+'文档范围：'+(data.documentFolders||[]).join('、')+'；文件引用请见 Claude 回答';bubble.appendChild(source);
         state.messages.push({role:'user',content:text},{role:'assistant',content:data.answer});persistMessages();setStatus('');})
-      .catch(function(e){bubble.textContent='请求失败：'+message(e);}).then(function(){state.busy=false;state.jobId=null;});
+      .catch(function(e){var partial=bubble.textContent;bubble.textContent=(partial&&partial.indexOf('正在检索')!==0?partial+'\n\n':'')+'请求失败：'+message(e);}).then(function(){state.busy=false;state.jobId=null;});
   }
 
 
