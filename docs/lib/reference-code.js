@@ -1,5 +1,37 @@
 (function () {
   'use strict';
+  // Existing HTML may still be cached when the service refreshes asset hashes.
+  // Add the newer controls before binding events to support those pages as well.
+  function ensureControls() {
+    var header = document.querySelector('.code-file-header');
+    var sidebar = document.querySelector('.code-sidebar');
+    if (sidebar) sidebar.id = 'code-directory';
+    if (!document.getElementById('toggle-tree')) {
+      var toggle = document.createElement('button'); toggle.id = 'toggle-tree'; toggle.type = 'button';
+      toggle.textContent = '隐藏目录'; toggle.setAttribute('aria-expanded', 'true');
+      toggle.setAttribute('aria-controls', 'code-directory');
+      document.getElementById('root').insertAdjacentElement('afterend', toggle);
+    }
+    if (!document.getElementById('copy-source')) {
+      var copy = document.createElement('button'); copy.id = 'copy-source'; copy.type = 'button'; copy.disabled = true;
+      copy.textContent = '复制源码'; document.getElementById('ask').insertAdjacentElement('beforebegin', copy);
+    }
+    if (!document.getElementById('file-meta')) {
+      var meta = document.createElement('small'); meta.id = 'file-meta';
+      document.getElementById('path').insertAdjacentElement('afterend', meta);
+    }
+    if (!document.getElementById('jump-form')) {
+      var jump = document.createElement('form'); jump.id = 'jump-form'; jump.className = 'code-line-tools';
+      jump.innerHTML = '<label>跳转行号 <input id="line-jump" type="number" min="1" placeholder="行号" required disabled></label><button type="submit" disabled>跳转</button>';
+      header.insertAdjacentElement('afterend', jump);
+    }
+    if (!document.getElementById('retry-load')) {
+      var retry = document.createElement('button'); retry.id = 'retry-load'; retry.type = 'button';
+      retry.textContent = '重新加载'; retry.hidden = true;
+      document.getElementById('root').insertAdjacentElement('afterend', retry);
+    }
+  }
+  ensureControls();
   var repo = document.getElementById('repo');
   var tree = document.getElementById('tree');
   var source = document.getElementById('source');
@@ -198,13 +230,35 @@
   function api(action, extra, options) {
     var query = new URLSearchParams(Object.assign({ repo: repo.value }, extra || {}));
     var init = { credentials: 'same-origin', cache: 'no-store' };
-    if (options && options.signal) init.signal = options.signal;
-    return fetch('__code/' + action + '?' + query, init).then(function (response) {
+    var externalSignal = options && options.signal;
+    var controller = window.AbortController ? new AbortController() : null;
+    function cancel() { if (controller) controller.abort(); }
+    if (controller) {
+      init.signal = controller.signal;
+      if (externalSignal) {
+        if (externalSignal.aborted) cancel();
+        else externalSignal.addEventListener('abort', cancel, { once: true });
+      }
+    } else if (externalSignal) init.signal = externalSignal;
+    var timer;
+    function cleanup() {
+      clearTimeout(timer);
+      if (externalSignal) externalSignal.removeEventListener('abort', cancel);
+    }
+    var timeout = new Promise(function (resolve, reject) {
+      timer = setTimeout(function () {
+        reject(new Error('请求超时，请点击重新加载或重试')); cancel();
+      }, 20000);
+    });
+    var request = fetch('__code/' + action + '?' + query, init).then(function (response) {
       return response.json().then(function (data) {
         if (!response.ok) throw new Error(data.message || data.error || '读取失败，请重试');
         return data;
       });
     });
+    return Promise.race([request, timeout]).then(function (data) {
+      cleanup(); return data;
+    }, function (error) { cleanup(); throw error; });
   }
   function button(text, handler) {
     var element = document.createElement('button');
@@ -362,6 +416,7 @@
     changeRepository();
   };
   document.getElementById('root').onclick = function () {
+    if (!repo.value) { document.getElementById('retry-load').click(); return; }
     fileCache.clear();
     return loadTree('', tree).then(function () { if (selectedPath) return openFile(selectedPath, selectedLine()); });
   };
@@ -710,6 +765,8 @@
   function initialize() {
     if (initializing) return;
     initializing = true;
+    status('正在读取代码仓库…');
+    document.getElementById('retry-load').hidden = true;
     var token = generation;
     api('repos').then(function (data) {
       if (token !== generation || !identity) return;
@@ -723,12 +780,21 @@
       changeRepository();
       if (params.get('path')) openFile(params.get('path'), selectedLine(), params.get('rev'));
     }).catch(function (error) {
-      if (token === generation) { identity = ''; status(error.message); }
+      if (token === generation) {
+        identity = ''; status(error.message);
+        document.getElementById('retry-load').hidden = false;
+      }
     }).then(function () {
       initializing = false;
       if (token !== generation && identity && repo.disabled) initialize();
     });
   }
+  document.getElementById('retry-load').onclick = function () {
+    if (!window.SiteAuth) { location.reload(); return; }
+    identity = '';
+    status('正在重新确认登录状态…');
+    SiteAuth.refresh().then(sessionChanged);
+  };
   function sessionChanged(info) {
     document.getElementById('reindex').hidden = !info.authenticated || (info.user || {}).role !== 'admin';
     document.getElementById('login').hidden = !!info.authenticated;
@@ -748,4 +814,9 @@
   document.addEventListener('siteauth:change', function (event) { sessionChanged(event.detail); });
   window.addEventListener('hashchange', function () { highlightLine(selectedLine(), true); });
   if (window.SiteAuth) sessionChanged(window.SiteAuth.snapshot());
+  else {
+    status('登录组件未加载，请刷新页面重试');
+    document.getElementById('retry-load').hidden = false;
+  }
+  document.documentElement.dataset.codeReady = 'true';
 }());

@@ -189,8 +189,56 @@ const assert = require('node:assert/strict');
     await page.locator('[data-code-folder][value="code/project/trunk"]').waitFor({state:'attached'});
     assert.equal(await page.locator('[data-code-folder][value="code/project/trunk"]').isChecked(), true);
     assert.equal(await page.locator('[data-home-ai]').isVisible(), true);
+    const legacy = await context.newPage();
+    const legacyErrors = [];
+    legacy.on('pageerror', error => legacyErrors.push(error.message));
+    await legacy.route('**/html/reference_code.html', async route => {
+      const response = await route.fetch();
+      let html = await response.text();
+      html = html.replace(/<button id="toggle-tree"[^>]*>[^<]*<\/button>/, '')
+        .replace(/<button id="copy-source"[^>]*>[^<]*<\/button>/, '')
+        .replace(/<small id="file-meta"><\/small>/, '')
+        .replace(/<form id="jump-form"[\s\S]*?<\/form>/, '')
+        .replace('id="code-directory" ', '');
+      await route.fulfill({response, body:html});
+    });
+    await legacy.goto(base + '/html/reference_code.html');
+    await legacy.getByRole('button', {name:'▸ src',exact:true}).click();
+    await legacy.getByRole('button', {name:'▸ nested',exact:true}).click();
+    await legacy.getByRole('button', {name:'main.c',exact:true}).click();
+    await legacy.locator('#source').waitFor({state:'visible'});
+    assert.match(await legacy.locator('#source').innerText(), /return 42/);
+    assert.deepEqual(legacyErrors, []);
+    await legacy.close();
+
+    const stalled = await context.newPage();
+    await stalled.addInitScript(() => {
+      const original = window.setTimeout;
+      window.setTimeout = (fn, delay, ...args) => original(fn, delay === 20000 ? 25 : delay, ...args);
+    });
+    let stallOnce = true;
+    await stalled.route('**/__code/repos?**', async route => {
+      if (stallOnce) { stallOnce = false; await new Promise(resolve => setTimeout(resolve, 200)); }
+      try { await route.continue(); } catch {}
+    });
+    await stalled.goto(base + '/html/reference_code.html');
+    await stalled.locator('#retry-load').waitFor({state:'visible'});
+    assert.match(await stalled.locator('#status').innerText(), /超时/);
+    await stalled.locator('#retry-load').click();
+    await stalled.getByRole('button', {name:'▸ src',exact:true}).waitFor();
+    await stalled.close();
+    const missingScript = await context.newPage();
+    await missingScript.addInitScript(() => {
+      const original = window.setTimeout;
+      window.setTimeout = (fn, delay, ...args) => original(fn, delay === 12000 ? 30 : delay, ...args);
+    });
+    await missingScript.route('**/lib/reference-code.js*', route => route.abort());
+    await missingScript.goto(base + '/html/reference_code.html');
+    await missingScript.getByRole('button', {name:'刷新页面',exact:true}).waitFor();
+    assert.match(await missingScript.locator('#status').innerText(), /脚本未能启动/);
+    await missingScript.close();
     assert.deepEqual(errors, []);
-    console.log('PASS: unified input, inline SSE, homepage SVN metadata, C/Bash/Python highlighting, symbol navigation, live file/symbol search, top-right symbol quick search, right-click AI menu, nested source browsing, deep links, mobile layout and AI handoff.');
+    console.log('PASS: source/home flows, large-file rendering, cached HTML compatibility, API timeout/retry and missing-script recovery.');
   } finally {
     if (browser) await browser.close();
     server.stdin.end('\n');

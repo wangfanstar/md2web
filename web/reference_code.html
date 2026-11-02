@@ -42,4 +42,13 @@
   <script src="lib/components/prism-c.min.js"></script><script src="lib/components/prism-cpp.min.js"></script>
   <script src="lib/components/prism-bash.min.js"></script><script src="lib/components/prism-python.min.js"></script>
   <script src="lib/auth.js"></script><script src="lib/reference-code.js"></script>
+  <script>
+    setTimeout(function () {
+      if (document.documentElement.dataset.codeReady === 'true') return;
+      document.getElementById('status').textContent = '代码页脚本未能启动，请刷新页面重试。';
+      var retry = document.createElement('button'); retry.type = 'button'; retry.textContent = '刷新页面';
+      retry.onclick = function () { location.reload(); };
+      document.getElementById('status').appendChild(retry);
+    }, 12000);
+  </script>
 </body></html>
