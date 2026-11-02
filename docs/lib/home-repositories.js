@@ -97,17 +97,35 @@
     }).catch(function () { /* Static hosting or temporary network failure: retain the complete offline snapshot. */ })
       .then(function () { busy = false; });
   }
+  function formatDateTime(value) {
+    if (!value) return '';
+    var date = new Date(value);
+    if (isNaN(date.getTime())) return String(value).slice(0, 10);
+    function pad(number) { return (number < 10 ? '0' : '') + number; }
+    return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
+      + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+  }
   function refreshCodeRepositories() {
     var host = document.querySelector('[data-code-repository-info]');
     if (!host) return;
     read('__ai/public').then(function (data) {
       if (!data.ok) throw new Error('读取失败');
       host.innerHTML = '<div class="cards">' + (data.repositories || []).map(function (repo) {
-        return '<div class="card"><strong>' + escape(repo.name || repo.id) + '<span class="badge svn">' + (repo.svnUrl ? 'SVN 库' : '本地代码库') + '</span></strong>'
-          + '<span>代码目录：' + escape(repo.path) + '</span>'
-          + (repo.svnUrl ? '<span style="overflow-wrap:anywhere">SVN 路径：' + escape(repo.svnUrl) + '</span>' : '')
-          + '<span>当前版本：' + escape(repo.ready ? (repo.revision === 'local' ? '本地目录' : 'r' + repo.revision) : '尚未同步') + '</span>'
-          + (repo.svnUrl ? '<span>最近成功更新：' + escape(repo.lastUpdated ? repo.lastUpdated.replace('T', ' ') + '（北京时间）' : '暂无成功更新记录') + '</span>' : '') + '</div>';
+        var source = repo.svnUrl ? 'SVN 库' : '本地代码库';
+        var directoryLabel = repo.svnUrl ? 'SVN 目录：' : '代码目录：';
+        var directory = repo.svnUrl || repo.path || repo.folder;
+        var version = repo.ready ? (repo.revision === 'local' ? '本地目录' : 'r' + repo.revision) : '尚未同步';
+        if (repo.ready && repo.revision && repo.revision !== 'local' && repo.revisionDate) {
+          version += ' · ' + formatDateTime(repo.revisionDate);
+        }
+        var href = 'html/reference_code.html?' + new URLSearchParams({repo: repo.id});
+        return '<div class="card"><strong><a href="' + escape(href) + '">' + escape(repo.name || repo.id)
+          + '</a><span class="badge ' + (repo.svnUrl ? 'svn' : 'local') + '">' + source + '</span></strong>'
+          + '<span>' + directoryLabel + escape(directory) + '</span>'
+          + (repo.revisionAuthor ? '<span>提交者：' + escape(repo.revisionAuthor) + '</span>' : '')
+          + '<span>当前版本：' + escape(version) + '</span>'
+          + '<span>最近成功更新：' + escape(repo.lastUpdated ? formatDateTime(repo.lastUpdated) + '（北京时间）' : '暂无成功更新记录') + '</span>'
+          + '<a class="code-repository-open" href="' + escape(href) + '">浏览代码 →</a></div>';
       }).join('') + '</div>';
       if (!(data.repositories || []).length) host.textContent = '尚未配置代码库。';
     }).catch(function () { host.textContent = '登录服务器后查看代码库信息；暂时无法读取时请刷新重试。'; });

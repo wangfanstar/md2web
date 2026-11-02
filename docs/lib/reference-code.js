@@ -6,12 +6,170 @@
   var params = new URLSearchParams(location.search);
   var selectedPath = '', revision = '', identity = '';
   var generation = 0, fileRequest = 0, searchRequest = 0;
+  var searchAbort = null, searchTimer = null, composing = false;
   var initializing = false;
+  var navigation = [];
+  var symbolRequest = 0;
+  var symbolData = null;
+  var symbolOrigin = null;
+  var fileRevision = '';
+  var contextMenu = null;
+  var fileCache = new Map();
+
+  var LANGUAGES = {
+    c: {grammar: 'c', symbols: true}, h: {grammar: 'c', symbols: true},
+    cpp: {grammar: 'cpp', symbols: true}, cc: {grammar: 'cpp', symbols: true},
+    cxx: {grammar: 'cpp', symbols: true}, hpp: {grammar: 'cpp', symbols: true},
+    hh: {grammar: 'cpp', symbols: true}, hxx: {grammar: 'cpp', symbols: true},
+    py: {grammar: 'python', symbols: true}, pyw: {grammar: 'python', symbols: true},
+    sh: {grammar: 'bash', symbols: true}, bash: {grammar: 'bash', symbols: true},
+    zsh: {grammar: 'bash', symbols: true}
+  };
+  var NO_SYMBOL_TOKEN = /^(comment|string|char|regex|url|keyword|number|boolean|directive|macro|operator)$/;
+
+  function languageFor(path) {
+    var name = String(path || '').split('/').pop();
+    var index = name.lastIndexOf('.');
+    return index < 0 ? null : LANGUAGES[name.slice(index + 1).toLowerCase()] || null;
+  }
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, function (c) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+    });
+  }
+  function escapeAttribute(value) { return escapeHtml(value); }
+
+  function flattenTokens(items, classes, output) {
+    if (typeof items === 'string') {
+      if (items) output.push({text: items, classes: classes});
+      return;
+    }
+    if (Array.isArray(items)) {
+      items.forEach(function (item) { flattenTokens(item, classes, output); });
+      return;
+    }
+    if (items && typeof items === 'object' && items.type) {
+      flattenTokens(items.content, classes.concat(items.type), output);
+    }
+  }
+  function tokenClass(classes) { return classes.length ? 'token ' + classes.join(' ') : ''; }
+  function allowsSymbols(classes) {
+    for (var i = 0; i < classes.length; i++) {
+      if (NO_SYMBOL_TOKEN.test(classes[i])) return false;
+    }
+    return true;
+  }
+  function segmentHtml(value, classes, symbols) {
+    var cls = tokenClass(classes), plain = escapeHtml(value);
+    if (!symbols || !value) return cls ? '<span class="' + cls + '">' + plain + '</span>' : plain;
+    var pieces = value.split(/([A-Za-z_][A-Za-z0-9_]{0,127})/), html = '';
+    pieces.forEach(function (piece) {
+      if (!piece) return;
+      if (/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(piece)) {
+        html += '<a class="code-symbol' + (cls ? ' ' + cls : '') + '" href="#" data-symbol="'
+          + escapeAttribute(piece) + '" title="查看 ' + escapeAttribute(piece) + ' 的定义与引用">'
+          + escapeHtml(piece) + '</a>';
+      } else {
+        html += cls ? '<span class="' + cls + '">' + escapeHtml(piece) + '</span>' : escapeHtml(piece);
+      }
+    });
+    return html;
+  }
+
+  function renderSource(text, path) {
+    var language = languageFor(path), output = [];
+    var grammar = language && window.Prism && Prism.languages[language.grammar];
+    if (grammar) {
+      try { flattenTokens(Prism.tokenize(text, grammar), [], output); } catch (error) { output = []; }
+    }
+    if (!output.length) output = [{text: text, classes: []}];
+    // 大文件保留语法高亮，但不为每个标识符生成可点击节点，避免数万 DOM 节点拖慢阅读。
+    var symbols = !!(language && language.symbols) && text.length <= 1024 * 1024
+      && text.split('\n').length <= 8000;
+    var html = [], line = 0, open = false;
+    function begin() {
+      line++;
+      open = true;
+      html.push('<span class="code-line" id="L' + line + '"><a class="code-line-number" href="'
+        + escapeAttribute(fileLink(path, line)) + '" data-line="' + line + '">' + line + '</a><code>');
+    }
+    function finish() { html.push('</code></span>'); open = false; }
+    begin();
+    output.forEach(function (run) {
+      var pieces = run.text.split('\n');
+      var allow = symbols && allowsSymbols(run.classes);
+      for (var index = 0; index < pieces.length; index++) {
+        if (index) { finish(); begin(); }
+        if (pieces[index]) html.push(segmentHtml(pieces[index], run.classes, allow));
+      }
+    });
+    if (open) finish();
+    return html.join('');
+  }
+
+  function formatDate(value) {
+    if (!value) return '';
+    var date = new Date(value);
+    if (isNaN(date.getTime())) return String(value).slice(0, 10);
+    function pad(number) { return (number < 10 ? '0' : '') + number; }
+    return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
+      + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+  }
+  function showRevision(value, date) {
+    revision = value || revision;
+    document.getElementById('revision').textContent = !revision || revision === 'local'
+      ? '本地代码' : 'SVN r' + revision + (date ? ' · ' + formatDate(date) : '');
+  }
+
+  function showSymbolResults(kind) {
+    if (!symbolData) return;
+    var host = document.getElementById('symbol-results'); host.textContent = '';
+    document.getElementById('symbol-definitions').setAttribute('aria-pressed', String(kind === 'definitions'));
+    document.getElementById('symbol-references').setAttribute('aria-pressed', String(kind === 'references'));
+    var hits = symbolData[kind];
+    hits.forEach(function (hit) {
+      var result = document.createElement('a'); result.className = 'code-search-hit'; result.href = fileLink(hit.path, hit.line, symbolData.revision);
+      var label = document.createElement('strong'); label.textContent = hit.path + ':' + hit.line;
+      var excerpt = document.createElement('span'); excerpt.textContent = hit.text;
+      result.appendChild(label); result.appendChild(excerpt);
+      result.onclick = function (event) {
+        event.preventDefault();
+        navigation.push(symbolOrigin);
+        document.getElementById('back-location').disabled = false;
+        openFile(hit.path, hit.line, symbolData.revision);
+      };
+      host.appendChild(result);
+    });
+    if (!hits.length) host.textContent = kind === 'definitions' && !symbolData.indexed
+      ? '尚无 GNU Global 符号索引，请管理员点击「更新 gtags 索引」。可以先查看文本出现位置。' : '没有找到匹配位置。';
+  }
+
+  function lookupSymbol(symbol, line) {
+    var request = ++symbolRequest, token = generation;
+    symbolOrigin = { path: selectedPath, line: line, revision: fileRevision, scroll: source.scrollTop };
+    document.getElementById('symbols').hidden = false;
+    document.getElementById('symbol-title').textContent = symbol;
+    document.getElementById('symbol-status').textContent = '正在查询定义与引用…';
+    document.getElementById('symbol-results').textContent = '';
+    symbolData = null;
+    api('symbol', { symbol: symbol, rev: fileRevision }).then(function (data) {
+      if (request !== symbolRequest || token !== generation) return;
+      symbolData = data;
+      document.getElementById('symbol-status').textContent = data.engine + (data.indexed ? '' : ' · 当前显示文本出现位置');
+      document.getElementById('symbol-definitions').textContent = '定义 (' + data.definitions.length + ')';
+      document.getElementById('symbol-references').textContent = (data.indexed ? '引用' : '出现位置') + ' (' + data.references.length + ')';
+      showSymbolResults(data.definitions.length ? 'definitions' : 'references');
+    }).catch(function (error) {
+      if (request === symbolRequest && token === generation) document.getElementById('symbol-status').textContent = error.message;
+    });
+  }
 
   function status(message) { document.getElementById('status').textContent = message; }
-  function api(action, extra) {
+  function api(action, extra, options) {
     var query = new URLSearchParams(Object.assign({ repo: repo.value }, extra || {}));
-    return fetch('__code/' + action + '?' + query, { credentials: 'same-origin', cache: 'no-store' }).then(function (response) {
+    var init = { credentials: 'same-origin', cache: 'no-store' };
+    if (options && options.signal) init.signal = options.signal;
+    return fetch('__code/' + action + '?' + query, init).then(function (response) {
       return response.json().then(function (data) {
         if (!response.ok) throw new Error(data.message || data.error || '读取失败，请重试');
         return data;
@@ -23,8 +181,9 @@
     element.type = 'button'; element.textContent = text; element.onclick = handler;
     return element;
   }
-  function fileLink(path, line) {
-    return 'html/reference_code.html?' + new URLSearchParams({ repo: repo.value, path: path, rev: revision }) + '#L' + line;
+  function fileLink(path, line, version) {
+    var targetRevision = version || (path === selectedPath && fileRevision ? fileRevision : revision);
+    return 'html/reference_code.html?' + new URLSearchParams({ repo: repo.value, path: path, rev: targetRevision }) + '#L' + line;
   }
   function selectedLine() {
     var match = /^#L(\d+)$/.exec(location.hash);
@@ -42,35 +201,40 @@
     document.getElementById('copy').disabled = !enabled;
     document.getElementById('ask').disabled = !enabled;
   }
+  function rememberFile(key, data) {
+    if (fileCache.size >= 12) fileCache.delete(fileCache.keys().next().value);
+    fileCache.set(key, data);
+  }
   function openFile(path, line, expectedRevision) {
     var token = generation, request = ++fileRequest;
+    var expected = expectedRevision || '';
+    var cacheKey = path + '@' + (expected || revision);
+    hideContextMenu();
     source.hidden = true; setFileActions(false);
     var empty = document.getElementById('empty');
     empty.hidden = false; empty.textContent = '正在读取 ' + path + '…';
     status('正在读取文件…');
-    return api('file', { path: path, rev: expectedRevision || '' }).then(function (data) {
+    function show(data) {
       if (token !== generation || request !== fileRequest) return;
-      selectedPath = path; revision = data.revision;
-      document.getElementById('revision').textContent = revision === 'local' ? '本地代码' : 'SVN r' + revision;
+      selectedPath = path; revision = data.revision; fileRevision = data.revision;
+      showRevision(revision, data.revisionDate);
       document.getElementById('path').textContent = path;
-      source.textContent = '';
-      var fragment = document.createDocumentFragment();
-      data.text.split('\n').forEach(function (text, index) {
-        var row = document.createElement('span'); row.className = 'code-line'; row.id = 'L' + (index + 1);
-        var number = document.createElement('a'); number.className = 'code-line-number';
-        number.textContent = index + 1; number.href = fileLink(path, index + 1);
-        number.setAttribute('aria-label', '第 ' + (index + 1) + ' 行，点击选择');
-        number.onclick = function (event) {
-          event.preventDefault(); history.replaceState(null, '', number.href); highlightLine(index + 1, false);
-        };
-        var content = document.createElement('code'); content.textContent = text || ' ';
-        row.appendChild(number); row.appendChild(content); fragment.appendChild(row);
-      });
-      source.appendChild(fragment); source.hidden = false; empty.hidden = true; setFileActions(true);
-      line = Math.max(1, Math.min(line || 1, source.childElementCount));
-      history.replaceState(null, '', fileLink(path, line)); highlightLine(line, line > 1);
+      source.innerHTML = renderSource(data.text, path);
+      source.hidden = false; empty.hidden = true; setFileActions(true);
+      var target = Math.max(1, Math.min(line || 1, source.childElementCount));
+      history.replaceState(null, '', fileLink(path, target));
+      highlightLine(target, target > 1);
       tree.querySelectorAll('[data-file]').forEach(function (item) { item.classList.toggle('is-active', item.dataset.file === path); });
-      status('已打开 ' + path + ' · 点击行号选择位置，可复制链接或向 AI 提问');
+      status('已打开 ' + path + ' · 点击行号选择位置，右键可向 AI 提问');
+    }
+    var cached = fileCache.get(cacheKey);
+    if (cached) {
+      show({text: cached.text, revision: cached.revision, revisionDate: cached.revisionDate});
+      return Promise.resolve();
+    }
+    return api('file', { path: path, rev: expected }).then(function (data) {
+      rememberFile(cacheKey, data);
+      show(data);
     }).catch(function (error) {
       if (token !== generation || request !== fileRequest) return;
       empty.textContent = error.message; status(error.message);
@@ -81,8 +245,7 @@
     host.textContent = '正在加载…';
     return api('tree', { path: folder }).then(function (data) {
       if (token !== generation) return;
-      host.textContent = ''; host.dataset.loaded = 'true'; revision = data.revision;
-      document.getElementById('revision').textContent = revision === 'local' ? '本地代码' : 'SVN r' + revision;
+      host.textContent = ''; host.dataset.loaded = 'true'; showRevision(data.revision, data.revisionDate);
       if (!data.entries.length) { host.textContent = '此目录为空'; return; }
       data.entries.forEach(function (item) {
         var row = document.createElement('div');
@@ -110,6 +273,10 @@
     });
   }
   function changeRepository() {
+    hideContextMenu();
+    navigation = []; symbolRequest++; symbolData = null;
+    document.getElementById('symbols').hidden = true;
+    document.getElementById('back-location').disabled = true;
     generation++; selectedPath = ''; source.textContent = ''; source.hidden = true; setFileActions(false);
     document.getElementById('path').textContent = '选择一个代码文件';
     document.getElementById('empty').hidden = false;
@@ -120,42 +287,190 @@
   repo.onchange = function () {
     params = new URLSearchParams();
     history.replaceState(null, '', 'html/reference_code.html?' + new URLSearchParams({ repo: repo.value }));
+    fileCache.clear();
     changeRepository();
   };
   document.getElementById('root').onclick = function () { loadTree('', tree); };
+  document.getElementById('reindex').onclick = function () {
+    var control = this, token = generation;
+    control.disabled = true; status('正在更新 GNU Global（gtags）符号索引，请稍候…');
+    fetch('__code/index?' + new URLSearchParams({ repo: repo.value }), {
+      method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF-Token': SiteAuth.csrfToken() }
+    }).then(function (response) {
+      return response.json().then(function (data) {
+        if (!response.ok) throw new Error(data.message || data.error);
+        if (token === generation) {
+          status(data.indexStatus);
+          if (document.getElementById('q').value.trim()) scheduleSearch();
+        }
+      });
+    }).catch(function (error) { if (token === generation) status(error.message); }).then(function () { control.disabled = false; });
+  };
+  document.getElementById('symbol-definitions').onclick = function () { showSymbolResults('definitions'); };
+  document.getElementById('symbol-references').onclick = function () { showSymbolResults('references'); };
+  document.getElementById('close-symbols').onclick = function () { document.getElementById('symbols').hidden = true; };
+  document.getElementById('back-location').onclick = function () {
+    var origin = navigation.pop();
+    if (!origin) return;
+    openFile(origin.path, origin.line, origin.revision).then(function () { source.scrollTop = origin.scroll; });
+    document.getElementById('back-location').disabled = navigation.length === 0;
+  };
   document.getElementById('close-results').onclick = function () { document.getElementById('search-results').hidden = true; };
   document.getElementById('login').onclick = function () { window.SiteAuth.openLogin(); };
-  document.getElementById('search').onsubmit = function (event) {
-    event.preventDefault();
+
+  function searchThreshold(mode) { return 2; }
+  function clearSearchTimer() {
+    if (searchTimer) { clearTimeout(searchTimer); searchTimer = null; }
+  }
+  function scheduleSearch() {
+    clearSearchTimer();
+    if (composing) return;
+    var input = document.getElementById('q'), mode = document.getElementById('mode').value;
+    var query = input.value.trim();
+    if (!query || query.length < searchThreshold(mode)) {
+      if (searchAbort) { searchAbort.abort(); searchAbort = null; }
+      searchRequest++;
+      document.getElementById('search-results').hidden = true;
+      if (query) status('继续输入以搜索（至少 ' + searchThreshold(mode) + ' 个字符）');
+      return;
+    }
+    searchTimer = setTimeout(runSearch, 260);
+  }
+  function runSearch() {
+    clearSearchTimer();
+    var input = document.getElementById('q'), mode = document.getElementById('mode').value;
+    var query = input.value.trim();
+    if (!query) return;
     var token = generation, request = ++searchRequest;
+    if (searchAbort) searchAbort.abort();
+    var controller = window.AbortController ? new AbortController() : null;
+    searchAbort = controller;
     status('正在检索…');
-    api('search', { q: document.getElementById('q').value, mode: document.getElementById('mode').value }).then(function (data) {
+    api('search', { q: query, mode: mode }, controller ? { signal: controller.signal } : null).then(function (data) {
       if (token !== generation || request !== searchRequest) return;
-      revision = data.revision;
+      searchAbort = null;
+      showRevision(data.revision, data.revisionDate);
       var host = document.getElementById('results'); host.textContent = '';
       document.getElementById('search-results').hidden = false;
       document.getElementById('result-title').textContent = data.hits.length + ' 个搜索结果';
       data.hits.forEach(function (hit) {
-        var result = document.createElement('a'); result.className = 'code-search-hit'; result.href = fileLink(hit.path, hit.line);
+        var result = document.createElement('a'); result.className = 'code-search-hit'; result.href = fileLink(hit.path, hit.line, data.revision);
         var label = document.createElement('strong'); label.textContent = hit.path + ':' + hit.line;
         var excerpt = document.createElement('span'); excerpt.textContent = hit.text;
         result.appendChild(label); result.appendChild(excerpt);
         result.onclick = function (event) { event.preventDefault(); openFile(hit.path, hit.line, data.revision); };
         host.appendChild(result);
       });
-      if (!data.hits.length) host.textContent = '没有找到匹配内容，请尝试其他关键词。';
-      status(data.hits.length + ' 个结果，最多返回 200 条 · ' + (data.engine || '文件检索'));
-    }).catch(function (error) { if (token === generation) status(error.message); });
+      if (!data.hits.length) host.textContent = '没有找到匹配内容，请尝试其他关键词或搜索方式。';
+      status(data.hits.length + ' 个结果，最多返回 200 条 · ' + (data.engine || '文件检索') + '（实时搜索）');
+    }).catch(function (error) {
+      if (error && error.name === 'AbortError') return;
+      if (token === generation && request === searchRequest) status(error.message);
+    });
+  }
+  document.getElementById('q').addEventListener('input', scheduleSearch);
+  document.getElementById('q').addEventListener('compositionstart', function () { composing = true; });
+  document.getElementById('q').addEventListener('compositionend', function () { composing = false; scheduleSearch(); });
+  document.getElementById('q').addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') {
+      this.value = ''; scheduleSearch();
+    }
+  });
+  document.getElementById('mode').onchange = scheduleSearch;
+  document.getElementById('search').onsubmit = function (event) {
+    event.preventDefault();
+    runSearch();
   };
-  document.getElementById('copy').onclick = function () {
-    var url = new URL(fileLink(selectedPath, selectedLine()), document.baseURI).href;
+
+  function selectedSourceText() {
+    var selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return '';
+    var range = selection.getRangeAt(0);
+    if (!source.contains(range.commonAncestorContainer)) return '';
+    return selection.toString().trim().slice(0, 1200);
+  }
+  function lineNumber(row) { return row ? Number(String(row.id || '').slice(1)) || 1 : selectedLine(); }
+  function askQuestion(line, symbol, selection) {
+    var question = '请解释代码仓库 ' + repo.value + ' 中的 ' + selectedPath + ' 第 ' + line + ' 行';
+    if (symbol) question += '，重点说明符号 ' + symbol + ' 的定义、作用及调用关系。';
+    else question += '附近的实现。';
+    if (selection) question += '\n相关代码：\n```\n' + selection + '\n```';
+    return question;
+  }
+  function askAI(question) {
+    location.href = 'index.html?' + new URLSearchParams({ aiQuestion: question, aiRepo: repo.value });
+  }
+  function hideContextMenu() {
+    if (contextMenu) contextMenu.hidden = true;
+  }
+  function copyLineLink(line) {
+    var url = new URL(fileLink(selectedPath, line), document.baseURI).href;
     var copy = navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject(new Error('clipboard unavailable'));
     copy.then(function () { status('行号链接已复制'); }).catch(function () { window.prompt('复制行号链接', url); });
-  };
-  document.getElementById('ask').onclick = function () {
-    var question = '请解释代码仓库 ' + repo.value + ' 中的 ' + selectedPath + ' 第 ' + selectedLine() + ' 行';
-    location.href = 'index.html?' + new URLSearchParams({ aiQuestion: question, aiRepo: repo.value });
-  };
+  }
+  function showContextMenu(event) {
+    if (!selectedPath) return;
+    var target = event.target;
+    var row = target.closest ? target.closest('.code-line') : null;
+    var symbol = target.closest ? target.closest('.code-symbol') : null;
+    var line = lineNumber(row);
+    var selection = selectedSourceText();
+    var name = symbol ? symbol.dataset.symbol : '';
+    if (!contextMenu) {
+      contextMenu = document.createElement('div');
+      contextMenu.id = 'code-context-menu';
+      contextMenu.className = 'code-context-menu';
+      contextMenu.setAttribute('role', 'menu');
+      document.body.appendChild(contextMenu);
+      document.addEventListener('click', function (click) {
+        if (contextMenu && !contextMenu.contains(click.target)) hideContextMenu();
+      });
+      document.addEventListener('keydown', function (key) { if (key.key === 'Escape') hideContextMenu(); });
+      window.addEventListener('resize', hideContextMenu);
+      source.addEventListener('scroll', hideContextMenu);
+    }
+    contextMenu.textContent = '';
+    if (name) {
+      contextMenu.appendChild(button('问 AI：解释 ' + name, function () { askAI(askQuestion(line, name, selection)); }));
+      contextMenu.appendChild(button('查找 ' + name + ' 的定义与引用', function () { lookupSymbol(name, line); }));
+    }
+    if (selection) {
+      contextMenu.appendChild(button('问 AI：解释选中代码', function () { askAI(askQuestion(line, '', selection)); }));
+    }
+    contextMenu.appendChild(button('问 AI：解释第 ' + line + ' 行', function () { askAI(askQuestion(line, name, selection)); }));
+    contextMenu.appendChild(button('复制行号链接', function () { copyLineLink(line); }));
+    if (name) {
+      contextMenu.appendChild(button('复制符号名 ' + name, function () {
+        var copy = navigator.clipboard ? navigator.clipboard.writeText(name) : Promise.reject(new Error('clipboard unavailable'));
+        copy.then(function () { status('符号名已复制'); }).catch(function () { window.prompt('复制符号名', name); });
+      }));
+    }
+    contextMenu.hidden = false;
+    contextMenu.style.left = '0px'; contextMenu.style.top = '0px';
+    var rect = contextMenu.getBoundingClientRect();
+    contextMenu.style.left = Math.max(8, Math.min(event.clientX, window.innerWidth - rect.width - 8)) + 'px';
+    contextMenu.style.top = Math.max(8, Math.min(event.clientY, window.innerHeight - rect.height - 8)) + 'px';
+    event.preventDefault();
+  }
+  source.addEventListener('contextmenu', showContextMenu);
+  source.addEventListener('click', function (event) {
+    var symbol = event.target.closest ? event.target.closest('.code-symbol') : null;
+    if (symbol) {
+      event.preventDefault();
+      lookupSymbol(symbol.dataset.symbol, lineNumber(symbol.closest('.code-line')));
+      return;
+    }
+    var number = event.target.closest ? event.target.closest('.code-line-number') : null;
+    if (number) {
+      event.preventDefault();
+      var line = lineNumber(number.closest('.code-line'));
+      history.replaceState(null, '', fileLink(selectedPath, line));
+      highlightLine(line, false);
+    }
+  });
+
+  document.getElementById('copy').onclick = function () { copyLineLink(selectedLine()); };
+  document.getElementById('ask').onclick = function () { askAI(askQuestion(selectedLine(), '', selectedSourceText())); };
   function initialize() {
     if (initializing) return;
     initializing = true;
@@ -179,9 +494,11 @@
     });
   }
   function sessionChanged(info) {
+    document.getElementById('reindex').hidden = !info.authenticated || (info.user || {}).role !== 'admin';
     document.getElementById('login').hidden = !!info.authenticated;
     if (!info.authenticated) {
       identity = ''; generation++; repo.textContent = ''; repo.disabled = true;
+      fileCache.clear();
       tree.textContent = '请登录后浏览代码目录'; source.textContent = ''; source.hidden = true; setFileActions(false);
       document.getElementById('results').textContent = '';
       status(info.fileMode ? '请通过认证服务打开本页以浏览代码' : '请先登录后浏览参考代码库');

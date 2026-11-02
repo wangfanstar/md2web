@@ -224,6 +224,15 @@ def repository_signature(settings, repo):
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode('utf-8')).hexdigest()
 
 
+def read_revision_info(root):
+    """读取同步时写入的版本信息（版本号、提交日期、作者）；旧快照没有该文件时返回空。"""
+    try:
+        value = json.loads((Path(root) / '.md2web-revision-info').read_text(encoding='utf-8'))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
 def sync_repository(auth_service, docs, settings, repo_id, require_account=False, now=None):
     """Caller owns LOCK. Network operations never hold the SQLite lock."""
     repo = repository(settings, repo_id)
@@ -240,14 +249,28 @@ def sync_repository(auth_service, docs, settings, repo_id, require_account=False
         if require_account and not all(credential):
             raise ValueError('每日 SVN 更新需要代码库账号或默认同步账号')
         info = auth_service.svn.info(repo['url'], str(stage / 'svn-config'), username=credential[0], password=credential[1])
-        revision = str(repo.get('revision', 'HEAD'))
-        if revision == 'HEAD':
-            revision = str(info['revision'])
+        requested_revision = str(repo.get('revision', 'HEAD'))
+        revision = str(info['revision']) if requested_revision == 'HEAD' else requested_revision
+        revision_date = str(info.get('last_changed_date') or '')
+        revision_author = str(info.get('last_changed_author') or '')
+        if requested_revision != 'HEAD':
+            # 固定版本时 info 指向 HEAD，再取一次指定版本的提交信息；失败不影响同步。
+            try:
+                pinned = auth_service.svn.info(repo['url'], str(stage / 'svn-config'),
+                                               username=credential[0], password=credential[1], revision=revision)
+                revision_date = str(pinned.get('last_changed_date') or '') or revision_date
+                revision_author = str(pinned.get('last_changed_author') or '') or revision_author
+            except Exception:
+                pass
         exported = stage / 'export'
         auth_service.svn.export(repo['url'], exported, revision=revision, config_dir=str(stage / 'svn-config'),
                                 username=credential[0], password=credential[1])
         validate_snapshot(exported)
         (exported / '.md2web-revision').write_text(revision, encoding='utf-8')
+        (exported / '.md2web-revision-info').write_text(json.dumps({
+            'revision': revision, 'url': repo['url'], 'date': revision_date,
+            'author': revision_author,
+        }, ensure_ascii=False), encoding='utf-8')
         from .reference_code import build_index
         index_status = build_index(exported)
         previous = stage / 'previous'
@@ -266,7 +289,8 @@ def sync_repository(auth_service, docs, settings, repo_id, require_account=False
         state = read_sync_state(auth_service)
         date = now or (datetime.utcnow() + timedelta(hours=8))
         state[repo_id] = {'signature': repository_signature(settings, repo), 'lastSuccessDate': date.strftime('%Y-%m-%d'),
-                          'lastAttempt': date.isoformat(), 'lastSuccessAt': date.isoformat(), 'revision': revision, 'error': ''}
+                          'lastAttempt': date.isoformat(), 'lastSuccessAt': date.isoformat(), 'revision': revision,
+                          'revisionDate': revision_date, 'revisionAuthor': revision_author, 'error': ''}
         save_sync_state(auth_service, state)
         return {'ok': True, 'revision': revision, 'indexStatus': index_status}
     finally:

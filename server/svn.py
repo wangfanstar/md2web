@@ -104,12 +104,20 @@ def parse_info_xml(text):
         "url": "",
         "root_url": "",
         "uuid": "",
+        "last_changed_revision": "",
+        "last_changed_date": "",
+        "last_changed_author": "",
     }
     if entry.find("url") is not None:
         info["url"] = entry.find("url").text or ""
     if repo is not None:
         info["root_url"] = (repo.find("root").text if repo.find("root") is not None else "") or ""
         info["uuid"] = (repo.find("uuid").text if repo.find("uuid") is not None else "") or ""
+    commit = entry.find("commit")
+    if commit is not None:
+        info["last_changed_revision"] = commit.get("revision", "")
+        info["last_changed_date"] = (commit.findtext("date") or "")
+        info["last_changed_author"] = (commit.findtext("author") or "")
     return info
 
 
@@ -372,10 +380,13 @@ class SvnClient:
         args += creds
         return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
 
-    def info(self, url, config_dir, username=None, password=None):
+    def info(self, url, config_dir, username=None, password=None, revision=None):
         """读取配置中仓库的远程信息；绑定场景可带当前会话凭据。"""
         creds, stdin_text = self._credential_args(username, password)
-        args = ["info", "--xml", "--non-interactive", "--no-auth-cache"] + creds + [url]
+        args = ["info", "--xml", "--non-interactive", "--no-auth-cache"] + creds
+        if revision is not None:
+            args += ["--revision", str(revision)]
+        args.append(url)
         completed = self._run(args, stdin_text=stdin_text, config_dir=config_dir)
         if completed.returncode != 0:
             raise SvnError(classify_error(completed.stderr), detail=completed.stderr)

@@ -503,11 +503,22 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             return rejected
         return json_error(410, 'ai_personal_config_retired', '个人 AI 配置已停用，请使用公共 AI 服务')
 
-    @app.get('/__code/<action>')
+    @app.route('/__code/<action>', methods=['GET', 'POST'])
     def reference_code_api(action):
         session, rejected = require_session()
         if rejected:
             return rejected
+        if action == 'index':
+            if request.method != 'POST':
+                return json_error(405, 'method_not_allowed', '请使用 POST 重建索引')
+            session, rejected = require_admin()
+            if rejected:
+                return rejected
+            rejected = require_csrf(session)
+            if rejected:
+                return rejected
+        elif request.method != 'GET':
+            return json_error(405, 'method_not_allowed', '此接口只接受 GET')
         from . import code_qa, reference_code
         settings = code_qa.validate((config.get('ai') or {}).get('claude'))
         try:
@@ -515,9 +526,20 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 return jsonify(ok=True, repositories=[{'id': r['id'], 'name': r['folder']} for r in settings['repositories']])
             repo = code_qa.repository(settings, request.args.get('repo'))
             root = code_qa.code_path(docs_root, repo, settings)
+            if action == 'index':
+                if not root.is_dir():
+                    raise ValueError('代码目录不存在')
+                if not code_qa.LOCK.acquire(False):
+                    return json_error(429, 'ai_busy', '正在问答或同步，请稍后重建索引')
+                try:
+                    return jsonify(ok=True, indexStatus=reference_code.build_index(root))
+                finally:
+                    code_qa.LOCK.release()
             path = reference_code.safe_path(root, request.args.get('path', ''))
             marker = root / '.md2web-revision'
             revision = marker.read_text(encoding='utf-8').strip() if marker.is_file() else 'local'
+            revision_info = code_qa.read_revision_info(root)
+            revision_date = str(revision_info.get('date') or '')
             if request.args.get('rev') not in (None, '', revision):
                 return json_error(409, 'revision_changed', '源码版本已更新，请重新打开当前版本')
             if action == 'tree':
@@ -528,27 +550,52 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                     except ValueError:
                         continue
                     entries.append({'name': child.name, 'path': child.relative_to(root).as_posix(), 'directory': child.is_dir()})
-                return jsonify(ok=True, entries=entries, revision=revision)
+                return jsonify(ok=True, entries=entries, revision=revision, revisionDate=revision_date)
             if action == 'file':
-                return jsonify(ok=True, text=reference_code.text(path), revision=revision)
+                return jsonify(ok=True, text=reference_code.text(path), revision=revision, revisionDate=revision_date)
+            if action == 'symbol':
+                result = reference_code.symbol_locations(root, request.args.get('symbol', ''))
+                return jsonify(ok=True, revision=revision, revisionDate=revision_date, **result)
             if action == 'search':
                 query = request.args.get('q', '').strip()
                 mode = request.args.get('mode', 'path')
+                if mode not in ('path', 'text', 'symbol'):
+                    raise ValueError('搜索方式无效')
                 if not query or len(query) > 200:
                     raise ValueError('请输入 1–200 字的搜索词')
+                if mode == 'symbol':
+                    reference_code.validate_symbol(query)
+                    indexed = reference_code.global_search(root, query, 'symbol') if path == root else None
+                    if indexed is not None:
+                        return jsonify(ok=True, hits=indexed, revision=revision, revisionDate=revision_date, engine='GNU Global')
+                    result = reference_code.symbol_locations(path, query)
+                    prefix = path.relative_to(root).as_posix()
+                    prefix = '' if prefix == '.' else prefix + '/'
+                    hits, seen = [], set()
+                    for hit in result['definitions'] + result['references']:
+                        relative = prefix + hit['path']
+                        key = (relative, hit['line'])
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        hits.append({'path': relative, 'line': hit['line'], 'text': hit['text']})
+                        if len(hits) >= 200:
+                            break
+                    return jsonify(ok=True, hits=hits, revision=revision, revisionDate=revision_date, engine=result['engine'])
                 indexed = reference_code.global_search(root, query, mode) if path == root else None
                 if indexed is not None:
-                    return jsonify(ok=True, hits=indexed, revision=revision, engine='GNU Global')
+                    return jsonify(ok=True, hits=indexed, revision=revision, revisionDate=revision_date, engine='GNU Global')
                 hits = []
+                needle = query.lower()
                 for file_path in reference_code.files(path):
                     relative = file_path.relative_to(root).as_posix()
                     if mode == 'path':
-                        if query.lower() in relative.lower():
+                        if needle in relative.lower():
                             hits.append({'path': relative, 'line': 1, 'text': relative})
                     else:
                         try:
                             for number, line in enumerate(reference_code.text(file_path).splitlines(), 1):
-                                if query.lower() in line.lower():
+                                if needle in line.lower():
                                     hits.append({'path': relative, 'line': number, 'text': line[:300]})
                                     if len(hits) >= 200:
                                         break
@@ -556,7 +603,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                             continue
                     if len(hits) >= 200:
                         break
-                return jsonify(ok=True, hits=hits, revision=revision, limited=True)
+                return jsonify(ok=True, hits=hits, revision=revision, revisionDate=revision_date, limited=True)
             raise ValueError('未知代码操作')
         except (ValueError, OSError) as error:
             return json_error(400, 'code_error', str(error))
@@ -573,18 +620,27 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         repos = []
         for repo in settings.get('repositories', []):
             ready, revision = False, ''
+            revision_info = {}
             try:
                 path = code_qa.code_path(docs_root, repo, settings)
                 marker = path / '.md2web-revision'
                 ready = path.is_dir() and (not repo.get('url') or (marker.is_file() and not marker.is_symlink()))
                 revision = (marker.read_text(encoding='utf-8').strip() if repo.get('url') else 'local') if ready else ''
+                if ready:
+                    revision_info = code_qa.read_revision_info(path)
             except (ValueError, OSError):
                 ready = False
+            record = sync_state.get(repo['id'], {})
+            record_current = bool(record) and record.get('signature') == code_qa.repository_signature(settings, repo)
+            revision_date = str(revision_info.get('date') or '') if repo.get('url') else ''
+            if not revision_date and record_current:
+                revision_date = str(record.get('revisionDate') or '')
             svn_url = urlsplit(repo.get('url', ''))
             safe_svn_url = urlunsplit((svn_url.scheme, svn_url.netloc.rsplit('@', 1)[-1], svn_url.path, '', ''))
             repos.append({'id': repo['id'], 'name': repo.get('name') or repo['folder'], 'folder': repo['folder'], 'ready': ready,
-                          'svnUrl': safe_svn_url,
-                          'lastUpdated': (sync_state.get(repo['id'], {}).get('lastSuccessAt', '') if sync_state.get(repo['id'], {}).get('signature') == code_qa.repository_signature(settings, repo) and not sync_state.get(repo['id'], {}).get('error') else ''),
+                          'svnUrl': safe_svn_url, 'revisionDate': revision_date,
+                          'revisionAuthor': str(revision_info.get('author') or '') if repo.get('url') else '',
+                          'lastUpdated': (record.get('lastSuccessAt', '') if record_current and not record.get('error') else ''),
                           'revision': revision, 'path': settings['codeFolder'] + '/' + repo['folder'],
                           'folders': code_qa.directory_choices(docs_root, settings['codeFolder'] + '/' + repo['folder']) if ready else []})
         folders = []

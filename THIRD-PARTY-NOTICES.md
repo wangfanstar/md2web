@@ -10,7 +10,7 @@
 |------|------|------|------|------|
 | docsify | 4.13.1 | MIT | https://github.com/docsifyjs/docsify | 站点框架（路由、侧栏、插件、Markdown 渲染） |
 | docsify 官方插件 zoom-image / front-matter | 4.13.1 | MIT | 同上（`lib/plugins/`） | 图片缩放、Front Matter 解析 |
-| Prism | 1.29.0 | MIT | https://github.com/PrismJS/prism | 代码高亮（核心由 docsify 内置，另含样式与按需加载器） |
+| Prism | 1.29.0 | MIT | https://github.com/PrismJS/prism | 代码高亮（含独立源码页使用的本地核心、C/C++/Bash/Python 语法、样式与按需加载器） |
 | Mermaid | 11.17.2 | MIT | https://github.com/mermaid-js/mermaid | 流程图/时序图/甘特图等图形渲染（离线） |
 | marked | 12.0.2 | MIT | https://github.com/markedjs/marked | 编辑器实时预览的 Markdown 渲染 |
 | DOMPurify | 3.1.6 | Apache-2.0 OR MPL-2.0 | https://github.com/cure53/DOMPurify | 阅读/预览/AI 回答的 HTML 净化 |

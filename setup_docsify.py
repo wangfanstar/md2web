@@ -129,8 +129,14 @@ ASSETS = {
     # 插件
     "zoom-image.min.js": "https://cdn.jsdelivr.net/npm/docsify@4.13.1/lib/plugins/zoom-image.min.js",
     "front-matter.min.js": "https://cdn.jsdelivr.net/npm/docsify@4.13.1/lib/plugins/front-matter.min.js",
-    # Prism 代码高亮（Prism 核心由 docsify 内置，只需样式与按需加载插件）
+    # Prism 代码高亮（站点由 docsify 内置核心，独立源码页使用本地核心与常用语言组件）
     "prism.min.css": "https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism.min.css",
+    "prism-core.min.js": "https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-core.min.js",
+    "components/prism-clike.min.js": "https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-clike.min.js",
+    "components/prism-c.min.js": "https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-c.min.js",
+    "components/prism-cpp.min.js": "https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-cpp.min.js",
+    "components/prism-bash.min.js": "https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js",
+    "components/prism-python.min.js": "https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-python.min.js",
     "prism-autoloader.min.js": "https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/autoloader/prism-autoloader.min.js",
     # Mermaid 图形渲染（离线）
     "mermaid.min.js": "https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js",
@@ -2077,7 +2083,7 @@ def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.h
     for kind in ("pdf", "word", "excel", "ppt"):
         (DOCS_DIR / kind).mkdir(parents=True, exist_ok=True)
     reference_cards.append('<a class="card" href="' + HTML_PREFIX + 'reference_library.html"><strong>参考文献库</strong><span>PDF、Word、Excel、PPT 统一管理与预览</span></a>')
-    reference_cards.append('<a class="card" href="html/reference_code.html"><strong>参考代码库</strong><span>目录浏览、路径与全文检索、行号链接</span></a>')
+    reference_cards.append('<a class="card" href="html/reference_code.html"><strong>参考代码库</strong><span>目录浏览、文件/符号/全文检索、实时搜索与右键问 AI</span></a>')
     webpages = scan_reference_web() if reference_web is None else reference_web
     web_cards = ['<a class="card" href="html/ref/index_html.html"><strong>参考网页索引与搜索</strong>'
                  '<span>共 %d 个网页 · 搜索标题、文件名和正文</span></a>' % len(webpages)]

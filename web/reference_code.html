@@ -7,21 +7,32 @@
   <header class="code-header"><a href="index.html">← 文档首页</a><div><h1>参考代码库</h1><p>浏览源码，查找实现，把文件位置带入 AI 问答。</p></div></header>
   <div class="code-toolbar">
     <label>代码仓库 <select id="repo" aria-label="代码仓库" disabled></select></label>
-    <span id="revision">等待加载</span><button id="root" type="button">刷新目录</button><button id="login" type="button" hidden>登录后浏览</button>
+    <span id="revision">等待加载</span><button id="root" type="button">刷新目录</button><button id="reindex" type="button" hidden title="管理员可重建 GNU Global 符号索引">更新 gtags 索引</button><button id="login" type="button" hidden>登录后浏览</button>
   </div>
   <form id="search" class="code-search">
-    <input id="q" required maxlength="200" aria-label="搜索代码" placeholder="输入文件名、路径片段或代码内容">
-    <select id="mode" aria-label="搜索方式"><option value="path">文件名 / 路径</option><option value="text">代码全文</option></select><button>搜索</button>
+    <input id="q" required maxlength="200" aria-label="搜索代码" placeholder="输入关键词，停顿后自动搜索（文件、全文或符号）" autocomplete="off">
+    <select id="mode" aria-label="搜索方式"><option value="path">文件 / 路径</option><option value="text">代码全文</option><option value="symbol">符号</option></select><button>搜索</button>
   </form>
   <p id="status" role="status">正在确认登录状态…</p>
   <main class="code-layout">
     <aside class="code-sidebar" aria-label="文件目录"><h2>文件目录</h2><p class="code-help">点击文件夹展开，点击文件阅读源码。</p><div id="tree">登录后加载代码目录</div></aside>
     <section class="code-reader" aria-label="源码阅读区">
       <section id="search-results" class="code-results" hidden><header><h2 id="result-title">搜索结果</h2><button id="close-results" type="button">收起结果</button></header><div id="results"></div></section>
-      <header class="code-file-header"><h2 id="path">选择一个代码文件</h2><div><button id="copy" type="button" disabled>复制行号链接</button><button id="ask" type="button" disabled>就此位置问 AI →</button></div></header>
+      <header class="code-file-header"><h2 id="path">选择一个代码文件</h2><div><button id="back-location" type="button" disabled>← 返回原位置</button><button id="copy" type="button" disabled>复制行号链接</button><button id="ask" type="button" disabled>就此位置问 AI →</button></div></header>
+      <section id="symbols" class="code-results" hidden aria-label="符号定义与引用">
+        <header><h2 id="symbol-title">符号查询</h2><button id="close-symbols" type="button">收起符号查询</button></header>
+        <p id="symbol-status" role="status"></p>
+        <div class="code-symbol-tabs" role="group" aria-label="符号查询类型"><button id="symbol-definitions" type="button" aria-pressed="true">定义</button><button id="symbol-references" type="button" aria-pressed="false">引用</button></div>
+        <div id="symbol-results"></div>
+      </section>
       <div id="empty" class="code-empty">从左侧展开目录选择文件，或搜索文件名与代码内容。</div>
       <pre id="source" tabindex="0" aria-label="源码与行号" hidden></pre>
     </section>
   </main>
+  <script src="lib/prism-core.min.js"></script>
+  <script>window.Prism.manual = true;</script>
+  <script src="lib/components/prism-clike.min.js"></script>
+  <script src="lib/components/prism-c.min.js"></script><script src="lib/components/prism-cpp.min.js"></script>
+  <script src="lib/components/prism-bash.min.js"></script><script src="lib/components/prism-python.min.js"></script>
   <script src="lib/auth.js"></script><script src="lib/reference-code.js"></script>
 </body></html>

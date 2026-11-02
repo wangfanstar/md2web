@@ -50,3 +50,21 @@ h2 { font-size:15px; margin:0; }
 .code-search-hit strong,.code-search-hit span { display:block; overflow-wrap:anywhere; }
 .code-search-hit span { color:#71829b; font:12px/1.7 Consolas,monospace; }
 @media(max-width:760px) { body { padding:16px; } .code-header { padding-right:110px; gap:8px; align-items:flex-start; flex-direction:column; } .code-header h1 { font-size:22px; } .code-layout { grid-template-columns:1fr; } .code-sidebar { position:static; max-height:36vh; } .code-search input { flex-basis:100%; } .code-toolbar label { flex-wrap:wrap; } }
+
+.code-symbol { color:inherit; text-decoration:none; cursor:pointer; border-bottom:1px dotted #a9bcd4; }
+.code-symbol:hover,.code-symbol:focus-visible { color:#1759b5; background:#dfecff; border-radius:2px; }
+#source .token.comment { color:#71836b; }
+#source .token.keyword { color:#8951ac; font-weight:600; }
+#source .token.string,#source .token.char { color:#a45728; }
+#source .token.function { color:#2464a8; }
+#source .token.number,#source .token.boolean { color:#a83d65; }
+#source .token.macro,#source .token.directive { color:#8a671c; }
+.code-symbol-tabs { display:flex; gap:8px; margin:10px 0; }
+.code-symbol-tabs [aria-pressed=true] { color:white; background:#245fbd; border-color:#245fbd; }
+#symbol-results { max-height:220px; overflow:auto; }
+#symbol-status { color:#6d8099; font-size:12px; }
+#source .token.operator,#source .token.punctuation { color:#5d7188; }
+#source .token.builtin,#source .token.class-name { color:#2464a8; }
+.code-context-menu { position:fixed; z-index:1200; display:flex; flex-direction:column; min-width:210px; max-width:340px; padding:6px; background:#fff; border:1px solid #cfdaea; border-radius:10px; box-shadow:0 12px 32px rgba(31,54,84,.18); }
+.code-context-menu button { border:0; background:transparent; text-align:left; padding:8px 10px; font-size:13px; color:#263b56; border-radius:6px; overflow-wrap:anywhere; }
+.code-context-menu button:hover,.code-context-menu button:focus-visible { background:#eaf2ff; color:#1759b5; }

@@ -240,10 +240,22 @@ class CodeQaTests(unittest.TestCase):
             self.assertEqual(kwargs['revision'], '12')
             target.mkdir()
             (target / 'new.c').write_text('updated', encoding='utf-8')
-        with mock.patch.object(f.svn, 'info', return_value={'revision': '99'}), mock.patch.object(f.svn, 'export', side_effect=export, create=True):
+        info = {'revision': '99', 'last_changed_revision': '99',
+                'last_changed_date': '2026-10-31T00:00:00.000000Z', 'last_changed_author': 'bob'}
+        pinned = {'revision': '12', 'last_changed_revision': '12',
+                  'last_changed_date': '2026-10-30T07:20:00.000000Z', 'last_changed_author': 'alice'}
+        def info_for(url, config_dir, **kwargs):
+            return pinned if str(kwargs.get('revision')) == '12' else info
+        with mock.patch.object(f.svn, 'info', side_effect=info_for), mock.patch.object(f.svn, 'export', side_effect=export, create=True):
             response = f.client.post('/__admin/code-repositories/a/sync', json={}, headers=headers)
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertEqual((self.path / '.md2web-revision').read_text(encoding='utf-8'), '12')
+        revision_info = code_qa.read_revision_info(self.path)
+        self.assertEqual(revision_info['revision'], '12')
+        self.assertEqual(revision_info['date'], '2026-10-30T07:20:00.000000Z')
+        self.assertEqual(revision_info['author'], 'alice')
+        public = f.client.get('/__ai/public').get_json()['repositories'][0]
+        self.assertEqual(public['revisionDate'], '2026-10-30T07:20:00.000000Z')
         with mock.patch.object(f.svn, 'info', side_effect=ValueError('failed')):
             response = f.client.post('/__admin/code-repositories/a/sync', json={}, headers=headers)
         self.assertEqual(response.status_code, 400)
