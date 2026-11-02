@@ -15,6 +15,9 @@
   var fileRevision = '';
   var contextMenu = null;
   var fileCache = new Map();
+  var quickInput = document.getElementById('quick-symbol');
+  var quickResults = document.getElementById('quick-symbol-results');
+  var quickRequest = 0, quickAbort = null, quickTimer = null, quickActive = -1, quickComposing = false;
 
   var LANGUAGES = {
     c: {grammar: 'c', symbols: true}, h: {grammar: 'c', symbols: true},
@@ -210,6 +213,7 @@
     var expected = expectedRevision || '';
     var cacheKey = path + '@' + (expected || revision);
     hideContextMenu();
+    closeQuickSearch();
     source.hidden = true; setFileActions(false);
     var empty = document.getElementById('empty');
     empty.hidden = false; empty.textContent = '正在读取 ' + path + '…';
@@ -274,6 +278,8 @@
   }
   function changeRepository() {
     hideContextMenu();
+    closeQuickSearch();
+    quickRequest++; if (quickAbort) { quickAbort.abort(); quickAbort = null; }
     navigation = []; symbolRequest++; symbolData = null;
     document.getElementById('symbols').hidden = true;
     document.getElementById('back-location').disabled = true;
@@ -368,6 +374,151 @@
       if (token === generation && request === searchRequest) status(error.message);
     });
   }
+  function quickSymbolName(text, query) {
+    var tokens = String(text || '').match(/[A-Za-z_][A-Za-z0-9_]*/g) || [];
+    var needle = String(query || '').toLowerCase(), fallback = '';
+    for (var index = 0; index < tokens.length; index++) {
+      var lower = tokens[index].toLowerCase();
+      if (lower.indexOf(needle) === 0) return tokens[index];
+      if (!fallback && lower.indexOf(needle) >= 0) fallback = tokens[index];
+    }
+    return fallback;
+  }
+  function closeQuickSearch() {
+    if (quickTimer) { clearTimeout(quickTimer); quickTimer = null; }
+    quickActive = -1;
+    if (quickResults) {
+      quickResults.hidden = true;
+      quickInput.setAttribute('aria-expanded', 'false');
+    }
+  }
+  function quickItems() {
+    return Array.prototype.slice.call(quickResults.querySelectorAll('.code-suggest-item'));
+  }
+  function setQuickActive(index) {
+    var items = quickItems();
+    if (!items.length) { quickActive = -1; return; }
+    quickActive = (index + items.length) % items.length;
+    items.forEach(function (item, position) {
+      var selected = position === quickActive;
+      item.classList.toggle('is-active', selected);
+      item.setAttribute('aria-selected', String(selected));
+    });
+    items[quickActive].scrollIntoView({ block: 'nearest' });
+  }
+  function useMainSearch(query) {
+    document.getElementById('q').value = query;
+    document.getElementById('mode').value = 'symbol';
+    closeQuickSearch();
+    runSearch();
+    document.getElementById('search-results').scrollIntoView({ block: 'nearest' });
+  }
+  function renderQuickResults(data, query) {
+    quickResults.textContent = '';
+    quickResults.hidden = false;
+    quickInput.setAttribute('aria-expanded', 'true');
+    quickActive = -1;
+    if (!data.hits.length) {
+      var empty = document.createElement('p');
+      empty.className = 'code-suggest-empty';
+      empty.textContent = '没有找到匹配的函数或符号';
+      quickResults.appendChild(empty);
+      return;
+    }
+    var shown = data.hits.slice(0, 8);
+    shown.forEach(function (hit, index) {
+      var item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'code-suggest-item';
+      item.setAttribute('role', 'option');
+      item.setAttribute('aria-selected', 'false');
+      var name = document.createElement('strong');
+      name.textContent = quickSymbolName(hit.text, query) || hit.path.split('/').pop();
+      var meta = document.createElement('span');
+      meta.className = 'code-suggest-meta';
+      meta.textContent = hit.path + ':' + hit.line;
+      var excerpt = document.createElement('span');
+      excerpt.className = 'code-suggest-excerpt';
+      excerpt.textContent = hit.text;
+      item.appendChild(name); item.appendChild(meta); item.appendChild(excerpt);
+      item.onclick = function () {
+        closeQuickSearch();
+        openFile(hit.path, hit.line, data.revision);
+      };
+      item.onmouseenter = function () { setQuickActive(index); };
+      quickResults.appendChild(item);
+    });
+    if (data.hits.length > shown.length) {
+      var more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'code-suggest-more';
+      more.textContent = '在下方查看全部 ' + data.hits.length + ' 条结果';
+      more.onclick = function () { useMainSearch(query); };
+      quickResults.appendChild(more);
+    }
+  }
+  function runQuickSearch() {
+    if (quickTimer) { clearTimeout(quickTimer); quickTimer = null; }
+    var query = quickInput.value.trim();
+    if (query.length < 2) { closeQuickSearch(); return; }
+    var token = generation, request = ++quickRequest;
+    if (quickAbort) quickAbort.abort();
+    var controller = window.AbortController ? new AbortController() : null;
+    quickAbort = controller;
+    quickResults.hidden = false;
+    quickResults.textContent = '正在搜索函数 / 符号…';
+    quickInput.setAttribute('aria-expanded', 'true');
+    api('search', { q: query, mode: 'symbol' }, controller ? { signal: controller.signal } : null).then(function (data) {
+      if (token !== generation || request !== quickRequest) return;
+      quickAbort = null;
+      showRevision(data.revision, data.revisionDate);
+      renderQuickResults(data, query);
+    }).catch(function (error) {
+      if (error && error.name === 'AbortError') return;
+      if (token === generation && request === quickRequest) {
+        quickResults.hidden = false;
+        quickResults.textContent = error.message;
+      }
+    });
+  }
+  function scheduleQuickSearch() {
+    if (quickComposing) return;
+    if (quickTimer) clearTimeout(quickTimer);
+    quickTimer = setTimeout(runQuickSearch, 220);
+  }
+  quickInput.addEventListener('input', scheduleQuickSearch);
+  quickInput.addEventListener('compositionstart', function () { quickComposing = true; });
+  quickInput.addEventListener('compositionend', function () { quickComposing = false; scheduleQuickSearch(); });
+  quickInput.addEventListener('focus', function () {
+    if (this.value.trim().length >= 2 && quickResults.hidden) scheduleQuickSearch();
+  });
+  quickInput.addEventListener('keydown', function (event) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (quickResults.hidden) { runQuickSearch(); return; }
+      setQuickActive(quickActive + (event.key === 'ArrowDown' ? 1 : -1));
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      var items = quickItems();
+      if (!items.length) { if (this.value.trim().length >= 2) useMainSearch(this.value.trim()); return; }
+      (items[quickActive] || items[0]).click();
+    } else if (event.key === 'Escape') {
+      if (!quickResults.hidden) { event.preventDefault(); closeQuickSearch(); }
+      else if (this.value) { this.value = ''; closeQuickSearch(); }
+    }
+  });
+  document.addEventListener('click', function (event) {
+    var host = document.querySelector('[data-quick-search]');
+    if (host && !host.contains(event.target)) closeQuickSearch();
+  });
+  document.addEventListener('keydown', function (event) {
+    if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey) return;
+    var active = document.activeElement, tag = (active && active.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || (active && active.isContentEditable)) return;
+    event.preventDefault();
+    quickInput.focus();
+    quickInput.select();
+  });
   document.getElementById('q').addEventListener('input', scheduleSearch);
   document.getElementById('q').addEventListener('compositionstart', function () { composing = true; });
   document.getElementById('q').addEventListener('compositionend', function () { composing = false; scheduleSearch(); });
@@ -498,7 +649,9 @@
     document.getElementById('login').hidden = !!info.authenticated;
     if (!info.authenticated) {
       identity = ''; generation++; repo.textContent = ''; repo.disabled = true;
-      fileCache.clear();
+      fileCache.clear(); closeQuickSearch();
+      quickRequest++; if (quickAbort) { quickAbort.abort(); quickAbort = null; }
+      if (quickInput) quickInput.value = '';
       tree.textContent = '请登录后浏览代码目录'; source.textContent = ''; source.hidden = true; setFileActions(false);
       document.getElementById('results').textContent = '';
       status(info.fileMode ? '请通过认证服务打开本页以浏览代码' : '请先登录后浏览参考代码库');

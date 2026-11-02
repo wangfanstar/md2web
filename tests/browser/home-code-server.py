@@ -53,13 +53,15 @@ try:
         return {'answer': 'First streamed paragraph\n\n**Completed answer**', 'documentFolders': ['md'], 'model': payload.get('model', '')}
 
     def index_search(root_path, query, mode):
-        if query != 'main':
+        if query not in ('main', 'mai'):
             return None
         if mode == 'definition':
             return [{'path': 'src/nested/main.c', 'line': 2, 'text': 'int main(void) {'}]
         if mode == 'reference':
             return [{'path': 'src/nested/caller.c', 'line': 2, 'text': 'int call_main(void) { return main(); }'}]
-        if mode == 'symbol':
+        if mode == 'symbol' and query == 'main':
+            return [{'path': 'src/nested/main.c', 'line': 2, 'text': 'int main(void) {'}]
+        if mode == 'symbol_partial' and query in ('main', 'mai'):
             return [{'path': 'src/nested/main.c', 'line': 2, 'text': 'int main(void) {'}]
         return None
 

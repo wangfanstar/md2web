@@ -143,7 +143,8 @@ def global_search(root, query, mode):
     executable = shutil.which('global')
     if not executable or not (root / 'GTAGS').is_file():
         return None
-    flags = {'path': '-P', 'text': '-g', 'definition': '-d', 'reference': '-r', 'symbol': '-s'}
+    flags = {'path': '-P', 'text': '-g', 'definition': '-d', 'reference': '-r',
+             'symbol': '-s', 'symbol_partial': '-s'}
     pattern = '^' + query + '$' if mode in ('definition', 'reference', 'symbol') else re.escape(query)
     args = [executable, flags[mode], '--result=grep', '-e', pattern]
     env = os.environ.copy()
@@ -166,6 +167,26 @@ def global_search(root, query, mode):
         return hits
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
+
+
+def symbol_occurrences(root, query):
+    """按片段匹配函数/符号名；没有 GNU Global 时用于实时符号搜索。"""
+    validate_symbol(query)
+    needle = query.lower()
+    identifier = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
+    hits = []
+    for path in files(root):
+        try:
+            lines = text(path).splitlines()
+        except (OSError, ValueError):
+            continue
+        for number, line in enumerate(lines, 1):
+            if not any(needle in token.lower() for token in identifier.findall(line)):
+                continue
+            hits.append({'path': path.relative_to(root).as_posix(), 'line': number, 'text': line[:300]})
+            if len(hits) >= 200:
+                return {'hits': hits, 'engine': '文本匹配（最多 200 条）'}
+    return {'hits': hits, 'engine': '文本匹配'}
 
 
 def symbol_locations(root, symbol):

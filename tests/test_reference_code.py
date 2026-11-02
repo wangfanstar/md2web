@@ -32,6 +32,28 @@ class ReferenceCodeTests(unittest.TestCase):
             self.assertEqual((root / 'GRTAGS').read_text(encoding='utf-8'), 'previous-tags')
             self.assertFalse(list(root.glob('.md2web-gtags-backup-*')))
 
+    def test_symbol_partial_search_matches_prefixes_without_anchors(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            (root / 'GTAGS').write_text('', encoding='utf-8')
+            (root / 'main.c').write_text('int main(void) {}\nint main_extra(void) {}\n', encoding='utf-8')
+            output = mock.Mock(returncode=0, stdout=b'main.c:1:int main(void) {}\nmain.c:2:int main_extra(void) {}\n')
+            with mock.patch('server.reference_code.shutil.which', return_value='global'), \
+                    mock.patch('server.reference_code.subprocess.run', return_value=output) as run:
+                hits = reference_code.global_search(root, 'mai', 'symbol_partial')
+            self.assertEqual(len(hits), 2)
+            self.assertEqual(run.call_args[0][0][1], '-s')
+            self.assertEqual(run.call_args[0][0][-1], 'mai')
+
+    def test_symbol_occurrences_fallback_matches_partial_identifiers(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            (root / 'main.c').write_text('int main(void);\nint main_extra(void);\nint other(void);\n', encoding='utf-8')
+            with mock.patch('server.reference_code.shutil.which', return_value=None):
+                result = reference_code.symbol_occurrences(root, 'mai')
+            self.assertFalse(result['engine'].startswith('GNU'))
+            self.assertEqual([hit['line'] for hit in result['hits']], [1, 2])
+
     def test_symbol_queries_use_separate_definition_and_reference_indexes(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder).resolve()
@@ -79,6 +101,9 @@ class ReferenceCodeTests(unittest.TestCase):
             symbols = fixture.client.get('/__code/search?repo=repo&q=main&mode=symbol').get_json()
             self.assertTrue(symbols['hits'])
             self.assertEqual(symbols['hits'][0]['path'], 'main.c')
+            partial = fixture.client.get('/__code/search?repo=repo&q=mai&mode=symbol').get_json()
+            self.assertTrue(partial['hits'])
+            self.assertEqual(partial['hits'][0]['path'], 'main.c')
             self.assertEqual(fixture.client.get('/__code/search?repo=repo&q=main%28&mode=symbol').status_code, 400)
             self.assertEqual(fixture.client.post('/__code/index?repo=repo').status_code, 403)
             from server import database
