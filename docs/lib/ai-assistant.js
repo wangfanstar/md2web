@@ -774,6 +774,8 @@
   }
 
   function init() {
+    var importedQuestion=new URLSearchParams(location.search).get('aiQuestion');
+    if(importedQuestion)setTimeout(function(){openPanel();state.inputEl.value=importedQuestion;},0);
     state.config = loadConfig();
     var store = loadHistoryStore();
     state.conversations = store.conversations;

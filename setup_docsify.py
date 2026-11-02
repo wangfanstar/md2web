@@ -620,7 +620,7 @@ def generate_custom_search_assets():
     (LIB_DIR / "custom-search.css").write_text(CUSTOM_SEARCH_CSS, encoding="utf-8")
     for name in (
         "workspace.js",
-        "home-repositories.js", "home.css",
+        "home-repositories.js", "home.css", "reference-code.js",
         "config-draft.js", "config-layout.js", "md2web-config.css",
         "workspace.css",
         "mermaid-init.js",
@@ -2076,6 +2076,7 @@ def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.h
     for kind in ("pdf", "word", "excel", "ppt"):
         (DOCS_DIR / kind).mkdir(parents=True, exist_ok=True)
     reference_cards.append('<a class="card" href="' + HTML_PREFIX + 'reference_library.html"><strong>参考文献库</strong><span>PDF、Word、Excel、PPT 统一管理与预览</span></a>')
+    reference_cards.append('<a class="card" href="html/reference_code.html"><strong>参考代码库</strong><span>目录浏览、路径与全文检索、行号链接</span></a>')
     webpages = scan_reference_web() if reference_web is None else reference_web
     web_cards = ['<a class="card" href="html/ref/index_html.html"><strong>参考网页索引与搜索</strong>'
                  '<span>共 %d 个网页 · 搜索标题、文件名和正文</span></a>' % len(webpages)]
@@ -2194,6 +2195,7 @@ def generate_reference_pages():
         encoding="utf-8"
     )
     generate_standalone_page("reference_library.html", "reference-library.js", "参考文献")
+    (HTML_DIR / "reference_code.html").write_bytes((ROOT / "web" / "reference_code.html").read_bytes())
     generate_standalone_page("reference_preview.html", "reference-preview.js", "参考文献预览")
     office_bundle = ROOT / "web" / "reference-office.bundle.js"
     if office_bundle.is_file():

@@ -503,6 +503,64 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             return rejected
         return json_error(410, 'ai_personal_config_retired', '个人 AI 配置已停用，请使用公共 AI 服务')
 
+    @app.get('/__code/<action>')
+    def reference_code_api(action):
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        from . import code_qa, reference_code
+        settings = code_qa.validate((config.get('ai') or {}).get('claude'))
+        try:
+            if action == 'repos':
+                return jsonify(ok=True, repositories=[{'id': r['id'], 'name': r['folder']} for r in settings['repositories']])
+            repo = code_qa.repository(settings, request.args.get('repo'))
+            root = code_qa.code_path(docs_root, repo, settings)
+            path = reference_code.safe_path(root, request.args.get('path', ''))
+            marker = root / '.md2web-revision'
+            revision = marker.read_text(encoding='utf-8').strip() if marker.is_file() else 'local'
+            if request.args.get('rev') not in (None, '', revision):
+                return json_error(409, 'revision_changed', '源码版本已更新，请重新打开当前版本')
+            if action == 'tree':
+                entries = []
+                for child in sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+                    try:
+                        reference_code.safe_path(root, child.relative_to(root).as_posix())
+                    except ValueError:
+                        continue
+                    entries.append({'name': child.name, 'path': child.relative_to(root).as_posix(), 'directory': child.is_dir()})
+                return jsonify(ok=True, entries=entries, revision=revision)
+            if action == 'file':
+                return jsonify(ok=True, text=reference_code.text(path), revision=revision)
+            if action == 'search':
+                query = request.args.get('q', '').strip()
+                mode = request.args.get('mode', 'path')
+                if not query or len(query) > 200:
+                    raise ValueError('请输入 1–200 字的搜索词')
+                indexed = reference_code.global_search(root, query, mode) if path == root else None
+                if indexed is not None:
+                    return jsonify(ok=True, hits=indexed, revision=revision, engine='GNU Global')
+                hits = []
+                for file_path in reference_code.files(path):
+                    relative = file_path.relative_to(root).as_posix()
+                    if mode == 'path':
+                        if query.lower() in relative.lower():
+                            hits.append({'path': relative, 'line': 1, 'text': relative})
+                    else:
+                        try:
+                            for number, line in enumerate(reference_code.text(file_path).splitlines(), 1):
+                                if query.lower() in line.lower():
+                                    hits.append({'path': relative, 'line': number, 'text': line[:300]})
+                                    if len(hits) >= 200:
+                                        break
+                        except ValueError:
+                            continue
+                    if len(hits) >= 200:
+                        break
+                return jsonify(ok=True, hits=hits, revision=revision, limited=True)
+            raise ValueError('未知代码操作')
+        except (ValueError, OSError) as error:
+            return json_error(400, 'code_error', str(error))
+
     @app.get('/__ai/public')
     def public_ai():
         session, rejected = require_session()

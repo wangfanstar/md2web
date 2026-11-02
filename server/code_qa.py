@@ -248,6 +248,8 @@ def sync_repository(auth_service, docs, settings, repo_id, require_account=False
                                 username=credential[0], password=credential[1])
         validate_snapshot(exported)
         (exported / '.md2web-revision').write_text(revision, encoding='utf-8')
+        from .reference_code import build_index
+        index_status = build_index(exported)
         previous = stage / 'previous'
         if target.exists():
             target.rename(previous)
@@ -266,7 +268,7 @@ def sync_repository(auth_service, docs, settings, repo_id, require_account=False
         state[repo_id] = {'signature': repository_signature(settings, repo), 'lastSuccessDate': date.strftime('%Y-%m-%d'),
                           'lastAttempt': date.isoformat(), 'lastSuccessAt': date.isoformat(), 'revision': revision, 'error': ''}
         save_sync_state(auth_service, state)
-        return {'ok': True, 'revision': revision}
+        return {'ok': True, 'revision': revision, 'indexStatus': index_status}
     finally:
         if not preserve_stage:
             shutil.rmtree(str(stage), ignore_errors=True)
