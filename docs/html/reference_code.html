@@ -1,1 +1,27 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="../"><title>参考代码库</title><link rel="stylesheet" href="lib/auth.css"><style>body{font:14px/1.7 system-ui;margin:24px;color:#243247}header,form{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px}main{display:grid;grid-template-columns:300px 1fr;gap:24px}aside{max-height:75vh;overflow:auto}button,a{cursor:pointer}pre{overflow:auto;background:#f5f8fc;padding:16px}pre a{display:block;white-space:pre;color:inherit;text-decoration:none}pre a:target{background:#fff2ad}input{min-width:240px}#status{color:#64748b}@media(max-width:700px){main{grid-template-columns:1fr}}</style></head><body><header><a href="index.html">返回首页</a><h2>参考代码库</h2><select id="repo" aria-label="代码仓库"></select><button id="root">仓库根目录</button><button id="copy">复制当前行链接</button><button id="ask">就此位置问 AI</button></header><form id="search"><input id="q" required placeholder="搜索文件名、路径或代码"><select id="mode"><option value="path">文件名 / 路径</option><option value="text">全文</option></select><button>搜索</button></form><p id="status" role="status">正在读取，请先登录</p><main><aside id="tree"></aside><section><h3 id="path"></h3><div id="results"></div><pre id="source"></pre></section></main><script src="lib/auth.js"></script><script src="lib/reference-code.js"></script></body></html>
+<!doctype html>
+<html lang="zh-CN"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="../">
+  <title>参考代码库</title>
+  <link rel="stylesheet" href="lib/auth.css?v=d10910267b"><link rel="stylesheet" href="lib/reference-code.css?v=e985229a9a">
+</head><body>
+  <header class="code-header"><a href="index.html">← 文档首页</a><div><h1>参考代码库</h1><p>浏览源码，查找实现，把文件位置带入 AI 问答。</p></div></header>
+  <div class="code-toolbar">
+    <label>代码仓库 <select id="repo" aria-label="代码仓库" disabled></select></label>
+    <span id="revision">等待加载</span><button id="root" type="button">刷新目录</button><button id="login" type="button" hidden>登录后浏览</button>
+  </div>
+  <form id="search" class="code-search">
+    <input id="q" required maxlength="200" aria-label="搜索代码" placeholder="输入文件名、路径片段或代码内容">
+    <select id="mode" aria-label="搜索方式"><option value="path">文件名 / 路径</option><option value="text">代码全文</option></select><button>搜索</button>
+  </form>
+  <p id="status" role="status">正在确认登录状态…</p>
+  <main class="code-layout">
+    <aside class="code-sidebar" aria-label="文件目录"><h2>文件目录</h2><p class="code-help">点击文件夹展开，点击文件阅读源码。</p><div id="tree">登录后加载代码目录</div></aside>
+    <section class="code-reader" aria-label="源码阅读区">
+      <section id="search-results" class="code-results" hidden><header><h2 id="result-title">搜索结果</h2><button id="close-results" type="button">收起结果</button></header><div id="results"></div></section>
+      <header class="code-file-header"><h2 id="path">选择一个代码文件</h2><div><button id="copy" type="button" disabled>复制行号链接</button><button id="ask" type="button" disabled>就此位置问 AI →</button></div></header>
+      <div id="empty" class="code-empty">从左侧展开目录选择文件，或搜索文件名与代码内容。</div>
+      <pre id="source" tabindex="0" aria-label="源码与行号" hidden></pre>
+    </section>
+  </main>
+  <script src="lib/auth.js?v=e3f61b0394"></script><script src="lib/reference-code.js?v=dfa0da3017"></script>
+</body></html>

@@ -620,7 +620,7 @@ def generate_custom_search_assets():
     (LIB_DIR / "custom-search.css").write_text(CUSTOM_SEARCH_CSS, encoding="utf-8")
     for name in (
         "workspace.js",
-        "home-repositories.js", "home.css", "reference-code.js",
+        "home-repositories.js", "home.css", "home-search.js", "reference-code.js", "reference-code.css",
         "config-draft.js", "config-layout.js", "md2web-config.css",
         "workspace.css",
         "mermaid-init.js",
@@ -1769,6 +1769,7 @@ MASTER_SCRIPT = """
       }).join('') + '</section>';
   }
   function search(query) {
+    if (input && input.dataset.searchMode === 'ai') return;
     load().then(function (data) {
       var keyword = String(query || '').trim().toLowerCase();
       if (!keyword || (keyword.length < 2 && !/[一-鿿]/.test(keyword))) { results.innerHTML = ''; return; }
@@ -1826,7 +1827,7 @@ MASTER_SCRIPT = """
   if (input) {
     input.addEventListener('input', function () { search(input.value); });
     input.addEventListener('keydown', function (event) {
-      if (event.key === 'Enter') {
+      if (event.key === 'Enter' && !event.isComposing && input.dataset.searchMode !== 'ai') {
         var first = results.querySelector('a');
         if (first) { window.location.href = first.getAttribute('href'); }
       }
@@ -2104,9 +2105,11 @@ def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.h
     <section class="home-hero" aria-labelledby="home-title"><p class="home-eyebrow">知识 · 查阅 · 探索</p><h1 id="home-title">{html.escape(title)}</h1>
     <p class="sub">从一篇文档开始，找到需要的知识与答案。</p></section>
     <section class="home-search" aria-label="搜索文档"><div class="home-section-caption"><h2>你想查找什么？</h2><a href="{HTML_PREFIX}{all_page}">浏览全部文档 →</a></div>
+    <div class="home-search-tabs" role="group" aria-label="搜索方式"><button type="button" data-home-mode="search" aria-pressed="true">普通搜索</button><button type="button" data-home-mode="ai" aria-pressed="false">AI 搜索</button></div>
     <div class="tools">
       <input type="search" placeholder="搜索全部仓库（文档名和全文）" data-master-search
              aria-label="搜索全部仓库的文档名和全文">
+      <button type="button" class="home-search-submit" data-home-submit>搜索</button>
       <div class="master-search-repo" data-master-repo-filter>
         <button type="button" class="master-search-repo-toggle is-all" data-master-repo-toggle aria-expanded="false" aria-label="搜索仓库范围"><span data-master-repo-label>仓库：全部仓库</span><span>▾</span></button>
         <div class="master-search-repo-menu" data-master-repo-menu hidden>
@@ -2117,13 +2120,8 @@ def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.h
       <label>模式<select class="master-search-mode" data-master-mode aria-label="搜索模式"><option value="both" selected>文档名和全文</option><option value="file">仅文档名</option><option value="full">仅全文</option></select></label>
     </div>
     <p class="hint">当前搜索范围：<strong>全部仓库</strong>；默认模式：<strong>文档名和全文</strong>，结果按两类分组显示。</p>
-    <div class="results" data-master-results aria-live="polite"></div></section>
-    <section class="home-ai" aria-labelledby="home-ai-title"><div><span class="home-eyebrow">AI 助手</span><h2 id="home-ai-title">带着问题，探索知识</h2><p>结合知识库与代码寻找答案，可选择仓库及子目录范围。</p></div>
-    <form onsubmit="event.preventDefault();AIAssistant.open();document.querySelector('[data-ai-input]').value=this.querySelector('input').value;">
-      <label class="sr-only" for="home-ai-question">输入 AI 问题</label>
-      <input id="home-ai-question" placeholder="例如：这个模块的工作流程是什么？" required maxlength="16000">
-      <button type="submit">选择范围并提问 →</button>
-    </form><p class="home-ai-note">登录服务器后可用 · 回答支持流式显示</p></section>
+    <div class="results" data-master-results aria-live="polite"></div>
+    <div data-home-ai hidden></div></section>
     <section id="knowledge" class="home-knowledge" aria-labelledby="knowledge-title"><div class="home-section-caption"><div><h2 id="knowledge-title">浏览知识库</h2><p>按主题分组，选择一个知识库开始阅读。</p></div><a href="{HTML_PREFIX}{all_page}">全部文档 →</a></div>
     <div data-master-repositories>{''.join(sections)}</div></section>
     <section id="code-repositories" class="home-knowledge" aria-labelledby="code-repositories-title"><div class="home-section-caption"><div><h2 id="code-repositories-title">代码库信息</h2><p>当前已同步的代码版本与 SVN 来源</p></div></div><div data-code-repository-info>登录服务器后查看代码库信息；离线页面不保存代码库配置。</div></section>
@@ -2138,6 +2136,7 @@ def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.h
   <script src="lib/sanitize.js"></script>
   <script src="lib/ai-retrieval.js"></script>
   <script src="lib/ai-assistant.js"></script>
+  <script src="lib/home-search.js"></script>
   <script src="lib/home-repositories.js"></script>
   <script src="lib/auth.js"></script>
   <script src="lib/md2web-feedback.js"></script>
@@ -2195,7 +2194,7 @@ def generate_reference_pages():
         encoding="utf-8"
     )
     generate_standalone_page("reference_library.html", "reference-library.js", "参考文献")
-    (HTML_DIR / "reference_code.html").write_bytes((ROOT / "web" / "reference_code.html").read_bytes())
+    generate_standalone_page("reference_code.html", "reference-code.js", "参考代码库")
     generate_standalone_page("reference_preview.html", "reference-preview.js", "参考文献预览")
     office_bundle = ROOT / "web" / "reference-office.bundle.js"
     if office_bundle.is_file():

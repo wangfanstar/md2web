@@ -662,6 +662,7 @@
   }
 
   function openPanel() {
+    if (state.inline) document.dispatchEvent(new CustomEvent('md2web:ai-open'));
     setTimeout(function(){
       if(!state.overlay)return;
       var select=state.overlay.querySelector('[data-code-repository]');
@@ -680,6 +681,13 @@
         (data.repositories||[]).forEach(function(repo){var option=document.createElement('option');option.value=repo.id;option.textContent=repositoryLabel(repo)+(repo.ready?' @ '+repo.revision:'（目录未就绪）');select.appendChild(option);});select.value='';
         var codes=state.overlay.querySelector('[data-code-scopes]');
         var previous={};codes.querySelectorAll('input:checked').forEach(function(e){previous[e.value]=true;});
+        var importedRepo = new URLSearchParams(location.search).get('aiRepo');
+        if (importedRepo && !state.importedRepoApplied) {
+          (data.repositories || []).forEach(function (repo) {
+            if (repo.id === importedRepo && repo.ready) previous[repo.path] = true;
+          });
+          state.importedRepoApplied = true;
+        }
         codes.textContent='';var codeLegend=document.createElement('legend');codeLegend.textContent='代码仓库（可多选到子目录）';codes.appendChild(codeLegend);addScopeActions(codes);
         (data.repositories||[]).forEach(function(repo){
           renderScopeTree(codes,[{path:repo.path,name:repositoryLabel(repo)+(repo.ready?'':'（目录未就绪）'),available:repo.ready}].concat((repo.folders||[]).map(function(path){return {path:path,available:repo.ready};})),previous,'data-code-folder');
@@ -697,17 +705,21 @@
     }
     ensureConversation();
     state.messages = activeConversation().messages;
-    renderMessages();
+    if (!state.busy) renderMessages();
     renderHistory();
     updateBadge();
     state.overlay.classList.add('is-open');
     if (!configured()) {
-      openConfig();
+      setStatus('请先登录后使用 AI 问答');
     }
     state.inputEl.focus();
   }
 
   function closePanel() {
+    if (state.inline) {
+      document.dispatchEvent(new CustomEvent('md2web:ai-close'));
+      return;
+    }
     if (state.overlay) {
       state.overlay.classList.remove('is-open');
     }
@@ -792,8 +804,24 @@
     }
     document.addEventListener('siteauth:change', function () {
       syncPersonalConfig();
+      if (state.overlay && state.overlay.classList.contains('is-open') && !state.busy &&
+          (!state.inline || !state.overlay.parentNode.hidden)) openPanel();
     });
     syncPersonalConfig();
+    var inlineHost = document.querySelector('[data-home-ai]');
+    var sharedInput = document.querySelector('[data-master-search]');
+    if (inlineHost && sharedInput) {
+      buildOverlay();
+      state.inline = true;
+      state.overlay.classList.add('ai-assistant-inline');
+      state.overlay.setAttribute('role', 'region');
+      state.overlay.setAttribute('aria-label', 'AI 搜索回答');
+      inlineHost.appendChild(state.overlay);
+      state.overlay.querySelector('.ai-compose').remove();
+      state.inputEl = sharedInput;
+      sharedInput.setAttribute('data-ai-input', '');
+      button.remove();
+    }
     document.addEventListener('keydown', function (event) {
       if (event.key === 'Escape') {
         var scopeDialog=state.overlay && state.overlay.querySelector('.ai-scope-dialog[open]');if(scopeDialog){scopeDialog.close();event.preventDefault();return;}
