@@ -64,5 +64,18 @@ h1 { margin:0; font-size:clamp(26px,4vw,38px); line-height:1.3; letter-spacing:-
 .ai-assistant-inline .ai-head { flex-wrap:wrap; }
 .ai-assistant-inline .ai-head [data-ai-action=close] { display:none; }
 .ai-assistant-inline .ai-messages { max-height:70vh; min-height:100px; overflow:auto; overscroll-behavior:contain; }
+.ai-assistant-inline .ai-messages:empty::before { content:'输入问题后点击「AI 提问」，回答将在这里逐段显示。'; display:block; padding:24px 12px; text-align:center; color:#8192a7; font-size:13px; }
 .ai-assistant-inline .ai-message { font-size:15px; padding:16px; }
 .ai-assistant-inline .ai-history { position:static; max-height:240px; overflow:auto; }
+
+.home-hero { padding-top:30px; padding-bottom:22px; }
+.home-search { box-shadow:0 8px 30px #24477507; }
+.home-search-tabs { display:inline-flex; gap:4px; padding:4px; background:#edf2fa; border-radius:11px; }
+.home-search-tabs button { border:0; background:transparent; padding:8px 22px; }
+.home-search-tabs [aria-pressed=true] { box-shadow:0 2px 8px #245fbd22; }
+.home-search .tools { align-items:center; gap:10px; }
+.home-search .tools input { flex:1 1 330px; min-width:160px; }
+.home-reference-grid>div:first-child { display:flex; flex-direction:column; gap:12px; }
+.home-reference-grid>div:first-child h3 { margin-bottom:0; }
+.home-reference-grid .card { padding:20px; }
+@media(max-width:700px) { .home-hero { padding-top:24px; } .home-search { padding:16px; } .home-search .tools input { flex-basis:100%; } .home-search-tabs { width:100%; } .home-search-tabs button { flex:1; } }

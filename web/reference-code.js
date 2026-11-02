@@ -15,6 +15,13 @@
   var fileRevision = '';
   var contextMenu = null;
   var fileCache = new Map();
+  var fileAbort = null;
+  var sourceLines = [];
+  var sourceText = '';
+  var windowStart = -1, windowEnd = -1, scrollFrame = null;
+  var rowHeight = 23;
+  var activeLine = 1;
+  var MAX_CACHE_BYTES = 12 * 1024 * 1024;
   var quickInput = document.getElementById('quick-symbol');
   var quickResults = document.getElementById('quick-symbol-results');
   var quickRequest = 0, quickAbort = null, quickTimer = null, quickActive = -1, quickComposing = false;
@@ -86,28 +93,48 @@
       try { flattenTokens(Prism.tokenize(text, grammar), [], output); } catch (error) { output = []; }
     }
     if (!output.length) output = [{text: text, classes: []}];
-    // 大文件保留语法高亮，但不为每个标识符生成可点击节点，避免数万 DOM 节点拖慢阅读。
-    var symbols = !!(language && language.symbols) && text.length <= 1024 * 1024
-      && text.split('\n').length <= 8000;
-    var html = [], line = 0, open = false;
-    function begin() {
-      line++;
-      open = true;
-      html.push('<span class="code-line" id="L' + line + '"><a class="code-line-number" href="'
-        + escapeAttribute(fileLink(path, line)) + '" data-line="' + line + '">' + line + '</a><code>');
-    }
-    function finish() { html.push('</code></span>'); open = false; }
-    begin();
+    // Only visible rows become DOM nodes, so large files retain clickable symbols.
+    var symbols = !!(language && language.symbols);
+    var lines = [''];
     output.forEach(function (run) {
       var pieces = run.text.split('\n');
       var allow = symbols && allowsSymbols(run.classes);
       for (var index = 0; index < pieces.length; index++) {
-        if (index) { finish(); begin(); }
-        if (pieces[index]) html.push(segmentHtml(pieces[index], run.classes, allow));
+        if (index) lines.push('');
+        if (pieces[index]) lines[lines.length - 1] += segmentHtml(pieces[index], run.classes, allow);
       }
     });
-    if (open) finish();
-    return html.join('');
+    return lines;
+  }
+
+  function renderWindow(force) {
+    if (!sourceLines.length || source.hidden) return;
+    var virtual = sourceLines.length > 1000;
+    var start = virtual ? Math.max(0, Math.floor(source.scrollTop / rowHeight) - 40) : 0;
+    var end = virtual ? Math.min(sourceLines.length, start + Math.ceil(source.clientHeight / rowHeight) + 100) : sourceLines.length;
+    if (!force && start === windowStart && end === windowEnd) return;
+    windowStart = start; windowEnd = end;
+    var html = [];
+    if (start) html.push('<span class="code-spacer" aria-hidden="true" style="height:' + (start * rowHeight) + 'px"></span>');
+    for (var index = start; index < end; index++) {
+      var line = index + 1;
+      html.push('<span class="code-line' + (line === activeLine ? ' is-selected' : '') + '" id="L' + line + '"><a class="code-line-number" href="'
+        + escapeAttribute(fileLink(selectedPath, line)) + '" data-line="' + line + '">' + line + '</a><code>' + sourceLines[index] + '</code></span>');
+    }
+    if (end < sourceLines.length) html.push('<span class="code-spacer" aria-hidden="true" style="height:' + ((sourceLines.length - end) * rowHeight) + 'px"></span>');
+    source.innerHTML = html.join('');
+  }
+
+  source.addEventListener('scroll', function () {
+    if (scrollFrame !== null) return;
+    scrollFrame = requestAnimationFrame(function () { scrollFrame = null; renderWindow(false); });
+  });
+  window.addEventListener('resize', function () { renderWindow(true); });
+
+  function clearSource() {
+    sourceLines = []; sourceText = ''; windowStart = -1; windowEnd = -1;
+    source.textContent = ''; source.hidden = true;
+    document.getElementById('file-meta').textContent = '';
   }
 
   function formatDate(value) {
@@ -193,6 +220,12 @@
     return match ? Number(match[1]) : 1;
   }
   function highlightLine(line, scroll) {
+    activeLine = Math.max(1, Math.min(line, sourceLines.length || 1));
+    document.getElementById('line-jump').value = activeLine;
+    if (sourceLines.length > 1000 && scroll) {
+      source.scrollTop = Math.max(0, (activeLine - 1) * rowHeight - source.clientHeight / 2);
+      renderWindow(true);
+    }
     source.querySelectorAll('.is-selected').forEach(function (row) { row.classList.remove('is-selected'); });
     var target = document.getElementById('L' + line);
     if (target) {
@@ -203,15 +236,31 @@
   function setFileActions(enabled) {
     document.getElementById('copy').disabled = !enabled;
     document.getElementById('ask').disabled = !enabled;
+    document.getElementById('copy-source').disabled = !enabled;
+    document.getElementById('line-jump').disabled = !enabled;
+    document.querySelector('#jump-form button').disabled = !enabled;
   }
   function rememberFile(key, data) {
-    if (fileCache.size >= 12) fileCache.delete(fileCache.keys().next().value);
+    fileCache.delete(key);
+    var renderedSize = data.renderedLines ? data.renderedLines.reduce(function (total, line) { return total + line.length * 2; }, 0) : 0;
+    if (renderedSize + data.text.length * 2 > MAX_CACHE_BYTES) delete data.renderedLines;
+    data.cacheBytes = data.text.length * 2 + (data.renderedLines ? renderedSize : 0);
+    if (!data.cachedAt) data.cachedAt = Date.now();
     fileCache.set(key, data);
+    var total = 0;
+    fileCache.forEach(function (entry) { total += entry.cacheBytes; });
+    while (fileCache.size > 8 || total > MAX_CACHE_BYTES) {
+      var oldest = fileCache.keys().next().value;
+      total -= fileCache.get(oldest).cacheBytes;
+      fileCache.delete(oldest);
+    }
   }
   function openFile(path, line, expectedRevision) {
     var token = generation, request = ++fileRequest;
     var expected = expectedRevision || '';
     var cacheKey = path + '@' + (expected || revision);
+    if (fileAbort) fileAbort.abort();
+    fileAbort = window.AbortController ? new AbortController() : null;
     hideContextMenu();
     closeQuickSearch();
     source.hidden = true; setFileActions(false);
@@ -223,32 +272,42 @@
       selectedPath = path; revision = data.revision; fileRevision = data.revision;
       showRevision(revision, data.revisionDate);
       document.getElementById('path').textContent = path;
-      source.innerHTML = renderSource(data.text, path);
+      if (!data.renderedLines) data.renderedLines = renderSource(data.text, path);
+      sourceLines = data.renderedLines; sourceText = data.text;
+      windowStart = -1; windowEnd = -1; source.scrollTop = 0;
       source.hidden = false; empty.hidden = true; setFileActions(true);
-      var target = Math.max(1, Math.min(line || 1, source.childElementCount));
+      rowHeight = parseFloat(getComputedStyle(source).lineHeight) || 23;
+      var target = Math.max(1, Math.min(line || 1, sourceLines.length));
+      activeLine = target;
+      renderWindow(true);
+      document.getElementById('line-jump').max = sourceLines.length;
+      document.getElementById('file-meta').textContent = sourceLines.length.toLocaleString() + ' 行 · ' + (sourceLines.length > 1000 ? '按可见区域加载，可直接跳转行号' : '点击符号查看定义与引用');
       history.replaceState(null, '', fileLink(path, target));
       highlightLine(target, target > 1);
       tree.querySelectorAll('[data-file]').forEach(function (item) { item.classList.toggle('is-active', item.dataset.file === path); });
       status('已打开 ' + path + ' · 点击行号选择位置，右键可向 AI 提问');
+      rememberFile(path + '@' + data.revision, data);
     }
     var cached = fileCache.get(cacheKey);
-    if (cached) {
-      show({text: cached.text, revision: cached.revision, revisionDate: cached.revisionDate});
+    if (cached && Date.now() - cached.cachedAt < 30000) {
+      show(cached);
       return Promise.resolve();
     }
-    return api('file', { path: path, rev: expected }).then(function (data) {
-      rememberFile(cacheKey, data);
+    return api('file', { path: path, rev: expected }, { signal: fileAbort && fileAbort.signal }).then(function (data) {
       show(data);
     }).catch(function (error) {
-      if (token !== generation || request !== fileRequest) return;
+      if (token !== generation || request !== fileRequest || error.name === 'AbortError') return;
       empty.textContent = error.message; status(error.message);
     });
   }
   function loadTree(folder, host) {
+    if (host.dataset.loading === String(generation)) return Promise.resolve();
+    host.dataset.loading = String(generation);
     var token = generation;
     host.textContent = '正在加载…';
     return api('tree', { path: folder }).then(function (data) {
       if (token !== generation) return;
+      delete host.dataset.loading;
       host.textContent = ''; host.dataset.loaded = 'true'; showRevision(data.revision, data.revisionDate);
       if (!data.entries.length) { host.textContent = '此目录为空'; return; }
       data.entries.forEach(function (item) {
@@ -264,7 +323,12 @@
           toggle.className = 'code-tree-folder'; toggle.setAttribute('aria-expanded', 'false'); toggle.title = item.path;
           row.appendChild(toggle); row.appendChild(children);
         } else {
-          var file = button(item.name, function () { openFile(item.path, 1); });
+          var file = button(item.name, function () {
+            symbolRequest++;
+            document.getElementById('symbols').hidden = true;
+            document.getElementById('search-results').hidden = true;
+            openFile(item.path, 1);
+          });
           file.className = 'code-tree-file'; file.dataset.file = item.path; file.title = item.path; row.appendChild(file);
         }
         host.appendChild(row);
@@ -272,7 +336,7 @@
       if (!selectedPath) status('展开左侧目录，选择文件阅读源码');
     }).catch(function (error) {
       if (token !== generation) return;
-      delete host.dataset.loaded; host.textContent = error.message + ' ';
+      delete host.dataset.loading; delete host.dataset.loaded; host.textContent = error.message + ' ';
       host.appendChild(button('重试', function () { loadTree(folder, host); })); status(error.message);
     });
   }
@@ -283,7 +347,8 @@
     navigation = []; symbolRequest++; symbolData = null;
     document.getElementById('symbols').hidden = true;
     document.getElementById('back-location').disabled = true;
-    generation++; selectedPath = ''; source.textContent = ''; source.hidden = true; setFileActions(false);
+    generation++; selectedPath = ''; clearSource(); setFileActions(false);
+    fileCache.clear();
     document.getElementById('path').textContent = '选择一个代码文件';
     document.getElementById('empty').hidden = false;
     document.getElementById('empty').textContent = '展开左侧目录选择文件，或使用上方搜索。';
@@ -296,7 +361,27 @@
     fileCache.clear();
     changeRepository();
   };
-  document.getElementById('root').onclick = function () { loadTree('', tree); };
+  document.getElementById('root').onclick = function () {
+    fileCache.clear();
+    return loadTree('', tree).then(function () { if (selectedPath) return openFile(selectedPath, selectedLine()); });
+  };
+  document.getElementById('toggle-tree').onclick = function () {
+    var directory = document.getElementById('code-directory');
+    directory.hidden = !directory.hidden;
+    document.querySelector('.code-layout').classList.toggle('tree-collapsed', directory.hidden);
+    this.setAttribute('aria-expanded', String(!directory.hidden));
+    this.textContent = directory.hidden ? '显示目录' : '隐藏目录';
+    renderWindow(true);
+  };
+  document.getElementById('jump-form').onsubmit = function (event) {
+    event.preventDefault();
+    var line = Math.max(1, Math.min(Number(document.getElementById('line-jump').value) || 1, sourceLines.length));
+    history.replaceState(null, '', fileLink(selectedPath, line)); highlightLine(line, true);
+  };
+  document.getElementById('copy-source').onclick = function () {
+    var copy = navigator.clipboard ? navigator.clipboard.writeText(sourceText) : Promise.reject(new Error('clipboard unavailable'));
+    copy.then(function () { status('完整源码已复制'); }).catch(function () { window.prompt('复制完整源码', sourceText); });
+  };
   document.getElementById('reindex').onclick = function () {
     var control = this, token = generation;
     control.disabled = true; status('正在更新 GNU Global（gtags）符号索引，请稍候…');
@@ -652,7 +737,7 @@
       fileCache.clear(); closeQuickSearch();
       quickRequest++; if (quickAbort) { quickAbort.abort(); quickAbort = null; }
       if (quickInput) quickInput.value = '';
-      tree.textContent = '请登录后浏览代码目录'; source.textContent = ''; source.hidden = true; setFileActions(false);
+      tree.textContent = '请登录后浏览代码目录'; clearSource(); setFileActions(false);
       document.getElementById('results').textContent = '';
       status(info.fileMode ? '请通过认证服务打开本页以浏览代码' : '请先登录后浏览参考代码库');
       return;

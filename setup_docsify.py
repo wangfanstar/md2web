@@ -1666,6 +1666,7 @@ MASTER_STYLE = """
 MASTER_SCRIPT = """
   var repos = window.__MD2WEB_REPOS__ || [];
   var index = null;
+  var indexPromise = null, searchEntries = null, searchVersion = 0, searchTimer = null;
   var input = document.querySelector('[data-master-search]');
   var repoToggle = document.querySelector('[data-master-repo-toggle]');
   var repoMenu = document.querySelector('[data-master-repo-menu]');
@@ -1684,9 +1685,11 @@ MASTER_SCRIPT = """
   });
   function load() {
     if (index) { return Promise.resolve(index); }
-    return fetch('html/search-index.json').then(function (r) { return r.json(); }).then(function (data) {
+    if (indexPromise) return indexPromise;
+    indexPromise = fetch('html/search-index.json').then(function (r) { return r.json(); }).then(function (data) {
       index = data; return data;
     }).catch(function () { index = {}; return index; });
+    return indexPromise;
   }
   function escapeHtml(value) {
     return String(value).replace(/[&<>"']/g, function (char) {
@@ -1775,18 +1778,30 @@ MASTER_SCRIPT = """
       }).join('') + '</section>';
   }
   function search(query) {
-    if (input && input.dataset.searchMode === 'ai') return;
-    load().then(function (data) {
+    var version = ++searchVersion;
+    if (searchTimer) clearTimeout(searchTimer);
+    if (input && input.dataset.searchMode === 'ai') return Promise.resolve();
+    if (!String(query || '').trim()) { results.innerHTML = ''; return Promise.resolve(); }
+    return load().then(function (data) {
+      if (version !== searchVersion || input.dataset.searchMode === 'ai') return;
       var keyword = String(query || '').trim().toLowerCase();
       if (!keyword || (keyword.length < 2 && !/[一-鿿]/.test(keyword))) { results.innerHTML = ''; return; }
       var modes = modeSelect && modeSelect.value === 'both' ? ['file', 'full'] : [modeSelect ? modeSelect.value : 'both'];
-      var flattened = flatten(data).filter(repoMatches);
+      if (!searchEntries) {
+        searchEntries = flatten(data);
+        searchEntries.forEach(function (hit) {
+          hit.fileName = documentFileName(hit);
+          hit.searchName = hit.fileName.toLowerCase();
+          hit.searchBody = String(hit.body || '').toLowerCase();
+        });
+      }
+      var flattened = searchEntries.filter(repoMatches);
       // 文档名匹配：只看末级文件名，按文档去重（同名文档的多个章节只保留一条）
       var seenFiles = {};
       var fileHits = [];
       flattened.forEach(function (hit) {
-        var name = documentFileName(hit);
-        if (name.toLowerCase().indexOf(keyword) === -1) { return; }
+        var name = hit.fileName;
+        if (hit.searchName.indexOf(keyword) === -1) { return; }
         var key = String(hit.route || '').replace(/\/+$/, '');
         if (seenFiles[key]) { return; }
         seenFiles[key] = true;
@@ -1801,7 +1816,7 @@ MASTER_SCRIPT = """
       });
       // 全文匹配：只匹配正文，与文档名结果分开
       var fullHits = flattened.filter(function (hit) {
-        return String(hit.body || '').toLowerCase().indexOf(keyword) !== -1;
+        return hit.searchBody.indexOf(keyword) !== -1;
       });
       var html = modes.map(function (mode) {
         return renderMode(mode, mode === 'file' ? fileHits : fullHits);
@@ -1831,11 +1846,23 @@ MASTER_SCRIPT = """
   }
 
   if (input) {
-    input.addEventListener('input', function () { search(input.value); });
+    input.addEventListener('md2web:search-submit', function () { search(input.value); });
+    input.addEventListener('input', function (event) {
+      searchVersion++;
+      if (searchTimer) clearTimeout(searchTimer);
+      if (event.isComposing || input.dataset.searchMode === 'ai') return;
+      if (!input.value.trim()) { results.innerHTML = ''; return; }
+      searchTimer = setTimeout(function () { search(input.value); }, 160);
+    });
     input.addEventListener('keydown', function (event) {
       if (event.key === 'Enter' && !event.isComposing && input.dataset.searchMode !== 'ai') {
-        var first = results.querySelector('a');
-        if (first) { window.location.href = first.getAttribute('href'); }
+        event.preventDefault();
+        var requested = input.value;
+        search(requested).then(function () {
+          if (requested !== input.value || input.dataset.searchMode === 'ai') return;
+          var first = results.querySelector('a');
+          if (first) { window.location.href = first.getAttribute('href'); }
+        });
       }
     });
   }

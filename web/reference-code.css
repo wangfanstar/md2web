@@ -37,6 +37,18 @@ h2 { font-size:15px; margin:0; }
 .code-empty { color:#8190a4; padding:40px 24px; text-align:center; }
 #source { margin:0; padding:14px 0; max-height:75vh; min-height:260px; overflow:auto; font:13px/1.75 Consolas,"Courier New",monospace; color:#23374f; background:#fff; tab-size:4; }
 .code-line { display:flex; min-width:max-content; }
+.code-line { height:22.75px; }
+.code-spacer { display:block; pointer-events:none; }
+.code-layout.tree-collapsed { grid-template-columns:minmax(0,1fr); }
+.code-file-identity { display:block!important; min-width:0; }
+#file-meta { display:block; color:#8190a4; margin-top:4px; font-size:11px; }
+.code-line-tools { display:flex; gap:10px; align-items:center; padding:8px 16px; border-bottom:1px solid #e4eaf2; background:#f8fafd; flex-wrap:wrap; }
+.code-line-tools label { display:flex; gap:8px; align-items:center; font-size:12px; color:#607894; }
+.code-line-tools input { width:100px; padding:4px 8px; }
+.code-line-tools button { padding:4px 10px; font-size:12px; }
+.code-line-tools>span { margin-left:auto; color:#8797ab; font-size:11px; }
+.code-file-header { position:sticky; top:0; z-index:2; }
+.code-line-number { position:sticky; left:0; z-index:1; }
 .code-line-number { flex:0 0 64px; width:64px; padding:0 14px; text-align:right; color:#93a2b7; background:#f7f9fc; text-decoration:none; user-select:none; }
 .code-line code { font:inherit; padding:0 18px; white-space:pre; }
 .code-line:hover { background:#f5f8fd; }

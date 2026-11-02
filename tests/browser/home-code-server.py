@@ -34,6 +34,7 @@ try:
     code.mkdir(parents=True)
     (code / 'main.c').write_text('/* source example */\nint main(void) {\n    return 42;\n}\n', encoding='utf-8')
     (code / 'caller.c').write_text('int main(void);\nint call_main(void) { return main(); }\n', encoding='utf-8')
+    (code / 'large.c').write_text(''.join('int function_%s(void) { return (%s); }\n' % (i, i) for i in range(20000)), encoding='utf-8')
     (code / 'tool.py').write_text('def build_index(value):\n    # keep symbols searchable\n    return value\n', encoding='utf-8')
     (code / 'run.sh').write_text('#!/usr/bin/env bash\n# build helper\nexport MODE="full"\necho "$MODE"\n', encoding='utf-8')
     (fixture.docs / 'code' / 'project' / 'trunk' / '.md2web-revision').write_text('42', encoding='utf-8')
