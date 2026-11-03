@@ -565,10 +565,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                     raise ValueError('请输入 1–200 字的搜索词')
                 if mode == 'symbol':
                     reference_code.validate_symbol(query)
-                    indexed = reference_code.global_search(root, query, 'symbol_partial') if path == root else None
-                    if indexed is not None:
-                        return jsonify(ok=True, hits=indexed, revision=revision, revisionDate=revision_date, engine='GNU Global')
-                    result = reference_code.symbol_occurrences(path, query)
+                    result = reference_code.search_symbols(path, query)
                     prefix = path.relative_to(root).as_posix()
                     prefix = '' if prefix == '.' else prefix + '/'
                     hits, seen = [], set()

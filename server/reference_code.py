@@ -144,9 +144,12 @@ def global_search(root, query, mode):
     if not executable or not (root / 'GTAGS').is_file():
         return None
     flags = {'path': '-P', 'text': '-g', 'definition': '-d', 'reference': '-r',
-             'symbol': '-s', 'symbol_partial': '-s'}
+             'symbol': '-s', 'symbol_partial': '-s',
+             'definition_partial': '-d', 'reference_partial': '-r'}
     pattern = '^' + query + '$' if mode in ('definition', 'reference', 'symbol') else re.escape(query)
     args = [executable, flags[mode], '--result=grep', '-e', pattern]
+    if mode.endswith('_partial'):
+        args.insert(2, '-i')
     env = os.environ.copy()
     env['GTAGSROOT'] = str(root)
     env['GTAGSDBPATH'] = str(root)
@@ -187,6 +190,25 @@ def symbol_occurrences(root, query):
             if len(hits) >= 200:
                 return {'hits': hits, 'engine': '文本匹配（最多 200 条）'}
     return {'hits': hits, 'engine': '文本匹配'}
+
+
+def search_symbols(root, query):
+    """Search definitions first, then references and other indexed symbols."""
+    validate_symbol(query)
+    groups = [global_search(root, query, mode) for mode in
+              ('definition_partial', 'reference_partial', 'symbol_partial')]
+    if any(group is None for group in groups):
+        return symbol_occurrences(root, query)
+    hits, seen = [], set()
+    for group in groups:
+        for hit in group:
+            key = (hit['path'], hit['line'])
+            if key not in seen:
+                seen.add(key)
+                hits.append(hit)
+                if len(hits) >= 200:
+                    return {'hits': hits, 'engine': 'GNU Global'}
+    return {'hits': hits, 'engine': 'GNU Global'}
 
 
 def symbol_locations(root, symbol):

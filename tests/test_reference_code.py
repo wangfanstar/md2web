@@ -54,6 +54,27 @@ class ReferenceCodeTests(unittest.TestCase):
             self.assertFalse(result['engine'].startswith('GNU'))
             self.assertEqual([hit['line'] for hit in result['hits']], [1, 2])
 
+    def test_quick_search_includes_definitions_missing_from_symbol_table(self):
+        definition = {'path': 'driver.c', 'line': 2646, 'text': 'gt_status_t ql_macw_am_scale_get(void)'}
+        reference = {'path': 'caller.c', 'line': 338, 'text': 'ql_macw_am_scale_get();'}
+        def indexed(root, query, mode):
+            return {'definition_partial': [definition], 'reference_partial': [reference, definition],
+                    'symbol_partial': []}[mode]
+        with mock.patch('server.reference_code.global_search', side_effect=indexed):
+            for query in ('ql_macw_am_scale_get', 'macw_am'):
+                result = reference_code.search_symbols(Path('.'), query)
+                self.assertEqual(result['engine'], 'GNU Global')
+                self.assertEqual(result['hits'], [definition, reference])
+
+    def test_quick_search_falls_back_when_index_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'test.c').write_text('int ql_macw_am_scale_get(void);', encoding='utf-8')
+            with mock.patch('server.reference_code.global_search', return_value=None):
+                result = reference_code.search_symbols(root, 'macw_am')
+            self.assertIn('文本匹配', result['engine'])
+            self.assertEqual(len(result['hits']), 1)
+
     def test_symbol_queries_use_separate_definition_and_reference_indexes(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder).resolve()

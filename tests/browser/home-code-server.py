@@ -56,14 +56,14 @@ try:
     def index_search(root_path, query, mode):
         if query not in ('main', 'mai'):
             return None
-        if mode == 'definition':
+        if mode in ('definition', 'definition_partial'):
             return [{'path': 'src/nested/main.c', 'line': 2, 'text': 'int main(void) {'}]
-        if mode == 'reference':
+        if mode in ('reference', 'reference_partial'):
             return [{'path': 'src/nested/caller.c', 'line': 2, 'text': 'int call_main(void) { return main(); }'}]
         if mode == 'symbol' and query == 'main':
             return [{'path': 'src/nested/main.c', 'line': 2, 'text': 'int main(void) {'}]
         if mode == 'symbol_partial' and query in ('main', 'mai'):
-            return [{'path': 'src/nested/main.c', 'line': 2, 'text': 'int main(void) {'}]
+            return []  # Defined functions need not appear in the other-symbol table.
         return None
 
     with mock.patch('server.code_qa.answer', side_effect=answer), mock.patch('server.reference_code.global_search', side_effect=index_search):
