@@ -4,10 +4,10 @@
   <title>参考代码库</title>
   <link rel="stylesheet" href="lib/auth.css"><link rel="stylesheet" href="lib/reference-code.css">
 </head><body>
-  <header class="code-header"><a href="index.html">← 文档首页</a><div><h1>参考代码库</h1><p>浏览源码，查找实现，把文件位置带入 AI 问答。</p></div>
+  <div class="code-search-dock"><header class="code-header"><a href="index.html">← 文档首页</a><div><h1>参考代码库</h1><p>浏览源码，查找实现，把文件位置带入 AI 问答。</p></div>
     <div class="code-quick-search" data-quick-search role="search">
       <label class="sr-only" for="quick-symbol">实时搜索函数或符号</label>
-      <input id="quick-symbol" type="search" placeholder="实时搜索函数 / 符号（按 / 聚焦）" aria-label="实时搜索函数或符号" aria-autocomplete="list" aria-controls="quick-symbol-results" aria-expanded="false" autocomplete="off" spellcheck="false">
+      <input id="quick-symbol" maxlength="128" type="search" placeholder="实时搜索函数 / 符号（按 / 聚焦）" aria-label="实时搜索函数或符号" aria-autocomplete="list" aria-controls="quick-symbol-results" aria-expanded="false" autocomplete="off" spellcheck="false">
       <div id="quick-symbol-results" class="code-suggest" role="listbox" aria-label="符号搜索结果" hidden></div>
     </div>
   </header>
@@ -19,6 +19,7 @@
     <input id="q" required maxlength="200" aria-label="搜索代码" placeholder="输入关键词，停顿后自动搜索（文件、全文或符号）" autocomplete="off">
     <select id="mode" aria-label="搜索方式"><option value="path">文件 / 路径</option><option value="text">代码全文</option><option value="symbol">函数 / 符号</option></select><button>搜索</button>
   </form>
+  </div>
   <p id="status" role="status">正在确认登录状态…</p>
   <main class="code-layout">
     <aside id="code-directory" class="code-sidebar" aria-label="文件目录"><h2>文件目录</h2><p class="code-help">点击文件夹展开，点击文件阅读源码。</p><div id="tree">登录后加载代码目录</div></aside>

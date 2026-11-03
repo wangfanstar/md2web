@@ -95,3 +95,7 @@ h2 { font-size:15px; margin:0; }
   .code-quick-search { width:100%; min-width:0; margin-left:0; flex-basis:100%; }
   .code-suggest { left:0; right:auto; width:100%; }
 }
+
+.code-search-dock { position:sticky; top:0; z-index:1150; background:#f4f7fb; padding:10px 0 12px; border-bottom:1px solid #dde5f0; }
+.code-search-dock .code-header { margin-top:0; }
+.code-suggest { max-height:min(360px,50vh); overscroll-behavior:contain; }

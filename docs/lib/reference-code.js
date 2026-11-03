@@ -56,6 +56,7 @@
   var MAX_CACHE_BYTES = 12 * 1024 * 1024;
   var quickInput = document.getElementById('quick-symbol');
   var quickResults = document.getElementById('quick-symbol-results');
+  var quickBusy = false;
   var quickRequest = 0, quickAbort = null, quickTimer = null, quickActive = -1, quickComposing = false;
 
   var LANGUAGES = {
@@ -526,6 +527,7 @@
   }
   function closeQuickSearch() {
     if (quickTimer) { clearTimeout(quickTimer); quickTimer = null; }
+    quickRequest++;
     quickActive = -1;
     if (quickResults) {
       quickResults.hidden = true;
@@ -535,7 +537,7 @@
   function quickItems() {
     return Array.prototype.slice.call(quickResults.querySelectorAll('.code-suggest-item'));
   }
-  function setQuickActive(index) {
+  function setQuickActive(index, scroll) {
     var items = quickItems();
     if (!items.length) { quickActive = -1; return; }
     quickActive = (index + items.length) % items.length;
@@ -544,7 +546,7 @@
       item.classList.toggle('is-active', selected);
       item.setAttribute('aria-selected', String(selected));
     });
-    items[quickActive].scrollIntoView({ block: 'nearest' });
+    if (scroll !== false) items[quickActive].scrollIntoView({ block: 'nearest' });
   }
   function useMainSearch(query) {
     document.getElementById('q').value = query;
@@ -585,7 +587,7 @@
         closeQuickSearch();
         openFile(hit.path, hit.line, data.revision);
       };
-      item.onmouseenter = function () { setQuickActive(index); };
+      item.onmouseenter = function () { setQuickActive(index, false); };
       quickResults.appendChild(item);
     });
     if (data.hits.length > shown.length) {
@@ -601,6 +603,9 @@
     if (quickTimer) { clearTimeout(quickTimer); quickTimer = null; }
     var query = quickInput.value.trim();
     if (query.length < 2) { closeQuickSearch(); return; }
+    if (!/^[A-Za-z_][A-Za-z0-9_]{1,127}$/.test(query)) { closeQuickSearch(); return; }
+    if (quickBusy) { quickTimer = setTimeout(runQuickSearch, 400); return; }
+    quickBusy = true;
     var token = generation, request = ++quickRequest;
     if (quickAbort) quickAbort.abort();
     var controller = window.AbortController ? new AbortController() : null;
@@ -612,19 +617,21 @@
       if (token !== generation || request !== quickRequest) return;
       quickAbort = null;
       showRevision(data.revision, data.revisionDate);
-      renderQuickResults(data, query);
+      if (!data || !Array.isArray(data.hits)) throw new Error('符号结果格式无效，请重试');
+      if (quickInput.value.trim() === query) renderQuickResults(data, query);
     }).catch(function (error) {
       if (error && error.name === 'AbortError') return;
       if (token === generation && request === quickRequest) {
         quickResults.hidden = false;
         quickResults.textContent = error.message;
       }
-    });
+    }).then(function () { quickBusy = false; }, function () { quickBusy = false; });
   }
   function scheduleQuickSearch() {
+    quickRequest++;
     if (quickComposing) return;
     if (quickTimer) clearTimeout(quickTimer);
-    quickTimer = setTimeout(runQuickSearch, 220);
+    quickTimer = setTimeout(runQuickSearch, 400);
   }
   quickInput.addEventListener('input', scheduleQuickSearch);
   quickInput.addEventListener('compositionstart', function () { quickComposing = true; });
