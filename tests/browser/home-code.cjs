@@ -45,14 +45,13 @@ const assert = require('node:assert/strict');
     assert.equal(await page.locator('[data-master-search]').inputValue(), 'main');
     await page.locator('[data-ai-model] option[value=opus]').waitFor({state:'attached'});
     await page.locator('.ai-scope-trigger').click();
-    for (const folder of ['pdf', 'word', 'excel', 'ppt', 'superpowers']) {
+    for (const folder of ['pdf', 'word', 'excel', 'ppt']) {
       assert.equal(await page.locator('[data-document-folder][value="' + folder + '"]').isEnabled(), true);
     }
-    assert.equal(await page.locator('[data-document-folder][value="html"]').isEnabled(), false);
-    await page.getByRole('button', {name:'展开 html',exact:true}).click();
+    for (const folder of ['html', 'lib', 'code', 'reference-trash', 'superpowers']) {
+      assert.equal(await page.locator('[data-document-folder][value="' + folder + '"]').count(), 0);
+    }
     await page.locator('[data-document-folder][value="html/ref"]').check();
-    assert.equal(await page.locator('[data-document-folder][value="html"]').isChecked(), false);
-    await page.locator('[data-document-folder][value="superpowers"]').check();
     await page.getByRole('button', {name:'完成选择',exact:true}).click();
     assert.equal(await page.locator('.ai-assistant-button').count(), 0);
     assert.equal(await page.locator('.ai-assistant-inline').evaluate(el => getComputedStyle(el).position), 'static');

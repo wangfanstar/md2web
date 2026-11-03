@@ -147,6 +147,9 @@ def global_search(root, query, mode):
              'symbol': '-s', 'symbol_partial': '-s',
              'definition_partial': '-d', 'reference_partial': '-r'}
     pattern = '^' + query + '$' if mode in ('definition', 'reference', 'symbol') else re.escape(query)
+    if mode.endswith('_partial'):
+        # A plain identifier is an exact tag lookup in Global, even with -e.
+        pattern = '.*' + re.escape(query) + '.*'
     args = [executable, flags[mode], '--result=grep', '-e', pattern]
     if mode.endswith('_partial'):
         args.insert(2, '-i')

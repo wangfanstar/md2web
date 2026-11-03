@@ -15,12 +15,12 @@ class CodeQaTests(unittest.TestCase):
         self.f.login()
         public = self.f.client.get('/__ai/public').get_json()
         folders = {row['path']: row for row in public['documentFolders']}
-        for name in ('pdf', 'pdf/manuals', 'word', 'excel', 'ppt', 'superpowers', 'superpowers/guide', 'html/ref'):
+        for name in ('pdf', 'pdf/manuals', 'word', 'excel', 'ppt', 'html/ref'):
             self.assertTrue(folders[name]['available'], name)
-        for name in ('html', 'lib', 'code'):
-            self.assertFalse(folders[name]['available'], name)
+        for name in ('html', 'lib', 'code', 'reference-trash', 'superpowers', 'superpowers/guide'):
+            self.assertNotIn(name, folders)
         payload = {'messages': [{'role': 'user', 'content': 'explain'}],
-                   'documentFolders': ['superpowers/guide', 'pdf/manuals', 'html/ref']}
+                   'documentFolders': ['word', 'pdf/manuals', 'html/ref']}
         with mock.patch('server.code_qa.subprocess.Popen', return_value=self.fake_process()):
             result = code_qa.answer(self.f.docs, self.f.config['ai'], payload)
         self.assertEqual(result['documentFolders'], payload['documentFolders'])

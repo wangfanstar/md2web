@@ -698,7 +698,10 @@
         if(!(data.repositories||[]).length){var emptyCode=document.createElement('p');emptyCode.className='ai-scope-empty';emptyCode.textContent='尚未配置代码仓库，请在仓库管理中识别并加入。';codes.appendChild(emptyCode);}
         var scopes=state.overlay.querySelector('[data-document-scopes]');scopes.textContent='';
         var legend=document.createElement('legend');legend.textContent='文档范围（docs/ 下）';scopes.appendChild(legend);addScopeActions(scopes);
-        renderScopeTree(scopes,data.documentFolders||[{path:'md',available:true}],chosen,'data-document-folder');
+        var documentFolders=(data.documentFolders||[{path:'md',available:true}]).filter(function(folder){
+          return folder.available!==false&&folder.path.split('/')[0].toLowerCase()!=='superpowers';
+        });
+        renderScopeTree(scopes,documentFolders,chosen,'data-document-folder');
         filterScopeTree(state.overlay.querySelector('.ai-scope-picker'));
         if(data.enabled===false)setStatus('管理员尚未启用 Claude 问答，请联系管理员在「配置」中启用。');
       }).catch(function(){setStatus('公共 AI 状态读取失败');});

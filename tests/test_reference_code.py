@@ -64,10 +64,12 @@ class ReferenceCodeTests(unittest.TestCase):
             output = mock.Mock(returncode=0, stdout=b'main.c:1:int main(void) {}\nmain.c:2:int main_extra(void) {}\n')
             with mock.patch('server.reference_code.shutil.which', return_value='global'), \
                     mock.patch('server.reference_code.subprocess.run', return_value=output) as run:
-                hits = reference_code.global_search(root, 'mai', 'symbol_partial')
-            self.assertEqual(len(hits), 2)
-            self.assertEqual(run.call_args[0][0][1], '-s')
-            self.assertEqual(run.call_args[0][0][-1], 'mai')
+                for mode, flag in (('symbol_partial', '-s'), ('definition_partial', '-d'), ('reference_partial', '-r')):
+                    hits = reference_code.global_search(root, 'ql_port', mode)
+                    self.assertEqual(len(hits), 2)
+                    self.assertEqual(run.call_args[0][0][1], flag)
+                    # Force regexp lookup: a bare ql_port only finds that exact tag.
+                    self.assertEqual(run.call_args[0][0][-1], '.*ql_port.*')
 
     def test_symbol_occurrences_fallback_matches_partial_identifiers(self):
         with tempfile.TemporaryDirectory() as folder:

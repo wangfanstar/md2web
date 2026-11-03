@@ -112,7 +112,8 @@ def document_roots(docs, settings):
 
 
 def document_choices(docs, settings):
-    rows = {row['path']: row for row in document_roots(docs, settings)}
+    rows = {row['path']: row for row in document_roots(docs, settings)
+            if row['available'] and row['path'].split('/')[0].lower() != 'superpowers'}
     for row in list(rows.values()):
         if not row['available']:
             continue
