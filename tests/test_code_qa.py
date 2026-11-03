@@ -9,6 +9,26 @@ from tests import test_server
 
 
 class CodeQaTests(unittest.TestCase):
+    def test_all_document_folders_are_discovered_and_selectable(self):
+        for relative in ('pdf/manuals', 'word', 'excel', 'ppt', 'superpowers/guide', 'html/ref', 'lib'):
+            (self.f.docs / relative).mkdir(parents=True, exist_ok=True)
+        self.f.login()
+        public = self.f.client.get('/__ai/public').get_json()
+        folders = {row['path']: row for row in public['documentFolders']}
+        for name in ('pdf', 'pdf/manuals', 'word', 'excel', 'ppt', 'superpowers', 'superpowers/guide', 'html/ref'):
+            self.assertTrue(folders[name]['available'], name)
+        for name in ('html', 'lib', 'code'):
+            self.assertFalse(folders[name]['available'], name)
+        payload = {'messages': [{'role': 'user', 'content': 'explain'}],
+                   'documentFolders': ['superpowers/guide', 'pdf/manuals', 'html/ref']}
+        with mock.patch('server.code_qa.subprocess.Popen', return_value=self.fake_process()):
+            result = code_qa.answer(self.f.docs, self.f.config['ai'], payload)
+        self.assertEqual(result['documentFolders'], payload['documentFolders'])
+        for forbidden in ('html', 'lib', 'code', '../private'):
+            payload['documentFolders'] = [forbidden]
+            with self.assertRaises(ValueError):
+                code_qa.answer(self.f.docs, self.f.config['ai'], payload)
+
     def setUp(self):
         self.f = test_server.AppTests()
         self.f.setUp()

@@ -30,8 +30,8 @@ const assert = require('node:assert/strict');
     assert.equal(await page.locator('[data-master-search], [data-ai-input]').count(), 1);
     await page.locator('[data-code-repository-info] .card').first().waitFor();
     const codeCard = await page.locator('[data-code-repository-info] .card').first().innerText();
-    assert.match(codeCard, /SVN 目录：https:\/\/svn\.example\.com\/project\/trunk/);
-    assert.match(codeCard, /当前版本：r42/);
+    assert.match(codeCard, /SVN 仓库：https:\/\/svn\.example\.com\/project\/trunk/);
+    assert.match(codeCard, /当前版本：2026-10-30.*r42/);
     assert.match(codeCard, /2026-10-30/);
     assert.match(codeCard, /提交者：alice/);
     assert.match(codeCard, /浏览代码/);
@@ -44,6 +44,16 @@ const assert = require('node:assert/strict');
     await page.locator('[data-home-mode=ai]').click();
     assert.equal(await page.locator('[data-master-search]').inputValue(), 'main');
     await page.locator('[data-ai-model] option[value=opus]').waitFor({state:'attached'});
+    await page.locator('.ai-scope-trigger').click();
+    for (const folder of ['pdf', 'word', 'excel', 'ppt', 'superpowers']) {
+      assert.equal(await page.locator('[data-document-folder][value="' + folder + '"]').isEnabled(), true);
+    }
+    assert.equal(await page.locator('[data-document-folder][value="html"]').isEnabled(), false);
+    await page.getByRole('button', {name:'展开 html',exact:true}).click();
+    await page.locator('[data-document-folder][value="html/ref"]').check();
+    assert.equal(await page.locator('[data-document-folder][value="html"]').isChecked(), false);
+    await page.locator('[data-document-folder][value="superpowers"]').check();
+    await page.getByRole('button', {name:'完成选择',exact:true}).click();
     assert.equal(await page.locator('.ai-assistant-button').count(), 0);
     assert.equal(await page.locator('.ai-assistant-inline').evaluate(el => getComputedStyle(el).position), 'static');
     await page.locator('[data-home-submit]').click();

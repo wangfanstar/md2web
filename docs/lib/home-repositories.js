@@ -99,11 +99,14 @@
   }
   function formatDateTime(value) {
     if (!value) return '';
-    var date = new Date(value);
+    var timestamp = String(value);
+    if (/^\d{4}-\d{2}-\d{2}T/.test(timestamp) && !/(Z|[+-]\d{2}:\d{2})$/i.test(timestamp)) timestamp += '+08:00';
+    var date = new Date(timestamp);
     if (isNaN(date.getTime())) return String(value).slice(0, 10);
+    date = new Date(date.getTime() + 8 * 60 * 60 * 1000);
     function pad(number) { return (number < 10 ? '0' : '') + number; }
-    return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
-      + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+    return date.getUTCFullYear() + '-' + pad(date.getUTCMonth() + 1) + '-' + pad(date.getUTCDate())
+      + ' ' + pad(date.getUTCHours()) + ':' + pad(date.getUTCMinutes());
   }
   function refreshCodeRepositories() {
     var host = document.querySelector('[data-code-repository-info]');
@@ -112,14 +115,14 @@
       if (!data.ok) throw new Error('读取失败');
       host.innerHTML = '<div class="cards">' + (data.repositories || []).map(function (repo) {
         var source = repo.svnUrl ? 'SVN 库' : '本地代码库';
-        var directoryLabel = repo.svnUrl ? 'SVN 目录：' : '代码目录：';
+        var directoryLabel = repo.svnUrl ? 'SVN 仓库：' : '代码目录：';
         var directory = repo.svnUrl || repo.path || repo.folder;
         var version = repo.ready ? (repo.revision === 'local' ? '本地目录' : 'r' + repo.revision) : '尚未同步';
-        if (repo.ready && repo.revision && repo.revision !== 'local' && repo.revisionDate) {
-          version += ' · ' + formatDateTime(repo.revisionDate);
+        if (repo.ready && repo.revisionDate) {
+          version = formatDateTime(repo.revisionDate) + '（北京时间）' + (repo.revision !== 'local' ? ' · r' + repo.revision : '');
         }
         var href = 'html/reference_code.html?' + new URLSearchParams({repo: repo.id});
-        return '<div class="card"><strong><a href="' + escape(href) + '">' + escape(repo.name || repo.id)
+        return '<div class="card"><strong><a href="' + escape(href) + '">' + escape(repo.folder || repo.name || repo.id)
           + '</a><span class="badge ' + (repo.svnUrl ? 'svn' : 'local') + '">' + source + '</span></strong>'
           + '<span>' + directoryLabel + escape(directory) + '</span>'
           + (repo.revisionAuthor ? '<span>提交者：' + escape(repo.revisionAuthor) + '</span>' : '')

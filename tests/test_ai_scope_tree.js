@@ -25,6 +25,12 @@ test('clearing descendants clears every ancestor',()=>{
   assert.equal(root._input.checked,false);
   assert.equal(branch._input.checked,false);
 });
+test('a disabled runtime parent remains unselected when an allowed child is checked',()=>{
+  const child=node(true), parent=node(false,[child],true);
+  syncScopeTree(host([parent,child]));
+  assert.equal(parent._input.checked,false);
+  assert.equal(child._input.checked,true);
+});
 test('query scopes retain distinct repositories but remove selected descendants',()=>{
   assert.deepEqual(compactScopes(['code/a','code/a/src','code/ab/src','md/topic','md/topic/sub']),['code/a','code/ab/src','md/topic']);
 });

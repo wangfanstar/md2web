@@ -253,6 +253,7 @@
     var nodes=Array.prototype.slice.call(host.querySelectorAll('.ai-tree-node')).reverse();
     nodes.forEach(function(node){
       var input=node._input,children=node._children.filter(function(child){return !child._input.disabled;});
+      if (input.disabled) { input.checked=false; input.indeterminate=false; return; }
       if(!children.length)return;
       var all=children.every(function(child){return child._input.checked&&!child._input.indeterminate;});
       var any=children.some(function(child){return child._input.checked||child._input.indeterminate;});
@@ -281,8 +282,10 @@
       var row=document.createElement('div');row.className='ai-tree-row';
       var toggle=document.createElement('button');toggle.type='button';toggle.className='ai-tree-toggle';toggle.textContent='▸';toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-label','展开 '+folder.path);
       var label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.setAttribute(attribute,'');input.value=folder.path;input.disabled=folder.available===false;
-      input.checked=Object.keys(selected).some(function(path){return selected[path]&&(folder.path===path||folder.path.indexOf(path+'/')===0);});
-      label.title=folder.path;label.appendChild(input);label.appendChild(document.createTextNode(folder.name||folder.path.split('/').pop()));
+      input.checked=!input.disabled&&Object.keys(selected).some(function(path){return selected[path]&&(folder.path===path||folder.path.indexOf(path+'/')===0);});
+      var displayName=(folder.name||folder.path.split('/').pop())+(folder.reason?'（'+folder.reason+'）':'');
+      label.title=folder.path;label.appendChild(input);label.appendChild(document.createTextNode(displayName));
+      node._displayName = displayName;
       var body=document.createElement('div');body.className='ai-tree-children';body.hidden=true;
       row.appendChild(toggle);row.appendChild(label);node.appendChild(row);node.appendChild(body);
       node._input=input;node._toggle=toggle;node._body=body;node._children=[];node._expanded=false;nodes[folder.path]=node;
@@ -290,7 +293,7 @@
       input.onchange=function(){var checked=input.checked;node.querySelectorAll('input[type=checkbox]').forEach(function(child){if(!child.disabled){child.checked=checked;child.indeterminate=false;}});syncScopeTree(tree);};
     });
     Object.keys(nodes).forEach(function(path){var node=nodes[path],parent=path;do{parent=parent.slice(0,parent.lastIndexOf('/'));}while(parent.indexOf('/')>=0&&!nodes[parent]);
-      if(nodes[parent]&&parent!==path){nodes[parent]._body.appendChild(node);nodes[parent]._children.push(node);}else{tree.appendChild(node);node._input.parentNode.lastChild.textContent=folders.filter(function(f){return f.path===path;})[0].name||path;}
+      if(nodes[parent]&&parent!==path){nodes[parent]._body.appendChild(node);nodes[parent]._children.push(node);}else{tree.appendChild(node);node._input.parentNode.lastChild.textContent=node._displayName;}
     });
     Object.keys(nodes).forEach(function(path){var node=nodes[path];if(!node._children.length){node._toggle.style.visibility='hidden';node._toggle.tabIndex=-1;}});
     host.appendChild(tree);syncScopeTree(tree);

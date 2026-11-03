@@ -6,6 +6,30 @@ from server import reference_code
 from tests.test_server import AppTests
 
 class ReferenceCodeTests(unittest.TestCase):
+    def test_local_working_copy_exposes_svn_address_and_commit_date(self):
+        fixture = AppTests()
+        fixture.setUp()
+        try:
+            fixture.config['ai']['claude'] = {'repositories': [{'id': 'pzz', 'folder': 'PZZ/trunk', 'name': 'trunk'}]}
+            root = fixture.docs / 'code' / 'PZZ' / 'trunk'
+            root.mkdir(parents=True)
+            metadata = root.parent / '.svn'
+            metadata.mkdir()
+            (metadata / 'wc.db').write_bytes(b'local marker')
+            fixture.login()
+            info = {'url': 'https://user:secret@svn.example.com/PZZ/trunk', 'revision': '42',
+                    'last_changed_date': '2026-11-03T02:00:00Z', 'last_changed_author': 'alice'}
+            with mock.patch.object(fixture.svn, 'info', return_value=info) as read:
+                public = fixture.client.get('/__ai/public').get_json()['repositories'][0]
+                fixture.client.get('/__ai/public')
+            self.assertEqual(public['svnUrl'], 'https://svn.example.com/PZZ/trunk')
+            self.assertEqual(public['revision'], '42')
+            self.assertEqual(public['revisionDate'], '2026-11-03T02:00:00Z')
+            self.assertNotIn('secret', str(public))
+            self.assertEqual(read.call_count, 1)
+        finally:
+            fixture.tearDown()
+
     def test_paths_and_text(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder).resolve()

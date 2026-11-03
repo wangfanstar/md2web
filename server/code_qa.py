@@ -8,11 +8,50 @@ import signal
 import shutil
 import tempfile
 import hashlib
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from . import folder_sources
 
 LOCK = threading.Lock()
+_WORKING_COPY_CACHE = {}
+_WORKING_COPY_CACHE_LOCK = threading.Lock()
+
+
+def working_copy_info(root, boundary, svn, config_dir):
+    """Read local SVN metadata, including when the configured folder is below .svn."""
+    current = root
+    signature = None
+    while current == boundary or boundary in current.parents:
+        marker = current / '.svn'
+        if marker.is_dir() and not marker.is_symlink():
+            database = marker / 'wc.db'
+            if not database.is_file():
+                database = marker / 'entries'
+            try:
+                info = database.stat()
+                signature = (str(marker), info.st_mtime, info.st_size)
+            except OSError:
+                signature = (str(marker),)
+            break
+        current = current.parent
+    if signature is None:
+        return {}
+    key = (str(root), signature)
+    now = time.monotonic()
+    with _WORKING_COPY_CACHE_LOCK:
+        cached = _WORKING_COPY_CACHE.get(key)
+        if cached and now - cached[0] < 60:
+            return dict(cached[1])
+    try:
+        result = svn.info(str(root), config_dir)
+    except Exception:
+        result = {}
+    with _WORKING_COPY_CACHE_LOCK:
+        if len(_WORKING_COPY_CACHE) >= 100:
+            _WORKING_COPY_CACHE.clear()
+        _WORKING_COPY_CACHE[key] = (now, result)
+    return dict(result)
 
 
 def relative_folder(value):
@@ -30,7 +69,9 @@ def relative_folder(value):
 def document_folder(value):
     from .paths import is_blocked_static_path
     value = relative_folder(value)
-    if value.split('/')[0].lower() in ('html', 'lib', 'reference-trash') or is_blocked_static_path(value):
+    reference_html = value == 'html/ref' or value.startswith('html/ref/')
+    if ((value.split('/')[0].lower() in ('html', 'lib', 'reference-trash') and not reference_html)
+            or is_blocked_static_path(value)):
         raise ValueError('文档范围不能包含代码库、配置或站点运行目录')
     return value
 
@@ -45,6 +86,43 @@ def contained_folder(docs, relative):
     if root not in path.resolve().parents:
         raise ValueError('目录越界')
     return path
+
+
+def document_roots(docs, settings):
+    """Expose data folders under docs while keeping runtime/private roots disabled."""
+    candidates = set(settings['documentFolders'])
+    candidates.update(child.name for child in Path(docs).iterdir()
+                      if child.is_dir() and not child.name.startswith('.'))
+    if (Path(docs) / 'html' / 'ref').is_dir():
+        candidates.add('html/ref')
+    rows = []
+    for folder in sorted(candidates):
+        available, reason = False, ''
+        try:
+            document_folder(folder)
+            available = contained_folder(docs, folder).is_dir()
+            if not available:
+                reason = '目录不存在'
+        except ValueError:
+            reason = '包含私有配置或站点运行资源'
+            if folder == 'code':
+                reason = '请在代码仓库区选择'
+        rows.append({'path': folder, 'available': available, 'reason': reason})
+    return rows
+
+
+def document_choices(docs, settings):
+    rows = {row['path']: row for row in document_roots(docs, settings)}
+    for row in list(rows.values()):
+        if not row['available']:
+            continue
+        for folder in directory_choices(docs, row['path']):
+            try:
+                document_folder(folder)
+            except ValueError:
+                continue
+            rows[folder] = {'path': folder, 'available': True}
+    return [rows[key] for key in sorted(rows)]
 
 
 def validate(raw):
@@ -452,8 +530,9 @@ def answer(docs, ai, payload, cancel=None, on_delta=None, on_progress=None):
     if sum(len(item['content']) for item in messages) > 32000 or messages[-1]['role'] != 'user':
         raise ValueError('消息过长或缺少问题')
     selected_folders = payload.get('documentFolders', ['md'])
+    allowed_folders = [row['path'] for row in document_roots(docs, settings) if row['available']]
     if (not isinstance(selected_folders, list) or len(selected_folders) > 50 or
-            any(not isinstance(p, str) or not any(p == base or p.startswith(base + '/') for base in settings['documentFolders']) for p in selected_folders)):
+            any(not isinstance(p, str) or not any(p == base or p.startswith(base + '/') for base in allowed_folders) for p in selected_folders)):
         raise ValueError('文档范围不在管理员开放的目录中')
     selected_folders = list(dict.fromkeys(selected_folders))
     repo_id = payload.get('codeRepositoryId')

@@ -32,6 +32,8 @@ try:
     }), encoding='utf-8')
     code = fixture.docs / 'code' / 'project' / 'trunk' / 'src' / 'nested'
     code.mkdir(parents=True)
+    for folder in ('pdf/manuals', 'word', 'excel', 'ppt', 'superpowers/guide', 'html/ref'):
+        (fixture.docs / folder).mkdir(parents=True, exist_ok=True)
     (code / 'main.c').write_text('/* source example */\nint main(void) {\n    return 42;\n}\n', encoding='utf-8')
     (code / 'caller.c').write_text('int main(void);\nint call_main(void) { return main(); }\n', encoding='utf-8')
     (code / 'large.c').write_text(''.join('int function_%s(void) { return (%s); }\n' % (i, i) for i in range(20000)), encoding='utf-8')
