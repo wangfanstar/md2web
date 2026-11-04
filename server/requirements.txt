@@ -5,7 +5,9 @@
 Flask==2.0.3
 Werkzeug==2.0.3
 Jinja2==3.0.3
-MarkupSafe==2.0.1
+# MarkupSafe must match the interpreter ABI; Python 3.11+ uses a newer compatible release.
+MarkupSafe==2.0.1; python_version < "3.11"
+MarkupSafe==2.1.5; python_version >= "3.11"
 itsdangerous==2.0.1
 click==8.0.4
 blinker==1.4

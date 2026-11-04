@@ -175,7 +175,8 @@ ASSETS = {
     },
 }
 
-# Prism 语言组件（autoloader 运行时按需加载，需下载到本地实现离线）
+# Prism 语言组件已全量内置在 docs/lib/components/（1.29.0），离线构建直接复用；
+# 仅当文档出现新增语言且本地缺失时才尝试下载。
 PRISM_COMPONENTS_CDN = "https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/"
 PRISM_CORE_LANGS = {"markup", "css", "clike", "javascript"}  # docsify 内置的 Prism 已包含
 

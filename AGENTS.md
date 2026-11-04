@@ -163,7 +163,8 @@ node --check web/custom-search.js       # 前端语法检查（workspace/mermaid
 - 认证依赖安装：`start_linux.sh` 在非 root 时优先 `--user` 安装（系统目录常不可写，直接装会 PermissionError），顺序为「离线 --user → 离线系统 → 联网 --user → 联网系统」；提示用户级失败时给出 sudo/--user 与 pip 升级命令。
 - **数据库兼容目标 SQLite 3.7.17（RHEL7 自带，Python 3.6 的 sqlite3）**：Windows 端也只写旧版能解析的对象，`data/` 数据库可在 Windows 与 RHEL7 之间直接共用。`database.sqlite_compat_issues` 负责静态检查（部分索引/表达式索引/UPSERT/CTE/窗口函数/STRICT/生成列/RETURNING/JSON 等），`database.migrate` 末尾调用 `sanitize_schema` 清理残留的不兼容对象；新增迁移必须保持基础语法，`DatabaseTests.test_schema_sql_avoids_modern_only_features` 与 `test_migrate_removes_sqlite37_incompatible_objects` 守护。
 - 旧版 SQLite 打开含不兼容对象的库会报 `malformed database schema`（连读取失败）：`database.connect` 会先移除这类索引（原文件留 `*.repair-*.bak`），仍失败则把库改名为 `*.corrupt-*.bak` 并重建。
-- 离线依赖包位于 `server/wheels/`（cp36 + manylinux1 x86_64，含 MarkupSafe 的 manylinux wheel 与本地构建的 blinker/dataclasses 纯 Python wheel，`*.whl` 在 `.gitattributes` 中标记为 binary）；新增/升级依赖时同步更新该目录，`OfflineWheelsTests` 会校验覆盖度。
+- 离线依赖包位于 `server/wheels/`（Linux x86_64 与 Windows amd64 的 MarkupSafe cp36–cp312 wheel，其余为纯 Python wheel；`*.whl` 在 `.gitattributes` 中标记为 binary）；`requirements.txt` 用环境标记在 Python 3.11+ 选择 MarkupSafe 2.1.5、旧版本选择 2.0.1；新增/升级依赖时同步更新该目录，`OfflineWheelsTests` 与 `tests/test_offline_bundle.py` 会校验覆盖度。
+- `docs/lib/components/` 已内置 Prism 1.29.0 全量语言组件（约 297 个 `.min.js`），离线构建和 docsify 运行时都不会再访问 CDN；当前文档用到的语言由 `ensure_prism_components` 复用本地文件，新增语言无需联网，缺失时仍只警告并降级高亮。
 - `start_linux.sh` 必须保持 LF + 可执行位（`.gitattributes` 已声明 `*.sh text eol=lf`）；脚本内置 CRLF 自愈（`sh start_linux.sh` 也会去 CR 后重执行），`start_windows.bat` 必须纯 ASCII。
 - `--svn-command` 支持带空格的路径（Windows 用双引号包住）；测试用假 svn 可执行文件注入，真实认证需要能连通的强制认证 SVN 路径。
 - 本地管理员默认 `admin / admin`（PBKDF2 存库）：仅用于网页「设置」；部署后必须尽快改密。修改 SVN 认证路径只失效 SVN 用户会话，管理员会话保留。
