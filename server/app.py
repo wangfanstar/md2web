@@ -565,7 +565,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                     raise ValueError('请输入 1–200 字的搜索词')
                 if mode == 'symbol':
                     reference_code.validate_symbol(query)
-                    result = reference_code.search_symbols(path, query)
+                    result = reference_code.search_symbols(path, query, quick=request.args.get('quick') == '1')
                     prefix = path.relative_to(root).as_posix()
                     prefix = '' if prefix == '.' else prefix + '/'
                     hits, seen = [], set()

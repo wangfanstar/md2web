@@ -6,6 +6,20 @@ from server import reference_code
 from tests.test_server import AppTests
 
 class ReferenceCodeTests(unittest.TestCase):
+    def test_live_search_returns_definitions_without_waiting_for_references(self):
+        hit = {'path': 'port.c', 'line': 90, 'text': 'int ql_port_get(void)'}
+        with mock.patch('server.reference_code.global_search', return_value=[hit]) as search:
+            result = reference_code.search_symbols(Path('.'), 'ql_port', quick=True)
+        self.assertEqual(result['hits'], [hit])
+        search.assert_called_once_with(Path('.'), 'ql_port', 'definition_partial', timeout=5)
+
+    def test_live_timeout_does_not_scan_entire_source_tree(self):
+        with mock.patch('server.reference_code.global_search', return_value=None), \
+                mock.patch('server.reference_code.symbol_occurrences') as scan:
+            with self.assertRaises(ValueError):
+                reference_code.search_symbols(Path('.'), 'ql_port', quick=True)
+        scan.assert_not_called()
+
     def test_local_working_copy_exposes_svn_address_and_commit_date(self):
         fixture = AppTests()
         fixture.setUp()

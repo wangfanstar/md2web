@@ -55,7 +55,7 @@ try:
             raise ValueError('cancelled')
         return {'answer': 'First streamed paragraph\n\n**Completed answer**', 'documentFolders': ['md'], 'model': payload.get('model', '')}
 
-    def index_search(root_path, query, mode):
+    def index_search(root_path, query, mode, timeout=15):
         if query not in ('main', 'mai'):
             return None
         if mode in ('definition', 'definition_partial'):

@@ -613,7 +613,7 @@
     quickResults.hidden = false;
     quickResults.textContent = '正在搜索函数 / 符号…';
     quickInput.setAttribute('aria-expanded', 'true');
-    api('search', { q: query, mode: 'symbol' }, controller ? { signal: controller.signal } : null).then(function (data) {
+    api('search', { q: query, mode: 'symbol', quick: '1' }, controller ? { signal: controller.signal } : null).then(function (data) {
       if (token !== generation || request !== quickRequest) return;
       quickAbort = null;
       showRevision(data.revision, data.revisionDate);

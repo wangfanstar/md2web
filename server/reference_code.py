@@ -139,7 +139,7 @@ def text(path):
     return value
 
 
-def global_search(root, query, mode):
+def global_search(root, query, mode, timeout=15):
     executable = shutil.which('global')
     if not executable or not (root / 'GTAGS').is_file():
         return None
@@ -158,7 +158,7 @@ def global_search(root, query, mode):
     env['GTAGSDBPATH'] = str(root)
     try:
         output = subprocess.run(args, cwd=str(root), env=env, stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL, timeout=15, check=False)
+                                stderr=subprocess.DEVNULL, timeout=timeout, check=False)
         if output.returncode not in (0, 1):
             return None
         hits = []
@@ -198,9 +198,15 @@ def symbol_occurrences(root, query):
     return {'hits': hits, 'engine': '文本匹配'}
 
 
-def search_symbols(root, query):
+def search_symbols(root, query, quick=False):
     """Search definitions first, then references and other indexed symbols."""
     validate_symbol(query)
+    if quick:
+        # Return definitions without waiting for potentially huge reference tables.
+        hits = global_search(root, query, 'definition_partial', timeout=5)
+        if hits is None:
+            raise ValueError('函数索引查询未完成，请检查 GNU Global 是否可用并更新 gtags 索引')
+        return {'hits': hits, 'engine': 'GNU Global · 函数与定义'}
     groups = [global_search(root, query, mode) for mode in
               ('definition_partial', 'reference_partial', 'symbol_partial')]
     if all(not group for group in groups):
