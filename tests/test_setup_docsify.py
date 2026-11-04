@@ -1038,6 +1038,33 @@ class OfflineWheelsTests(unittest.TestCase):
 class LauncherScriptsTests(unittest.TestCase):
     """启动脚本的行尾/权限约定：Linux 脚本必须 LF 且可执行，Windows 脚本保持 CRLF。"""
 
+    def test_restart_preparation_supports_copy_deployment(self):
+        sh = find_posix_shell()
+        if not sh:
+            self.skipTest('POSIX shell unavailable')
+        source = (ROOT / 'start_linux.sh').read_text(encoding='utf-8')
+        preparation = source.split('  restart)\n', 1)[1].split('    pid=', 1)[0]
+        directory = tempfile.mkdtemp(prefix='md2web-restart-')
+        try:
+            for has_git, update_status, build_status, expected in (
+                    (False, 1, 0, 0), (False, 1, 1, 1),
+                    (True, 1, 0, 1), (True, 0, 0, 0)):
+                marker = Path(directory) / '.git'
+                if has_git:
+                    marker.touch()
+                elif marker.exists():
+                    marker.unlink()
+                script = ('PY=python\nupdate_code() { return %d; }\n'
+                          'rebuild_site() { return %d; }\n'
+                          'git() { echo test-version; }\n' % (update_status, build_status))
+                result = subprocess.run([sh], input=(script + preparation).encode('utf-8'),
+                                        cwd=directory, env=posix_shell_env(sh),
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.assertEqual(result.returncode, expected,
+                                 (result.stdout + result.stderr).decode('utf-8', 'replace'))
+        finally:
+            rmtree_safe(directory)
+
     def test_gitattributes_declares_line_endings(self):
         text = (ROOT / ".gitattributes").read_text(encoding="utf-8")
         self.assertIn("*.sh text eol=lf", text)

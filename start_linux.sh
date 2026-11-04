@@ -5,6 +5,7 @@
 #   ./start_linux.sh --stop          停止后台实例（按 pidfile）
 #   ./start_linux.sh --restart       强制重启：先更新代码（git pull --ff-only），
 #                                    强制重建页面，成功后停止旧实例并启动；失败则取消重启
+#                                    无 .git 的拷贝部署使用本地已同步代码，仍强制重建
 #   ./start_linux.sh --update        启动前更新代码（git pull --ff-only）
 #   ./start_linux.sh --no-update     普通启动跳过更新（restart 强制更新，不受此选项影响）
 #   ./start_linux.sh --rebuild       强制重新构建站点（setup_docsify.py）
@@ -571,16 +572,25 @@ case "$MODE" in
       echo "[错误] 未找到 Python，保留当前服务。" >&2
       exit 1
     fi
-    if ! update_code; then
-      echo "[错误] restart 更新失败，已取消重启；请解决更新错误后重试。" >&2
-      exit 1
+    if [ -e .git ]; then
+      if ! update_code; then
+        echo "[错误] restart 更新失败，已取消重启；请解决更新错误后重试。" >&2
+        exit 1
+      fi
+    else
+      echo "[提示] 拷贝/rsync 部署：使用当前目录已同步的代码，强制重建后重启。"
+      echo "[提示] 无 .git，无法检查 GitHub 最新版本；更新代码请先同步部署文件。"
     fi
     SITE_REBUILT=0
     if ! rebuild_site; then
       echo "[错误] restart 重建失败，已取消重启。" >&2
       exit 1
     fi
-    echo "[提示] restart 将启动提交 $(git rev-parse --short HEAD)，前端资源已重新构建。"
+    if [ -e .git ]; then
+      echo "[提示] restart 将启动提交 $(git rev-parse --short HEAD)，前端资源已重新构建。"
+    else
+      echo "[提示] restart 将启动当前目录代码，前端资源已重新构建。"
+    fi
     # 先按 pidfile 停本实例（若在运行）
     pid="$(read_pid)"
     if [ -n "$pid" ] && is_alive "$pid"; then
