@@ -159,13 +159,16 @@ def global_search(root, query, mode):
     try:
         output = subprocess.run(args, cwd=str(root), env=env, stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, timeout=15, check=False)
-        if output.returncode not in (0, 1) or len(output.stdout) > 4 * 1024 * 1024:
+        if output.returncode not in (0, 1):
             return None
         hits = []
         for line in output.stdout.decode('utf-8', errors='replace').splitlines():
             parts = line.split(':', 2)
             relative = parts[0][2:] if parts[0].startswith('./') else parts[0]
-            safe_path(root, relative)
+            try:
+                safe_path(root, relative)
+            except ValueError:
+                continue
             number = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1
             hits.append({'path': relative, 'line': number, 'text': parts[2][:300] if len(parts) > 2 else relative})
             if len(hits) >= 200:
@@ -200,11 +203,11 @@ def search_symbols(root, query):
     validate_symbol(query)
     groups = [global_search(root, query, mode) for mode in
               ('definition_partial', 'reference_partial', 'symbol_partial')]
-    if any(group is None for group in groups):
+    if all(not group for group in groups):
         return symbol_occurrences(root, query)
     hits, seen = [], set()
     for group in groups:
-        for hit in group:
+        for hit in group or []:
             key = (hit['path'], hit['line'])
             if key not in seen:
                 seen.add(key)

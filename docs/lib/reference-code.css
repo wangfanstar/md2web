@@ -99,3 +99,13 @@ h2 { font-size:15px; margin:0; }
 .code-search-dock { position:sticky; top:0; z-index:1150; background:#f4f7fb; padding:10px 0 12px; border-bottom:1px solid #dde5f0; }
 .code-search-dock .code-header { margin-top:0; }
 .code-suggest { max-height:min(360px,50vh); overscroll-behavior:contain; }
+/* Compact navigation keeps both searches visible while reading long files. */
+.code-search-dock { box-shadow:0 4px 12px #2539530d; }
+.code-search-dock .code-header { padding-bottom:8px; gap:16px; }
+.code-search-dock h1 { font-size:22px; margin:0; }
+.code-search-dock .code-header p { display:none; }
+.code-search-dock .code-toolbar { padding:8px 12px; border-radius:6px; }
+.code-search-dock .code-search { margin:8px 0 0; }
+.code-suggest { width:min(650px,85vw); }
+.code-suggest-excerpt { color:#425875; white-space:pre-wrap; }
+@media(min-width:761px) { .code-sidebar { top:190px; max-height:calc(100vh - 210px); } }
