@@ -52,8 +52,22 @@ const source='# 复制格式测试\n\n正文 **加粗**、*斜体*、[文档链�
     await insecure.goto('http://copy.test/html/index_server_only.html#/md/old/math');
     await insecure.waitForFunction(()=>document.querySelector('.markdown-section .mermaid svg'));
     assert.equal(await insecure.evaluate(()=>isSecureContext),false);
-    await insecure.getByRole('button',{name:'复制本页内容',exact:true}).click();
+    await insecure.evaluate(()=>{const filler=document.createElement('div');filler.id='copy-scroll-filler';filler.style.height='2800px';document.querySelector('.markdown-section').appendChild(filler);window.scrollTo(0,1200);});
+    await insecure.waitForFunction(()=>document.querySelector('[data-workspace-copy-content]'));
+    const beforeCopyScroll=await insecure.evaluate(()=>scrollY);
+    assert.ok(beforeCopyScroll>500,'test page must be scrolled before copying');
+    await insecure.evaluate(()=>document.querySelector('[data-workspace-copy-content]').click());
     await insecure.waitForFunction(()=>document.querySelector('[data-workspace-copy-content]').textContent.includes('已复制'));
+    await insecure.waitForTimeout(500);
+    const afterCopyScroll=await insecure.evaluate(()=>scrollY);
+    assert.ok(Math.abs(afterCopyScroll-beforeCopyScroll)<=20,'page copy must keep the reading position ('+beforeCopyScroll+' -> '+afterCopyScroll+')');
+    await insecure.evaluate(()=>window.scrollTo(0,1200));
+    await insecure.waitForFunction(()=>document.querySelector('[data-workspace-copy-path]'));
+    await insecure.evaluate(()=>document.querySelector('[data-workspace-copy-path]').click());
+    await insecure.waitForFunction(()=>document.querySelector('[data-workspace-copy-path]').textContent.includes('已复制'));
+    await insecure.waitForTimeout(100);
+    const afterLinkScroll=await insecure.evaluate(()=>scrollY);
+    assert.ok(Math.abs(afterLinkScroll-1200)<=20,'link copy must keep the reading position ('+afterLinkScroll+')');
     await insecure.close();
     const offline=await context.newPage();
     await offline.goto(require('node:url').pathToFileURL(path.resolve('docs/html/index_all.html')).href+'#/md/使用说明/快速开始');
@@ -62,6 +76,6 @@ const source='# 复制格式测试\n\n正文 **加粗**、*斜体*、[文档链�
     await offline.getByRole('button',{name:'复制本页内容',exact:true}).click();
     await offline.waitForFunction(()=>document.querySelector('[data-workspace-copy-content]').textContent.includes('已复制'));
     await offline.close();
-    console.log('formatted HTML/plain clipboard, native paste, embedded diagrams/math, fallback, failure and folder visibility: PASS');
+    console.log('formatted HTML/plain clipboard, native paste, embedded diagrams/math, fallback without scroll jump, failure and folder visibility: PASS');
   }finally{await browser.close();const exit=new Promise(resolve=>server.on('exit',resolve));server.stdin.end('\n');assert.equal(await exit,0,stderr);}
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -201,8 +201,33 @@
     state.messagesEl.scrollTop = state.messagesEl.scrollHeight;
   }
 
+  function keepReaderPosition(scrollX, scrollY) {
+    var deadline=Date.now()+400;
+    function restore(){ if(Math.abs(window.pageXOffset-scrollX)>1||Math.abs(window.pageYOffset-scrollY)>1)window.scrollTo(scrollX,scrollY); }
+    function stop(){ window.removeEventListener('wheel',stop);window.removeEventListener('touchstart',stop);window.removeEventListener('keydown',stop);clearInterval(timer); }
+    var timer=setInterval(function(){ if(Date.now()>=deadline){stop();return;} restore(); },50);
+    window.addEventListener('wheel',stop,{passive:true});
+    window.addEventListener('touchstart',stop,{passive:true});
+    window.addEventListener('keydown',stop);
+    restore();
+    if(window.requestAnimationFrame)window.requestAnimationFrame(restore);
+  }
   function copyText(text) {
-    function fallback(){var area=document.createElement('textarea');area.value=text;area.style.position='fixed';area.style.opacity='0';document.body.appendChild(area);area.select();var ok=document.execCommand('copy');area.remove();if(!ok)throw new Error('请手动选择文字复制');}
+    function fallback(){
+      var scrollX=window.pageXOffset,scrollY=window.pageYOffset;
+      var area=document.createElement('textarea');
+      area.value=text;
+      area.setAttribute('readonly','');
+      area.style.cssText='position:fixed;width:1px;height:1px;padding:0;border:0;opacity:0;';
+      document.body.appendChild(area);
+      var ok=false;
+      try{ if(area.focus)area.focus({preventScroll:true}); area.select(); ok=document.execCommand('copy'); }
+      finally{
+        area.remove();
+        keepReaderPosition(scrollX,scrollY);
+      }
+      if(!ok)throw new Error('请手动选择文字复制');
+    }
     var promise=navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(text).catch(fallback):Promise.resolve().then(fallback);
     promise.then(function(){setStatus('已复制');}).catch(function(e){setStatus('复制失败：'+e.message);});
   }

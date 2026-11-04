@@ -388,6 +388,7 @@
   }
   function legacyCopy(data) {
     var selection = window.getSelection(), ranges = [], focus = document.activeElement;
+    var scrollX = window.pageXOffset, scrollY = window.pageYOffset;
     if (selection) for (var i = 0; i < selection.rangeCount; i++) ranges.push(selection.getRangeAt(i).cloneRange());
     var holder = document.createElement('div');
     holder.contentEditable = 'true';
@@ -400,6 +401,31 @@
       event.clipboardData.setData('text/plain', data.text);
       event.preventDefault(); handled = true;
     }
+    function keepReaderPosition() {
+      // Chrome may scroll the selection/copy target into view after execCommand
+      // returns. Guard the next few frames so copying does not jump to the top.
+      var deadline = Date.now() + 400;
+      function restore() {
+        if (Math.abs(window.pageXOffset - scrollX) > 1 || Math.abs(window.pageYOffset - scrollY) > 1) {
+          window.scrollTo(scrollX, scrollY);
+        }
+      }
+      function stop() {
+        window.removeEventListener('wheel', stop);
+        window.removeEventListener('touchstart', stop);
+        window.removeEventListener('keydown', stop);
+        clearInterval(timer);
+      }
+      var timer = setInterval(function () {
+        if (Date.now() >= deadline) { stop(); return; }
+        restore();
+      }, 50);
+      window.addEventListener('wheel', stop, { passive: true });
+      window.addEventListener('touchstart', stop, { passive: true });
+      window.addEventListener('keydown', stop);
+      restore();
+      if (window.requestAnimationFrame) window.requestAnimationFrame(restore);
+    }
     try {
       document.body.appendChild(holder);
       var range = document.createRange(); range.selectNodeContents(holder);
@@ -410,6 +436,8 @@
       document.removeEventListener('copy', onCopy); holder.remove();
       if (focus && focus.focus) focus.focus({preventScroll:true});
       if (selection) { selection.removeAllRanges(); ranges.forEach(function (saved) { selection.addRange(saved); }); }
+      // Selecting the off-screen copy holder can move the viewport; keep the reader where they were.
+      keepReaderPosition();
     }
     return data;
   }

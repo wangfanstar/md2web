@@ -559,7 +559,46 @@
     var done = function () { if (button) { var old = button.textContent; button.textContent = '已复制'; setTimeout(function () { button.textContent = old; }, 1200); } };
     if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(value).then(done, function () { fallback(value, done); }); } else fallback(value, done);
   }
-  function fallback(value, done) { var input = document.createElement('textarea'); input.value = value; input.style.position = 'fixed'; input.style.opacity = '0'; document.body.appendChild(input); input.select(); try { if (document.execCommand('copy')) done(); } catch (_) {} document.body.removeChild(input); }
+  function keepReaderPosition(scrollX, scrollY) {
+    var deadline = Date.now() + 400;
+    function restore() {
+      if (Math.abs(window.pageXOffset - scrollX) > 1 || Math.abs(window.pageYOffset - scrollY) > 1) {
+        window.scrollTo(scrollX, scrollY);
+      }
+    }
+    function stop() {
+      window.removeEventListener('wheel', stop);
+      window.removeEventListener('touchstart', stop);
+      window.removeEventListener('keydown', stop);
+      clearInterval(timer);
+    }
+    var timer = setInterval(function () {
+      if (Date.now() >= deadline) { stop(); return; }
+      restore();
+    }, 50);
+    window.addEventListener('wheel', stop, { passive: true });
+    window.addEventListener('touchstart', stop, { passive: true });
+    window.addEventListener('keydown', stop);
+    restore();
+    if (window.requestAnimationFrame) window.requestAnimationFrame(restore);
+  }
+  function fallback(value, done) {
+    var scrollX = window.pageXOffset, scrollY = window.pageYOffset;
+    var input = document.createElement('textarea');
+    input.value = value;
+    input.setAttribute('readonly', '');
+    input.style.cssText = 'position:fixed;width:1px;height:1px;padding:0;border:0;opacity:0;';
+    document.body.appendChild(input);
+    try {
+      if (input.focus) input.focus({ preventScroll: true });
+      input.select();
+      if (document.execCommand('copy')) done();
+    } catch (_) {
+    } finally {
+      document.body.removeChild(input);
+      keepReaderPosition(scrollX, scrollY);
+    }
+  }
 
   function addCodeButtons() {
     var section = document.querySelector('.markdown-section');
