@@ -565,7 +565,8 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                     raise ValueError('请输入 1–200 字的搜索词')
                 if mode == 'symbol':
                     reference_code.validate_symbol(query)
-                    result = reference_code.search_symbols(path, query, quick=request.args.get('quick') == '1')
+                    result = reference_code.search_symbols(path, query, quick=request.args.get('quick') == '1',
+                                                           preferred=request.args.get('current'))
                     prefix = path.relative_to(root).as_posix()
                     prefix = '' if prefix == '.' else prefix + '/'
                     hits, seen = [], set()
@@ -578,7 +579,8 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                         hits.append({'path': relative, 'line': hit['line'], 'text': hit['text']})
                         if len(hits) >= 200:
                             break
-                    return jsonify(ok=True, hits=hits, revision=revision, revisionDate=revision_date, engine=result['engine'])
+                    return jsonify(ok=True, hits=hits, revision=revision, revisionDate=revision_date, engine=result['engine'],
+                                   limited=result.get('limited', False))
                 indexed = reference_code.global_search(root, query, mode) if path == root else None
                 if indexed is not None:
                     return jsonify(ok=True, hits=indexed, revision=revision, revisionDate=revision_date, engine='GNU Global')

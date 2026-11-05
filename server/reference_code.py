@@ -5,6 +5,8 @@ import subprocess
 import re
 import collections
 import threading
+import time
+from itertools import chain, islice
 from pathlib import Path
 from . import code_qa, folder_sources
 
@@ -178,34 +180,48 @@ def global_search(root, query, mode, timeout=15):
         return None
 
 
-def symbol_occurrences(root, query):
+def symbol_occurrences(root, query, quick=False, preferred=None):
     """按片段匹配函数/符号名；没有 GNU Global 时用于实时符号搜索。"""
     validate_symbol(query)
     needle = query.lower()
     identifier = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
     hits = []
-    for path in files(root):
+    candidates = files(root)
+    if quick:
+        candidates = islice(candidates, 48)
+        if preferred:
+            first = safe_path(root, preferred)
+            if first.is_file():
+                candidates = chain([first], (path for path in candidates if path != first))
+        deadline = time.monotonic() + 0.5
+    for path in candidates:
+        if quick and time.monotonic() >= deadline:
+            break
         try:
             lines = text(path).splitlines()
         except (OSError, ValueError):
             continue
         for number, line in enumerate(lines, 1):
+            if needle not in line.lower():
+                continue
             if not any(needle in token.lower() for token in identifier.findall(line)):
                 continue
             hits.append({'path': path.relative_to(root).as_posix(), 'line': number, 'text': line[:300]})
-            if len(hits) >= 200:
+            if len(hits) >= (8 if quick else 200):
                 return {'hits': hits, 'engine': '文本匹配（最多 200 条）'}
     return {'hits': hits, 'engine': '文本匹配'}
 
 
-def search_symbols(root, query, quick=False):
+def search_symbols(root, query, quick=False, preferred=None):
     """Search definitions first, then references and other indexed symbols."""
     validate_symbol(query)
     if quick:
         # Return definitions without waiting for potentially huge reference tables.
         hits = global_search(root, query, 'definition_partial', timeout=5)
-        if hits is None:
-            raise ValueError('函数索引查询未完成，请检查 GNU Global 是否可用并更新 gtags 索引')
+        if not hits:
+            result = symbol_occurrences(root, query, quick=True, preferred=preferred)
+            result.update(limited=True, engine='源码快速匹配')
+            return result
         return {'hits': hits, 'engine': 'GNU Global · 函数与定义'}
     groups = [global_search(root, query, mode) for mode in
               ('definition_partial', 'reference_partial', 'symbol_partial')]

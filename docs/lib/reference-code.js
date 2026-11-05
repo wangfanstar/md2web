@@ -563,9 +563,8 @@
     if (!data.hits.length) {
       var empty = document.createElement('p');
       empty.className = 'code-suggest-empty';
-      empty.textContent = '没有找到匹配的函数或符号';
+      empty.textContent = data.limited ? '快速检索范围内没有匹配项' : '没有找到匹配的函数或符号';
       quickResults.appendChild(empty);
-      return;
     }
     var shown = data.hits.slice(0, 8);
     shown.forEach(function (hit, index) {
@@ -590,11 +589,11 @@
       item.onmouseenter = function () { setQuickActive(index, false); };
       quickResults.appendChild(item);
     });
-    if (data.hits.length > shown.length) {
+    if (data.limited || data.hits.length > shown.length) {
       var more = document.createElement('button');
       more.type = 'button';
       more.className = 'code-suggest-more';
-      more.textContent = '在下方查看全部 ' + data.hits.length + ' 条结果';
+      more.textContent = data.limited ? '在整个仓库中搜索此符号' : '在下方查看全部 ' + data.hits.length + ' 条结果';
       more.onclick = function () { useMainSearch(query); };
       quickResults.appendChild(more);
     }
@@ -613,7 +612,7 @@
     quickResults.hidden = false;
     quickResults.textContent = '正在搜索函数 / 符号…';
     quickInput.setAttribute('aria-expanded', 'true');
-    api('search', { q: query, mode: 'symbol', quick: '1' }, controller ? { signal: controller.signal } : null).then(function (data) {
+    api('search', { q: query, mode: 'symbol', quick: '1', current: selectedPath || '' }, controller ? { signal: controller.signal } : null).then(function (data) {
       if (token !== generation || request !== quickRequest) return;
       quickAbort = null;
       showRevision(data.revision, data.revisionDate);
