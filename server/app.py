@@ -1083,6 +1083,26 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             return json_error(error.status, "folder_error", error.message)
         return jsonify({"ok": True, "folder": listing})
 
+    @app.post('/__folder/scan')
+    def scan_folder():
+        session, rejected = require_session()
+        if rejected:
+            return rejected
+        rejected = require_csrf(session)
+        if rejected:
+            return rejected
+        payload = request.get_json(silent=True) or {}
+        path = payload.get('path') or 'md'
+        try:
+            listing = operations.folder_listing(md_dir(), path, recursive=True, config=config)
+        except operations.OperationError as error:
+            return json_error(error.status, 'folder_error', error.message)
+        if not rebuild_repository_pages():
+            return json_error(503, 'scan_rebuild_failed', '扫描后的导航和索引重建失败，请检查服务日志后重试')
+        folder_cache.clear()
+        return jsonify(ok=True, path=listing['path'], documents=len(listing['documents']),
+                       folders=len(listing['allFolders']), rebuilt=True)
+
     document_meta_cache = MetadataCache(cache_settings.get('maxEntries', 256), cache_settings.get('maxBytes', 33554432),
                                        cache_settings.get('metadataTtlSeconds', 60))
 

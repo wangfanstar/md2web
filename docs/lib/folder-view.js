@@ -218,7 +218,8 @@
       repositoryActionsHtml(),
       '<div class="folder-view-actions"><button type="button" data-folder-action="menu" data-path="' + escapeHtml(folder.path)
         + '">新建文档或文件夹</button><button type="button" data-folder-action="trash" data-mount="' + escapeHtml(trashMount)
-        + '">回收站</button></div>',
+        + '">回收站</button><button type="button" data-folder-action="scan" data-path="' + escapeHtml(folder.path)
+        + '" title="扫描当前文件夹及子文件夹中的 Markdown 文档，更新导航和搜索索引">扫描文件夹</button></div>',
       '<p class="folder-view-meta">目录：<code>' + escapeHtml(folder.path || '') + '</code>'
         + ' · 文档 ' + ((folder.documents || []).length) + ' 个 · 合计 '
         + escapeHtml(formatBytes(folder.totalBytes)) + '</p>',
@@ -818,6 +819,18 @@
     var repositoryButton = event.target.closest ? event.target.closest('[data-repository-sync], [data-repository-delete]') : null;
     if (repositoryButton) {
       manageRepository(repositoryButton, repositoryButton.hasAttribute('data-repository-delete'));
+      return;
+    }
+    var scan = event.target.closest ? event.target.closest('[data-folder-action="scan"]') : null;
+    if (scan) {
+      if (!requireLogin()) return;
+      scan.disabled = true; scan.textContent = '正在扫描…';
+      api('__folder/scan', { method: 'POST', body: JSON.stringify({ path: scan.getAttribute('data-path') }) })
+        .then(function (result) {
+          reloadSoon('扫描完成，共发现 ' + result.documents + ' 篇 Markdown 文档，导航与搜索索引已更新。');
+        }).catch(function (error) {
+          window.alert('扫描失败：' + error.message);
+        }).then(function () { scan.disabled = false; scan.textContent = '扫描文件夹'; });
       return;
     }
     var trigger = event.target.closest ? event.target.closest('[data-folder-action="menu"]') : null;

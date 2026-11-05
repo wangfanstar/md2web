@@ -1194,6 +1194,29 @@ class AppTests(ServerTestBase):
         self.assertTrue(payload["ok"])
         return payload["csrfToken"]
 
+    def test_manual_folder_scan_rebuilds_and_discovers_new_documents(self):
+        from server.app import create_app
+        rebuild = mock.Mock(return_value=True)
+        self.app = create_app(self.config, self.conn, self.auth, self.docs, on_config_changed=rebuild)
+        self.client = self.app.test_client()
+        self.assertEqual(self.client.post('/__folder/scan', json={'path': 'md'}).status_code, 401)
+        csrf = self.login()
+        self.assertEqual(self.client.post('/__folder/scan', json={'path': 'md'}).status_code, 403)
+        headers = {'X-CSRF-Token': csrf}
+        nested = self.docs / 'md' / 'scan-test' / 'nested'
+        nested.mkdir(parents=True)
+        self.client.get('/__folder?path=md/scan-test&recursive=1')
+        (nested / 'added.md').write_text('# Newly added', encoding='utf-8')
+        response = self.client.post('/__folder/scan', json={'path': 'md/scan-test'}, headers=headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()['documents'], 1)
+        rebuild.assert_called_once_with()
+        listing = self.client.get('/__folder?path=md/scan-test&recursive=1').get_json()['folder']
+        self.assertEqual(listing['documents'][0]['name'], 'added.md')
+        self.assertEqual(self.client.post('/__folder/scan', json={'path': '../outside'}, headers=headers).status_code, 400)
+        rebuild.return_value = False
+        self.assertEqual(self.client.post('/__folder/scan', json={'path': 'md/scan-test'}, headers=headers).status_code, 503)
+
     def test_reference_pdf_upload_route_accepts_post(self):
         anonymous = self.client.post("/__references/upload")
         self.assertEqual(anonymous.status_code, 401)
