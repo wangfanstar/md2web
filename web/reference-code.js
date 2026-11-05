@@ -310,6 +310,57 @@
       fileCache.delete(oldest);
     }
   }
+  var tagbar = document.getElementById('file-tagbar');
+  var tagToggle = document.getElementById('toggle-tagbar');
+  function renderFileTags() {
+    var host = document.getElementById('file-tags');
+    host.textContent = '';
+    var lines = sourceText.split(/\r?\n/), count = 0;
+    // Match common source declarations. This local outline also works without gtags.
+    var patterns = [
+      { label: '函数', regex: /^\s*(?:(?:async\s+)?def|function)\s+([A-Za-z_]\w*)\s*\(/ },
+      { label: '类型', regex: /^\s*(?:export\s+)?(?:class|struct|enum|union|interface)\s+([A-Za-z_]\w*)/ },
+      { label: '宏', regex: /^\s*#\s*define\s+([A-Za-z_]\w*)/ },
+      { label: '函数', regex: /^\s*(?:[A-Za-z_]\w*[\s*&]+)+([A-Za-z_]\w*)\s*\([^;{}]*\)\s*(?:const\s*)?(?:\{|$)/ }
+    ];
+    var groups = {};
+    lines.forEach(function (line, index) {
+      patterns.some(function (pattern) {
+        var match = pattern.regex.exec(line);
+        if (!match || /^(if|for|while|switch|return|catch)$/.test(match[1])) return false;
+        if (!groups[pattern.label]) groups[pattern.label] = [];
+        groups[pattern.label].push({ name: match[1], line: index + 1 });
+        return true;
+      });
+    });
+    Object.keys(groups).forEach(function (kind) {
+      var group = document.createElement('details'), heading = document.createElement('summary');
+      group.open = true;
+      heading.textContent = kind + ' (' + groups[kind].length + ')';
+      group.appendChild(heading);
+      groups[kind].forEach(function (tag) {
+        var link = document.createElement('a');
+        link.textContent = tag.name + ' · ' + tag.line;
+        link.href = fileLink(selectedPath, tag.line);
+        link.title = lines[tag.line - 1].trim();
+        link.onclick = function (event) {
+          if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+          event.preventDefault();
+          highlightLine(tag.line, true);
+          history.replaceState(null, '', fileLink(selectedPath, tag.line));
+          source.focus();
+        };
+        group.appendChild(link); count++;
+      });
+      host.appendChild(group);
+    });
+    if (!count) host.textContent = '未识别到符号';
+  }
+  tagToggle.onclick = function () {
+    tagbar.hidden = !tagbar.hidden;
+    tagToggle.setAttribute('aria-expanded', String(!tagbar.hidden));
+    if (!tagbar.hidden) renderFileTags();
+  };
   function openFile(path, line, expectedRevision) {
     var token = generation, request = ++fileRequest;
     var expected = expectedRevision || '';
@@ -319,6 +370,7 @@
     hideContextMenu();
     closeQuickSearch();
     source.hidden = true; setFileActions(false);
+    tagToggle.disabled = true; document.getElementById('file-tags').textContent = '';
     var empty = document.getElementById('empty');
     empty.hidden = false; empty.textContent = '正在读取 ' + path + '…';
     status('正在读取文件…');
@@ -330,6 +382,8 @@
       document.getElementById('path').title = path;
       if (!data.renderedLines) data.renderedLines = renderSource(data.text, path);
       sourceLines = data.renderedLines; sourceText = data.text;
+      tagToggle.disabled = false;
+      if (!tagbar.hidden) renderFileTags();
       windowStart = -1; windowEnd = -1; source.scrollTop = 0;
       source.hidden = false; empty.hidden = true; setFileActions(true);
       rowHeight = parseFloat(getComputedStyle(source).lineHeight) || 23;

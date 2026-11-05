@@ -115,3 +115,15 @@ h2 { font-size:15px; margin:0; }
 #path { overflow-wrap:anywhere; text-align:left; }
 #symbols.is-hover { position:fixed; left:330px; top:220px; z-index:1200; width:min(620px,calc(100vw - 40px)); max-height:55vh; overflow:auto; background:white; box-shadow:0 8px 28px #24395033; }
 @media(max-width:760px) { #symbols.is-hover { left:16px; top:180px; } }
+
+.code-file-identity { position:relative; padding-left:36px; }
+#toggle-tagbar { position:absolute; left:0; top:0; font-size:18px; padding:0 7px; }
+#toggle-tagbar[aria-expanded="true"] { background:#eaf2ff; color:#185bc0; }
+.code-source-layout { display:flex; align-items:stretch; }
+.code-source-layout #source { flex:1; min-width:0; }
+#file-tagbar { flex:0 0 230px; max-height:75vh; overflow:auto; border-right:1px solid #dde5f0; padding:12px; background:#f8fafd; }
+#file-tagbar h2 { margin-bottom:10px; }
+#file-tagbar summary { cursor:pointer; color:#607894; }
+#file-tagbar a { display:block; padding:4px 8px; font:12px/1.7 Consolas,monospace; overflow-wrap:anywhere; text-decoration:none; }
+#file-tagbar a:hover { background:#eaf2ff; }
+@media(max-width:760px) { #file-tagbar { flex-basis:160px; } }

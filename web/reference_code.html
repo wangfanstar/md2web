@@ -25,7 +25,7 @@
     <aside id="code-directory" class="code-sidebar" aria-label="文件目录"><h2>文件目录</h2><p class="code-help">点击文件夹展开，点击文件阅读源码。</p><div id="tree">登录后加载代码目录</div></aside>
     <section class="code-reader" aria-label="源码阅读区">
       <section id="search-results" class="code-results" hidden><header><h2 id="result-title">搜索结果</h2><button id="close-results" type="button">收起结果</button></header><div id="results"></div></section>
-      <header class="code-file-header"><div class="code-file-identity"><h2 id="path">选择一个代码文件</h2><small id="file-meta"></small></div><div><button id="back-location" type="button" disabled>← 返回原位置</button><button id="copy" type="button" disabled>复制行号链接</button><button id="copy-source" type="button" disabled>复制源码</button><button id="ask" type="button" disabled>就此位置问 AI →</button></div></header>
+      <header class="code-file-header"><div class="code-file-identity"><button id="toggle-tagbar" type="button" title="显示 / 隐藏文件符号栏" aria-label="文件符号栏" aria-expanded="false" aria-controls="file-tagbar" disabled>☷</button><h2 id="path">选择一个代码文件</h2><small id="file-meta"></small></div><div><button id="back-location" type="button" disabled>← 返回原位置</button><button id="copy" type="button" disabled>复制行号链接</button><button id="copy-source" type="button" disabled>复制源码</button><button id="ask" type="button" disabled>就此位置问 AI →</button></div></header>
       <form id="jump-form" class="code-line-tools"><label>跳转行号 <input id="line-jump" type="number" min="1" placeholder="行号" required disabled></label><button type="submit" disabled>跳转</button><span>点击符号查定义 / 引用，右键解释代码</span></form>
       <section id="symbols" class="code-results" hidden aria-label="符号定义与引用">
         <header><h2 id="symbol-title">符号查询</h2><button id="close-symbols" type="button">收起符号查询</button></header>
@@ -34,7 +34,7 @@
         <div id="symbol-results"></div>
       </section>
       <div id="empty" class="code-empty">从左侧展开目录选择文件，或搜索文件名与代码内容。</div>
-      <pre id="source" tabindex="0" aria-label="源码与行号" hidden></pre>
+      <div class="code-source-layout"><aside id="file-tagbar" aria-label="当前文件符号" hidden><h2>文件符号</h2><div id="file-tags"></div></aside><pre id="source" tabindex="0" aria-label="源码与行号" hidden></pre></div>
     </section>
   </main>
   <script src="lib/prism-core.min.js"></script>
