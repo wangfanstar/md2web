@@ -42,7 +42,7 @@ class ReferenceCodeTests(unittest.TestCase):
             for index in range(49):
                 (root / ('f%02d.c' % index)).touch()
             (root / 'port.c').write_text('int gt_gport_get(void);')
-            with mock.patch('server.reference_code.global_search', return_value=None):
+            with mock.patch('server.reference_code.global_search', return_value=None), mock.patch('server.reference_code.rg_symbols', return_value=None):
                 self.assertFalse(reference_code.search_symbols(root, 'gt_gport', quick=True)['hits'])
                 result = reference_code.search_symbols(root, 'gt_gport', quick=True, preferred='port.c')
             self.assertEqual(result['hits'][0]['path'], 'port.c')
