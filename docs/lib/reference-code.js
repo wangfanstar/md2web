@@ -32,6 +32,30 @@
     }
   }
   ensureControls();
+  // Keep the current path visible with the search/navigation controls.
+  var fileHeader = document.querySelector('.code-file-header');
+  document.querySelector('.code-search-dock').appendChild(fileHeader);
+  function updateDockHeight() {
+    document.documentElement.style.setProperty('--code-dock-height',
+      document.querySelector('.code-search-dock').getBoundingClientRect().height + 'px');
+  }
+  if (window.ResizeObserver) new ResizeObserver(updateDockHeight).observe(document.querySelector('.code-search-dock'));
+  window.addEventListener('resize', updateDockHeight);
+  updateDockHeight();
+  function showFilePath(path) {
+    var host = document.getElementById('path');
+    host.textContent = '';
+    var root = document.createElement('span');
+    root.className = 'code-path-root'; root.textContent = '/';
+    host.appendChild(root);
+    path.split('/').forEach(function (part, index) {
+      if (index) host.appendChild(document.createTextNode('/'));
+      var segment = document.createElement('span');
+      segment.textContent = part; host.appendChild(segment);
+    });
+    host.title = path;
+  }
+
   var repo = document.getElementById('repo');
   var tree = document.getElementById('tree');
   var source = document.getElementById('source');
@@ -423,7 +447,7 @@
       if (token !== generation || request !== fileRequest) return;
       selectedPath = path; revision = data.revision; fileRevision = data.revision;
       showRevision(revision, data.revisionDate);
-      document.getElementById('path').textContent = path;
+      showFilePath(path);
       document.getElementById('path').title = path;
       if (!data.renderedLines) data.renderedLines = renderSource(data.text, path);
       sourceLines = data.renderedLines; sourceText = data.text;

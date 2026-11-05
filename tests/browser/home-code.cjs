@@ -163,6 +163,20 @@ const assert = require('node:assert/strict');
       return preview && preview.textContent.includes('return 42;');
     });
     assert.match(await page.locator('.code-function-preview').first().innerText(), /int main\(void\) \{[\s\S]*return 42;[\s\S]*\}/);
+    assert.equal(await page.locator('.code-search-dock #path .code-path-root').innerText(), '/');
+    assert.equal(await page.locator('.code-search-dock #path span').last().innerText(), 'main.c');
+    assert.equal(await page.locator('#symbols').evaluate(panel => getComputedStyle(panel).overflowY), 'hidden');
+    assert.equal(await page.locator('#symbol-results').evaluate(panel => getComputedStyle(panel).overflowY), 'auto');
+    assert.equal(await page.locator('.code-function-preview').first().evaluate(panel => getComputedStyle(panel).overflowY), 'visible');
+    await page.screenshot({path: process.env.TEMP + '/md2web-hover-layout.png'});
+    const authControl = page.locator('.site-auth-fixed');
+    if (await authControl.count()) {
+      assert.equal(await authControl.evaluate(panel => {
+        const bounds = panel.getBoundingClientRect();
+        return panel.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
+      }), true);
+    }
+
     await page.keyboard.press('Escape');
     await page.locator('#source .code-symbol[data-symbol="gt_port_speed_t"]').last().hover();
     await page.waitForFunction(() => {
