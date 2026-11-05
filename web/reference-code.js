@@ -327,6 +327,7 @@
       selectedPath = path; revision = data.revision; fileRevision = data.revision;
       showRevision(revision, data.revisionDate);
       document.getElementById('path').textContent = path;
+      document.getElementById('path').title = path;
       if (!data.renderedLines) data.renderedLines = renderSource(data.text, path);
       sourceLines = data.renderedLines; sourceText = data.text;
       windowStart = -1; windowEnd = -1; source.scrollTop = 0;
@@ -749,6 +750,27 @@
     contextMenu.style.top = Math.max(8, Math.min(event.clientY, window.innerHeight - rect.height - 8)) + 'px';
     event.preventDefault();
   }
+  var hoverPanel = document.getElementById('symbols'), hoverTimer;
+  source.addEventListener('mouseover', function (event) {
+    var symbol = event.target.closest('.code-symbol');
+    if (!symbol || symbol.contains(event.relatedTarget)) return;
+    clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(function () {
+      hoverPanel.classList.add('is-hover');
+      lookupSymbol(symbol.dataset.symbol, lineNumber(symbol.closest('.code-line')));
+    }, 400);
+  });
+  source.addEventListener('mouseout', function (event) {
+    if (event.target.closest('.code-symbol')) clearTimeout(hoverTimer);
+  });
+  source.addEventListener('scroll', function () {
+    clearTimeout(hoverTimer);
+    if (hoverPanel.classList.contains('is-hover')) hoverPanel.hidden = true;
+  });
+  source.addEventListener('click', function () { hoverPanel.classList.remove('is-hover'); });
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') { clearTimeout(hoverTimer); hoverPanel.hidden = true; }
+  });
   source.addEventListener('contextmenu', showContextMenu);
   source.addEventListener('click', function (event) {
     var symbol = event.target.closest ? event.target.closest('.code-symbol') : null;

@@ -109,3 +109,9 @@ h2 { font-size:15px; margin:0; }
 .code-suggest { width:min(650px,85vw); }
 .code-suggest-excerpt { color:#425875; white-space:pre-wrap; }
 @media(min-width:761px) { .code-sidebar { top:190px; max-height:calc(100vh - 210px); } }
+
+.code-file-header { position:sticky; top:0; z-index:4; background:#fff; }
+.code-file-identity { min-width:0; flex:1; }
+#path { overflow-wrap:anywhere; text-align:left; }
+#symbols.is-hover { position:fixed; left:330px; top:220px; z-index:1200; width:min(620px,calc(100vw - 40px)); max-height:55vh; overflow:auto; background:white; box-shadow:0 8px 28px #24395033; }
+@media(max-width:760px) { #symbols.is-hover { left:16px; top:180px; } }
