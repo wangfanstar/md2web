@@ -86,7 +86,7 @@ const assert = require('node:assert/strict');
     assert.equal(await page.locator('#source .token.comment .code-symbol').count(), 0);
     assert.equal(await page.locator('#source .code-symbol.token.comment, #source .code-symbol.token.keyword').count(), 0);
     await page.evaluate(() => document.dispatchEvent(new CustomEvent('siteauth:change', {detail:SiteAuth.snapshot()})));
-    assert.equal(await page.locator('#source .code-line').count(), 5);
+    assert.equal(await page.locator('#source .code-line').count(), 10);
     assert.equal(await page.getByRole('button', {name:'▾ nested',exact:true}).count(), 1);
     await page.locator('#q').fill('return 42');
     await page.locator('#mode').selectOption('text');
@@ -164,6 +164,25 @@ const assert = require('node:assert/strict');
     });
     assert.match(await page.locator('.code-function-preview').first().innerText(), /int main\(void\) \{[\s\S]*return 42;[\s\S]*\}/);
     await page.keyboard.press('Escape');
+    await page.locator('#source .code-symbol[data-symbol="gt_port_speed_t"]').last().hover();
+    await page.waitForFunction(() => {
+      const preview = document.querySelector('.code-function-preview');
+      return preview && preview.textContent.includes('int speed;');
+    });
+    assert.match(await page.locator('.code-function-preview').first().innerText(), /typedef struct[\s\S]*int mode;[\s\S]*gt_port_speed_t;/);
+    await page.keyboard.press('Escape');
+    for (const id of ['code-directory', 'file-tagbar']) {
+      if (id === 'file-tagbar') await page.locator('#toggle-tagbar').click();
+      const panel = page.locator('#' + id);
+      const before = (await panel.boundingBox()).width;
+      const handle = await panel.locator('.code-width-handle').boundingBox();
+      await page.mouse.move(handle.x + 3, handle.y + 20);
+      await page.mouse.down();
+      await page.mouse.move(handle.x + 63, handle.y + 20);
+      await page.mouse.up();
+      assert.ok((await panel.boundingBox()).width > before + 40);
+      if (id === 'file-tagbar') await page.locator('#toggle-tagbar').click();
+    }
     await page.locator('#q').press('Escape');
     await page.locator('#q').fill('return 42');
     await page.locator('#mode').selectOption('text');

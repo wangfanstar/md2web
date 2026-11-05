@@ -310,6 +310,51 @@
       fileCache.delete(oldest);
     }
   }
+  function addWidthHandle(panel, property, initial, minimum, maximum) {
+    var handle = document.createElement('div');
+    handle.className = 'code-width-handle';
+    handle.tabIndex = 0;
+    handle.setAttribute('role', 'separator');
+    handle.setAttribute('aria-orientation', 'vertical');
+    handle.setAttribute('aria-label', panel.getAttribute('aria-label') + '宽度');
+    var width = initial;
+    try { width = Number(localStorage.getItem(property)) || initial; } catch (ignore) {}
+    function resize(value) {
+      width = Math.max(minimum, Math.min(maximum, value));
+      document.documentElement.style.setProperty(property, width + 'px');
+      handle.setAttribute('aria-valuenow', width);
+    }
+    handle.setAttribute('aria-valuemin', minimum);
+    handle.setAttribute('aria-valuemax', maximum);
+    function saveWidth() { try { localStorage.setItem(property, width); } catch (ignore) {} }
+    resize(width);
+    handle.addEventListener('pointerdown', function (event) {
+      if (event.button !== 0) return;
+      var start = event.clientX, original = width;
+      handle.setPointerCapture(event.pointerId);
+      document.body.classList.add('code-resizing');
+      function move(pointer) { resize(original + pointer.clientX - start); }
+      function stop() {
+        document.body.classList.remove('code-resizing');
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', stop);
+        handle.removeEventListener('pointercancel', stop);
+        saveWidth();
+      }
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', stop);
+      handle.addEventListener('pointercancel', stop);
+      event.preventDefault();
+    });
+    handle.addEventListener('keydown', function (event) {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      resize(width + (event.key === 'ArrowRight' ? 16 : -16)); saveWidth();
+    });
+    panel.appendChild(handle);
+  }
+  addWidthHandle(document.getElementById('code-directory'), '--code-directory-width', 290, 180, 600);
+  addWidthHandle(document.getElementById('file-tagbar'), '--code-tagbar-width', 230, 140, 600);
   var tagbar = document.getElementById('file-tagbar');
   var tagToggle = document.getElementById('toggle-tagbar');
   function renderFileTags() {
@@ -823,27 +868,51 @@
     }
     return '';
   }
+  function typeExcerpt(text, symbol) {
+    var clean = text.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'/g,
+      function (value) { return value.replace(/[^\n]/g, ' '); });
+    var declaration = /\b(?:typedef\s+)?(?:struct|union|enum)\b[^;{}]*\{/g, match;
+    while ((match = declaration.exec(clean))) {
+      var depth = 1, end = declaration.lastIndex;
+      while (end < clean.length && depth) {
+        if (clean[end] === '{') depth++;
+        if (clean[end] === '}') depth--;
+        end++;
+      }
+      if (depth) continue;
+      var suffix = /^[^;{}]*;/.exec(clean.slice(end));
+      var finish = end + (suffix ? suffix[0].length : 0);
+      var names = clean.slice(match.index, declaration.lastIndex) + clean.slice(end, finish);
+      if (!(new RegExp('\\b' + symbol + '\\b')).test(names)) continue;
+      return { text: text.slice(match.index, finish), line: clean.slice(0, match.index).split('\n').length };
+    }
+    return null;
+  }
   var previewRequest = 0;
   function previewFunction(symbol) {
     var request = ++previewRequest, token = generation, version = fileRevision;
     hoverPanel.classList.add('is-hover');
     hoverPanel.hidden = false;
     document.getElementById('symbol-title').textContent = symbol;
-    document.getElementById('symbol-status').textContent = '正在读取函数内容…';
+    document.getElementById('symbol-status').textContent = '正在读取符号定义…';
     var host = document.getElementById('symbol-results');
     host.textContent = '';
     api('symbol', { symbol: symbol, rev: version }).then(function (data) {
       var hits = data.definitions.length ? data.definitions : data.references;
       return Promise.all(hits.slice(0, 5).map(function (hit) {
         return api('file', { path: hit.path, rev: data.revision || version }).then(function (file) {
-          return { hit: hit, text: functionExcerpt(file.text, hit.line, hit.path), revision: file.revision };
+          var type = typeExcerpt(file.text, symbol);
+          if (type) hit = Object.assign({}, hit, { line: type.line });
+          return { hit: hit, text: type ? type.text : functionExcerpt(file.text, hit.line, hit.path), revision: file.revision };
         });
       }));
     }).then(function (items) {
       if (request !== previewRequest || token !== generation || !hoverPanel.classList.contains('is-hover')) return;
-      var shown = 0;
+      var shown = 0, seen = {};
       items.forEach(function (item) {
-        if (!item.text) return;
+        var key = item.hit.path + ':' + item.hit.line;
+        if (!item.text || seen[key]) return;
+        seen[key] = true;
         var link = document.createElement('a'), pre = document.createElement('pre');
         link.href = fileLink(item.hit.path, item.hit.line, item.revision);
         link.textContent = item.hit.path + ':' + item.hit.line;
@@ -856,7 +925,7 @@
         pre.textContent = item.text;
         host.appendChild(link); host.appendChild(pre); shown++;
       });
-      document.getElementById('symbol-status').textContent = shown ? '函数定义源码' : '未找到函数实现，请更新 gtags 索引后重试。';
+      document.getElementById('symbol-status').textContent = shown ? '符号定义源码' : '未找到符号定义，请更新 gtags 索引后重试。';
     }).catch(function (error) {
       if (request === previewRequest && token === generation) document.getElementById('symbol-status').textContent = error.message;
     });

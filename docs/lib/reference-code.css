@@ -130,3 +130,9 @@ h2 { font-size:15px; margin:0; }
 
 #symbols.is-hover .code-symbol-tabs { display:none; }
 .code-function-preview { margin:8px 0 18px; padding:12px; overflow:auto; max-height:40vh; background:#f6f8fb; color:#253953; font:13px/1.7 Consolas,monospace; tab-size:4; }
+
+@media(min-width:761px) { .code-layout { grid-template-columns:minmax(0,var(--code-directory-width,290px)) minmax(0,1fr); } }
+#file-tagbar { position:relative; flex-basis:var(--code-tagbar-width,230px); max-width:60%; }
+.code-width-handle { position:absolute; right:0; top:0; bottom:0; width:7px; cursor:col-resize; touch-action:none; z-index:5; }
+.code-width-handle:hover,.code-width-handle:focus-visible { background:#9cbcf0; }
+.code-resizing,.code-resizing * { cursor:col-resize!important; user-select:none!important; }

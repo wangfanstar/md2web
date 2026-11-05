@@ -35,6 +35,8 @@ try:
     for folder in ('pdf/manuals', 'word', 'excel', 'ppt', 'superpowers/guide', 'html/ref'):
         (fixture.docs / folder).mkdir(parents=True, exist_ok=True)
     (code / 'main.c').write_text('/* source example */\nint main(void) {\n    return 42;\n}\n', encoding='utf-8')
+    with (code / 'main.c').open('a', encoding='utf-8') as stream:
+        stream.write('typedef struct {\n    int speed;\n    struct { int mode; } nested;\n} gt_port_speed_t;\ngt_port_speed_t port_speed;\n')
     (code / 'caller.c').write_text('int main(void);\nint call_main(void) { return main(); }\n', encoding='utf-8')
     (code / 'large.c').write_text(''.join('int function_%s(void) { return (%s); }\n' % (i, i) for i in range(20000)), encoding='utf-8')
     (code / 'tool.py').write_text('def build_index(value):\n    # keep symbols searchable\n    return value\n', encoding='utf-8')
