@@ -69,3 +69,16 @@ test('restoring math inside HTML attributes does not introduce markup or quotes'
   assert.equal(prepared.restore('<a title="' + prepared.markdown + '">link</a>'),
     '<a title="$x&quot;&lt;y$">link</a>');
 });
+
+test('table bold code and adjacent Chinese cells keep independent emphasis', () => {
+  const source = '| 操作 | 本端 TX | 本端 RX | local | remote | 对端 local | 对端 remote |\n'
+    + '|---|---|---|---|---|---|---|\n'
+    + '| **`SOFT_PCS_TX_RST`** | 停 | **正常** | 0 | **1** | **1** | 0 |';
+  const prepared = math.prepare(source);
+  const html = prepared.restore(marked.parse(prepared.markdown));
+  assert.match(html, /<strong><code>SOFT_PCS_TX_RST<\/code><\/strong>/);
+  assert.match(html, /<td>停<\/td>/);
+  assert.match(html, /<td><strong>正常<\/strong><\/td>/);
+  assert.equal((html.match(/<strong>1<\/strong>/g) || []).length, 2);
+  assert.ok(!html.includes('**'));
+});
