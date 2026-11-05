@@ -1115,6 +1115,22 @@ exit 1
         finally:
             rmtree_safe(directory)
 
+    def test_restart_dependency_failure_keeps_existing_service(self):
+        sh = find_posix_shell()
+        if not sh:
+            self.skipTest('POSIX shell unavailable')
+        source = (ROOT / 'start_linux.sh').read_text(encoding='utf-8')
+        preparation = source.split('  restart)\n', 1)[1].split('    pid=', 1)[0]
+        script = chr(10).join(['PY=python', 'update_code() { return 0; }',
+                              'ensure_auth_deps() { return 1; }',
+                              'rebuild_site() { echo UNEXPECTED_REBUILD; return 0; }',
+                              preparation])
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run([sh], input=script.encode('utf-8'), cwd=directory,
+                                    env=posix_shell_env(sh), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn(b'UNEXPECTED_REBUILD', result.stdout)
+
     def test_gitattributes_declares_line_endings(self):
         text = (ROOT / ".gitattributes").read_text(encoding="utf-8")
         self.assertIn("*.sh text eol=lf", text)

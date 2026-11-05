@@ -603,6 +603,7 @@ case "$MODE" in
       echo "[提示] 拷贝/rsync 部署：使用当前目录已同步的代码，强制重建后重启。"
       echo "[提示] 无 .git，无法检查 GitHub 最新版本；更新代码请先同步部署文件。"
     fi
+    ensure_auth_deps || exit 1
     SITE_REBUILT=0
     if ! rebuild_site; then
       echo "[错误] restart 重建失败，已取消重启。" >&2
