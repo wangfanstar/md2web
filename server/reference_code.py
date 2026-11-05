@@ -1,5 +1,6 @@
 """Authenticated source browsing and optional GNU Global indexes."""
 import os
+import json
 import shutil
 import subprocess
 import re
@@ -141,14 +142,40 @@ def text(path):
     return value
 
 
+_SEARCH_CACHE = collections.OrderedDict()
+_SEARCH_CACHE_LOCK = threading.Lock()
+
+
 def global_search(root, query, mode, timeout=15):
+    try:
+        signature = tuple((name, (root / name).stat().st_mtime, (root / name).stat().st_size)
+                          for name in ('GTAGS', 'GRTAGS', 'GPATH') if (root / name).is_file())
+    except OSError:
+        signature = ()
+    key = (str(root.resolve()), query, mode, signature)
+    with _SEARCH_CACHE_LOCK:
+        cached = _SEARCH_CACHE.get(key)
+        if cached and cached[0] > time.monotonic():
+            _SEARCH_CACHE.move_to_end(key)
+            return [dict(hit) for hit in cached[1]]
+    hits = _global_search(root, query, mode, timeout)
+    if hits is not None:
+        with _SEARCH_CACHE_LOCK:
+            _SEARCH_CACHE[key] = (time.monotonic() + 5, hits)
+            _SEARCH_CACHE.move_to_end(key)
+            while len(_SEARCH_CACHE) > 128:
+                _SEARCH_CACHE.popitem(last=False)
+    return None if hits is None else [dict(hit) for hit in hits]
+
+
+def _global_search(root, query, mode, timeout=15):
     executable = shutil.which('global')
     if not executable or not (root / 'GTAGS').is_file():
         return None
     flags = {'path': '-P', 'text': '-g', 'definition': '-d', 'reference': '-r',
              'symbol': '-s', 'symbol_partial': '-s',
              'definition_partial': '-d', 'reference_partial': '-r'}
-    pattern = '^' + query + '$' if mode in ('definition', 'reference', 'symbol') else re.escape(query)
+    pattern = query if mode in ('definition', 'reference', 'symbol') else re.escape(query)
     if mode.endswith('_partial'):
         # A plain identifier is an exact tag lookup in Global, even with -e.
         pattern = '.*' + re.escape(query) + '.*'
@@ -212,21 +239,68 @@ def symbol_occurrences(root, query, quick=False, preferred=None):
     return {'hits': hits, 'engine': '文本匹配'}
 
 
+def rg_symbols(root, query, quick=False):
+    executable = shutil.which('rg')
+    if not executable:
+        return None
+    args = [executable, '--json', '--fixed-strings', '--ignore-case', '--max-filesize', '2M',
+            '--max-count', '8', '--glob', '!GTAGS', '--glob', '!GRTAGS', '--glob', '!GPATH',
+            '--glob', '!node_modules/**', '--glob', '!__pycache__/**', '--glob', '!回收站/**',
+            '--', query, '.']
+    try:
+        result = subprocess.run(args, cwd=str(root), stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, timeout=1 if quick else 5, check=False)
+        if result.returncode not in (0, 1):
+            return None
+        hits = []
+        needle = query.lower()
+        for raw in result.stdout.decode('utf-8', errors='replace').splitlines():
+            record = json.loads(raw)
+            if record.get('type') != 'match':
+                continue
+            data = record['data']
+            relative = data.get('path', {}).get('text', '')
+            relative = relative.replace('\\', '/')
+            if relative.startswith('./'):
+                relative = relative[2:]
+            if not relative or any(part in ('node_modules', '__pycache__', '回收站') for part in relative.split('/')):
+                continue
+            try:
+                safe_path(root, relative)
+            except ValueError:
+                continue
+            line = data.get('lines', {}).get('text', '').rstrip('\r\n')
+            if not any(needle in token.lower() for token in re.findall(r'[A-Za-z_][A-Za-z0-9_]*', line)):
+                continue
+            hits.append({'path': relative, 'line': data['line_number'], 'text': line[:300]})
+            if len(hits) >= (8 if quick else 200):
+                break
+        return {'hits': hits, 'engine': 'ripgrep · 源码匹配'}
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        return None
+
+
 def search_symbols(root, query, quick=False, preferred=None):
     """Search definitions first, then references and other indexed symbols."""
     validate_symbol(query)
+    # Bare identifiers use Global's direct tag lookup; anchored regexps scan tags.
+    hits = global_search(root, query, 'definition', timeout=2)
+    if hits:
+        return {'hits': hits, 'engine': 'GNU Global · 精确函数定义'}
+    definitions = global_search(root, query, 'definition_partial', timeout=3) if hits is not None else None
+    if definitions:
+        return {'hits': definitions, 'engine': 'GNU Global · 函数与定义'}
     if quick:
-        # Return definitions without waiting for potentially huge reference tables.
-        hits = global_search(root, query, 'definition_partial', timeout=5)
-        if not hits:
-            result = symbol_occurrences(root, query, quick=True, preferred=preferred)
-            result.update(limited=True, engine='源码快速匹配')
-            return result
-        return {'hits': hits, 'engine': 'GNU Global · 函数与定义'}
-    groups = [global_search(root, query, mode) for mode in
-              ('definition_partial', 'reference_partial', 'symbol_partial')]
+        result = symbol_occurrences(root, query, quick=True, preferred=preferred)
+        if not result['hits']:
+            result = rg_symbols(root, query, quick=True) or result
+        result.update(limited=True, engine='源码快速匹配')
+        return result
+    groups = [global_search(root, query, mode, timeout=5) for mode in
+              ('reference_partial', 'symbol_partial')] if definitions is not None else []
     if all(not group for group in groups):
-        return symbol_occurrences(root, query)
+        fast = rg_symbols(root, query)
+        return fast if fast is not None else symbol_occurrences(root, query)
     hits, seen = [], set()
     for group in groups:
         for hit in group or []:

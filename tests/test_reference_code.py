@@ -6,12 +6,35 @@ from server import reference_code
 from tests.test_server import AppTests
 
 class ReferenceCodeTests(unittest.TestCase):
+    def test_ripgrep_fallback_finds_partial_identifiers(self):
+        if not reference_code.shutil.which('rg'):
+            self.skipTest('ripgrep unavailable')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'port.c').write_text('int ql_port_priv_cb_get(void);')
+            result = reference_code.rg_symbols(root, 'port_priv')
+            self.assertEqual(result['hits'][0]['path'], 'port.c')
+            self.assertEqual(result['hits'][0]['line'], 1)
+
+    def test_index_search_cache_reuses_success_and_invalidates_on_index_change(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'GTAGS').write_text('old')
+            hit = {'path': 'port.c', 'line': 1, 'text': 'int port(void)'}
+            with mock.patch('server.reference_code._global_search', return_value=[hit]) as search:
+                self.assertEqual(reference_code.global_search(root, 'port', 'definition'), [hit])
+                self.assertEqual(reference_code.global_search(root, 'port', 'definition'), [hit])
+                self.assertEqual(search.call_count, 1)
+                (root / 'GTAGS').write_text('updated')
+                reference_code.global_search(root, 'port', 'definition')
+                self.assertEqual(search.call_count, 2)
+
     def test_live_search_returns_definitions_without_waiting_for_references(self):
         hit = {'path': 'port.c', 'line': 90, 'text': 'int ql_port_get(void)'}
         with mock.patch('server.reference_code.global_search', return_value=[hit]) as search:
             result = reference_code.search_symbols(Path('.'), 'ql_port', quick=True)
         self.assertEqual(result['hits'], [hit])
-        search.assert_called_once_with(Path('.'), 'ql_port', 'definition_partial', timeout=5)
+        search.assert_called_once_with(Path('.'), 'ql_port', 'definition', timeout=2)
 
     def test_live_timeout_does_not_scan_entire_source_tree(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -102,20 +125,20 @@ class ReferenceCodeTests(unittest.TestCase):
     def test_quick_search_includes_definitions_missing_from_symbol_table(self):
         definition = {'path': 'driver.c', 'line': 2646, 'text': 'gt_status_t ql_macw_am_scale_get(void)'}
         reference = {'path': 'caller.c', 'line': 338, 'text': 'ql_macw_am_scale_get();'}
-        def indexed(root, query, mode):
-            return {'definition_partial': [definition], 'reference_partial': [reference, definition],
+        def indexed(root, query, mode, timeout=15):
+            return {'definition': [], 'definition_partial': [definition], 'reference_partial': [reference, definition],
                     'symbol_partial': []}[mode]
         with mock.patch('server.reference_code.global_search', side_effect=indexed):
             for query in ('ql_macw_am_scale_get', 'macw_am'):
                 result = reference_code.search_symbols(Path('.'), query)
-                self.assertEqual(result['engine'], 'GNU Global')
-                self.assertEqual(result['hits'], [definition, reference])
+                self.assertTrue(result['engine'].startswith('GNU Global'))
+                self.assertEqual(result['hits'], [definition])
 
     def test_quick_search_falls_back_when_index_is_unavailable(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             (root / 'test.c').write_text('int ql_macw_am_scale_get(void);', encoding='utf-8')
-            with mock.patch('server.reference_code.global_search', return_value=None):
+            with mock.patch('server.reference_code.global_search', return_value=None), mock.patch('server.reference_code.rg_symbols', return_value=None):
                 result = reference_code.search_symbols(root, 'macw_am')
             self.assertIn('文本匹配', result['engine'])
             self.assertEqual(len(result['hits']), 1)
@@ -132,7 +155,7 @@ class ReferenceCodeTests(unittest.TestCase):
             self.assertEqual(result['definitions'][0]['line'], 1)
             self.assertEqual(run.call_args_list[0][0][0][1], '-d')
             self.assertEqual(run.call_args_list[1][0][0][1], '-r')
-            self.assertEqual(run.call_args_list[0][0][0][-1], '^main$')
+            self.assertEqual(run.call_args_list[0][0][0][-1], 'main')
 
     def test_symbol_fallback_is_explicit_and_matches_whole_identifiers(self):
         with tempfile.TemporaryDirectory() as folder:
