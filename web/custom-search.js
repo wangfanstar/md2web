@@ -439,6 +439,7 @@
     }
 
     view.statusEl.textContent = statusText;
+    view.statusEl.hidden = !!(view.compact && statusText === '输入关键词，搜索全部仓库的文档名和全文');
     if (view.root) {
       var modeSelect = view.root.querySelector('[data-role="search-mode"]');
       if (modeSelect) modeSelect.value = state.searchMode;
@@ -2637,6 +2638,16 @@
     if (!appName || appName.getAttribute('data-custom-icons') === '1') {
       return;
     }
+    var accountRow = appName.closest('.custom-sidebar-account-row');
+    if (!accountRow) {
+      var parent = appName.parentNode;
+      var existingAuth = parent.querySelector('.site-auth-row');
+      accountRow = document.createElement('div');
+      accountRow.className = 'custom-sidebar-account-row';
+      parent.insertBefore(accountRow, appName);
+      accountRow.appendChild(appName);
+      if (existingAuth) accountRow.appendChild(existingAuth);
+    }
     var title = String(appName.textContent || '').trim() || '文档中心';
     appName.setAttribute('data-custom-icons', '1');
     appName.innerHTML = [
@@ -2695,6 +2706,10 @@
       '<div class="custom-search-status">正在加载搜索索引...</div>',
       '<div class="custom-search-results"></div>'
     ].join('');
+    var refresh = wrapper.querySelector('.custom-search-refresh');
+    refresh.textContent = '⟳';
+    refresh.setAttribute('aria-label', '更新搜索索引');
+    wrapper.querySelector('.custom-search-top-row').insertBefore(refresh, wrapper.querySelector('.custom-search-kbd-hint'));
     aside.insertBefore(wrapper, aside.firstChild);
 
     state.sidebar = {

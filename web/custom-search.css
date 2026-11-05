@@ -1256,3 +1256,26 @@ body.toc-resizing {
 .custom-search-repo-item input { flex: 0 0 auto; margin: 0; }
 
 .custom-search-repo-empty { color: #94a3b8; display: block; font-size: 12px; padding: 4px 6px; }
+
+/* Compact sidebar search and account tools share the same spacing rhythm. */
+.sidebar { padding-top:0; }
+.docs-custom-search { padding:14px 12px 10px; }
+.custom-search-top-row { margin-bottom:10px; }
+.docs-custom-search .custom-search-status { margin-top:8px; line-height:1.6; font-size:11px; }
+.docs-custom-search .custom-search-status:empty,
+.docs-custom-search .custom-search-refresh-status:empty,
+.docs-custom-search .custom-search-results:empty { display:none; }
+.docs-custom-search .custom-search-refresh { float:none; margin:8px 0 0; padding:3px 7px; }
+.docs-custom-search .custom-search-filters { margin-top:8px; }
+.custom-sidebar-account-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px 10px; padding:8px 12px; background:#fff; border-bottom:1px solid #e5eaf0; }
+.sidebar .custom-sidebar-account-row .app-name { flex:0 0 auto; margin:0; padding:0; font-size:12px; line-height:1; text-align:left; }
+.custom-sidebar-account-row .custom-sidebar-icons { gap:3px; }
+.custom-sidebar-account-row .custom-sidebar-icon { width:28px; height:28px; padding:5px; border:1px solid #e5eaf0; background:#f8fafc; }
+.custom-sidebar-account-row .site-auth-row { flex:1 1 140px; width:auto; min-width:0; min-height:28px; padding:0; }
+.custom-sidebar-account-row .site-auth-indicator { gap:6px; }
+.custom-sidebar-account-row .site-auth-user { font-size:11px; font-weight:500; }
+.custom-sidebar-account-row .site-auth-login { border-radius:5px; padding:3px 7px; }
+
+.docs-custom-search .custom-search-top-row .custom-search-refresh { margin:0 0 0 auto; width:25px; height:25px; padding:0; font-size:16px; }
+.docs-custom-search .custom-search-kbd-hint { margin-left:2px; }
+.docs-custom-search .custom-search-status[hidden] { display:none; }
