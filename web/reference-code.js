@@ -804,6 +804,63 @@
     contextMenu.style.top = Math.max(8, Math.min(event.clientY, window.innerHeight - rect.height - 8)) + 'px';
     event.preventDefault();
   }
+  function functionExcerpt(text, number, path) {
+    var lines = text.split(/\r?\n/), start = Math.max(0, number - 1);
+    if (/\.py$/.test(path)) {
+      var indent = (lines[start].match(/^\s*/) || [''])[0].length, end = start + 1;
+      while (end < lines.length && (!lines[end].trim() || (lines[end].match(/^\s*/) || [''])[0].length > indent)) end++;
+      return lines.slice(start, end).join('\n');
+    }
+    // Preserve newlines while masking strings and comments before counting braces.
+    var tail = lines.slice(start).join('\n');
+    var clean = tail.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|`(?:\\[\s\S]|[^`\\])*`/g,
+      function (value) { return value.replace(/[^\n]/g, ' '); });
+    var depth = 0, opened = false;
+    for (var i = 0; i < clean.length; i++) {
+      if (!opened && clean[i] === ';') return '';
+      if (clean[i] === '{') { depth++; opened = true; }
+      if (clean[i] === '}' && opened && --depth === 0) return tail.slice(0, i + 1);
+    }
+    return '';
+  }
+  var previewRequest = 0;
+  function previewFunction(symbol) {
+    var request = ++previewRequest, token = generation, version = fileRevision;
+    hoverPanel.classList.add('is-hover');
+    hoverPanel.hidden = false;
+    document.getElementById('symbol-title').textContent = symbol;
+    document.getElementById('symbol-status').textContent = '正在读取函数内容…';
+    var host = document.getElementById('symbol-results');
+    host.textContent = '';
+    api('symbol', { symbol: symbol, rev: version }).then(function (data) {
+      var hits = data.definitions.length ? data.definitions : data.references;
+      return Promise.all(hits.slice(0, 5).map(function (hit) {
+        return api('file', { path: hit.path, rev: data.revision || version }).then(function (file) {
+          return { hit: hit, text: functionExcerpt(file.text, hit.line, hit.path), revision: file.revision };
+        });
+      }));
+    }).then(function (items) {
+      if (request !== previewRequest || token !== generation || !hoverPanel.classList.contains('is-hover')) return;
+      var shown = 0;
+      items.forEach(function (item) {
+        if (!item.text) return;
+        var link = document.createElement('a'), pre = document.createElement('pre');
+        link.href = fileLink(item.hit.path, item.hit.line, item.revision);
+        link.textContent = item.hit.path + ':' + item.hit.line;
+        link.onclick = function (event) {
+          if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+          event.preventDefault(); hoverPanel.hidden = true;
+          openFile(item.hit.path, item.hit.line, item.revision);
+        };
+        pre.className = 'code-function-preview';
+        pre.textContent = item.text;
+        host.appendChild(link); host.appendChild(pre); shown++;
+      });
+      document.getElementById('symbol-status').textContent = shown ? '函数定义源码' : '未找到函数实现，请更新 gtags 索引后重试。';
+    }).catch(function (error) {
+      if (request === previewRequest && token === generation) document.getElementById('symbol-status').textContent = error.message;
+    });
+  }
   var hoverPanel = document.getElementById('symbols'), hoverTimer;
   source.addEventListener('mouseover', function (event) {
     var symbol = event.target.closest('.code-symbol');
@@ -811,7 +868,7 @@
     clearTimeout(hoverTimer);
     hoverTimer = setTimeout(function () {
       hoverPanel.classList.add('is-hover');
-      lookupSymbol(symbol.dataset.symbol, lineNumber(symbol.closest('.code-line')));
+      previewFunction(symbol.dataset.symbol);
     }, 400);
   });
   source.addEventListener('mouseout', function (event) {
@@ -821,7 +878,7 @@
     clearTimeout(hoverTimer);
     if (hoverPanel.classList.contains('is-hover')) hoverPanel.hidden = true;
   });
-  source.addEventListener('click', function () { hoverPanel.classList.remove('is-hover'); });
+  source.addEventListener('click', function () { previewRequest++; hoverPanel.classList.remove('is-hover'); });
   document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') { clearTimeout(hoverTimer); hoverPanel.hidden = true; }
   });

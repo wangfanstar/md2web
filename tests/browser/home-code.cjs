@@ -157,6 +157,13 @@ const assert = require('node:assert/strict');
     await page.locator('#quick-symbol-results .code-suggest-item').first().click();
     await page.waitForFunction(() => document.getElementById('path').textContent.endsWith('main.c'));
     assert.equal(await page.locator('#quick-symbol-results').isHidden(), true);
+    await page.locator('#source .code-symbol[data-symbol="main"]').hover();
+    await page.waitForFunction(() => {
+      const preview = document.querySelector('.code-function-preview');
+      return preview && preview.textContent.includes('return 42;');
+    });
+    assert.match(await page.locator('.code-function-preview').first().innerText(), /int main\(void\) \{[\s\S]*return 42;[\s\S]*\}/);
+    await page.keyboard.press('Escape');
     await page.locator('#q').press('Escape');
     await page.locator('#q').fill('return 42');
     await page.locator('#mode').selectOption('text');
