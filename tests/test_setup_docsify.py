@@ -1038,6 +1038,56 @@ class OfflineWheelsTests(unittest.TestCase):
 class LauncherScriptsTests(unittest.TestCase):
     """启动脚本的行尾/权限约定：Linux 脚本必须 LF 且可执行，Windows 脚本保持 CRLF。"""
 
+    def test_managed_python_installs_into_project_venv(self):
+        sh = find_posix_shell()
+        if not sh:
+            self.skipTest('POSIX shell unavailable')
+        source = (ROOT / 'start_linux.sh').read_text(encoding='utf-8')
+        functions = source[source.index('has_auth_deps() {'):source.index('SITE_REBUILT=0')]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'server' / 'wheels').mkdir(parents=True)
+            fake = """#!/bin/sh
+echo "$*" >> calls
+case "$*" in
+  *EXTERNALLY-MANAGED*) exit 0 ;;
+  *base_prefix*) exit 1 ;;
+  '-m venv data/venv')
+    mkdir -p data/venv/bin
+    cp virtual-python data/venv/bin/python
+    chmod +x data/venv/bin/python
+    exit 0 ;;
+esac
+exit 1
+"""
+            virtual = """#!/bin/sh
+echo "venv $*" >> calls
+case "$*" in
+  *--user*|*--break-system-packages*) exit 99 ;;
+  *base_prefix*|'-m pip --version'|'-m pip install --no-index --find-links server/wheels -r server/requirements.txt') exit 0 ;;
+esac
+exit 1
+"""
+            (root / 'system-python').write_bytes(fake.encode('utf-8'))
+            (root / 'virtual-python').write_bytes(virtual.encode('utf-8'))
+            script = chr(10).join(['chmod +x system-python', 'PY=./system-python', functions,
+                                   'pip_install_requirements', ''])
+            result = subprocess.run([sh], input=script.encode('utf-8'), cwd=directory,
+                                    env=posix_shell_env(sh), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertEqual(result.returncode, 0, (result.stdout + result.stderr).decode('utf-8', 'replace'))
+            calls = (root / 'calls').read_text()
+            self.assertIn('-m venv data/venv', calls)
+            self.assertIn('venv -m pip install --no-index', calls)
+            self.assertNotIn('--user', calls)
+            self.assertNotIn('--break-system-packages', calls)
+            (root / 'calls').write_text('')
+            (root / 'system-python').write_bytes(fake.replace('mkdir -p data/venv/bin', 'exit 1').encode('utf-8'))
+            result = subprocess.run([sh], input=script.encode('utf-8'), cwd=directory,
+                                    env=posix_shell_env(sh), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn('pip install', (root / 'calls').read_text())
+
+
     def test_restart_preparation_supports_copy_deployment(self):
         sh = find_posix_shell()
         if not sh:
@@ -1054,7 +1104,7 @@ class LauncherScriptsTests(unittest.TestCase):
                     marker.touch()
                 elif marker.exists():
                     marker.unlink()
-                script = ('PY=python\nupdate_code() { return %d; }\n'
+                script = ('PY=python\nensure_auth_deps() { return 0; }\nupdate_code() { return %d; }\n'
                           'rebuild_site() { return %d; }\n'
                           'git() { echo test-version; }\n' % (update_status, build_status))
                 result = subprocess.run([sh], input=(script + preparation).encode('utf-8'),
@@ -1189,7 +1239,7 @@ class LauncherScriptsTests(unittest.TestCase):
         raw = (ROOT / "start_linux.sh").read_text(encoding="utf-8")
         self.assertIn("git pull --ff-only", raw, "--restart 应先拉取最新代码")
         self.assertIn("update_code", raw, "应有独立的代码更新逻辑")
-        self.assertIn("WANT_UPDATE=1", raw, "--restart 应默认触发代码更新")
+        self.assertIn("if ! update_code; then", raw, "--restart 应默认触发代码更新")
         self.assertIn("if [ \"$WANT_UPDATE\" -eq 1 ] || [ \"$DO_UPDATE\" -eq 1 ]", raw,
                       "更新应在启动前执行")
         # 更新相关开关（脚本自身消费，不透明给 serve.py）

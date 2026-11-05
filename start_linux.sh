@@ -41,6 +41,8 @@ fi
 PY=""
 if [ -n "$PYTHON" ]; then
   PY="$PYTHON"
+elif [ -x data/venv/bin/python ] && data/venv/bin/python -m pip --version >/dev/null 2>&1; then
+  PY="$(pwd)/data/venv/bin/python"
 else
   for candidate in python3.12 python3.11 python3.10 python3.9 python3.8 python3 python; do
     if command -v "$candidate" >/dev/null 2>&1; then
@@ -62,6 +64,7 @@ esac
 
 # 解析脚本自身的开关（其余参数原样透传给 serve.py）
 MODE="background"
+PREVIEW=0
 expect_value=0
 value_option=""
 n=$#
@@ -79,6 +82,7 @@ while [ "$i" -lt "$n" ]; do
   fi
   case "$arg" in
     --) ;;  # 容忍 `./start_linux.sh -- restart` 这类多打了分隔符的写法
+    --preview) PREVIEW=1; set -- "$@" "$arg" ;;
     --foreground|--fg|foreground|fg) MODE="foreground" ;;
     --stop|stop) MODE="stop" ;;
     --restart|restart) MODE="restart" ;;
@@ -294,35 +298,51 @@ has_auth_deps() {
   "$PY" -c "import flask, waitress" >/dev/null 2>&1
 }
 
-# 按「离线包优先 → 联网」与「非 root 优先用户级」顺序安装 requirements
+# Use a project environment when the OS owns the selected interpreter.
+prepare_dependency_python() {
+  if "$PY" -c 'import sys; sys.exit(0 if sys.prefix != getattr(sys, "base_prefix", sys.prefix) or hasattr(sys, "real_prefix") else 1)'; then
+    return 0
+  fi
+  if "$PY" -c 'import os, sys, sysconfig; sys.exit(0 if os.path.isfile(os.path.join(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED")) else 1)'; then
+    echo "[提示] 系统 Python 由操作系统管理，正在准备项目虚拟环境 data/venv ..."
+    if ! "$PY" -m venv data/venv; then
+      echo "[错误] 无法创建虚拟环境，请管理员安装与 $PY 对应的 venv 包（例如 python3.12-venv），然后重新启动。" >&2
+      return 1
+    fi
+    PY="$(pwd)/data/venv/bin/python"
+    if ! "$PY" -m pip --version >/dev/null 2>&1; then
+      echo "[错误] 项目虚拟环境缺少 pip，请安装对应的 venv/ensurepip 组件后重试。" >&2
+      return 1
+    fi
+  fi
+}
+
 pip_install_requirements() {
-  if [ "$(id -u 2>/dev/null || echo 0)" -eq 0 ]; then
+  prepare_dependency_python || return 1
+  if "$PY" -c 'import sys; sys.exit(0 if sys.prefix != getattr(sys, "base_prefix", sys.prefix) or hasattr(sys, "real_prefix") else 1)'; then
+    first_flags=""
+    second_flags=""
+  elif [ "$(id -u 2>/dev/null || echo 0)" -eq 0 ]; then
     first_flags=""
     second_flags="--user"
   else
     first_flags="--user"
     second_flags=""
   fi
-  installed=0
-  if [ -d server/wheels ]; then
+  for source in offline online; do
+    [ "$source" = offline ] && [ ! -d server/wheels ] && continue
+    previous_flags=unset
     for flags in "$first_flags" "$second_flags"; do
-      # shellcheck disable=SC2086
-      if "$PY" -m pip install $flags --no-index --find-links server/wheels -r server/requirements.txt; then
-        installed=1
-        break
+      [ "$flags" = "$previous_flags" ] && continue
+      previous_flags="$flags"
+      if [ "$source" = offline ]; then
+        if "$PY" -m pip install $flags --no-index --find-links server/wheels -r server/requirements.txt; then return 0; fi
+      else
+        if "$PY" -m pip install $flags -r server/requirements.txt; then return 0; fi
       fi
     done
-  fi
-  if [ "$installed" -ne 1 ]; then
-    for flags in "$first_flags" "$second_flags"; do
-      # shellcheck disable=SC2086
-      if "$PY" -m pip install $flags -r server/requirements.txt; then
-        installed=1
-        break
-      fi
-    done
-  fi
-  [ "$installed" -eq 1 ]
+  done
+  return 1
 }
 
 install_auth_deps() {
@@ -330,11 +350,13 @@ install_auth_deps() {
   if pip_install_requirements && has_auth_deps; then
     return 0
   fi
-  echo "[警告] 依赖仍不可用，将以只读预览模式启动（无法登录编辑）。" >&2
-  echo "        若提示 Permission denied：请改用有写权限的账号，或加 --user / sudo，例如：" >&2
-  echo "          $PY -m pip install --user --no-index --find-links server/wheels -r server/requirements.txt" >&2
-  echo "        老版本 pip 先升级：$PY -m pip install --user --upgrade 'pip<22'" >&2
+  echo "[错误] 认证服务依赖安装失败，启动已取消。请解决上述错误后重试；需要只读预览时请显式使用 --preview。" >&2
   return 1
+}
+
+ensure_auth_deps() {
+  [ "$PREVIEW" = 1 ] && return 0
+  has_auth_deps || install_auth_deps
 }
 
 SITE_REBUILT=0
@@ -691,9 +713,7 @@ case "$MODE" in
 esac
 
 # 认证编辑依赖：缺失时自动安装
-if ! has_auth_deps; then
-  install_auth_deps || true
-fi
+ensure_auth_deps || exit 1
 
 # 默认监听所有网卡（局域网可访问）；仅本机使用请在命令行加 --bind 127.0.0.1
 has_bind=0
