@@ -3738,6 +3738,38 @@ class LocalPublishTests(ServerTestBase):
     def published_hash(self, path):
         return self.client.get("/__md/document?path=" + path).get_json()["document"]["published"]["hash"]
 
+    def test_save_returns_while_rebuild_is_blocked(self):
+        import threading
+        from server.app import create_app
+        started = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+
+        def rebuild():
+            started.set()
+            release.wait(5)
+            finished.set()
+
+        app = create_app(self.config, self.conn, self.auth, self.docs,
+                         on_config_changed=rebuild)
+        client = app.test_client()
+        client.post("/__auth/login", json={"username": "admin", "password": "admin"})
+        csrf = client.get("/__auth/session").get_json()["csrfToken"]
+        path = "md/本地库/a.md"
+        base = self.published_hash(path)
+        try:
+            response = client.post("/__md/publish", json={
+                "path": path, "content": "# fast save\n", "baseHash": base},
+                headers={"X-CSRF-Token": csrf})
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.get_json()["rebuildQueued"])
+            self.assertTrue(started.wait(1))
+            self.assertFalse(finished.is_set())
+            self.assertEqual((self.docs / path).read_text(encoding="utf-8"), "# fast save\n")
+        finally:
+            release.set()
+            finished.wait(5)
+
     def test_symlink_folder_rejects_all_writes(self):
         target = self.tmp / "外部资料"
         target.mkdir()

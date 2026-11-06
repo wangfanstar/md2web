@@ -266,7 +266,7 @@
 
   function publishToServer() {
     var content = state.textarea.value;
-    setStatus('正在保存到服务器并更新站点…');
+    setStatus('正在保存到服务器…');
     return authApi('__md/publish', {
       method: 'POST',
       body: JSON.stringify({ path: state.resource, content: content, baseHash: state.baseHash })
@@ -277,7 +277,7 @@
       state.draftVersion = 0;
       state.publishedOnServer = true;
       refreshModifiedState();
-      setStatus('已保存到服务器：' + (result.path || state.resource) + '（站点已更新，关闭编辑器后自动刷新）');
+      setStatus('已保存到服务器：' + (result.path || state.resource) + (payload.rebuildQueued ? '（索引正在后台更新，关闭编辑器后自动刷新）' : '（索引尚未更新，关闭编辑器后自动刷新）'));
       refreshPendingDrafts();
       return result;
     }).catch(function (error) {

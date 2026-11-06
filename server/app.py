@@ -2047,6 +2047,37 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             )
         return cursor.lastrowid
 
+    publish_rebuild_lock = threading.Lock()
+    publish_rebuild_state = {"running": False, "pending": False}
+
+    def schedule_publish_rebuild():
+        """Coalesce saves; a save during a build always schedules another pass."""
+        if on_config_changed is None:
+            return False
+
+        def run():
+            while True:
+                with publish_rebuild_lock:
+                    publish_rebuild_state["pending"] = False
+                rebuild_repository_pages()
+                with publish_rebuild_lock:
+                    if not publish_rebuild_state["pending"]:
+                        publish_rebuild_state["running"] = False
+                        return
+
+        with publish_rebuild_lock:
+            publish_rebuild_state["pending"] = True
+            if not publish_rebuild_state["running"]:
+                publish_rebuild_state["running"] = True
+                try:
+                    threading.Thread(target=run, name="md2web-save-rebuild",
+                                     daemon=True).start()
+                except Exception:
+                    publish_rebuild_state["running"] = False
+                    app.logger.exception("Unable to schedule saved-document rebuild")
+                    return False
+        return True
+
     @app.route("/__md/publish", methods=["POST"])
     @serialized
     def pending_publish():
@@ -2086,12 +2117,8 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             return json_error(error.status, code, error.message, **extra)
         except server_documents_error() as error:
             return json_error(error.status, "publish_error", error.message, **getattr(error, "extra", {}))
-        if on_config_changed is not None:
-            try:
-                on_config_changed()
-            except Exception:
-                pass
-        return jsonify({"ok": True, "result": result})
+        queued = schedule_publish_rebuild()
+        return jsonify({"ok": True, "result": result, "rebuildQueued": queued})
 
     @app.get("/__md/drafts")
     def list_my_drafts():
