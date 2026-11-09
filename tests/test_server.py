@@ -2603,6 +2603,23 @@ class SvnApiTests(ServerTestBase):
         response = self.client.get("/__md/history?path=md/硬件设计/时钟树设计&mode=local")
         self.assertEqual(response.get_json()["code"], "not_local")
 
+    def test_svn_comparison_can_use_the_older_document_revision_outside_the_log_page(self):
+        self.login()
+        path = 'md/硬件设计/时钟树设计.md'
+        entries = [{'revision': 12}, {'revision': 5}]
+        with mock.patch.object(self.svn, 'log', return_value=entries) as log:
+            page = self.client.get('/__svn/log', query_string={'path': path, 'limit': 1}).get_json()
+        self.assertEqual(log.call_args[1]['limit'], 2)
+        self.assertEqual(page['entries'], entries[:1])
+        self.assertEqual(page['olderRevision'], 5)
+        with mock.patch.object(self.svn, 'cat', side_effect=['# 旧版\n', '# 新版\n']) as cat:
+            result = self.client.get('/__md/compare', query_string={
+                'path': path, 'left': 'svn:r5', 'right': 'svn:r12'}).get_json()
+        self.assertEqual([call[1]['revision'] for call in cat.call_args_list], [5, 12])
+        self.assertEqual([call[0][0] for call in cat.call_args_list], [log.call_args[0][0]] * 2)
+        self.assertEqual(result['left']['content'], '# 旧版\n')
+        self.assertEqual(result['right']['content'], '# 新版\n')
+
     def test_commit_uses_stored_credential_without_session_memory(self):
         """模拟重启/换标签页：会话内存没有口令时，提交应使用数据库里已保存的最新口令。"""
         headers_csrf = self.login()

@@ -29,6 +29,18 @@ function loadFolderView(overrides = {}) {
   return (overrides.window || window).FolderView;
 }
 
+test('folder counts include empty and nested folders and split direct from recursive documents', () => {
+  const view = loadFolderView();
+  const counts = view.countFolderContents('md/repo',
+    ['md/repo', 'md/repo/a', 'md/repo/a/nested', 'md/repo/empty', 'md/repo/a', 'md/repo-other'],
+    ['md/repo/root.md', 'md/repo/a/a.md', 'md/repo/a/nested/nested.md', 'md/repo-other/ignored.md']);
+  const stats = path => ({ ...counts.get(path) });
+  assert.deepEqual(stats('md/repo'), { directFolders: 2, totalFolders: 3, directDocuments: 1, totalDocuments: 3 });
+  assert.deepEqual(stats('md/repo/a'), { directFolders: 1, totalFolders: 1, directDocuments: 1, totalDocuments: 2 });
+  assert.deepEqual(stats('md/repo/empty'), { directFolders: 0, totalFolders: 0, directDocuments: 0, totalDocuments: 0 });
+  assert.equal(counts.has('md/repo-other'), false);
+});
+
 test('create request refreshes session and uses the latest CSRF token', async () => {
   let refreshed = false;
   const requests = [];

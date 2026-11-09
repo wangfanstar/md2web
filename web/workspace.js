@@ -537,6 +537,7 @@
     var status = dialog.querySelector('[role="status"]');
     var list = dialog.querySelector('ul');
     var more = dialog.querySelector('[data-history-more]');
+    var comparisonRequest = 0;
     dialog.querySelector('[data-history-path]').textContent = filename;
     dialog.addEventListener('close', function () { dialog.remove(); });
     document.body.appendChild(dialog);
@@ -570,9 +571,45 @@
       return [version, author, date && date.replace('T', ' ').slice(0, 19)].filter(Boolean).join(' · ');
     }
 
+    function addPreviousComparison(row, previous, current) {
+      var actions = document.createElement('div');
+      var button = document.createElement('button');
+      var feedback = document.createElement('span');
+      feedback.setAttribute('role', 'status');
+      button.type = 'button';
+      button.textContent = '与上一版本对比';
+      button.disabled = !previous;
+      if (!previous) feedback.textContent = '无更早版本';
+      actions.className = 'workspace-history-actions';
+      actions.append(button, feedback);
+      row.appendChild(actions);
+      button.addEventListener('click', function () {
+        var request = ++comparisonRequest;
+        button.disabled = true;
+        feedback.textContent = '正在读取两个版本…';
+        historyRequest('__md/compare' + query + '&left=' + encodeURIComponent(previous)
+          + '&right=' + encodeURIComponent(current)).then(function (payload) {
+          if (!dialog.open || request !== comparisonRequest) return;
+          [payload.left, payload.right].forEach(function (version) {
+            version.label = version.ref.replace(/^local:/, '版本 ').replace(/^svn:/, '');
+          });
+          feedback.textContent = '';
+          button.disabled = false;
+          button.focus();
+          window.DiffView.open(payload.left, payload.right, Object.assign({}, payload.options, {modal: true}));
+        }).catch(function (error) {
+          if (request === comparisonRequest) showError(error, feedback);
+        }).then(function () {
+          if (request !== comparisonRequest) feedback.textContent = '';
+          button.disabled = false;
+        });
+      });
+    }
+
     function addLocalVersion(version) {
       var row = addEntry(entryLabel('版本 ' + version.draftVersion + (version.isHead ? '（当前）' : ''),
         version.author, version.createdAt));
+      addPreviousComparison(row, version.previousId, version.id);
       var details = document.createElement('details');
       details.innerHTML = '<summary>查看该版本 Markdown 原文</summary><pre></pre>';
       var content = details.querySelector('pre');
@@ -612,8 +649,10 @@
       if (!dialog.open) return;
       title.textContent = 'SVN 提交记录';
       var entries = payload.entries || [];
-      entries.forEach(function (entry) {
-        addEntry(entryLabel('r' + entry.revision, entry.author, entry.date), entry.message);
+      entries.forEach(function (entry, index) {
+        var older = index + 1 < entries.length ? entries[index + 1].revision : payload.olderRevision;
+        var row = addEntry(entryLabel('r' + entry.revision, entry.author, entry.date), entry.message);
+        addPreviousComparison(row, older && 'svn:r' + older, 'svn:r' + entry.revision);
       });
       status.textContent = entries.length ? '最多显示最近 50 条记录。' : '暂无 SVN 提交记录。';
     }).catch(function (error) {

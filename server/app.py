@@ -2371,13 +2371,14 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             from urllib.parse import quote
             relative = path[len(binding["mount"]):].lstrip("/")
             url = binding["url"].rstrip("/") + "/" + quote(relative)
-            entries = auth_service.svn.log(url, limit=limit, config_dir=config_dir,
+            entries = auth_service.svn.log(url, limit=limit + 1, config_dir=config_dir,
                                            username=username, password=password)
         except Exception as error:  # SvnError 内部已脱敏
             return json_error(502, "svn_log_failed", str(error))
         finally:
             _shutil.rmtree(config_dir, ignore_errors=True)
-        return jsonify({"ok": True, "entries": entries})
+        return jsonify(ok=True, entries=entries[:limit],
+                       olderRevision=entries[limit]["revision"] if len(entries) > limit else None)
 
     @app.post("/__svn/refresh")
     @serialized

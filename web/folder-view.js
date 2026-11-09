@@ -177,34 +177,110 @@
       + '</div></div>';
   }
 
+  function countFolderContents(root, folderPaths, documentPaths) {
+    var folders = new Map();
+    function entry(path) {
+      if (!folders.has(path)) {
+        folders.set(path, { directFolders: 0, totalFolders: 0, directDocuments: 0, totalDocuments: 0 });
+        if (path !== root) entry(folderPathOf(path));
+      }
+      return folders.get(path);
+    }
+    entry(root);
+    folderPaths.forEach(function (path) {
+      if (path !== root + '/.' && path.indexOf(root + '/') === 0) entry(path);
+    });
+    documentPaths.forEach(function (path) {
+      if (path.indexOf(root + '/') !== 0) return;
+      var folder = entry(folderPathOf(path));
+      folder.directDocuments += 1;
+      folder.totalDocuments += 1;
+    });
+    // 子路径比它的父路径长，倒序汇总时可以把完整的子树数量一次加到父级。
+    Array.from(folders.keys()).sort(function (left, right) { return right.length - left.length; })
+      .forEach(function (path) {
+        if (path === root) return;
+        var parent = folders.get(folderPathOf(path));
+        var child = folders.get(path);
+        parent.directFolders += 1;
+        parent.totalFolders += 1 + child.totalFolders;
+        parent.totalDocuments += child.totalDocuments;
+      });
+    return folders;
+  }
+
+  function folderTotals(stats) {
+    return '子文件夹共 ' + stats.totalFolders + ' 个 · 文档共 ' + stats.totalDocuments + ' 篇';
+  }
+
+  function documentCountSummary(stats) {
+    return '<p class="folder-view-meta" data-folder-document-counts>当前文件夹 ' + stats.directDocuments
+      + ' 篇 · 所有子文件夹 ' + (stats.totalDocuments - stats.directDocuments) + ' 篇'
+      + '（直属 ' + stats.directFolders + ' 个，含下级共 ' + stats.totalFolders + ' 个）</p>';
+  }
+
+  function childCountLabel(stats) {
+    return '<span class="folder-view-meta">子文件夹 ' + stats.totalFolders + ' 个 · 文档 '
+      + stats.totalDocuments + ' 篇（本层 ' + stats.directDocuments + ' 篇）</span>';
+  }
+
+  // file:// 和只读预览使用已构建的导航及 Markdown 快照，保留正文或画廊。
+  function renderSnapshotCounts(root) {
+    var article = document.querySelector('.markdown-section');
+    var content = (window.__DOCSIFY_OFFLINE_DATA__ || {}).content;
+    var navigation = (window.MD2WEB_NAVIGATION || {}).folders;
+    if (!article || !content || !navigation || article.querySelector('[data-folder-view], [data-folder-snapshot-counts]')) return;
+    var counts = countFolderContents(root, Object.keys(navigation),
+      Object.keys(content).filter(function (path) { return /\.md$/i.test(path); }));
+    var children = Object.keys(navigation).filter(function (path) {
+      return folderPathOf(path) === root && counts.has(path);
+    }).sort().map(function (path) {
+      var item = navigation[path];
+      return '<li><a href="' + escapeHtml(item.href) + '">' + escapeHtml(item.label) + '/</a>'
+        + childCountLabel(counts.get(path)) + '</li>';
+    }).join('');
+    var stats = counts.get(root);
+    article.insertAdjacentHTML('afterbegin', '<section class="folder-snapshot-counts" data-folder-snapshot-counts aria-label="目录统计">'
+      + '<p class="folder-view-meta"><strong>目录统计</strong> · ' + folderTotals(stats) + '</p>'
+      + documentCountSummary(stats)
+      + (children ? '<ul class="folder-view-folders">' + children + '</ul>' : '') + '</section>');
+  }
+
   function renderFolderView(folder) {
     var article = document.querySelector('.markdown-section');
     if (!article) {
       return;
     }
     document.body.classList.add('folder-view-active');
+    var root = folder.path === 'md/.' ? 'md' : folder.path;
+    var counts = countFolderContents(root, (folder.allFolders || []).concat(folder.folders || [])
+      .map(function (item) { return item.path; }), (folder.documents || []).map(function (item) { return item.path; }));
+    var stats = counts.get(root);
     var sections = groupDocuments(folder.documents || []);
-    var singleFolder = sections.length <= 1 && (!sections.length || sections[0].folder === folder.path);
+    var singleFolder = sections.length <= 1 && (!sections.length || sections[0].folder === root);
+    var documentsHeading = '<h2>文档</h2>' + documentCountSummary(stats);
     var documentsHtml;
     if (singleFolder && !(folder.documents || []).length && !(folder.folders || []).length) {
       // 空文件夹（如刚新建的仓库）：直接给出「新建文档」入口，而不是空白或 404
       var emptyReadOnly = !!config.repoReadOnly || config.repoAllowCommit === false;
-      documentsHtml = '<h2>文档</h2>' + emptyStateHtml(folder.path, emptyReadOnly);
+      documentsHtml = documentsHeading + emptyStateHtml(root, emptyReadOnly);
     } else if (singleFolder) {
-      documentsHtml = '<h2>文档</h2>' + documentTableHtml(sections.length ? sections[0].documents : []);
+      documentsHtml = documentsHeading + documentTableHtml(sections.length ? sections[0].documents : []);
     } else {
-      documentsHtml = '<h2>文档</h2>' + sections.map(function (section) {
+      documentsHtml = documentsHeading + sections.map(function (section) {
         var badge = section.group
           ? '<span class="folder-view-group-badge">分组：' + escapeHtml(section.group) + '</span>'
           : '';
         return '<h3 class="folder-view-group"><span class="folder-view-group-name">'
-          + escapeHtml(relativeFolderLabel(folder.path, section.folder)) + '/</span>' + badge + svnBadge(section.folder)
+          + escapeHtml(relativeFolderLabel(root, section.folder)) + '/</span>' + badge + svnBadge(section.folder)
+          + '<span class="folder-view-meta">本层 ' + section.documents.length + ' 篇</span>'
           + '</h3>' + documentTableHtml(section.documents);
       }).join('');
     }
     var folders = (folder.folders || []).map(function (item) {
       var repository = repos.filter(function (repo) { return repo.mount === item.path; })[0];
       return '<li><a href="#/' + escapeHtml(item.path) + '/">' + escapeHtml(item.name) + '/</a>' + svnBadge(item.path)
+        + childCountLabel(counts.get(item.path))
         + '<button type="button" data-folder-action="menu" data-path="' + escapeHtml(item.path)
         + '" aria-label="操作 ' + escapeHtml(item.name) + '">操作</button>'
         + (config.repoInfo && config.repoInfo.all && repository
@@ -220,8 +296,8 @@
         + '">新建文档或文件夹</button><button type="button" data-folder-action="trash" data-mount="' + escapeHtml(trashMount)
         + '">回收站</button><button type="button" data-folder-action="scan" data-path="' + escapeHtml(folder.path)
         + '" title="扫描当前文件夹及子文件夹中的 Markdown 文档，更新导航和搜索索引">扫描文件夹</button></div>',
-      '<p class="folder-view-meta">目录：<code>' + escapeHtml(folder.path || '') + '</code>'
-        + ' · 文档 ' + ((folder.documents || []).length) + ' 个 · 合计 '
+      '<p class="folder-view-meta">目录：<code>' + escapeHtml(root) + '</code>'
+        + ' · ' + folderTotals(stats) + ' · 合计 '
         + escapeHtml(formatBytes(folder.totalBytes)) + '</p>',
       (folders ? '<h2>子文件夹</h2><ul class="folder-view-folders">' + folders + '</ul>' : ''),
       documentsHtml,
@@ -294,10 +370,8 @@
   }
 
   function loadFolderView() {
-    if (!config.folderView) {
-      return;
-    }
-    var route = currentRoute();
+    var routeAtRequest = currentRoute();
+    var route = routeAtRequest;
     var repoInfo = config.repoInfo || {};
     var rootFolder = repoInfo.all ? 'md' : (repoInfo.mount || '');
     if (!route || route === 'README.md' || route === '/') {
@@ -317,13 +391,23 @@
       document.body.classList.remove('folder-view-active');
       return;
     }
-    fetch('__folder?path=' + encodeURIComponent(folder) + '&recursive=1').then(function (response) {
-      return response.json();
+    if (!config.folderView || window.location.protocol === 'file:') {
+      renderSnapshotCounts(folder);
+      return;
+    }
+    function useSnapshot() {
+      if (currentRoute() === routeAtRequest) renderSnapshotCounts(folder);
+    }
+    return fetch('__folder?path=' + encodeURIComponent(folder) + '&recursive=1').then(function (response) {
+      return response.ok ? response.json() : null;
     }).then(function (payload) {
+      if (currentRoute() !== routeAtRequest) return;
       if (payload && payload.ok) {
         renderFolderView(payload.folder);
+      } else {
+        useSnapshot();
       }
-    }).catch(function () { /* 只读预览等场景保持原文 */ });
+    }).catch(useSnapshot);
   }
 
   // ---------- 右键菜单 ----------
@@ -871,7 +955,8 @@
   window.addEventListener('hashchange', function () { window.setTimeout(loadFolderView, 120); });
   window.FolderView = { isFolderRoute: isFolderRoute, reload: loadFolderView, pathFromElement: pathFromElement,
                         restoreRenamePosition: restoreRenamePosition,
-                        groupDocuments: groupDocuments, emptyStateHtml: emptyStateHtml, createEntry: createEntry,
+                        groupDocuments: groupDocuments, countFolderContents: countFolderContents,
+                        emptyStateHtml: emptyStateHtml, createEntry: createEntry,
                         repositoryActionsHtml: repositoryActionsHtml, svnRepoForPath: svnRepoForPath,
                         svnBadge: svnBadge, documentTableHtml: documentTableHtml };
   window.setTimeout(loadFolderView, 200);

@@ -79,6 +79,18 @@ class LocalHistoryApiTests(unittest.TestCase):
                          'no_binding')
         history = self.client.get('/__md/history', query_string={'path': path, 'mode': 'local'}).get_json()['history']
         self.assertEqual(len(history['revisions']), 3)
+        query = {'path': path, 'mode': 'local', 'limit': 1}
+        first_page = self.client.get('/__md/history', query_string=query).get_json()['history']
+        newest = first_page['revisions'][0]
+        self.assertEqual(newest['previousId'], history['revisions'][1]['id'])
+        comparison = self.client.get('/__md/compare', query_string={
+            'path': path, 'left': newest['previousId'], 'right': newest['id']}).get_json()
+        self.assertEqual(comparison['left']['content'], '# first\n')
+        self.assertEqual(comparison['right']['content'], '# current\n')
+        last_page = self.client.get('/__md/history', query_string=dict(
+            query, cursor=history['revisions'][1]['draftVersion'])).get_json()['history']
+        self.assertIsNone(last_page['revisions'][0]['previousId'])
+        self.assertIsNone(last_page['nextCursor'])
         diff = self.client.get('/__md/diff', query_string={'path': path}).get_json()['diff']
         self.assertIn('-# first', diff['diff'])
         self.assertIn('+# current', diff['diff'])

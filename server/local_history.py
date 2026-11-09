@@ -29,15 +29,17 @@ def get_revision(conn, path, ref):
 
 def list_history(conn, md_dir, path, cursor=None, limit=200):
     path = documents.normalize_md_path(path)
+    limit = min(200, max(1, int(limit)))
     rows = conn.execute('SELECT v.*, u.svn_username AS author FROM local_document_versions v LEFT JOIN users u ON u.id=v.actor_id WHERE v.path=? AND v.id<? ORDER BY v.id DESC LIMIT ?',
-                        (path, int(cursor) if cursor else 9223372036854775807, min(200,max(1,int(limit))))).fetchall()
+                        (path, int(cursor) if cursor else 9223372036854775807, limit + 1)).fetchall()
     current = drafts.published_text(md_dir, path)
-    return {'path': path, 'mode': 'local', 'nextCursor': rows[-1]['id'] if len(rows) == min(200,max(1,int(limit))) else None, 'revisions': [
+    return {'path': path, 'mode': 'local', 'nextCursor': rows[limit - 1]['id'] if len(rows) > limit else None, 'revisions': [
         {'id': 'local:' + str(row['id']), 'createdAt': row['created_at'],
+         'previousId': 'local:' + str(rows[i + 1]['id']) if i + 1 < len(rows) else None,
          'author': row['author'] or '', 'hash': documents.text_hash(row['content']),
          'size': len(row['content'].encode('utf-8')), 'draftVersion': row['id'],
-         'isHead': i == 0 and documents.text_hash(row['content']) == documents.text_hash(current)}
-        for i, row in enumerate(rows)]}
+         'isHead': not cursor and i == 0 and documents.text_hash(row['content']) == documents.text_hash(current)}
+        for i, row in enumerate(rows[:limit])]}
 
 
 def diff_documents(conn, md_dir, path, from_ref, to_ref):

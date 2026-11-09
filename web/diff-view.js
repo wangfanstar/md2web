@@ -5,17 +5,20 @@
   function open(left,right,options) {
     if(active)active();
     options=options||{};
-    var overlay=node('div');overlay.className='diff-view';overlay.setAttribute('role','dialog');overlay.setAttribute('aria-label','版本对比');document.body.appendChild(overlay);
+    var overlay=node(options.modal?'dialog':'div');overlay.className='diff-view';overlay.setAttribute('role','dialog');overlay.setAttribute('aria-label','版本对比');document.body.appendChild(overlay);
     var bar=node('div',undefined,overlay);bar.className='diff-toolbar';
     var worker=null,timer=null,rows=[],changes=[],selected=-1,inline=false,only=false,wrap=false,ignore=false;
     var leftSelect=node('select',undefined,bar),rightSelect=node('select',undefined,bar);
     var versions=options.versions||[{ref:left.ref||'left',label:left.label||'左版本'},{ref:right.ref||'right',label:right.label||'右版本'}];
     [leftSelect,rightSelect].forEach(function(select){versions.forEach(function(v){var o=node('option',v.label,select);o.value=v.ref;});});
     leftSelect.value=left.ref||'left';rightSelect.value=right.ref||'right';
+    leftSelect.hidden=rightSelect.hidden=!options.load;
     function stop(){if(worker)worker.terminate();worker=null;clearTimeout(timer);}
-    function close(){stop();overlay.remove();document.removeEventListener('keydown',escape);active=null;}
+    function close(){stop();if(overlay.open)overlay.close();overlay.remove();document.removeEventListener('keydown',escape);active=null;}
     function escape(e){if(e.key==='Escape'){e.stopImmediatePropagation();close();}}
-    document.addEventListener('keydown',escape);active=close;
+    if(options.modal)overlay.addEventListener('cancel',function(e){e.preventDefault();close();});
+    else document.addEventListener('keydown',escape);
+    active=close;
     function button(label,fn){var b=node('button',label,bar);b.type='button';b.onclick=fn;return b;}
     button('交换',function(){var temp=left;left=right;right=temp;leftSelect.value=left.ref;rightSelect.value=right.ref;calculate();});
     function jump(delta){if(!changes.length)return;selected=(selected+delta+changes.length)%changes.length;viewport.scrollTop=changes[selected]*24;render();}
@@ -27,7 +30,8 @@
     function download(text,name){var url=URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'}));var a=node('a');a.href=url;a.download=name;a.click();setTimeout(function(){URL.revokeObjectURL(url);},1000);}
     button('下载左侧原文',function(){download(left.content,'left.md');});button('下载右侧原文',function(){download(right.content,'right.md');});
     button('Unified diff',function(){var text='--- '+left.label+'\n+++ '+right.label+'\n@@ -1,'+left.content.split('\n').length+' +1,'+right.content.split('\n').length+' @@\n';rows.forEach(function(r){if(r.kind==='equal')text+=' '+r.left+'\n';else {if(r.left!==null)text+='-'+r.left+'\n';if(r.right!==null)text+='+'+r.right+'\n';}});download(text,'comparison.diff');});
-    button('关闭',close);
+    var closeButton=button('关闭',close);
+    closeButton.autofocus=!!options.modal;
     var status=node('p','正在计算…',overlay),heads=node('div',undefined,overlay);heads.className='diff-heads';
     var lh=node('strong','',heads),rh=node('strong','',heads);
     var viewport=node('div',undefined,overlay);viewport.className='diff-viewport';
@@ -58,7 +62,9 @@
     }
     var generation=0;
     function load(){if(!options.load)return;var current=++generation;status.textContent='读取版本…';options.load(leftSelect.value,rightSelect.value).then(function(data){if(current!==generation)return;left=data.left;right=data.right;calculate();}).catch(function(e){status.textContent=e.message;});}
-    leftSelect.onchange=rightSelect.onchange=load;calculate();
+    leftSelect.onchange=rightSelect.onchange=load;
+    if(options.modal)overlay.showModal();
+    calculate();
   }
   window.DiffView={open:open};
 })();
