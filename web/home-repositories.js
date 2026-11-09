@@ -54,9 +54,13 @@
   if (typeof module !== 'undefined') { module.exports = {normalize:normalize, render:render, fromLegacy:fromLegacy}; return; }
   if (!root || root.location.protocol === 'file:') return;
   var busy = false;
-  function read(path) {
-    return root.fetch(path, {cache:'no-store', credentials:'same-origin'}).then(function (response) {
-      if (!response.ok) throw new Error('HTTP ' + response.status);
+  function read(path, options) {
+    return root.fetch(path, Object.assign({cache:'no-store', credentials:'same-origin'}, options)).then(function (response) {
+      if (!response.ok) {
+        var error = new Error('HTTP ' + response.status);
+        error.status = response.status;
+        throw error;
+      }
       return response.json();
     });
   }
@@ -100,7 +104,7 @@
   function formatDateTime(value) {
     if (!value) return '';
     var timestamp = String(value);
-    if (/^\d{4}-\d{2}-\d{2}T/.test(timestamp) && !/(Z|[+-]\d{2}:\d{2})$/i.test(timestamp)) timestamp += '+08:00';
+    if (/^\d{4}-\d{2}-\d{2}T/.test(timestamp) && !/(Z|[+-]\d{2}:?\d{2})$/i.test(timestamp)) timestamp += '+08:00';
     var date = new Date(timestamp);
     if (isNaN(date.getTime())) return String(value).slice(0, 10);
     date = new Date(date.getTime() + 8 * 60 * 60 * 1000);
@@ -108,35 +112,83 @@
     return date.getUTCFullYear() + '-' + pad(date.getUTCMonth() + 1) + '-' + pad(date.getUTCDate())
       + ' ' + pad(date.getUTCHours()) + ':' + pad(date.getUTCMinutes());
   }
-  function refreshCodeRepositories() {
+  function renderCodeRepositories(repositories) {
+    if (!repositories.length) return '尚未配置代码库。';
+    return '<div class="cards">' + repositories.map(function (repo) {
+      var isSvn = repo.sourceMode === 'svn' || !!repo.svnUrl;
+      var source = isSvn ? 'SVN 库' : '本地代码库';
+      var directoryLabel = isSvn ? 'SVN 仓库：' : '代码目录：';
+      var directory = isSvn ? repo.svnUrl || '地址不可用' : repo.path || repo.folder;
+      var version = repo.ready ? (repo.revision === 'local' ? '本地目录' : 'r' + repo.revision) : '尚未同步';
+      if (repo.ready && repo.revisionDate) {
+        version = formatDateTime(repo.revisionDate) + '（北京时间）' + (repo.revision !== 'local' ? ' · r' + repo.revision : '');
+      }
+      var href = 'html/reference_code.html?' + new URLSearchParams({repo: repo.id});
+      return '<div class="card"><strong><a href="' + escape(href) + '">' + escape(repo.folder || repo.name || repo.id)
+        + '</a><span class="badge ' + (isSvn ? 'svn' : 'local') + '">' + source + '</span></strong>'
+        + '<span>' + directoryLabel + escape(directory) + '</span>'
+        + (repo.revisionAuthor ? '<span>提交者：' + escape(repo.revisionAuthor) + '</span>' : '')
+        + '<span>当前版本：' + escape(version) + '</span>'
+        + '<span>最近成功更新：' + escape(repo.lastUpdated ? formatDateTime(repo.lastUpdated) + '（北京时间）' : '暂无成功更新记录') + '</span>'
+        + '<a class="code-repository-open" href="' + escape(href) + '">浏览代码 →</a></div>';
+    }).join('') + '</div>';
+  }
+
+  var codeSession = null;
+  function refreshCodeRepositories(event) {
     var host = document.querySelector('[data-code-repository-info]');
     if (!host) return;
-    read('__ai/public').then(function (data) {
-      if (!data.ok) throw new Error('读取失败');
-      host.innerHTML = '<div class="cards">' + (data.repositories || []).map(function (repo) {
-        var source = repo.svnUrl ? 'SVN 库' : '本地代码库';
-        var directoryLabel = repo.svnUrl ? 'SVN 仓库：' : '代码目录：';
-        var directory = repo.svnUrl || repo.path || repo.folder;
-        var version = repo.ready ? (repo.revision === 'local' ? '本地目录' : 'r' + repo.revision) : '尚未同步';
-        if (repo.ready && repo.revisionDate) {
-          version = formatDateTime(repo.revisionDate) + '（北京时间）' + (repo.revision !== 'local' ? ' · r' + repo.revision : '');
+    var session = event.detail;
+    var token = session.authenticated ? root.SiteAuth.csrfToken() : '';
+    if (codeSession && codeSession.token !== token) {
+      if (codeSession.controller) codeSession.controller.abort();
+      codeSession = null;
+    }
+    if (!token) {
+      host.textContent = session.available ? '登录服务器后查看代码库信息。' : '当前无法连接认证服务。';
+      return;
+    }
+    if (!codeSession) {
+      codeSession = {token:token, controller:null, pending:false, nextRefresh:0, html:null};
+      host.textContent = '正在读取代码库信息…';
+    }
+    var current = codeSession;
+    if (current.pending || Date.now() < current.nextRefresh) return;
+    current.pending = true;
+    current.nextRefresh = Date.now() + 30000;
+    current.controller = root.AbortController ? new root.AbortController() : null;
+    var timer;
+    var timeout = new Promise(function (_, reject) {
+      timer = root.setTimeout(function () {
+        if (current.controller) current.controller.abort();
+        reject(new Error('读取超时'));
+      }, 10000);
+    });
+    Promise.race([read('__ai/public?summary=1', current.controller && {signal:current.controller.signal}), timeout])
+      .then(function (data) {
+        if (codeSession !== current) return;
+        if (!data.ok || !Array.isArray(data.repositories)) throw new Error('读取失败');
+        var html = renderCodeRepositories(data.repositories);
+        if (current.html !== html) {
+          host.innerHTML = html;
+          current.html = html;
         }
-        var href = 'html/reference_code.html?' + new URLSearchParams({repo: repo.id});
-        return '<div class="card"><strong><a href="' + escape(href) + '">' + escape(repo.folder || repo.name || repo.id)
-          + '</a><span class="badge ' + (repo.svnUrl ? 'svn' : 'local') + '">' + source + '</span></strong>'
-          + '<span>' + directoryLabel + escape(directory) + '</span>'
-          + (repo.revisionAuthor ? '<span>提交者：' + escape(repo.revisionAuthor) + '</span>' : '')
-          + '<span>当前版本：' + escape(version) + '</span>'
-          + '<span>最近成功更新：' + escape(repo.lastUpdated ? formatDateTime(repo.lastUpdated) + '（北京时间）' : '暂无成功更新记录') + '</span>'
-          + '<a class="code-repository-open" href="' + escape(href) + '">浏览代码 →</a></div>';
-      }).join('') + '</div>';
-      if (!(data.repositories || []).length) host.textContent = '尚未配置代码库。';
-    }).catch(function () { host.textContent = '登录服务器后查看代码库信息；暂时无法读取时请刷新重试。'; });
+      }).catch(function (error) {
+        if (codeSession !== current) return;
+        if (error.status === 401 || error.status === 403) {
+          current.html = null;
+          host.textContent = '登录服务器后查看代码库信息。';
+        } else if (current.html === null) {
+          host.textContent = '暂时无法读取代码库信息，稍后将自动重试。';
+        }
+      }).then(function () {
+        root.clearTimeout(timer);
+        current.pending = false;
+        current.controller = null;
+      });
   }
-  root.addEventListener('focus', refreshCodeRepositories);
+  // 登录、退出、窗口聚焦和定时会话校验均由 SiteAuth 汇总到同一事件。
   document.addEventListener('siteauth:change', refreshCodeRepositories);
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refreshCodeRepositories);
-  else refreshCodeRepositories();
   root.addEventListener('focus', refresh);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refresh);
   else refresh();

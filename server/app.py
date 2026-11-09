@@ -9,6 +9,7 @@ import hmac
 import queue
 import uuid
 import json
+import re
 import shutil
 import tempfile
 import threading
@@ -615,6 +616,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         from . import code_qa
         settings = code_qa.validate((config.get('ai') or {}).get('claude'))
         from urllib.parse import urlsplit, urlunsplit
+        summary = request.args.get('summary') == '1'
         sync_state = code_qa.read_sync_state(auth_service)
         repos = []
         for repo in settings.get('repositories', []):
@@ -624,11 +626,20 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             try:
                 path = code_qa.code_path(docs_root, repo, settings)
                 marker = path / '.md2web-revision'
-                ready = path.is_dir() and (not repo.get('url') or (marker.is_file() and not marker.is_symlink()))
-                revision = (marker.read_text(encoding='utf-8').strip() if repo.get('url') else 'local') if ready else ''
+                ready = path.is_dir()
                 if ready:
-                    revision_info = code_qa.read_revision_info(path)
-                    if not repo.get('url'):
+                    if repo.get('url'):
+                        if marker.is_file() and not marker.is_symlink():
+                            revision = marker.read_text(encoding='utf-8').strip()
+                        ready = bool(re.match(r'^[0-9]+$', revision))
+                        if ready:
+                            revision_info = code_qa.read_revision_info(path)
+                            if str(revision_info.get('revision', '')) != revision:
+                                revision_info = {}
+                        else:
+                            revision = ''
+                    else:
+                        revision = 'local'
                         working_info = code_qa.working_copy_info(
                             path, code_qa.contained_folder(docs_root, settings['codeFolder']),
                             auth_service.svn, str(Path(config['storage']['database']).parent / 'svn-code-info'))
@@ -637,20 +648,28 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                             revision_info = {'date': working_info.get('last_changed_date', ''),
                                              'author': working_info.get('last_changed_author', '')}
             except (ValueError, OSError):
-                ready = False
+                ready, revision = False, ''
             record = sync_state.get(repo['id'], {})
-            record_current = bool(record) and record.get('signature') == code_qa.repository_signature(settings, repo)
-            revision_date = str(revision_info.get('date') or '')
-            if not revision_date and record_current:
-                revision_date = str(record.get('revisionDate') or '')
-            svn_url = urlsplit(repo.get('url') or working_info.get('url') or '')
-            safe_svn_url = urlunsplit((svn_url.scheme, svn_url.netloc.rsplit('@', 1)[-1], svn_url.path, '', ''))
-            repos.append({'id': repo['id'], 'name': repo.get('name') or repo['folder'], 'folder': repo['folder'], 'ready': ready,
-                          'svnUrl': safe_svn_url, 'revisionDate': revision_date,
-                          'revisionAuthor': str(revision_info.get('author') or ''),
-                          'lastUpdated': (record.get('lastSuccessAt', '') if record_current and not record.get('error') else ''),
-                          'revision': revision, 'path': settings['codeFolder'] + '/' + repo['folder'],
-                          'folders': code_qa.directory_choices(docs_root, settings['codeFolder'] + '/' + repo['folder']) if ready else []})
+            record_current = (isinstance(record, dict) and
+                              record.get('signature') == code_qa.repository_signature(settings, repo))
+            matching_revision = ready and record_current and str(record.get('revision', '')) == revision
+            source_url = repo.get('url') or working_info.get('url') or ''
+            try:
+                svn_url = urlsplit(source_url)
+                safe_svn_url = urlunsplit((svn_url.scheme, svn_url.netloc.rsplit('@', 1)[-1], svn_url.path, '', ''))
+            except ValueError:
+                safe_svn_url = ''
+            item = {'id': repo['id'], 'name': repo.get('name') or repo['folder'], 'folder': repo['folder'],
+                    'ready': ready, 'sourceMode': 'svn' if source_url else 'local', 'svnUrl': safe_svn_url,
+                    'revisionDate': str(revision_info.get('date') or (record.get('revisionDate') if matching_revision else '') or ''),
+                    'revisionAuthor': str(revision_info.get('author') or (record.get('revisionAuthor') if matching_revision else '') or ''),
+                    'lastUpdated': str(record.get('lastSuccessAt') or '') if record_current else '',
+                    'revision': revision, 'path': settings['codeFolder'] + '/' + repo['folder']}
+            if not summary:
+                item['folders'] = code_qa.directory_choices(docs_root, item['path']) if ready else []
+            repos.append(item)
+        if summary:
+            return jsonify(ok=True, repositories=repos)
         folders = code_qa.document_choices(docs_root, settings)
 
         return jsonify(ok=True, enabled=bool(settings.get('enabled')), repositories=repos,

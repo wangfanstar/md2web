@@ -19,9 +19,14 @@ const assert = require('node:assert/strict');
     const page = await context.newPage();
     const errors = [];
     let largeFileRequests = 0;
+    let summaryRequests = 0, scopeRequests = 0;
     page.on('request', request => {
       const url = new URL(request.url());
       if (url.pathname === '/__code/file' && url.searchParams.get('path') === 'src/nested/large.c') largeFileRequests++;
+      if (url.pathname === '/__ai/public') {
+        if (url.searchParams.get('summary') === '1') summaryRequests++;
+        else scopeRequests++;
+      }
     });
     page.on('pageerror', error => errors.push(error.message));
     await context.request.post(base + '/__auth/login', {data:{username:'admin',password:'admin'}});
@@ -35,6 +40,22 @@ const assert = require('node:assert/strict');
     assert.match(codeCard, /2026-10-30/);
     assert.match(codeCard, /提交者：alice/);
     assert.match(codeCard, /浏览代码/);
+    await page.evaluate(() => Promise.all([SiteAuth.refresh(), SiteAuth.refresh()]));
+    assert.equal(summaryRequests, 1);
+    assert.equal(scopeRequests, 0);
+    const summaryURL = /\/__ai\/public\?summary=1$/;
+    const unavailable = route => route.fulfill({status:503, json:{ok:false}});
+    await page.route(summaryURL, unavailable);
+    const failedRefresh = page.waitForResponse(response => summaryURL.test(response.url()) && response.status() === 503);
+    await page.evaluate(() => {
+      const now = Date.now;
+      Date.now = () => now() + 31000;
+      try { document.dispatchEvent(new CustomEvent('siteauth:change', {detail:SiteAuth.snapshot()})); }
+      finally { Date.now = now; }
+    });
+    await (await failedRefresh).finished();
+    assert.equal(await page.locator('[data-code-repository-info] .card').first().innerText(), codeCard);
+    await page.unroute(summaryURL, unavailable);
     await page.locator('h1').click();
     await page.keyboard.press('/');
     assert.equal(await page.locator('[data-master-search]').evaluate(input => input === document.activeElement), true);
@@ -298,6 +319,26 @@ const assert = require('node:assert/strict');
     await missingScript.getByRole('button', {name:'刷新页面',exact:true}).waitFor();
     assert.match(await missingScript.locator('#status').innerText(), /脚本未能启动/);
     await missingScript.close();
+    const logoutPage = await context.newPage();
+    let releaseSummary;
+    const summaryHeld = new Promise(resolve => { releaseSummary = resolve; });
+    await logoutPage.route(summaryURL, async route => {
+      await summaryHeld;
+      await route.fulfill({json:{ok:true,repositories:[{id:'late',name:'late'}]}}).catch(() => {});
+    });
+    try {
+      await Promise.all([
+        logoutPage.waitForRequest(request => summaryURL.test(request.url())),
+        logoutPage.goto(base + '/index.html')
+      ]);
+      await logoutPage.evaluate(() => SiteAuth.logout());
+      await logoutPage.locator('[data-code-repository-info]').filter({hasText:'登录服务器后查看代码库信息'}).waitFor();
+    } finally {
+      releaseSummary();
+      await logoutPage.unrouteAll({behavior:'wait'});
+    }
+    assert.equal(await logoutPage.locator('[data-code-repository-info] .card').count(), 0);
+    await logoutPage.close();
     assert.deepEqual(errors, []);
     console.log('PASS: source/home flows, large-file rendering, cached HTML compatibility, API timeout/retry and missing-script recovery.');
   } finally {

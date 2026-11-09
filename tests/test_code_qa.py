@@ -79,6 +79,44 @@ class CodeQaTests(unittest.TestCase):
         self.assertEqual(f.client.get('/code/a/main.py').status_code, 404)
         self.assertEqual(f.client.post('/__ai/chat', json={'path': '/etc'}, headers={'X-CSRF-Token': csrf}).status_code, 400)
 
+    def test_home_summary_skips_scope_scans_and_preserves_last_success(self):
+        f = self.f
+        endpoint = '/__ai/public?summary=1'
+        self.assertEqual(f.client.get(endpoint).status_code, 401)
+        f.login()
+        repo = self.settings['repositories'][0]
+        repo['url'] = 'https://user:private-secret@svn.example.com/a?token=hidden#fragment'
+        (self.path / 'src').mkdir()
+        (self.path / '.md2web-revision-info').write_text(
+            json.dumps({'revision': '11', 'date': 'old-date', 'author': 'old-author'}), encoding='utf-8')
+        state = {'signature': code_qa.repository_signature(code_qa.validate(self.settings), repo),
+                 'revision': '11', 'revisionDate': 'old-date', 'revisionAuthor': 'old-author',
+                 'lastSuccessAt': '2026-10-31T08:00:00', 'error': 'daily update failed'}
+        code_qa.save_sync_state(f.auth, {'a': state})
+        with mock.patch.object(code_qa, 'directory_choices') as scan_code, mock.patch.object(code_qa, 'document_choices') as scan_docs:
+            response = f.client.get(endpoint)
+        scan_code.assert_not_called()
+        scan_docs.assert_not_called()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers['Cache-Control'], 'private, no-store')
+        summary = response.get_json()
+        self.assertNotIn('documentFolders', summary)
+        card = summary['repositories'][0]
+        self.assertEqual(card['svnUrl'], 'https://svn.example.com/a')
+        self.assertEqual(card['revision'], '12')
+        self.assertEqual(card['revisionDate'], '')
+        self.assertEqual(card['revisionAuthor'], '')
+        self.assertEqual(card['lastUpdated'], state['lastSuccessAt'])
+        self.assertNotIn('folders', card)
+        self.assertNotIn('private-secret', response.get_data(as_text=True))
+        full = f.client.get('/__ai/public').get_json()
+        self.assertIn('code/a/src', full['repositories'][0]['folders'])
+        self.assertIn('documentFolders', full)
+        (self.path / '.md2web-revision').write_text('', encoding='utf-8')
+        card = f.client.get(endpoint).get_json()['repositories'][0]
+        self.assertFalse(card['ready'])
+        self.assertEqual(card['revision'], '')
+
     def test_multiple_code_scopes_and_nested_documents_are_validated(self):
         (self.path / 'src').mkdir()
         (self.f.docs / 'md' / 'nested').mkdir()
