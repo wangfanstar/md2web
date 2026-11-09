@@ -110,7 +110,7 @@ test('document actions show on md pages but not on index entry/root views', () =
   assert.equal(api.isDocumentView('md/硬件设计/子目录', { querySelector: () => ({}) }), false);
   const source = fs.readFileSync(path.join(__dirname, '..', 'web', 'workspace.js'), 'utf8');
   assert.match(source, /isDocumentView/);
-  for (const needle of ['data-workspace-source', 'data-workspace-edit', 'data-workspace-download-md']) {
+  for (const needle of ['data-workspace-history', '查看历史记录', 'data-workspace-edit', 'data-workspace-download-md']) {
     assert.ok(source.includes(needle), needle);
   }
 });

@@ -2589,10 +2589,19 @@ class SvnApiTests(ServerTestBase):
 
     def test_log_endpoint_uses_session_credential(self):
         self.login()
-        payload = self.client.get("/__svn/log?path=md/硬件设计/时钟树设计.md&limit=5").get_json()
+        with mock.patch.object(self.svn, 'log', wraps=self.svn.log) as log:
+            payload = self.client.get("/__svn/log", query_string={
+                'path': 'md/硬件设计/时钟树设计', 'limit': 5}).get_json()
+        self.assertEqual(log.call_args[0][0], "https://svn.example.invalid/svn/hardware/trunk/docs/"
+                         "%E6%97%B6%E9%92%9F%E6%A0%91%E8%AE%BE%E8%AE%A1.md")
+        self.assertEqual(log.call_args[1]['username'], 'alice')
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["entries"][0]["revision"], 5)
         self.assertEqual(payload["entries"][0]["message"], "docs")
+        self.assertEqual(self.client.get("/__svn/log?path=md/硬件设计/../other.md").get_json()["code"],
+                         "invalid_path")
+        response = self.client.get("/__md/history?path=md/硬件设计/时钟树设计&mode=local")
+        self.assertEqual(response.get_json()["code"], "not_local")
 
     def test_commit_uses_stored_credential_without_session_memory(self):
         """模拟重启/换标签页：会话内存没有口令时，提交应使用数据库里已保存的最新口令。"""

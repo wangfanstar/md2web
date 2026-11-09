@@ -75,7 +75,9 @@ class LocalHistoryApiTests(unittest.TestCase):
             response = self.client.post('/__md/publish', json={'path': path, 'content': text,
                 'baseHash': documents.text_hash(before)}, headers=headers)
             self.assertEqual(response.status_code, 200, response.get_json())
-        history = self.client.get('/__md/history', query_string={'path': path}).get_json()['history']
+        self.assertEqual(self.client.get('/__svn/log', query_string={'path': path}).get_json()['code'],
+                         'no_binding')
+        history = self.client.get('/__md/history', query_string={'path': path, 'mode': 'local'}).get_json()['history']
         self.assertEqual(len(history['revisions']), 3)
         diff = self.client.get('/__md/diff', query_string={'path': path}).get_json()['diff']
         self.assertIn('-# first', diff['diff'])

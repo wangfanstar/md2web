@@ -1876,7 +1876,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         from . import documents
         path = documents.normalize_md_path(raw)
         binding = server_config.match_repository(config, path)
-        return path if not binding or binding.get('source_mode') == 'local' else None
+        return path if not binding or binding.get('source_mode', 'svn') != 'svn' else None
 
     @app.get('/__md/compare')
     def compare_versions():
@@ -1971,6 +1971,8 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         try:
             from . import local_history
             path = local_history_path(request.args.get('path') or '')
+            if path is None and request.args.get('mode') == 'local':
+                return json_error(400, 'not_local', '该文档关联 SVN，请查看 SVN 日志')
             with auth_service._db_lock:
                 limit = min(200, max(1, int(request.args.get('limit', 50))))
                 cursor = int(request.args['cursor']) if request.args.get('cursor') else None
@@ -2350,9 +2352,12 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         session, rejected = require_session()
         if rejected:
             return rejected
-        path = request.args.get("path") or ""
+        try:
+            path = server_documents.normalize_md_path(request.args.get("path"))
+        except MdSaveError as error:
+            return json_error(error.status, "invalid_path", error.message)
         binding = server_config.match_repository(config, path)
-        if binding is None:
+        if binding is None or binding.get("source_mode", "svn") != "svn":
             return json_error(400, "no_binding", "该文档未关联 SVN")
         try:
             limit = min(50, max(1, int(request.args.get("limit") or 20)))
@@ -2363,7 +2368,10 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         import tempfile as _tempfile
         config_dir = _tempfile.mkdtemp(prefix="md2web-svn-log-")
         try:
-            entries = auth_service.svn.log(binding["url"], limit=limit, config_dir=config_dir,
+            from urllib.parse import quote
+            relative = path[len(binding["mount"]):].lstrip("/")
+            url = binding["url"].rstrip("/") + "/" + quote(relative)
+            entries = auth_service.svn.log(url, limit=limit, config_dir=config_dir,
                                            username=username, password=password)
         except Exception as error:  # SvnError 内部已脱敏
             return json_error(502, "svn_log_failed", str(error))

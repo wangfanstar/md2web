@@ -313,6 +313,13 @@ body.hide-heading-numbers .docs-page-toc-index { display:none; }
 .workspace-number-dialog footer { display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:18px; }
 .workspace-number-dialog button { padding:8px 14px;border:1px solid var(--docs-line);border-radius:6px;background:var(--docs-bg,#fff);font:inherit;color:var(--docs-ink);cursor:pointer; }
 .workspace-number-dialog button[type="submit"] { background:var(--docs-accent);color:#fff; }
+.workspace-history-dialog ul { padding:0;list-style:none; }
+.workspace-history-dialog li { padding:10px 0;border-top:1px solid var(--docs-line);overflow-wrap:anywhere; }
+.workspace-history-dialog li div { margin-top:4px;white-space:pre-wrap; }
+.workspace-history-dialog summary { margin-top:6px;cursor:pointer;color:var(--docs-accent); }
+.workspace-history-dialog pre { max-height:45vh;overflow:auto;padding:10px;background:var(--docs-soft,#f4f6f8);white-space:pre-wrap; }
+.workspace-history-dialog [role="status"]:empty { display:none; }
+.workspace-history-dialog button:disabled { cursor:wait;opacity:.6; }
 @media(max-width:640px){.workspace-number-columns{grid-template-columns:1fr;}.workspace-number-dialog{padding:16px;}}
 
 /* ---------- 图片/图形放大查看 ---------- */

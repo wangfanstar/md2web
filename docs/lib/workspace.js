@@ -455,7 +455,7 @@
     updateDocActions(actions, route);
   }
 
-  // 仅在实际文档页显示「查看源码 / 编辑 MD / 下载 MD」；
+  // 仅在实际文档页显示「查看历史记录 / 编辑 MD / 下载 MD」；
   // 各入口页 index_*.html（含 index_all.html）的首页与文件夹列表不显示。
   function isDocumentView(route, section) {
     if (!route || route.indexOf('md/') !== 0 || route.charAt(route.length - 1) === '/') return false;
@@ -491,11 +491,143 @@
     if (window.MdEditor) window.MdEditor.open();
   }
 
+  function historyRequest(url) {
+    return fetch(url, { cache: 'no-store' }).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (payload) {
+        if (response.ok && payload.ok) return payload;
+        var error = new Error(payload.error || ('HTTP ' + response.status));
+        error.code = payload.code;
+        error.status = response.status;
+        throw error;
+      });
+    });
+  }
+
+  function openDocumentHistory(path) {
+    var auth = window.SiteAuth;
+    if (window.location.protocol === 'file:') {
+      window.alert('离线页面无法读取版本历史，请通过认证服务打开本文档。');
+      return;
+    }
+    auth.refresh().then(function (session) {
+      if (currentRoute() !== path || document.querySelector('.workspace-history-dialog')) return;
+      if (!session.available) {
+        window.alert('当前无法连接认证服务，请通过认证服务打开本文档后重试。');
+        return;
+      }
+      if (!session.authenticated) {
+        auth.openLogin();
+        return;
+      }
+      showDocumentHistory(path, auth);
+    });
+  }
+
+  function showDocumentHistory(path, auth) {
+    var filename = /\.md$/i.test(path) ? path : path + '.md';
+    var query = '?path=' + encodeURIComponent(filename);
+    var dialog = document.createElement('dialog');
+    dialog.className = 'workspace-number-dialog workspace-history-dialog';
+    dialog.setAttribute('aria-labelledby', 'workspace-history-title');
+    dialog.innerHTML = '<h2 id="workspace-history-title">查看历史记录</h2>'
+      + '<p data-history-path></p><p role="status">正在读取历史…</p><ul></ul>'
+      + '<footer><button type="button" data-history-more hidden>加载更多</button>'
+      + '<form method="dialog"><button type="submit" autofocus>关闭</button></form></footer>';
+    var title = dialog.querySelector('h2');
+    var status = dialog.querySelector('[role="status"]');
+    var list = dialog.querySelector('ul');
+    var more = dialog.querySelector('[data-history-more]');
+    dialog.querySelector('[data-history-path]').textContent = filename;
+    dialog.addEventListener('close', function () { dialog.remove(); });
+    document.body.appendChild(dialog);
+    dialog.showModal();
+
+    function showError(error, target) {
+      if (!dialog.open) return;
+      if (error.status === 401) {
+        dialog.close();
+        auth.openLogin();
+        return;
+      }
+      target.textContent = '读取失败：' + error.message;
+    }
+
+    function addEntry(label, message) {
+      var row = document.createElement('li');
+      var heading = document.createElement('strong');
+      heading.textContent = label;
+      row.appendChild(heading);
+      if (message) {
+        var description = document.createElement('div');
+        description.textContent = message;
+        row.appendChild(description);
+      }
+      list.appendChild(row);
+      return row;
+    }
+
+    function entryLabel(version, author, date) {
+      return [version, author, date && date.replace('T', ' ').slice(0, 19)].filter(Boolean).join(' · ');
+    }
+
+    function addLocalVersion(version) {
+      var row = addEntry(entryLabel('版本 ' + version.draftVersion + (version.isHead ? '（当前）' : ''),
+        version.author, version.createdAt));
+      var details = document.createElement('details');
+      details.innerHTML = '<summary>查看该版本 Markdown 原文</summary><pre></pre>';
+      var content = details.querySelector('pre');
+      var loaded = false;
+      var loading = false;
+      details.addEventListener('toggle', function () {
+        if (!details.open || loaded || loading || !dialog.open) return;
+        loading = true;
+        content.textContent = '正在读取版本…';
+        historyRequest('__md/revision' + query + '&id=' + encodeURIComponent(version.id)).then(function (payload) {
+          if (!dialog.open) return;
+          content.textContent = payload.revision.content;
+          loaded = true;
+        }).catch(function (error) {
+          showError(error, content);
+        }).then(function () { loading = false; });
+      });
+      row.appendChild(details);
+    }
+
+    function loadLocal(cursor) {
+      more.disabled = true;
+      status.textContent = '正在读取历史…';
+      var page = cursor ? '&cursor=' + encodeURIComponent(cursor) : '';
+      return historyRequest('__md/history' + query + '&mode=local' + page).then(function (payload) {
+        if (!dialog.open) return;
+        var history = payload.history;
+        title.textContent = 'SQLite 已保存版本';
+        history.revisions.forEach(addLocalVersion);
+        status.textContent = list.children.length ? '' : '暂无已保存版本。';
+        more.hidden = !history.nextCursor;
+        more.onclick = function () { loadLocal(history.nextCursor); };
+      }).catch(function (error) { showError(error, status); }).then(function () { more.disabled = false; });
+    }
+
+    historyRequest('__svn/log' + query + '&limit=50').then(function (payload) {
+      if (!dialog.open) return;
+      title.textContent = 'SVN 提交记录';
+      var entries = payload.entries || [];
+      entries.forEach(function (entry) {
+        addEntry(entryLabel('r' + entry.revision, entry.author, entry.date), entry.message);
+      });
+      status.textContent = entries.length ? '最多显示最近 50 条记录。' : '暂无 SVN 提交记录。';
+    }).catch(function (error) {
+      if (!dialog.open) return;
+      if (error.code === 'no_binding') return loadLocal();
+      showError(error, status);
+    });
+  }
+
   function updateDocActions(actions, route) {
     var section = document.querySelector('.markdown-section');
-    var names = ['source', 'edit', 'download'];
+    var names = ['history', 'edit', 'download'];
     var buttons = {
-      source: actions.querySelector('[data-workspace-source]'),
+      history: actions.querySelector('[data-workspace-history]'),
       edit: actions.querySelector('[data-workspace-edit]'),
       download: actions.querySelector('[data-workspace-download-md]')
     };
@@ -504,13 +636,13 @@
       return;
     }
     var exportButton = actions.querySelector('[data-workspace-export]');
-    if (!buttons.source) {
-      buttons.source = document.createElement('button');
-      buttons.source.type = 'button';
-      buttons.source.setAttribute('data-workspace-source', '');
-      buttons.source.textContent = '查看源码';
-      buttons.source.addEventListener('click', function () { if (window.MdEditor && window.MdEditor.openLocal) window.MdEditor.openLocal(); });
-      actions.insertBefore(buttons.source, exportButton || null);
+    if (!buttons.history) {
+      buttons.history = document.createElement('button');
+      buttons.history.type = 'button';
+      buttons.history.setAttribute('data-workspace-history', '');
+      buttons.history.textContent = '查看历史记录';
+      buttons.history.addEventListener('click', function () { openDocumentHistory(currentRoute()); });
+      actions.insertBefore(buttons.history, exportButton || null);
     }
     if (!buttons.edit) {
       buttons.edit = document.createElement('button');
