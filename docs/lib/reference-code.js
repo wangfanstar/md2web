@@ -57,6 +57,17 @@
   }
 
   var repo = document.getElementById('repo');
+  var syncControl = document.createElement('button');
+  syncControl.type = 'button';
+  syncControl.textContent = '更新 SVN 库';
+  syncControl.title = '按仓库配置的 SVN 地址和版本更新当前代码库';
+  syncControl.hidden = true;
+  document.getElementById('reindex').insertAdjacentElement('beforebegin', syncControl);
+  var syncStatus = document.createElement('span');
+  syncStatus.setAttribute('role', 'status');
+  syncControl.insertAdjacentElement('afterend', syncStatus);
+  var canSync = false;
+  var syncing = false;
   var tree = document.getElementById('tree');
   var source = document.getElementById('source');
   var params = new URLSearchParams(location.search);
@@ -534,7 +545,47 @@
     document.getElementById('search-results').hidden = true;
     return loadTree('', tree);
   }
+  function updateSyncControl() {
+    var option = repo.options[repo.selectedIndex];
+    syncControl.hidden = !canSync || !option || option.dataset.svnSync !== 'true';
+    syncControl.disabled = syncing;
+  }
+  syncControl.onclick = function () {
+    if (syncControl.hidden || syncing) return;
+    var repository = repo.value;
+    var token = generation;
+    syncing = true;
+    updateSyncControl();
+    syncStatus.textContent = '正在更新 SVN 库…';
+    fetch('__admin/code-repositories/' + encodeURIComponent(repository) + '/sync', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'X-CSRF-Token': SiteAuth.csrfToken() }
+    }).then(function (response) {
+      return response.json().then(function (data) {
+        if (!response.ok) throw new Error(data.message || 'SVN 更新失败');
+        return data;
+      });
+    }).then(function (data) {
+      if (token !== generation) return;
+      var path = selectedPath, line = activeLine;
+      var refreshed = changeRepository();
+      token = generation;
+      var request = fileRequest;
+      syncStatus.textContent = '已更新至 SVN r' + data.revision + (data.indexStatus ? ' · ' + data.indexStatus : '');
+      return refreshed.then(function () {
+        if (token !== generation || request !== fileRequest) return;
+        if (path) return openFile(path, line, data.revision);
+      });
+    }).catch(function (error) {
+      if (token === generation) syncStatus.textContent = '更新失败：' + error.message;
+    }).then(function () {
+      syncing = false;
+      updateSyncControl();
+    });
+  };
   repo.onchange = function () {
+    syncStatus.textContent = '';
+    updateSyncControl();
     params = new URLSearchParams();
     history.replaceState(null, '', 'html/reference_code.html?' + new URLSearchParams({ repo: repo.value }));
     fileCache.clear();
@@ -1004,11 +1055,16 @@
       if (token !== generation || !identity) return;
       repo.textContent = '';
       data.repositories.forEach(function (item) {
-        var option = document.createElement('option'); option.value = item.id; option.textContent = item.name; repo.appendChild(option);
+        var option = document.createElement('option');
+        option.value = item.id;
+        option.textContent = item.name;
+        option.dataset.svnSync = String(item.svnSync === true);
+        repo.appendChild(option);
       });
       repo.disabled = !data.repositories.length;
       if (!data.repositories.length) { status('管理员尚未开放代码仓库'); return; }
       if (data.repositories.some(function (item) { return item.id === params.get('repo'); })) repo.value = params.get('repo');
+      updateSyncControl();
       changeRepository();
       if (params.get('path')) openFile(params.get('path'), selectedLine(), params.get('rev'));
     }).catch(function (error) {
@@ -1028,7 +1084,10 @@
     SiteAuth.refresh().then(sessionChanged);
   };
   function sessionChanged(info) {
-    document.getElementById('reindex').hidden = !info.authenticated || (info.user || {}).role !== 'admin';
+    canSync = !!info.authenticated && (info.user || {}).role === 'admin';
+    document.getElementById('reindex').hidden = !canSync;
+    updateSyncControl();
+    if (!canSync) syncStatus.textContent = '';
     document.getElementById('login').hidden = !!info.authenticated;
     if (!info.authenticated) {
       identity = ''; generation++; repo.textContent = ''; repo.disabled = true;

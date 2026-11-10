@@ -221,12 +221,26 @@ class ReferenceCodeTests(unittest.TestCase):
                 '{"revision": "42", "url": "https://svn.example.com/repo", "date": "2026-10-30T07:20:00.000000Z", "author": "alice"}',
                 encoding='utf-8')
             fixture.login()
+            self.assertTrue(fixture.client.get('/__code/repos').get_json()['repositories'][0]['svnSync'])
+            sync_url = '/__admin/code-repositories/repo/sync'
+            self.assertEqual(fixture.client.post(sync_url).status_code, 403)
             public = fixture.client.get('/__ai/public').get_json()['repositories'][0]
             self.assertEqual(public['revision'], '42')
             self.assertEqual(public['revisionDate'], '2026-10-30T07:20:00.000000Z')
             self.assertEqual(public['revisionAuthor'], 'alice')
             tree = fixture.client.get('/__code/tree?repo=repo').get_json()
             self.assertEqual(tree['revisionDate'], '2026-10-30T07:20:00.000000Z')
+            from server import database
+            database.ensure_admin(fixture.conn)
+            admin = fixture.client.post('/__auth/login', json={
+                'username': 'admin', 'password': 'admin', 'mode': 'admin'}).get_json()
+            self.assertEqual(fixture.client.post(sync_url).status_code, 403)
+            with mock.patch('server.code_qa.sync_repository', return_value={
+                    'ok': True, 'revision': '43', 'indexStatus': 'ready'}) as sync:
+                result = fixture.client.post(sync_url, headers={'X-CSRF-Token': admin['csrfToken']})
+                self.assertEqual(result.status_code, 200)
+                self.assertEqual(result.get_json()['revision'], '43')
+                self.assertEqual(sync.call_args[0][-1], 'repo')
         finally:
             fixture.tearDown()
 

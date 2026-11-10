@@ -524,7 +524,10 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         settings = code_qa.validate((config.get('ai') or {}).get('claude'))
         try:
             if action == 'repos':
-                return jsonify(ok=True, repositories=[{'id': r['id'], 'name': r['folder']} for r in settings['repositories']])
+                return jsonify(ok=True, repositories=[
+                    {'id': r['id'], 'name': r['folder'], 'svnSync': bool(r.get('url'))}
+                    for r in settings['repositories']
+                ])
             repo = code_qa.repository(settings, request.args.get('repo'))
             root = code_qa.code_path(docs_root, repo, settings)
             if action == 'index':
