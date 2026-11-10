@@ -241,6 +241,14 @@ class ReferenceCodeTests(unittest.TestCase):
                 self.assertEqual(result.status_code, 200)
                 self.assertEqual(result.get_json()['revision'], '43')
                 self.assertEqual(sync.call_args[0][-1], 'repo')
+            from server.svn import SvnError
+            with mock.patch('server.code_qa.sync_repository', side_effect=SvnError(
+                    'permission_denied', detail='private SVN command output')):
+                result = fixture.client.post(sync_url, headers={'X-CSRF-Token': admin['csrfToken']})
+                self.assertEqual(result.status_code, 502)
+                self.assertEqual(result.get_json()['code'], 'permission_denied')
+                self.assertIn('读取权限', result.get_json()['error'])
+                self.assertNotIn(b'private SVN command output', result.data)
         finally:
             fixture.tearDown()
 

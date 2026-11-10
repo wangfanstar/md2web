@@ -560,9 +560,15 @@
     fetch('__admin/code-repositories/' + encodeURIComponent(repository) + '/sync', {
       method: 'POST', credentials: 'same-origin',
       headers: { 'X-CSRF-Token': SiteAuth.csrfToken() }
+    }).catch(function () {
+      throw new Error('无法连接站点服务，请检查网络或服务器是否在线');
     }).then(function (response) {
-      return response.json().then(function (data) {
-        if (!response.ok) throw new Error(data.message || 'SVN 更新失败');
+      return response.json().catch(function () {
+        throw new Error('服务器未返回有效的同步结果（HTTP ' + response.status + '），请检查认证服务或反向代理');
+      }).then(function (data) {
+        if (!response.ok || !data || data.ok !== true) {
+          throw new Error((data && (data.error || data.message)) || '同步请求异常（HTTP ' + response.status + '）');
+        }
         return data;
       });
     }).then(function (data) {

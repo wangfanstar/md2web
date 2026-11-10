@@ -804,6 +804,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
 
     @app.post('/__admin/code-repositories/<repo_id>/sync')
     def sync_code_repository(repo_id):
+        from .svn import ERROR_MESSAGES, SvnError
         session, rejected = require_admin()
         if rejected:
             return rejected
@@ -820,10 +821,16 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                 return json_error(409, 'config_conflict', '配置已变化，请重新读取配置后再更新')
             settings = code_qa.validate((config.get('ai') or {}).get('claude'))
             return jsonify(**code_qa.sync_repository(auth_service, docs_root, settings, repo_id))
+        except SvnError as error:
+            return json_error(502, error.code, ERROR_MESSAGES.get(error.code, ERROR_MESSAGES['failed']))
         except ValueError as error:
             return json_error(400, 'code_sync_failed', str(error))
-        except Exception:
-            return json_error(502, 'code_sync_failed', '代码库同步失败，请检查 SVN 地址、版本和同步账号')
+        except OSError as error:
+            app.logger.warning('代码库同步写入失败: %s (errno=%s)', type(error).__name__, error.errno)
+            return json_error(500, 'code_sync_storage_failed', '无法写入或替换代码目录，请检查服务账号权限、磁盘空间和文件占用')
+        except Exception as error:
+            app.logger.warning('代码库同步失败: %s', type(error).__name__)
+            return json_error(500, 'code_sync_failed', '代码库同步发生内部错误，请查看认证服务日志')
         finally:
             code_qa.LOCK.release()
 
