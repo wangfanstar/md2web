@@ -298,12 +298,17 @@ def discover_repositories(docs, settings, svn, config_dir):
     return result
 
 
-def validate_snapshot(root):
+def validate_snapshot(root, allow_svn_symlinks=False):
     resolved = root.resolve()
     for directory, dirs, files in os.walk(str(root), followlinks=False):
         for name in dirs + files:
             path = Path(directory, name)
-            if path.is_symlink() or resolved not in path.resolve().parents:
+            is_symlink = path.is_symlink()
+            if is_symlink and allow_svn_symlinks:
+                # SVN versions symbolic links as special files. Leave them to SVN;
+                # do not resolve them or treat junctions as SVN special files.
+                continue
+            if is_symlink or folder_sources.is_directory_link(path) or resolved not in path.resolve().parents:
                 raise ValueError('SVN 代码库包含链接或越界路径，已拒绝发布')
 
 
@@ -383,7 +388,10 @@ def sync_repository(auth_service, docs, settings, repo_id, require_account=False
         checked_working_revision(info, repo)
         if not re.match(r'^https?://', info['url']):
             raise ValueError('网页更新仅支持 HTTP 或 HTTPS 的 SVN 工作副本')
-        validate_snapshot(target)
+        try:
+            validate_snapshot(target, allow_svn_symlinks=True)
+        except ValueError:
+            raise ValueError('SVN 工作副本包含目录联接或越界路径，无法安全原地更新')
         try:
             svn.update(target, revision=repo.get('revision') or 'HEAD', config_dir=config_dir,
                        username=credential[0], password=credential[1], ignore_externals=True)
@@ -395,7 +403,6 @@ def sync_repository(auth_service, docs, settings, repo_id, require_account=False
             raise ValueError('SVN 更新后存在冲突，请在原工作副本中解决冲突后重试')
         info = svn.info(str(target), config_dir)
         revision = checked_working_revision(info, repo)
-        validate_snapshot(target)
         from .reference_code import build_index
         return record_code_sync(auth_service, settings, repo, revision,
                                 info.get('last_changed_date', ''), info.get('last_changed_author', ''),

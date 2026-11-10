@@ -51,6 +51,10 @@ def build_index(root):
     executable = shutil.which('gtags')
     if not executable:
         return 'gtags 未安装，使用文件检索'
+    try:
+        code_qa.validate_snapshot(root)
+    except ValueError:
+        return '代码目录包含链接，已跳过重建 gtags 索引'
     names = ('GTAGS', 'GRTAGS', 'GPATH')
     backups = {}
     for name in names:

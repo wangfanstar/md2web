@@ -372,6 +372,27 @@ class CodeQaTests(unittest.TestCase):
                 code_qa.sync_repository(self.f.auth, self.f.docs, settings, 'a')
         update.assert_not_called()
 
+    def test_working_copy_update_allows_svn_symlinks_but_skips_index_build(self):
+        (self.path / '.svn').mkdir()
+        link = self.path.resolve() / 'source-link'
+        link.touch()
+        settings = code_qa.validate(self.settings)
+        info = {'url': settings['repositories'][0]['url'], 'revision': '12'}
+        is_symlink = type(link).is_symlink
+        with mock.patch.object(type(link), 'is_symlink', lambda path: path == link or is_symlink(path)), \
+                mock.patch.object(self.f.svn, 'info', return_value=info), \
+                mock.patch.object(self.f.svn, 'update', create=True) as update, \
+                mock.patch.object(self.f.svn, 'status', return_value='', create=True), \
+                mock.patch('server.reference_code.shutil.which', return_value='gtags'), \
+                mock.patch('server.reference_code.subprocess.run') as run:
+            result = code_qa.sync_repository(self.f.auth, self.f.docs, settings, 'a')
+            with self.assertRaisesRegex(ValueError, '拒绝发布'):
+                code_qa.validate_snapshot(self.path)
+        self.assertEqual(result['revision'], '12')
+        self.assertIn('跳过重建', result['indexStatus'])
+        update.assert_called_once()
+        run.assert_not_called()
+
     def test_working_copy_conflict_is_not_recorded_as_success(self):
         (self.path / '.svn').mkdir()
         settings = code_qa.validate(self.settings)
