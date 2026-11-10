@@ -504,6 +504,22 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             return rejected
         return json_error(410, 'ai_personal_config_retired', '个人 AI 配置已停用，请使用公共 AI 服务')
 
+    def inspect_code_working_copy(path):
+        from . import code_qa
+        return code_qa.working_copy_info(
+            path, docs_root.resolve(), auth_service.svn,
+            str(Path(config['storage']['database']).parent / 'svn-code-info'))
+
+    def code_sync_available(repo, settings):
+        from . import code_qa
+        if repo.get('url'):
+            return True
+        try:
+            info = inspect_code_working_copy(code_qa.code_path(docs_root, repo, settings))
+        except (OSError, ValueError):
+            return False
+        return info.get('url', '').startswith(('http://', 'https://'))
+
     @app.route('/__code/<action>', methods=['GET', 'POST'])
     def reference_code_api(action):
         session, rejected = require_session()
@@ -525,7 +541,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         try:
             if action == 'repos':
                 return jsonify(ok=True, repositories=[
-                    {'id': r['id'], 'name': r['folder'], 'svnSync': bool(r.get('url'))}
+                    {'id': r['id'], 'name': r['folder'], 'svnSync': code_sync_available(r, settings)}
                     for r in settings['repositories']
                 ])
             repo = code_qa.repository(settings, request.args.get('repo'))
@@ -543,6 +559,10 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             marker = root / '.md2web-revision'
             revision = marker.read_text(encoding='utf-8').strip() if marker.is_file() else 'local'
             revision_info = code_qa.read_revision_info(root)
+            working_info = inspect_code_working_copy(root)
+            if working_info:
+                revision = code_qa.checked_working_revision(working_info, repo)
+                revision_info = {'date': working_info.get('last_changed_date', '')}
             revision_date = str(revision_info.get('date') or '')
             if request.args.get('rev') not in (None, '', revision):
                 return json_error(409, 'revision_changed', '源码版本已更新，请重新打开当前版本')
@@ -627,20 +647,16 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             revision_info = {}
             working_info = {}
             try:
-                revision = code_qa.code_revision(docs_root, repo, settings)
                 path = code_qa.code_path(docs_root, repo, settings)
-                if repo.get('url'):
+                working_info = inspect_code_working_copy(path) if path.is_dir() else {}
+                revision = code_qa.code_revision(docs_root, repo, settings, lambda _: working_info)
+                if working_info:
+                    revision_info = {'date': working_info.get('last_changed_date', ''),
+                                     'author': working_info.get('last_changed_author', '')}
+                elif repo.get('url'):
                     revision_info = code_qa.read_revision_info(path)
                     if str(revision_info.get('revision', '')) != revision:
                         revision_info = {}
-                else:
-                    working_info = code_qa.working_copy_info(
-                        path, code_qa.contained_folder(docs_root, settings['codeFolder']),
-                        auth_service.svn, str(Path(config['storage']['database']).parent / 'svn-code-info'))
-                    if working_info.get('url'):
-                        revision = str(working_info.get('revision') or 'local')
-                        revision_info = {'date': working_info.get('last_changed_date', ''),
-                                         'author': working_info.get('last_changed_author', '')}
             except ValueError as error:
                 reason, revision = str(error), ''
             except OSError:
@@ -752,7 +768,8 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
                     if cancel.is_set():
                         raise ValueError('请求已取消')
                 result = code_qa.answer(docs_root, ai_snapshot, payload, cancel, on_delta=send_delta,
-                                        on_progress=lambda data: emit('progress', data))
+                                        on_progress=lambda data: emit('progress', data),
+                                        inspect_working_copy=inspect_code_working_copy)
                 emit('complete', result)
             except ValueError as error:
                 emit('error', {'message': str(error)})

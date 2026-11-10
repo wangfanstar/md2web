@@ -219,14 +219,18 @@ def code_path(docs, repo, settings=None):
     return contained_folder(docs, (settings or {}).get('codeFolder', 'code') + '/' + repo['folder'])
 
 
-def code_revision(docs, repo, settings):
+def code_revision(docs, repo, settings, inspect_working_copy=None):
     path = code_path(docs, repo, settings)
+    if inspect_working_copy and path.is_dir():
+        info = inspect_working_copy(path)
+        if info:
+            return checked_working_revision(info, repo)
     if not repo.get('url'):
         if not path.is_dir():
             raise ValueError('本地目录不存在，请检查代码根目录和仓库目录配置')
         return 'local'
     if working_copy_marker(path, Path(docs).resolve()) is not None:
-        raise ValueError('目标位于 SVN 工作副本内，请配置独立的同步目录')
+        raise ValueError('无法读取 SVN 工作副本，请检查 SVN 客户端和目录权限')
     marker = path / '.md2web-revision'
     if not marker.is_symlink() and marker.is_file():
         try:
@@ -236,6 +240,16 @@ def code_revision(docs, repo, settings):
         if re.fullmatch(r'[0-9]+', revision):
             return revision
     raise ValueError('缺少有效的 SVN 快照，请管理员在参考代码库中更新 SVN 库')
+
+
+def checked_working_revision(info, repo):
+    url = info.get('url', '').rstrip('/')
+    if repo.get('url') and url != repo['url'].rstrip('/'):
+        raise ValueError('配置的 SVN 地址与工作副本不一致，请按 svn info 的 URL 修正配置')
+    revision = str(info.get('revision', ''))
+    if not url or not re.fullmatch(r'[0-9]+', revision):
+        raise ValueError('无法读取 SVN 工作副本的 URL 或版本')
+    return revision
 
 
 def directory_choices(docs, base, limit=1000):
@@ -334,23 +348,62 @@ def read_revision_info(root):
         return {}
 
 
+def record_code_sync(auth_service, settings, repo, revision, revision_date, revision_author, index_status, now):
+    state = read_sync_state(auth_service)
+    date = now or (datetime.utcnow() + timedelta(hours=8))
+    state[repo['id']] = {'signature': repository_signature(settings, repo), 'lastSuccessDate': date.strftime('%Y-%m-%d'),
+                        'lastAttempt': date.isoformat(), 'lastSuccessAt': date.isoformat(), 'revision': revision,
+                        'revisionDate': revision_date, 'revisionAuthor': revision_author, 'error': ''}
+    save_sync_state(auth_service, state)
+    return {'ok': True, 'revision': revision, 'indexStatus': index_status}
+
+
 def sync_repository(auth_service, docs, settings, repo_id, require_account=False, now=None):
     """Caller owns LOCK. Network operations never hold the SQLite lock."""
     repo = repository(settings, repo_id)
-    if not repo.get('url'):
-        raise ValueError('本地版本目录无需 SVN 更新')
     target = code_path(docs, repo, settings)
-    if working_copy_marker(target, Path(docs).resolve()) is not None:
-        raise ValueError('目标位于 SVN 工作副本中，请改用独立目录保存同步快照')
+    wc_marker = working_copy_marker(target, Path(docs).resolve())
+    if wc_marker is None and not repo.get('url'):
+        raise ValueError('本地版本目录无需 SVN 更新')
+    if wc_marker is not None and (wc_marker.is_symlink() or not target.is_dir()):
+        raise ValueError('SVN 工作副本目录无效，请检查目标路径和 .svn 目录')
+    credential = None
+    with auth_service._db_lock:
+        if repo.get('username'):
+            credential = (repo['username'], repo['password'])
+        elif repo.get('url'):
+            credential = auth_service.repo_sync_credential({'id': 'code-' + repo_id})
+    credential = credential or (None, None)
+    if require_account and not all(credential):
+        raise ValueError('每日 SVN 更新需要代码库账号或默认同步账号')
+    svn = auth_service.svn
+    if wc_marker is not None:
+        config_dir = str(state_path(auth_service).parent / 'svn-code-info')
+        info = svn.info(str(target), config_dir)
+        checked_working_revision(info, repo)
+        if not re.match(r'^https?://', info['url']):
+            raise ValueError('网页更新仅支持 HTTP 或 HTTPS 的 SVN 工作副本')
+        validate_snapshot(target)
+        try:
+            svn.update(target, revision=repo.get('revision') or 'HEAD', config_dir=config_dir,
+                       username=credential[0], password=credential[1], ignore_externals=True)
+        finally:
+            with _WORKING_COPY_CACHE_LOCK:
+                _WORKING_COPY_CACHE.clear()
+        if any(len(line) >= 7 and (line[0] == 'C' or line[1] == 'C' or line[6] == 'C')
+               for line in svn.status(target, config_dir=config_dir).splitlines()):
+            raise ValueError('SVN 更新后存在冲突，请在原工作副本中解决冲突后重试')
+        info = svn.info(str(target), config_dir)
+        revision = checked_working_revision(info, repo)
+        validate_snapshot(target)
+        from .reference_code import build_index
+        return record_code_sync(auth_service, settings, repo, revision,
+                                info.get('last_changed_date', ''), info.get('last_changed_author', ''),
+                                build_index(target), now)
     target.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix='.sync-', dir=str(target.parent)))
     preserve_stage = False
     try:
-        with auth_service._db_lock:
-            credential = ((repo['username'], repo['password']) if repo.get('username') else
-                          auth_service.repo_sync_credential({'id': 'code-' + repo_id})) or (None, None)
-        if require_account and not all(credential):
-            raise ValueError('每日 SVN 更新需要代码库账号或默认同步账号')
         info = auth_service.svn.info(repo['url'], str(stage / 'svn-config'), username=credential[0], password=credential[1])
         requested_revision = str(repo.get('revision', 'HEAD'))
         revision = str(info['revision']) if requested_revision == 'HEAD' else requested_revision
@@ -389,13 +442,7 @@ def sync_repository(auth_service, docs, settings, repo_id, require_account=False
                     preserve_stage = True
                     raise ValueError('发布与回滚失败，旧版本保留在 ' + str(previous))
             raise
-        state = read_sync_state(auth_service)
-        date = now or (datetime.utcnow() + timedelta(hours=8))
-        state[repo_id] = {'signature': repository_signature(settings, repo), 'lastSuccessDate': date.strftime('%Y-%m-%d'),
-                          'lastAttempt': date.isoformat(), 'lastSuccessAt': date.isoformat(), 'revision': revision,
-                          'revisionDate': revision_date, 'revisionAuthor': revision_author, 'error': ''}
-        save_sync_state(auth_service, state)
-        return {'ok': True, 'revision': revision, 'indexStatus': index_status}
+        return record_code_sync(auth_service, settings, repo, revision, revision_date, revision_author, index_status, now)
     finally:
         if not preserve_stage:
             shutil.rmtree(str(stage), ignore_errors=True)
@@ -539,7 +586,7 @@ def collect_stream(process, prompt, timeout, on_delta, on_progress=None):
         diagnostics.join(1)
 
 
-def answer(docs, ai, payload, cancel=None, on_delta=None, on_progress=None):
+def answer(docs, ai, payload, cancel=None, on_delta=None, on_progress=None, inspect_working_copy=None):
     settings = validate(ai.get('claude'))
     if not settings.get('enabled'):
         raise ValueError('管理员尚未启用 Claude 问答')
@@ -569,7 +616,7 @@ def answer(docs, ai, payload, cancel=None, on_delta=None, on_progress=None):
     if repo_id:
         repo = repository(settings, repo_id)
         path = code_path(docs, repo, settings)
-        revision = code_revision(docs, repo, settings)
+        revision = code_revision(docs, repo, settings, inspect_working_copy)
         directories.append(path.relative_to(Path(docs).resolve()).as_posix())
     code_folders = payload.get('codeFolders', [])
     if not isinstance(code_folders, list) or len(code_folders) > 50:
@@ -581,7 +628,7 @@ def answer(docs, ai, payload, cancel=None, on_delta=None, on_progress=None):
             if not any(folder == settings['codeFolder'] + '/' + r['folder'] or folder.startswith(settings['codeFolder'] + '/' + r['folder'] + '/') for r in settings['repositories']):
                 raise ValueError('代码目录不在已配置代码库内')
             owner = next(r for r in settings['repositories'] if folder == settings['codeFolder'] + '/' + r['folder'] or folder.startswith(settings['codeFolder'] + '/' + r['folder'] + '/'))
-            code_revision(docs, owner, settings)
+            code_revision(docs, owner, settings, inspect_working_copy)
             if not contained_folder(docs, folder).is_dir():
                 raise ValueError('代码目录不存在')
             directories.append(folder)

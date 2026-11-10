@@ -116,7 +116,7 @@
       <p class="hint">Linux 服务账号先配置好 claude；md2web 只在 docs 目录调用命令，将所选目录和问题传入并收集回答，无需 API 地址、Key、服务商或模型配置。JSON 中的 <code>enabled</code> 必须为 <code>true</code> 才能问答，<code>executable</code>（默认 <code>claude</code>）与 <code>timeoutSeconds</code> 分别控制命令和超时；也可以在 AI 面板的「⚙ 配置」中用表单修改。代码库、范围及每日 SVN 更新账号同样写入当前 JSON。</p>
       <div class="ai-config-form" data-ai-config-form></div>
       <h2>代码库 SVN 更新</h2>
-      <p class="hint">启用每日更新并为所需 SVN 库勾选自动更新后，服务按北京时间运行。自动更新需要可用的单库或默认同步凭据。地址留空即为本地代码库。同步会用 SVN 导出替换目标目录，请使用独立目录。</p>
+      <p class="hint">每日更新按北京时间运行，需要可用的单库或默认同步凭据。已有 SVN 工作副本会原地更新，其他已配置 SVN 地址的目录会更新导出快照。未填写地址的 SVN 工作副本可在参考代码库页面手动更新；使用默认凭据时请填写与工作副本一致的地址。</p>
       <div class="ai-config-form" data-code-sync-schedule></div>
       <div data-code-sync-rows></div>
       <button type="button" data-add-code-sync>添加代码库</button>

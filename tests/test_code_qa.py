@@ -337,14 +337,51 @@ class CodeQaTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual((self.path / 'new.c').read_text(encoding='utf-8'), 'updated')
 
-    def test_sync_refuses_to_replace_a_working_copy_subdirectory(self):
+    def test_sync_updates_existing_working_copy_in_place(self):
         (self.path.parent / '.svn').mkdir()
         settings = code_qa.validate(self.settings)
-        with mock.patch.object(self.f.svn, 'info') as info:
-            with self.assertRaisesRegex(ValueError, 'SVN 工作副本'):
-                code_qa.sync_repository(self.f.auth, self.f.docs, settings, 'a')
-        info.assert_not_called()
+        repo = settings['repositories'][0]
+        old = {'url': repo['url'], 'revision': '11'}
+        new = dict(old, revision='12')
+        with mock.patch.object(self.f.svn, 'info', side_effect=[old, new]), \
+                mock.patch.object(self.f.svn, 'update', create=True) as update, \
+                mock.patch.object(self.f.svn, 'status', return_value='', create=True), \
+                mock.patch.object(self.f.svn, 'export', create=True) as export:
+            result = code_qa.sync_repository(self.f.auth, self.f.docs, settings, 'a')
+        self.assertEqual(result['revision'], '12')
+        self.assertEqual(update.call_args[0], (self.path.resolve(),))
+        self.assertEqual(update.call_args[1]['revision'], '12')
+        self.assertTrue(update.call_args[1]['ignore_externals'])
+        export.assert_not_called()
         self.assertTrue((self.path / 'main.py').is_file())
+        self.assertTrue((self.path.parent / '.svn').is_dir())
+        self.f.login()
+        with mock.patch.object(self.f.svn, 'info', return_value=new):
+            card = self.f.client.get('/__ai/public').get_json()['repositories'][0]
+            self.assertTrue(card['ready'])
+            self.assertEqual(card['revision'], '12')
+            self.assertEqual(self.f.client.get('/__code/tree?repo=a').get_json()['revision'], '12')
+
+    def test_working_copy_update_rejects_mismatched_url(self):
+        (self.path / '.svn').mkdir()
+        settings = code_qa.validate(self.settings)
+        with mock.patch.object(self.f.svn, 'info', return_value={
+                'url': 'https://svn.example.com/other', 'revision': '11'}), \
+                mock.patch.object(self.f.svn, 'update', create=True) as update:
+            with self.assertRaisesRegex(ValueError, 'SVN 地址与工作副本不一致'):
+                code_qa.sync_repository(self.f.auth, self.f.docs, settings, 'a')
+        update.assert_not_called()
+
+    def test_working_copy_conflict_is_not_recorded_as_success(self):
+        (self.path / '.svn').mkdir()
+        settings = code_qa.validate(self.settings)
+        repo = settings['repositories'][0]
+        with mock.patch.object(self.f.svn, 'info', return_value={'url': repo['url'], 'revision': '11'}), \
+                mock.patch.object(self.f.svn, 'update', create=True), \
+                mock.patch.object(self.f.svn, 'status', return_value='      C main.py', create=True):
+            with self.assertRaisesRegex(ValueError, '更新后存在冲突'):
+                code_qa.sync_repository(self.f.auth, self.f.docs, settings, 'a')
+        self.assertNotIn('a', code_qa.read_sync_state(self.f.auth))
 
     def fake_process(self):
         process = mock.Mock(returncode=0)

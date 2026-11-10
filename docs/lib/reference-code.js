@@ -60,7 +60,7 @@
   var syncControl = document.createElement('button');
   syncControl.type = 'button';
   syncControl.textContent = '更新 SVN 库';
-  syncControl.title = '按仓库配置的 SVN 地址和版本更新当前代码库';
+  syncControl.title = '已有 SVN 工作副本会原地更新；其他已配置的 SVN 库会更新导出快照';
   syncControl.hidden = true;
   document.getElementById('reindex').insertAdjacentElement('beforebegin', syncControl);
   var syncStatus = document.createElement('span');

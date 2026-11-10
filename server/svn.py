@@ -293,11 +293,14 @@ class SvnClient:
         args += creds
         return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
 
-    def update(self, path, revision=None, depth="infinity", config_dir=None, username=None, password=None):
+    def update(self, path, revision=None, depth="infinity", config_dir=None, username=None, password=None,
+               ignore_externals=False):
         creds, stdin_text = self._credential_args(username, password)
         args = ["update", str(path), "--depth", depth, "--non-interactive", "--no-auth-cache", "--accept", "postpone"]
         if revision:
             args += ["--revision", str(revision)]
+        if ignore_externals:
+            args.append("--ignore-externals")
         args += creds
         return self._run_checked(args, stdin_text=stdin_text, config_dir=config_dir)
 
