@@ -2136,10 +2136,10 @@ def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.h
     <a class="skip-link" href="#knowledge">跳到知识库</a>
     <header class="home-header"><a class="home-brand" href="index.html">文档中心</a><nav aria-label="首页导航"><a href="#knowledge">浏览知识库</a><a href="#references">参考资料</a><a href="{HTML_PREFIX}{config_page}">管理设置</a></nav></header>
     <main id="home-main">
-    <section class="home-hero" aria-labelledby="home-title"><p class="home-eyebrow">知识 · 查阅 · 探索</p><h1 id="home-title">{html.escape(title)}</h1>
-    <p class="sub">从一篇文档开始，找到需要的知识与答案。</p></section>
-    <section class="home-search" aria-label="搜索文档"><div class="home-section-caption"><h2>你想查找什么？</h2><a href="{HTML_PREFIX}{all_page}">浏览全部文档 →</a></div>
-    <div class="home-search-tabs" role="group" aria-label="搜索方式"><button type="button" data-home-mode="search" aria-pressed="true">普通搜索</button><button type="button" data-home-mode="ai" aria-pressed="false">AI 搜索</button></div>
+    <section class="home-hero" aria-labelledby="home-title"><p class="home-eyebrow">查文档 · 找资料 · 问 AI</p><h1 id="home-title">{html.escape(title)}</h1>
+    <p class="sub">输入关键词查找文档，或按资料类型直接进入。</p></section>
+    <section class="home-search" aria-label="搜索文档"><div class="home-section-caption"><h2>搜索文档</h2><a href="{HTML_PREFIX}{all_page}">浏览全部文档 →</a></div>
+    <div class="home-search-tabs" role="group" aria-label="搜索方式"><button type="button" data-home-mode="search" aria-pressed="true">关键词搜索</button><button type="button" data-home-mode="ai" aria-pressed="false">向 AI 提问</button></div>
     <div class="tools">
       <input type="search" placeholder="搜索全部仓库（文档名和全文）" data-master-search
              aria-label="搜索全部仓库的文档名和全文">
@@ -2153,12 +2153,15 @@ def generate_master_index_html(repos, title=DEFAULT_TITLE, all_page="index_all.h
       </div>
       <label>模式<select class="master-search-mode" data-master-mode aria-label="搜索模式"><option value="both" selected>文档名和全文</option><option value="file">仅文档名</option><option value="full">仅全文</option></select></label>
     </div>
-    <p class="hint">当前搜索范围：<strong>全部仓库</strong>；默认模式：<strong>文档名和全文</strong>，结果按两类分组显示。</p>
+    <p class="hint">支持文档标题与正文检索；可通过仓库和模式缩小范围。参考文献、网页与代码请使用下方专属入口。</p>
     <div class="results" data-master-results aria-live="polite"></div>
     <div data-home-ai hidden></div></section>
+    <nav class="home-shortcuts" aria-label="按资料类型查找"><a href="{HTML_PREFIX}{all_page}"><strong>文档知识库 →</strong><span>按目录浏览 Markdown 文档</span></a>
+    <a href="html/reference_library.html"><strong>参考文献 →</strong><span>PDF · Word · Excel · PPT</span></a><a href="html/ref/index_html.html"><strong>参考网页 →</strong><span>网页标题与正文搜索</span></a>
+    <a href="html/reference_code.html"><strong>参考代码 →</strong><span>文件、符号与全文检索</span></a></nav>
     <section id="knowledge" class="home-knowledge" aria-labelledby="knowledge-title"><div class="home-section-caption"><div><h2 id="knowledge-title">浏览知识库</h2><p>按主题分组，选择一个知识库开始阅读。</p></div><a href="{HTML_PREFIX}{all_page}">全部文档 →</a></div>
     <div data-master-repositories>{''.join(sections)}</div></section>
-    <section id="code-repositories" class="home-knowledge" aria-labelledby="code-repositories-title"><div class="home-section-caption"><div><h2 id="code-repositories-title">代码库信息</h2><p>当前已同步的代码版本与 SVN 来源</p></div></div><div data-code-repository-info>登录服务器后查看代码库信息；离线页面不保存代码库配置。</div></section>
+    <details id="code-repositories" class="home-knowledge"><summary>代码库同步信息与版本</summary><section aria-labelledby="code-repositories-title"><div class="home-section-caption"><div><h2 id="code-repositories-title">代码库信息</h2><p>当前已同步的代码版本与 SVN 来源</p></div></div><div data-code-repository-info>登录服务器后查看代码库信息；离线页面不保存代码库配置。</div></section></details>
     <section id="references" class="home-references" aria-labelledby="references-title"><div class="home-section-caption"><h2 id="references-title">参考资料</h2></div><div class="home-reference-grid"><div><h3>参考文献</h3>{''.join(reference_cards)}</div><div><h3>参考网页</h3><div class="cards">{''.join(web_cards)}</div></div></div></section>
     </main><footer class="home-footer"><span>随时查阅，专注阅读</span><nav aria-label="帮助与管理"><a href="{HTML_PREFIX}md2web_feedback.html">读者反馈</a><a href="{HTML_PREFIX}md2web_recycle.html?mount=md">回收站</a><a href="{HTML_PREFIX}{config_page}">仓库配置</a><a href="#home-title">返回顶部 ↑</a></nav></footer>
   </div>

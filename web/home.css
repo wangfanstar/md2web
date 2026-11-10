@@ -79,3 +79,19 @@ h1 { margin:0; font-size:clamp(26px,4vw,38px); line-height:1.3; letter-spacing:-
 .home-reference-grid>div:first-child h3 { margin-bottom:0; }
 .home-reference-grid .card { padding:20px; }
 @media(max-width:700px) { .home-hero { padding-top:24px; } .home-search { padding:16px; } .home-search .tools input { flex-basis:100%; } .home-search-tabs { width:100%; } .home-search-tabs button { flex:1; } }
+
+/* Task entrances remain visible before the repository catalogue. */
+.home-shortcuts { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:20px 0 32px; }
+.home-shortcuts a { display:flex; flex-direction:column; padding:18px; background:#fff; border:1px solid #dce5f0; border-radius:12px; text-decoration:none; }
+.home-shortcuts strong { font-size:16px; }
+.home-shortcuts span { margin-top:6px; font-size:13px; color:#60718a; }
+.home-shortcuts a:hover { border-color:#245fbd; background:#f0f5ff; }
+.home-hero { padding:24px 0 18px; }
+.home-eyebrow { margin-bottom:6px; }
+.home-knowledge .card { overflow-wrap:anywhere; }
+.home-knowledge .card strong { margin-bottom:6px; }
+#code-repositories { margin:24px 0; border-top:1px solid #dfe6ef; padding-top:16px; }
+#code-repositories summary { cursor:pointer; color:#596b84; font-weight:600; }
+#code-repositories section { margin-top:18px; }
+@media(max-width:900px) { .home-shortcuts { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:420px) { .home-shortcuts { grid-template-columns:1fr; } .home-section-caption { flex-wrap:wrap; } }
