@@ -219,6 +219,25 @@ def code_path(docs, repo, settings=None):
     return contained_folder(docs, (settings or {}).get('codeFolder', 'code') + '/' + repo['folder'])
 
 
+def code_revision(docs, repo, settings):
+    path = code_path(docs, repo, settings)
+    if not repo.get('url'):
+        if not path.is_dir():
+            raise ValueError('本地目录不存在，请检查代码根目录和仓库目录配置')
+        return 'local'
+    if working_copy_marker(path, Path(docs).resolve()) is not None:
+        raise ValueError('目标位于 SVN 工作副本内，请配置独立的同步目录')
+    marker = path / '.md2web-revision'
+    if not marker.is_symlink() and marker.is_file():
+        try:
+            revision = marker.read_text(encoding='utf-8').strip()
+        except UnicodeError:
+            revision = ''
+        if re.fullmatch(r'[0-9]+', revision):
+            return revision
+    raise ValueError('缺少有效的 SVN 快照，请管理员在参考代码库中更新 SVN 库')
+
+
 def directory_choices(docs, base, limit=1000):
     root = contained_folder(docs, base)
     result = []
@@ -550,15 +569,7 @@ def answer(docs, ai, payload, cancel=None, on_delta=None, on_progress=None):
     if repo_id:
         repo = repository(settings, repo_id)
         path = code_path(docs, repo, settings)
-        if not path.is_dir():
-            raise ValueError('代码库目录不存在，请联系管理员')
-        marker = path / '.md2web-revision'
-        if repo.get('url'):
-            if marker.is_symlink() or not marker.is_file():
-                raise ValueError('代码库尚未拉取，请联系管理员')
-            revision = marker.read_text(encoding='utf-8').strip()
-        else:
-            revision = 'local'
+        revision = code_revision(docs, repo, settings)
         directories.append(path.relative_to(Path(docs).resolve()).as_posix())
     code_folders = payload.get('codeFolders', [])
     if not isinstance(code_folders, list) or len(code_folders) > 50:
@@ -570,9 +581,7 @@ def answer(docs, ai, payload, cancel=None, on_delta=None, on_progress=None):
             if not any(folder == settings['codeFolder'] + '/' + r['folder'] or folder.startswith(settings['codeFolder'] + '/' + r['folder'] + '/') for r in settings['repositories']):
                 raise ValueError('代码目录不在已配置代码库内')
             owner = next(r for r in settings['repositories'] if folder == settings['codeFolder'] + '/' + r['folder'] or folder.startswith(settings['codeFolder'] + '/' + r['folder'] + '/'))
-            marker = code_path(docs, owner, settings) / '.md2web-revision'
-            if owner.get('url') and (marker.is_symlink() or not marker.is_file()):
-                raise ValueError('代码库尚未拉取，请联系管理员')
+            code_revision(docs, owner, settings)
             if not contained_folder(docs, folder).is_dir():
                 raise ValueError('代码目录不存在')
             directories.append(folder)

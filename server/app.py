@@ -623,35 +623,29 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         sync_state = code_qa.read_sync_state(auth_service)
         repos = []
         for repo in settings.get('repositories', []):
-            ready, revision = False, ''
+            revision, reason = '', ''
             revision_info = {}
             working_info = {}
             try:
+                revision = code_qa.code_revision(docs_root, repo, settings)
                 path = code_qa.code_path(docs_root, repo, settings)
-                marker = path / '.md2web-revision'
-                ready = path.is_dir()
-                if ready:
-                    if repo.get('url'):
-                        if marker.is_file() and not marker.is_symlink():
-                            revision = marker.read_text(encoding='utf-8').strip()
-                        ready = bool(re.match(r'^[0-9]+$', revision))
-                        if ready:
-                            revision_info = code_qa.read_revision_info(path)
-                            if str(revision_info.get('revision', '')) != revision:
-                                revision_info = {}
-                        else:
-                            revision = ''
-                    else:
-                        revision = 'local'
-                        working_info = code_qa.working_copy_info(
-                            path, code_qa.contained_folder(docs_root, settings['codeFolder']),
-                            auth_service.svn, str(Path(config['storage']['database']).parent / 'svn-code-info'))
-                        if working_info.get('url'):
-                            revision = str(working_info.get('revision') or 'local')
-                            revision_info = {'date': working_info.get('last_changed_date', ''),
-                                             'author': working_info.get('last_changed_author', '')}
-            except (ValueError, OSError):
-                ready, revision = False, ''
+                if repo.get('url'):
+                    revision_info = code_qa.read_revision_info(path)
+                    if str(revision_info.get('revision', '')) != revision:
+                        revision_info = {}
+                else:
+                    working_info = code_qa.working_copy_info(
+                        path, code_qa.contained_folder(docs_root, settings['codeFolder']),
+                        auth_service.svn, str(Path(config['storage']['database']).parent / 'svn-code-info'))
+                    if working_info.get('url'):
+                        revision = str(working_info.get('revision') or 'local')
+                        revision_info = {'date': working_info.get('last_changed_date', ''),
+                                         'author': working_info.get('last_changed_author', '')}
+            except ValueError as error:
+                reason, revision = str(error), ''
+            except OSError:
+                reason, revision = '代码目录无法读取，请检查服务账号权限', ''
+            ready = bool(revision)
             record = sync_state.get(repo['id'], {})
             record_current = (isinstance(record, dict) and
                               record.get('signature') == code_qa.repository_signature(settings, repo))
@@ -663,7 +657,7 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             except ValueError:
                 safe_svn_url = ''
             item = {'id': repo['id'], 'name': repo.get('name') or repo['folder'], 'folder': repo['folder'],
-                    'ready': ready, 'sourceMode': 'svn' if source_url else 'local', 'svnUrl': safe_svn_url,
+                    'ready': ready, 'reason': reason, 'sourceMode': 'svn' if source_url else 'local', 'svnUrl': safe_svn_url,
                     'revisionDate': str(revision_info.get('date') or (record.get('revisionDate') if matching_revision else '') or ''),
                     'revisionAuthor': str(revision_info.get('author') or (record.get('revisionAuthor') if matching_revision else '') or ''),
                     'lastUpdated': str(record.get('lastSuccessAt') or '') if record_current else '',

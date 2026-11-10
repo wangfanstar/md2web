@@ -116,6 +116,17 @@ class CodeQaTests(unittest.TestCase):
         card = f.client.get(endpoint).get_json()['repositories'][0]
         self.assertFalse(card['ready'])
         self.assertEqual(card['revision'], '')
+        self.assertIn('更新 SVN 库', card['reason'])
+        with self.assertRaisesRegex(ValueError, '缺少有效的 SVN 快照'):
+            code_qa.answer(f.docs, f.config['ai'], {
+                'messages': [{'role': 'user', 'content': 'explain'}],
+                'codeFolders': ['code/a/src'],
+            })
+        (self.path / '.md2web-revision').write_text('13', encoding='utf-8')
+        refreshed = f.client.get('/__ai/public').get_json()['repositories'][0]
+        self.assertTrue(refreshed['ready'])
+        self.assertEqual(refreshed['revision'], '13')
+        self.assertIn('code/a/src', refreshed['folders'])
 
     def test_multiple_code_scopes_and_nested_documents_are_validated(self):
         (self.path / 'src').mkdir()

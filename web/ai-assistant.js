@@ -697,7 +697,10 @@
       var cancelButton=state.overlay.querySelector('[data-ai-cancel]');if(cancelButton)cancelButton.onclick=function(){if(state.jobId)fetch('__ai/jobs/'+state.jobId+'/cancel',{method:'POST',credentials:'same-origin',headers:{'X-CSRF-Token':SiteAuth.csrfToken()}});};
       var configButton=state.overlay.querySelector('[data-ai-action="config"]');if(configButton)configButton.hidden=!isAdmin();
       if(location.protocol==='file:' || !accountIdentity())return;
-      fetch('__ai/public',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(data){
+      fetch('__ai/public',{credentials:'same-origin',cache:'no-store'}).then(function(r){
+        if (!r.ok) throw new Error('无法读取代码库状态');
+        return r.json();
+      }).then(function(data){
         if(!select)return;select.textContent='';
         var modelSelect=state.overlay.querySelector('[data-ai-model]'),chosenModel=modelSelect.value;
         modelSelect.textContent='';var defaultModel=document.createElement('option');defaultModel.value='';defaultModel.textContent='服务默认';modelSelect.appendChild(defaultModel);
@@ -706,19 +709,21 @@
 
         var chosen={};Array.prototype.forEach.call(state.overlay.querySelectorAll('[data-document-folder]'),function(input){if(input.checked)chosen[input.value]=true;});
         var empty=document.createElement('option');empty.value='';empty.textContent='不使用代码库（默认）';select.appendChild(empty);
-        (data.repositories||[]).forEach(function(repo){var option=document.createElement('option');option.value=repo.id;option.textContent=repositoryLabel(repo)+(repo.ready?' @ '+repo.revision:'（目录未就绪）');select.appendChild(option);});select.value='';
+        (data.repositories||[]).forEach(function(repo){var option=document.createElement('option');option.value=repo.id;option.disabled=!repo.ready;option.textContent=repositoryLabel(repo)+(repo.ready?' @ '+repo.revision:'（'+(repo.reason||'目录未就绪')+'）');select.appendChild(option);});select.value='';
         var codes=state.overlay.querySelector('[data-code-scopes]');
         var previous={};codes.querySelectorAll('input:checked').forEach(function(e){previous[e.value]=true;});
         var importedRepo = new URLSearchParams(location.search).get('aiRepo');
         if (importedRepo && !state.importedRepoApplied) {
           (data.repositories || []).forEach(function (repo) {
-            if (repo.id === importedRepo && repo.ready) previous[repo.path] = true;
+            if (repo.id === importedRepo && repo.ready) {
+              previous[repo.path] = true;
+              state.importedRepoApplied = true;
+            }
           });
-          state.importedRepoApplied = true;
         }
         codes.textContent='';var codeLegend=document.createElement('legend');codeLegend.textContent='代码仓库（可多选到子目录）';codes.appendChild(codeLegend);addScopeActions(codes);
         (data.repositories||[]).forEach(function(repo){
-          renderScopeTree(codes,[{path:repo.path,name:repositoryLabel(repo)+(repo.ready?'':'（目录未就绪）'),available:repo.ready}].concat((repo.folders||[]).map(function(path){return {path:path,available:repo.ready};})),previous,'data-code-folder');
+          renderScopeTree(codes,[{path:repo.path,name:repositoryLabel(repo),available:repo.ready,reason:repo.ready?'':(repo.reason||'目录未就绪')}].concat((repo.folders||[]).map(function(path){return {path:path,available:repo.ready};})),previous,'data-code-folder');
         });
         if(!(data.repositories||[]).length){var emptyCode=document.createElement('p');emptyCode.className='ai-scope-empty';emptyCode.textContent='尚未配置代码仓库，请在仓库管理中识别并加入。';codes.appendChild(emptyCode);}
         var scopes=state.overlay.querySelector('[data-document-scopes]');scopes.textContent='';
