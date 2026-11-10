@@ -18,25 +18,28 @@ _WORKING_COPY_CACHE = {}
 _WORKING_COPY_CACHE_LOCK = threading.Lock()
 
 
-def working_copy_info(root, boundary, svn, config_dir):
-    """Read local SVN metadata, including when the configured folder is below .svn."""
+def working_copy_marker(root, boundary):
     current = root
-    signature = None
     while current == boundary or boundary in current.parents:
         marker = current / '.svn'
-        if marker.is_dir() and not marker.is_symlink():
-            database = marker / 'wc.db'
-            if not database.is_file():
-                database = marker / 'entries'
-            try:
-                info = database.stat()
-                signature = (str(marker), info.st_mtime, info.st_size)
-            except OSError:
-                signature = (str(marker),)
-            break
+        if marker.is_dir() or marker.is_symlink():
+            return marker
         current = current.parent
-    if signature is None:
+
+
+def working_copy_info(root, boundary, svn, config_dir):
+    """Read local SVN metadata, including when the configured folder is below .svn."""
+    marker = working_copy_marker(root, boundary)
+    if marker is None or marker.is_symlink():
         return {}
+    database = marker / 'wc.db'
+    if not database.is_file():
+        database = marker / 'entries'
+    try:
+        info = database.stat()
+        signature = (str(marker), info.st_mtime, info.st_size)
+    except OSError:
+        signature = (str(marker),)
     key = (str(root), signature)
     now = time.monotonic()
     with _WORKING_COPY_CACHE_LOCK:
@@ -318,6 +321,8 @@ def sync_repository(auth_service, docs, settings, repo_id, require_account=False
     if not repo.get('url'):
         raise ValueError('本地版本目录无需 SVN 更新')
     target = code_path(docs, repo, settings)
+    if working_copy_marker(target, Path(docs).resolve()) is not None:
+        raise ValueError('目标位于 SVN 工作副本中，请改用独立目录保存同步快照')
     target.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix='.sync-', dir=str(target.parent)))
     preserve_stage = False

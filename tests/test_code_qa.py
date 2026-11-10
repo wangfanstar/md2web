@@ -314,10 +314,26 @@ class CodeQaTests(unittest.TestCase):
         self.assertEqual(revision_info['author'], 'alice')
         public = f.client.get('/__ai/public').get_json()['repositories'][0]
         self.assertEqual(public['revisionDate'], '2026-10-30T07:20:00.000000Z')
+        with mock.patch.object(code_qa, 'discover_repositories') as discover:
+            status = f.client.get('/__admin/code-repositories?summary=1').get_json()
+        discover.assert_not_called()
+        self.assertTrue(status['state']['a']['lastSuccessAt'])
+        conflict = f.client.post('/__admin/code-repositories/a/sync', json={'expectedConfigVersion': 'old'}, headers=headers)
+        self.assertEqual(conflict.status_code, 409)
+        self.assertEqual(conflict.get_json()['code'], 'config_conflict')
         with mock.patch.object(f.svn, 'info', side_effect=ValueError('failed')):
             response = f.client.post('/__admin/code-repositories/a/sync', json={}, headers=headers)
         self.assertEqual(response.status_code, 400)
         self.assertEqual((self.path / 'new.c').read_text(encoding='utf-8'), 'updated')
+
+    def test_sync_refuses_to_replace_a_working_copy_subdirectory(self):
+        (self.path.parent / '.svn').mkdir()
+        settings = code_qa.validate(self.settings)
+        with mock.patch.object(self.f.svn, 'info') as info:
+            with self.assertRaisesRegex(ValueError, 'SVN 工作副本'):
+                code_qa.sync_repository(self.f.auth, self.f.docs, settings, 'a')
+        info.assert_not_called()
+        self.assertTrue((self.path / 'main.py').is_file())
 
     def fake_process(self):
         process = mock.Mock(returncode=0)
@@ -382,6 +398,12 @@ class CodeQaTests(unittest.TestCase):
             target.mkdir()
             (target / 'main.c').write_text('version12', encoding='utf-8')
         with mock.patch.object(self.f.svn, 'info', return_value={'revision': '99'}), mock.patch.object(self.f.svn, 'export', side_effect=export, create=True) as exported:
+            self.settings['dailySyncEnabled'] = False
+            self.assertEqual(code_qa.sync_daily(self.f.auth, self.f.docs, now=now), [])
+            self.settings['dailySyncEnabled'] = True
+            self.settings['repositories'][0]['dailySync'] = False
+            self.assertEqual(code_qa.sync_daily(self.f.auth, self.f.docs, now=now), [])
+            self.settings['repositories'][0]['dailySync'] = True
             self.assertEqual(code_qa.sync_daily(self.f.auth, self.f.docs, now=now - timedelta(hours=2)), [])
             self.assertTrue(code_qa.sync_daily(self.f.auth, self.f.docs, now=now)[0]['ok'])
             self.assertEqual(code_qa.sync_daily(self.f.auth, self.f.docs, now=now + timedelta(hours=1)), [])

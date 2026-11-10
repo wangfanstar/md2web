@@ -36,7 +36,7 @@
     }
   }
 
-  function api(path, options) {
+  function api(path, options, keepConfig) {
     var requestIdentity=state.authFingerprint;
     var headers = Object.assign({ 'Content-Type': 'application/json' }, (options && options.headers) || {});
     if (state.csrf) {
@@ -51,7 +51,7 @@
           if((response.status===401||response.status===403)&&path.indexOf('__auth/')!==0&&window.SiteAuth)window.SiteAuth.refresh();
           throw error;
         }
-        if (options && /POST|PUT|DELETE/.test(options.method || '') && path.indexOf('__admin/') === 0) {
+        if (!keepConfig && options && /POST|PUT|DELETE/.test(options.method || '') && path.indexOf('__admin/') === 0) {
           return fetch('__config', {cache:'no-store', headers:headers}).then(function(r){return r.ok?r.json():null;}).then(function(fresh){
             if(fresh&&fresh.config&&state.editable&&state.authFingerprint===requestIdentity){state.config=fresh.config;if(state.draft){state.draft.base.authorization=fresh.config.authorization;state.draft.base.credentials=fresh.config.credentials;state.draft.base.expectedConfigVersion=fresh.config.expectedConfigVersion;captureDraft();}}
             return payload;
@@ -302,13 +302,158 @@
     var panel = query('[data-ai-panel]');
     if (!panel) return;
     panel.hidden = !state.editable;
-    var settings=(state.config.ai||{}).claude||{},form=query('[data-ai-config-form]');
-    if(form){form.textContent='';
-      [['enabled','启用 AI 问答','checkbox',false],['executable','Claude 命令','text','claude'],['timeoutSeconds','回答超时（秒）','number',120],['models','可选模型（逗号分隔，须为服务支持的模型）','text',['sonnet','opus','haiku']],['codeFolder','代码根目录','text','code'],['dailySyncEnabled','启用每日 SVN 更新','checkbox',true],['dailySyncTime','每日更新时间','time','03:00']].forEach(function(field){var label=document.createElement('label'),input=document.createElement('input');label.textContent=field[1];input.type=field[2];input.setAttribute('data-ai-form',field[0]);var value=settings[field[0]]===undefined?field[3]:settings[field[0]];if(input.type==='checkbox')input.checked=value;else input.value=Array.isArray(value)?value.join(', '):value;if(field[0]==='timeoutSeconds'){input.min=5;input.max=600;}label.appendChild(input);form.appendChild(label);});
-      var note=document.createElement('p');note.className='hint';note.textContent='已配置 '+(settings.repositories||[]).length+' 个代码仓库。可在仓库管理中识别添加；修改后点击顶部「保存全部修改」。';form.appendChild(note);
+    var settings = (state.config.ai || {}).claude || {};
+    var form = query('[data-ai-config-form]');
+    var schedule = query('[data-code-sync-schedule]');
+    if (schedule) schedule.textContent = '';
+    if (form) {
+      form.textContent = '';
+      [
+        ['enabled', '启用 AI 问答', 'checkbox', false], ['executable', 'Claude 命令', 'text', 'claude'],
+        ['timeoutSeconds', '回答超时（秒）', 'number', 120],
+        ['models', '可选模型（逗号分隔，须为服务支持的模型）', 'text', ['sonnet', 'opus', 'haiku']],
+        ['codeFolder', '代码根目录', 'text', 'code'],
+        ['dailySyncEnabled', '启用每日 SVN 更新', 'checkbox', true],
+        ['dailySyncTime', '每日更新时间（北京时间）', 'time', '03:00']
+      ].forEach(function (field) {
+        var label = document.createElement('label');
+        var input = document.createElement('input');
+        var key = field[0];
+        var value = settings[key] === undefined ? field[3] : settings[key];
+        label.textContent = field[1];
+        input.type = field[2];
+        input.dataset.aiForm = key;
+        if (input.type === 'checkbox') input.checked = value;
+        else input.value = Array.isArray(value) ? value.join(', ') : value;
+        if (key === 'timeoutSeconds') { input.min = 5; input.max = 600; }
+        label.appendChild(input);
+        (schedule && key.indexOf('dailySync') === 0 ? schedule : form).appendChild(label);
+      });
     }
-    var json=query('[data-public-ai-json]');if(json)json.value=JSON.stringify({claude:(state.config.ai || {}).claude || {}},null,2);
+    renderCodeSyncRows(settings);
+    var json = query('[data-public-ai-json]');
+    if (json) json.value = JSON.stringify({claude: settings}, null, 2);
   }
+
+  function codeSyncRepo(row) {
+    var repo = {id: row.dataset.codeSyncRow};
+    all('[data-code-field]', row).forEach(function (input) {
+      repo[input.dataset.codeField] = input.type === 'checkbox' ? input.checked :
+        input.type === 'password' ? input.value : input.value.trim();
+    });
+    repo.revision = repo.revision || 'HEAD';
+    return repo;
+  }
+
+  function renderCodeSyncRows(settings) {
+    var host = query('[data-code-sync-rows]');
+    if (!host) return;
+    host.textContent = '';
+    if (!state.editable) return;
+    var rows = (settings.repositories || []).map(function (repo) {
+      var row = document.createElement('fieldset');
+      row.className = 'ai-config-form';
+      row.dataset.codeSyncRow = repo.id;
+      var legend = document.createElement('legend');
+      legend.textContent = repo.name || repo.folder || repo.id;
+      row.appendChild(legend);
+      [
+        ['name', '名称', 'text'], ['folder', '代码目录（相对代码根）', 'text'],
+        ['url', 'SVN 地址', 'url'], ['revision', '版本（HEAD 或数字）', 'text'],
+        ['username', '同步账号（可沿用默认凭据）', 'text'], ['password', '同步密码', 'password'],
+        ['dailySync', '此库参与每日自动更新', 'checkbox']
+      ].forEach(function (field) {
+        var label = document.createElement('label');
+        var input = document.createElement('input');
+        label.textContent = field[1];
+        input.type = field[2];
+        input.dataset.codeField = field[0];
+        if (input.type === 'checkbox') input.checked = repo.dailySync !== false;
+        else input.value = repo[field[0]] || (field[0] === 'revision' ? 'HEAD' : '');
+        if (input.type === 'password') input.autocomplete = 'new-password';
+        label.appendChild(input);
+        row.appendChild(label);
+      });
+      var actions = document.createElement('div');
+      actions.className = 'row';
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = '立即更新 SVN';
+      var status = document.createElement('p');
+      status.setAttribute('role', 'status');
+      var remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = '移除配置（保留目录）';
+      remove.onclick = function () {
+        row.remove();
+        if (!host.children.length) host.textContent = '尚未配置代码库。';
+        captureDraft();
+      };
+      actions.append(button, remove, status);
+      row.appendChild(actions);
+      var url = query('[data-code-field="url"]', row);
+      function updateControls() {
+        var hasUrl = !!url.value.trim();
+        query('[data-code-field="dailySync"]', row).disabled = !hasUrl;
+        button.disabled = !hasUrl || !!row.dataset.syncing;
+      }
+      url.addEventListener('input', updateControls);
+      updateControls();
+      button.addEventListener('click', function () {
+        var current = codeSyncRepo(row);
+        var baseline = state.savedCodeSettings || {};
+        var saved = (baseline.repositories || []).find(function (item) { return item.id === current.id; });
+        if (!saved || !saved.url || (baseline.codeFolder || 'code') !== query('[data-ai-form="codeFolder"]').value.trim() ||
+            ['folder', 'url', 'revision', 'username', 'password'].some(function (key) {
+              return current[key] !== (saved[key] || (key === 'revision' ? 'HEAD' : ''));
+            })) {
+          status.textContent = '请先保存代码库配置，再手动更新。';
+          return;
+        }
+        row.dataset.syncing = '1';
+        updateControls();
+        status.textContent = '正在从 SVN 更新…';
+        api('__admin/code-repositories/' + encodeURIComponent(current.id) + '/sync', {
+          method: 'POST', body: JSON.stringify({expectedConfigVersion: state.savedCodeVersion})
+        }, true).then(function (result) {
+          status.textContent = '更新成功 · r' + result.revision;
+        }).catch(function (error) {
+          if (!error.stale) status.textContent = '更新失败：' + error.message;
+        }).then(function () {
+          delete row.dataset.syncing;
+          updateControls();
+        });
+      });
+      host.appendChild(row);
+      return {repo:repo, row:row, status:status};
+    });
+    if (!rows.length) host.textContent = '尚未配置代码库。';
+    if (rows.some(function (item) { return item.repo.url; })) {
+      api('__admin/code-repositories?summary=1').then(function (data) {
+        rows.forEach(function (item) {
+          if (!item.row.isConnected || item.status.textContent) return;
+          var record = (data.state || {})[item.repo.id];
+          if (!record) return;
+          item.status.textContent = [
+            record.lastSuccessAt && '上次成功：' + record.lastSuccessAt.slice(0, 16).replace('T', ' ') + '（北京时间）',
+            record.error
+          ].filter(Boolean).join(' · ');
+        });
+      }).catch(function () { /* 状态读取失败时仍可保存配置或手动更新。 */ });
+    }
+  }
+
+  document.addEventListener('click', function (event) {
+    if (!event.target.matches || !event.target.matches('[data-add-code-sync]') || !state.editable) return;
+    state.config.ai = serializeForm().ai;
+    var settings = state.config.ai.claude;
+    settings.repositories = settings.repositories || [];
+    var number = 1;
+    while (settings.repositories.some(function (repo) { return repo.id === 'code-' + number; })) number += 1;
+    settings.repositories.push({id:'code-' + number, folder:'code-' + number, revision:'HEAD', dailySync:true});
+    renderAiPanel();
+    captureDraft();
+  });
 
   document.addEventListener('click',function(event){
     if(!event.target.matches||!event.target.matches('[data-public-ai-read], [data-public-ai-apply]')||!state.editable)return;
@@ -317,6 +462,10 @@
       if(event.target.matches('[data-public-ai-read]')){box.value=JSON.stringify({claude:(serializeForm().ai || {}).claude || {}},null,2);return;}
       var value=JSON.parse(box.value),allowed=['claude'];
       if(!value||Array.isArray(value)||typeof value!=='object'||Object.keys(value).some(function(key){return allowed.indexOf(key)<0;}))throw new Error('JSON 必须为 AI 配置对象，不能含未知字段');
+      if (value.claude && value.claude.repositories !== undefined &&
+          (!Array.isArray(value.claude.repositories) || value.claude.repositories.some(function (repo) {
+            return !repo || typeof repo !== 'object' || !repo.id;
+          }))) throw new Error('repositories 必须为带 ID 的代码库列表');
       state.config.ai={claude:value.claude||{}};renderAiPanel();
       captureDraft();
       setStatus('公共 AI JSON 已应用，请点击「保存全部修改」写盘。');
@@ -1186,6 +1335,8 @@
       }
       return api('__config').then(function (configPayload) { current();
         state.config = configPayload.config || {};
+        state.savedCodeSettings = (state.config.ai || {}).claude;
+        state.savedCodeVersion = state.config.expectedConfigVersion;
         installManagement();
         renderPolicyFields();
         state.editable = true;
@@ -1259,6 +1410,12 @@
     if (authUrl) payload.auth = Object.assign({}, payload.auth || {}, { url: authUrl.value.trim() });
     payload.ai = { claude: (payload.ai || {}).claude || {} };
     all('[data-ai-form]').forEach(function(input){var key=input.getAttribute('data-ai-form');payload.ai.claude[key]=key==='models'?input.value.split(/[,，\n]/).map(function(v){return v.trim();}).filter(Boolean):input.type==='checkbox'?input.checked:input.type==='number'?Number(input.value):input.value.trim();});
+    if (query('[data-code-sync-rows]') && state.editable) {
+      payload.ai.claude.repositories = all('[data-code-sync-row]').map(codeSyncRepo);
+      if (payload.ai.claude.defaultRepository && !payload.ai.claude.repositories.some(function (repo) {
+        return repo.id === payload.ai.claude.defaultRepository;
+      })) payload.ai.claude.defaultRepository = '';
+    }
     payload.folderGroups = collectFolderGroups();
     payload.repositories = repos.map(function (repo) {
       var item = {
@@ -1330,6 +1487,8 @@
     layout('saving',true);
     return api('__config', { method: 'PUT', body: JSON.stringify(payload) }).then(function (result) {
       state.config = result.config || state.config;
+      state.savedCodeSettings = (state.config.ai || {}).claude;
+      state.savedCodeVersion = state.config.expectedConfigVersion;
       state.dirty = false;
       state.rebuilt = result.rebuilt;
       loadProfiles().catch(function (error) { setStatus(error.message, true); });
@@ -1589,7 +1748,7 @@
       fetch('__admin/code-repositories',{credentials:'same-origin'}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.message||d.error);return d;});}).then(function(data){
         output.textContent='识别结果按本地目录导入 AI 范围；SVN 地址供核对。导入不会拉取或覆盖代码，请保存配置后使用。';
         (data.discovered||[]).forEach(function(repo){var row=document.createElement('p');row.textContent=repo.folder+' · '+(repo.url||'本地目录')+(repo.error?' · '+repo.error:'');var button=document.createElement('button');button.textContent=repo.configured?'已配置':'加入 AI 代码范围';button.disabled=repo.configured;button.onclick=function(){
-          state.config.ai=state.config.ai||{};var claude=state.config.ai.claude=state.config.ai.claude||{};claude.repositories=claude.repositories||[];
+          state.config.ai=serializeForm().ai;var claude=state.config.ai.claude;claude.repositories=claude.repositories||[];
           if(claude.repositories.some(function(r){return r.folder===repo.folder||r.folder.indexOf(repo.folder+'/')===0||repo.folder.indexOf(r.folder+'/')===0;})){button.textContent='已存在包含关系的代码库';button.disabled=true;return;}
           var id='code-'+Date.now();claude.repositories.push({id:id,name:repo.name,folder:repo.folder,url:'',revision:'HEAD',dailySync:false});
           renderAiPanel();captureDraft();button.disabled=true;button.textContent='已加入，请保存配置';
@@ -1782,7 +1941,7 @@
       return;
     }
     state.authFingerprint = next;
-    if(!info.authenticated||!info.user||info.user.role!=='admin'){state.editable=false;state.draft=null;state.config=null;state.credentials={};state.defaultCredential={};state.dirty=false;state.jsonDirty=false;layout('clearPrivate');layout('refresh');}
+    if(!info.authenticated||!info.user||info.user.role!=='admin'){state.editable=false;state.draft=null;state.config=null;state.savedCodeSettings=null;state.savedCodeVersion='';state.credentials={};state.defaultCredential={};state.dirty=false;state.jsonDirty=false;renderCodeSyncRows({});layout('clearPrivate');layout('refresh');}
     loadConfig();
   });
 

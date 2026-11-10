@@ -682,7 +682,15 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
             return rejected
         from . import code_qa
         settings = code_qa.validate((config.get('ai') or {}).get('claude'))
-        return jsonify(ok=True, state=code_qa.read_sync_state(auth_service),
+        state = code_qa.read_sync_state(auth_service)
+        if request.args.get('summary') == '1':
+            current = {}
+            for repo in settings['repositories']:
+                record = state.get(repo['id'])
+                if isinstance(record, dict) and record.get('signature') == code_qa.repository_signature(settings, repo):
+                    current[repo['id']] = {key: record.get(key, '') for key in ('lastSuccessAt', 'error')}
+            return jsonify(ok=True, state=current)
+        return jsonify(ok=True, state=state,
                        discovered=code_qa.discover_repositories(docs_root, settings, auth_service.svn, str(Path(config['storage']['database']).parent / 'svn-discovery')))
 
     @app.post('/__admin/ai/personal-configs/clear')
@@ -803,6 +811,10 @@ def create_app(config, conn, auth_service, docs_dir, on_config_changed=None):
         if not code_qa.LOCK.acquire(False):
             return json_error(409, 'ai_busy', '正在问答或同步，请稍后重试')
         try:
+            payload = request.get_json(silent=True) or {}
+            expected = payload.get('expectedConfigVersion') if isinstance(payload, dict) else None
+            if expected and expected != policy.version(config_to_json(config)):
+                return json_error(409, 'config_conflict', '配置已变化，请重新读取配置后再更新')
             settings = code_qa.validate((config.get('ai') or {}).get('claude'))
             return jsonify(**code_qa.sync_repository(auth_service, docs_root, settings, repo_id))
         except ValueError as error:

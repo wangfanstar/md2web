@@ -163,3 +163,5 @@ body.config-has-draft { padding-top:100px; }
 .ai-config-form input { padding:10px; border:1px solid #cbd5e1; border-radius:7px; }
 .ai-config-form input[type=checkbox] { width:20px; height:20px; accent-color:#2563eb; }
 .ai-config-form p { grid-column:1/-1; margin:0; }
+[data-code-sync-row] { min-width:0; }
+[data-code-sync-row] > .row { grid-column:1/-1; }

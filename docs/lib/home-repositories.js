@@ -169,6 +169,7 @@
         if (codeSession !== current) return;
         if (!data.ok || !Array.isArray(data.repositories)) throw new Error('读取失败');
         var html = renderCodeRepositories(data.repositories);
+        if (session.role === 'admin') html = '<p><a href="html/md2web_config.html#tab=ai">管理代码库 SVN 更新 →</a></p>' + html;
         if (current.html !== html) {
           host.innerHTML = html;
           current.html = html;
