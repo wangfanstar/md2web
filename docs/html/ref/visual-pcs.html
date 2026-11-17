@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Visual PCS</title>
-<meta name="description" content="An interactive 3D walk through the 200GBASE-R Ethernet PCS: PCS lanes, PMA bit-multiplexing, SerDes lanes, alignment, deskew and FEC diagnostics.">
+<title>Visual PCS（中文版）</title>
+<meta name="description" content="用交互式 3D 实验了解 200GBASE-R 以太网 PCS：PCS 通道、PMA 比特复用、SerDes 通道、时延对齐与 FEC 诊断。">
 <link rel="stylesheet" href="visual-pcs-assets/fonts.css">
 <style>
 /* Layout: a lab bench. Full-bleed 3D lane diagram up top with its readouts
@@ -565,46 +565,46 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 </head>
 <body>
 <header class="mast">
-  <a class="brand" href="#top" id="top">Visual PCS <span>IEEE 802.3 · 200GBASE-R</span></a>
-  <nav aria-label="Sections">
-    <a href="#lab">Lane lab</a>
-    <a href="#lanes">Three lanes</a>
-    <a href="#tx">Transmit</a>
-    <a href="#mux">Bit-mux</a>
-    <a href="#rx">Receive</a>
-    <a href="#debug">Debugging</a>
+  <a class="brand" href="#top" id="top">Visual PCS（中文版） <span>IEEE 802.3 · 200GBASE-R</span></a>
+  <nav aria-label="章节">
+    <a href="#lab">通道实验</a>
+    <a href="#lanes">三类通道</a>
+    <a href="#tx">发送</a>
+    <a href="#mux">比特复用</a>
+    <a href="#rx">接收</a>
+    <a href="#debug">故障排查</a>
   </nav>
 </header>
 
 <section class="hero" aria-labelledby="hero-title">
   <div>
-    <p class="kicker">Ethernet PCS, for people who already know SerDes</p>
-    <h1 id="hero-title">Following a PCS lane <em>from MAC to MAC across a 200G link</em></h1>
+    <p class="kicker">面向熟悉 SerDes 的读者：以太网 PCS</p>
+    <h1 id="hero-title">追踪一条 PCS 通道 <em>穿越 200G 链路，从发送 MAC 到接收 MAC</em></h1>
   </div>
-  <p class="lede">A 200GBASE-R PCS splits one stream into 8 logical lanes, and the PMA squeezes those onto however many SerDes lanes the interface has. The receiver gets them back in whatever order and timing the wires deliver, and the alignment markers in the data put them back together. The lab below runs that whole path. Pick a lane, change the width, then break something.</p>
+  <p class="lede">200GBASE-R PCS 将一路数据流拆成 8 条逻辑通道，PMA 再将它们复用到接口提供的 SerDes 通道上。接收端收到的数据流顺序和到达时间取决于物理信道，再借助数据中的对齐标记恢复原有顺序。下方实验模拟了整个过程，可以选择通道、改变通道数和注入故障。</p>
 </section>
 
 <dl class="terms">
-  <div class="term t-pcs"><dt><i></i>PCS lane</dt><dd>A logical stream the PCS creates and tracks. It is identified by the lane number in its alignment markers. 200GBASE-R has 8.</dd></div>
-  <div class="term t-pma"><dt><i></i>PMA lane</dt><dd>A lane at the PCS-to-PMA service interface. On transmit, PMA lane <i>i</i> carries PCS lane <i>i</i>. On receive, any PCS lane can arrive on any PMA lane.</dd></div>
-  <div class="term t-ser"><dt><i></i>SerDes lane</dt><dd>A physical electrical or optical lane: 8, 4 or 2 of them at 200G. Each one may bit-multiplex several PCS lanes.</dd></div>
+  <div class="term t-pcs"><dt><i></i>PCS 通道</dt><dd>PCS 创建并跟踪的逻辑数据流，由对齐标记中的通道编号识别。200GBASE-R 有 8 条。</dd></div>
+  <div class="term t-pma"><dt><i></i>PMA 通道</dt><dd>PCS 到 PMA 服务接口上的通道。发送时，PMA 通道 <i>i</i> 承载 PCS 通道 <i>i</i>。接收时，任何 PCS 通道都可能从任何 PMA 通道到达。</dd></div>
+  <div class="term t-ser"><dt><i></i>SerDes 通道</dt><dd>物理电通道或光通道。200G 可使用 8、4 或 2 条，每条可逐比特复用多条 PCS 通道。</dd></div>
 </dl>
 
 <section class="lab" id="lab" aria-labelledby="lab-title">
   <div class="lab-head">
-    <h2 id="lab-title">Lane lab <span>200GBASE-R · 8 PCS lanes · one direction of the link</span></h2>
+    <h2 id="lab-title">通道实验 <span>200GBASE-R · 8 条 PCS 通道 · 链路单向演示</span></h2>
     <p id="lab-summary" class="lab-summary" aria-live="polite"></p>
   </div>
 
-  <div class="toolbar" role="toolbar" aria-label="Lane lab controls">
-    <div class="tgroup" aria-label="Playback">
-      <button type="button" id="btn-play" class="btn primary" aria-pressed="true" title="Pause or resume (P)">Pause</button>
-      <button type="button" id="btn-step" class="btn" title="Advance one data unit (.)">Step</button>
-      <label class="field"><span>Speed</span>
+  <div class="toolbar" role="toolbar" aria-label="通道实验控件">
+    <div class="tgroup" aria-label="播放">
+      <button type="button" id="btn-play" class="btn primary" aria-pressed="true" title="暂停或继续（P）">暂停</button>
+      <button type="button" id="btn-step" class="btn" title="前进一个数据单元（.）">单步</button>
+      <label class="field"><span>速度</span>
         <select id="sel-speed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
       </label>
     </div>
-    <div class="tgroup" aria-label="SerDes lane width">
+    <div class="tgroup" aria-label="SerDes 通道数量">
       <span class="tlabel" id="w-label">SerDes lanes</span>
       <div class="seg" role="radiogroup" aria-labelledby="w-label">
         <button type="button" role="radio" class="segbtn" data-width="8" id="w8">8 × NRZ</button>
@@ -612,28 +612,28 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         <button type="button" role="radio" class="segbtn" data-width="2" id="w2">2 × PAM4</button>
       </div>
     </div>
-    <div class="tgroup" aria-label="Mux mapping">
-      <span class="tlabel" id="m-label">Mapping</span>
+    <div class="tgroup" aria-label="复用映射">
+      <span class="tlabel" id="m-label">映射</span>
       <div class="seg" role="radiogroup" aria-labelledby="m-label">
-        <button type="button" role="radio" class="segbtn" data-preset="grouped" id="mg">Grouped</button>
-        <button type="button" role="radio" class="segbtn" data-preset="interleaved" id="mi">Interleaved</button>
-        <button type="button" role="radio" class="segbtn" data-preset="remapped" id="mr">Remapped</button>
+        <button type="button" role="radio" class="segbtn" data-preset="grouped" id="mg">按组</button>
+        <button type="button" role="radio" class="segbtn" data-preset="interleaved" id="mi">交织</button>
+        <button type="button" role="radio" class="segbtn" data-preset="remapped" id="mr">重新映射</button>
       </div>
     </div>
-    <div class="tgroup" aria-label="Payload">
-      <label class="field" for="msg-input"><span>MAC sends</span></label>
+    <div class="tgroup" aria-label="有效载荷">
+      <label class="field" for="msg-input"><span>MAC 发送</span></label>
       <input type="text" id="msg-input" maxlength="200" spellcheck="false" aria-describedby="msg-help">
-      <span class="sr" id="msg-help">Printable ASCII text the MAC transmits, repeated. Leave empty for the default passage.</span>
+      <span class="sr" id="msg-help">MAC 循环发送的可打印 ASCII 文本。留空时使用默认文本。</span>
     </div>
-    <div class="tgroup" aria-label="View">
-      <button type="button" id="btn-overview" class="btn" title="Show the whole link">Whole link</button>
-      <button type="button" id="btn-explore" class="btn" aria-pressed="false" title="Let drag and pinch move the 3D camera">Drag to explore</button>
+    <div class="tgroup" aria-label="视图">
+      <button type="button" id="btn-overview" class="btn" title="显示完整链路">链路全景</button>
+      <button type="button" id="btn-explore" class="btn" aria-pressed="false" title="通过拖动和双指缩放调整 3D 视角">拖动浏览</button>
     </div>
   </div>
 
-  <div class="lanepick" role="group" aria-label="Follow one PCS lane">
-    <span class="tlabel">Follow lane</span>
-    <button type="button" class="chip all" data-lane="-1" aria-pressed="true">All</button>
+  <div class="lanepick" role="group" aria-label="追踪一条 PCS 通道">
+    <span class="tlabel">追踪通道</span>
+    <button type="button" class="chip all" data-lane="-1" aria-pressed="true">全部</button>
     <button type="button" class="chip l0" data-lane="0" aria-pressed="false"><i></i>0</button>
     <button type="button" class="chip l1" data-lane="1" aria-pressed="false"><i></i>1</button>
     <button type="button" class="chip l2" data-lane="2" aria-pressed="false"><i></i>2</button>
@@ -642,48 +642,48 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <button type="button" class="chip l5" data-lane="5" aria-pressed="false"><i></i>5</button>
     <button type="button" class="chip l6" data-lane="6" aria-pressed="false"><i></i>6</button>
     <button type="button" class="chip l7" data-lane="7" aria-pressed="false"><i></i>7</button>
-    <span class="keys" aria-hidden="true">Keys: P pause · . step · 0–7 lane · Enter inspect · Esc close</span>
+    <span class="keys" aria-hidden="true">快捷键：P 暂停 · . 单步 · 0–7 选择通道 · Enter 查看 · Esc 关闭</span>
   </div>
 
   <div class="viewport" id="viewport">
-    <div class="legend" aria-label="Legend">
-      <span><i class="lg-cube"></i>data unit on a PCS lane</span>
-      <span><i class="lg-am"></i>alignment marker</span>
-      <span><i class="lg-ring"></i>AM lock</span>
-      <span><i class="lg-sheath"></i>physical SerDes lane</span>
-      <span><i class="lg-bad"></i>error</span>
+    <div class="legend" aria-label="图例">
+      <span><i class="lg-cube"></i>PCS 通道中的数据单元</span>
+      <span><i class="lg-am"></i>对齐标记</span>
+      <span><i class="lg-ring"></i>AM 锁定</span>
+      <span><i class="lg-sheath"></i>物理 SerDes 通道</span>
+      <span><i class="lg-bad"></i>错误</span>
     </div>
     <p id="lab-hint" class="lab-hint" hidden></p>
-    <p class="vp-click" id="vp-click">Click a block to see what it carries · click a box to see how that step works</p>
-    <div class="follow-bar" id="follow-bar" hidden><span>Following <b></b></span><span id="follow-where"></span>
-      <button type="button" class="btn" id="follow-stop">Stop following</button></div>
-    <p class="vp-help" id="vp-help">Drag to pan · right-drag to rotate · Ctrl + scroll to zoom</p>
-    <noscript><p class="noscript">The lane lab needs JavaScript and WebGL.</p></noscript>
+    <p class="vp-click" id="vp-click">点击数据块查看内容 · 点击处理模块查看步骤说明</p>
+    <div class="follow-bar" id="follow-bar" hidden><span>正在追踪 <b></b></span><span id="follow-where"></span>
+      <button type="button" class="btn" id="follow-stop">停止追踪</button></div>
+    <p class="vp-help" id="vp-help">拖动平移 · 右键拖动旋转 · Ctrl + 滚轮缩放</p>
+    <noscript><p class="noscript">通道实验需要 JavaScript 和 WebGL。</p></noscript>
   </div>
 
   <section class="lens" id="lens" aria-labelledby="lens-title">
     <div class="lens-bar">
-      <h3 id="lens-title">Bit lens</h3>
-      <div class="lens-modes" role="group" aria-label="Show one operation at bit scale">
+      <h3 id="lens-title">位级视图</h3>
+      <div class="lens-modes" role="group" aria-label="查看单个操作的位级过程">
         <button type="button" class="btn" data-view="b66">64B/66B</button>
         <button type="button" class="btn" data-view="b257">256B/257B</button>
-        <button type="button" class="btn" data-view="am">AM insertion</button>
-        <button type="button" class="btn" data-view="prefec">Pre-FEC distribution</button>
+        <button type="button" class="btn" data-view="am">插入 AM</button>
+        <button type="button" class="btn" data-view="prefec">FEC 前分配</button>
         <button type="button" class="btn" data-view="rs">RS(544,514)</button>
-        <button type="button" class="btn" data-view="dist">Symbol distribution</button>
-        <button type="button" class="btn" data-view="mux">Bit-mux</button>
-        <button type="button" class="btn" data-view="demux">RX demux</button>
-        <button type="button" class="btn" data-view="lock">AM lock</button>
-        <button type="button" class="btn" data-view="deskew">Deskew</button>
-        <button type="button" class="btn" data-view="reorder">Lane reorder</button>
-        <button type="button" class="btn" data-view="deint">De-interleave</button>
-        <button type="button" class="btn" data-view="rsdec">RS decode</button>
-        <button type="button" class="btn" data-view="postfec">Post-FEC interleave</button>
-        <button type="button" class="btn" data-view="amr">AM removal</button>
-        <button type="button" class="btn" data-view="r257">Reverse transcode</button>
-        <button type="button" class="btn" data-view="d66">64B/66B decode</button>
+        <button type="button" class="btn" data-view="dist">符号分配</button>
+        <button type="button" class="btn" data-view="mux">比特复用</button>
+        <button type="button" class="btn" data-view="demux">RX 解复用</button>
+        <button type="button" class="btn" data-view="lock">AM 锁定</button>
+        <button type="button" class="btn" data-view="deskew">时延对齐</button>
+        <button type="button" class="btn" data-view="reorder">通道重排</button>
+        <button type="button" class="btn" data-view="deint">解交织</button>
+        <button type="button" class="btn" data-view="rsdec">RS 解码</button>
+        <button type="button" class="btn" data-view="postfec">FEC 后交织</button>
+        <button type="button" class="btn" data-view="amr">移除 AM</button>
+        <button type="button" class="btn" data-view="r257">逆转码</button>
+        <button type="button" class="btn" data-view="d66">64B/66B 解码</button>
       </div>
-      <span class="lens-hint">Input on the left, output on the right. Or click a box in the 3D view.</span>
+      <span class="lens-hint">左侧为输入，右侧为输出。也可点击 3D 视图中的处理模块。</span>
     </div>
   </section>
 
@@ -691,7 +691,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <div class="opv-inner">
       <header class="opv-head">
         <div><h3 id="opv-title"></h3><p class="opv-where" id="opv-where"></p></div>
-        <button type="button" class="ins-x" data-act="close" aria-label="Close">×</button>
+        <button type="button" class="ins-x" data-act="close" aria-label="关闭">×</button>
       </header>
       <div class="opv-stage">
         <button type="button" class="opv-pg" data-act="page" id="opv-pg-l" hidden>‹</button>
@@ -701,42 +701,42 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <div class="opv-pick" id="opv-pick" hidden aria-live="polite"></div>
       <p class="note opv-note" id="opv-note"></p>
       <footer class="opv-foot">
-        <button type="button" class="btn" data-act="prev" id="opv-prev" title="The unit before this one (←)">← Prev</button>
-        <button type="button" class="btn" data-act="next" id="opv-next" title="The unit after this one (→)">Next →</button>
+        <button type="button" class="btn" data-act="prev" id="opv-prev" title="上一个数据单元（←）">← 上一个</button>
+        <button type="button" class="btn" data-act="next" id="opv-next" title="下一个数据单元（→）">下一个 →</button>
         <span class="opv-sp"></span>
         <span class="opv-count" id="opv-count" aria-live="polite"></span>
         <span class="opv-acts" id="opv-acts"></span>
-        <button type="button" class="btn" data-act="step" id="opv-step" title="Add one unit (.)">Step</button>
-        <button type="button" class="btn primary" data-act="play" id="opv-play" title="Replay one unit at a time (P)">Animate</button>
+        <button type="button" class="btn" data-act="step" id="opv-step" title="加入一个数据单元（.）">单步</button>
+        <button type="button" class="btn primary" data-act="play" id="opv-play" title="逐个数据单元播放（P）">播放动画</button>
       </footer>
     </div>
   </dialog>
 
-  <nav class="rail" id="rail" aria-label="Pipeline stages"></nav>
+  <nav class="rail" id="rail" aria-label="处理阶段"></nav>
 
   <article class="stage-detail" id="stage-detail" aria-live="polite"></article>
 
   <div class="panels">
     <section class="panel" aria-labelledby="map-title">
-      <header><h3 id="map-title">PCS-to-SerDes mapping</h3><span class="tag std">Standard concept</span></header>
+      <header><h3 id="map-title">PCS 到 SerDes 的映射</h3><span class="tag std">标准概念</span></header>
       <div class="order" id="order-strip"></div>
       <div class="tablewrap"><table class="maptable" id="map-table"></table></div>
       <p class="note" id="map-note"></p>
     </section>
 
     <section class="panel" aria-labelledby="scope-title">
-      <header><h3 id="scope-title">Bit scope</h3><span class="tag">Time-interleaved bits per SerDes lane</span></header>
-      <div class="scopewrap"><canvas id="scope" role="img" aria-label="Bit interleaving on each SerDes lane"></canvas></div>
+      <header><h3 id="scope-title">比特示波图</h3><span class="tag">逐条 SerDes 通道的比特交织时序</span></header>
+      <div class="scopewrap"><canvas id="scope" role="img" aria-label="每条 SerDes 通道的比特交织"></canvas></div>
       <p class="note" id="scope-note"></p>
     </section>
 
     <section class="panel" aria-labelledby="fault-title">
-      <header><h3 id="fault-title">Fault lab</h3><span class="tag">Simulated</span></header>
+      <header><h3 id="fault-title">故障实验</h3><span class="tag">模拟</span></header>
       <div class="faults" id="faults"></div>
     </section>
 
     <section class="panel diag" aria-labelledby="diag-title">
-      <header><h3 id="diag-title">Diagnostics</h3><span class="tag">Conceptual readouts</span></header>
+      <header><h3 id="diag-title">诊断</h3><span class="tag">演示读数</span></header>
       <div id="diag"></div>
     </section>
   </div>
@@ -744,147 +744,147 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 
 <article class="story">
 <section id="lanes" aria-labelledby="lanes-title">
-  <p class="eyebrow">Part 1</p>
-  <h2 id="lanes-title">Three things called "lane"</h2>
-  <p>Most confusion in PCS debugging comes from one word doing three jobs. A <b>PCS lane</b> is a stream of data with an identity. A <b>PMA lane</b> is a position on the service interface between PCS and PMA. A <b>SerDes lane</b> is a physical path with a driver, a channel and a CDR. They line up one-to-one only in the 8-lane NRZ case.</p>
+  <p class="eyebrow">第 1 部分</p>
+  <h2 id="lanes-title">三种“通道”各指什么</h2>
+  <p>PCS 调试中，同一个“通道”常指三种不同的东西。<b>PCS 通道</b>是有独立标识的数据流。<b>PMA 通道</b>是 PCS 与 PMA 服务接口上的一个位置。<b>SerDes 通道</b>是包含驱动器、传输信道和 CDR 的物理路径。只有在 8 通道 NRZ 的场景下，三者才一一对应。</p>
   <figure class="wide">
     <div class="figwrap" id="fig-nest"></div>
-    <figcaption>The 4-lane case. Eight PCS lanes cross the PMA service interface as eight PMA lanes; the PMA interleaves them two per SerDes lane.</figcaption>
+    <figcaption>以 4 条 SerDes 通道为例。8 条 PCS 通道以 8 条 PMA 通道的形式经过 PMA 服务接口，PMA 将它们两两交织到各条 SerDes 通道上。</figcaption>
   </figure>
   <div class="tablewrap">
     <table class="cmp">
-      <caption class="sr">Comparison of PCS, PMA and SerDes lanes</caption>
-      <thead><tr><th scope="col"></th><th scope="col">PCS lane</th><th scope="col">PMA lane</th><th scope="col">SerDes lane</th></tr></thead>
+      <caption class="sr">PCS、PMA 和 SerDes 通道对比</caption>
+      <thead><tr><th scope="col">PCS 通道</th><th scope="col">PMA 通道</th><th scope="col">SerDes 通道</th></tr></thead>
       <tbody>
-        <tr><th scope="row">What it is</th><td>Logical stream of FEC symbols</td><td>Position at the PCS/PMA service interface</td><td>Physical electrical or optical lane</td></tr>
-        <tr><th scope="row">Identity comes from</th><td>Lane number in its alignment markers</td><td>Its index on the interface</td><td>The pin, trace, or wavelength</td></tr>
-        <tr><th scope="row">Count at 200G</th><td>Always 8</td><td>8 at the PCS boundary</td><td>8, 4 or 2</td></tr>
-        <tr><th scope="row">Rate</th><td>26.5625 Gb/s</td><td>26.5625 Gb/s</td><td>26.5625, 53.125 or 106.25 Gb/s</td></tr>
-        <tr><th scope="row">Order on receive</th><td>Restored by the PCS</td><td>Arbitrary</td><td>Whatever the board routes</td></tr>
+        <tr><th scope="row">含义</th><td>FEC 符号的逻辑数据流</td><td>PCS/PMA 服务接口上的位置</td><td>物理电通道或光通道</td></tr>
+        <tr><th scope="row">如何标识</th><td>对齐标记中的通道编号</td><td>接口上的索引</td><td>引脚、走线或波长</td></tr>
+        <tr><th scope="row">200G 通道数量</th><td>固定为 8</td><td>PCS 边界上为 8</td><td>8、4 或 2</td></tr>
+        <tr><th scope="row">速率</th><td>26.5625 Gb/s</td><td>26.5625 Gb/s</td><td>26.5625、53.125 或 106.25 Gb/s</td></tr>
+        <tr><th scope="row">接收顺序</th><td>由 PCS 恢复顺序</td><td>任意</td><td>取决于电路板布线</td></tr>
       </tbody>
     </table>
   </div>
   <aside class="margin">
-    <h3>Where a retimer sits</h3>
-    <p>A retimer or gearbox is a PMA. It recovers each SerDes lane, demultiplexes it into PCS-lane-rate streams, and multiplexes them out again, possibly to a different width. It moves bits without decoding them, so it does not need to know which PCS lane is which. What it must do is keep a fixed mapping while the link is up and stay inside the skew budget.</p>
+    <h3>Retimer 位于哪里？</h3>
+    <p>Retimer（重定时器）或 Gearbox 是一个 PMA。它恢复每条 SerDes 通道，将其解复用为 PCS 通道速率的数据流，再复用输出，输出通道数可以不同。它直接转发比特，无需解码或识别 PCS 通道编号。链路正常运行时，映射必须固定，通道时延偏差也必须在预算内。</p>
   </aside>
 </section>
 
 <section id="tx" aria-labelledby="tx-title">
-  <p class="eyebrow">Part 2</p>
-  <h2 id="tx-title">Transmit: one stream becomes eight lanes</h2>
-  <p>On transmit, the PCS works on a single aggregate stream until the very last step. The order is defined by IEEE 802.3 Clause 119, and it matters for debugging because it decides what each later stage can see.</p>
+  <p class="eyebrow">第 2 部分</p>
+  <h2 id="tx-title">发送：一路数据流分成八条通道</h2>
+  <p>发送时，PCS 一直处理单路聚合数据流，直到最后一步才分成多条通道。IEEE 802.3 第 119 条规定了处理顺序。调试时需要留意这一点，因为它决定了各阶段能看到什么数据。</p>
   <ol class="steps">
-    <li><b>64B/66B encode</b> each 8 bytes from 200GMII into a 66-bit block. Idles are deleted here to make room for alignment markers.</li>
-    <li><b>Transcode</b> four 66-bit blocks into one 256B/257B block. Same data, packed tighter. This is a transcode of the 64B/66B blocks, not a second line code.</li>
-    <li><b>Scramble</b> the 257-bit blocks.</li>
-    <li><b>Insert alignment markers</b>, one per PCS lane, as a group. They go in after the scrambler, so they stay recognizable in raw lane data.</li>
-    <li><b>Pre-FEC distribution</b>: split the stream 10 bits at a time between two Reed-Solomon encoders.</li>
-    <li><b>RS(544,514) encode</b> into codewords A and B. AMs are inside the codewords, so FEC protects them.</li>
-    <li><b>Symbol distribution</b>: deal 10-bit symbols from both codewords round-robin onto the 8 PCS lanes.</li>
+    <li><b>64B/66B 编码</b>将来自 200GMII 的每 8 字节编码成一个 66 位块。在这里删除 Idle，为对齐标记腾出空间。</li>
+    <li><b>转码</b>将四个 66 位块压缩打包成一个 256B/257B 块。数据内容相同。这一步是在重新打包 64B/66B 块。</li>
+    <li><b>加扰</b> 257 位块。</li>
+    <li><b>插入对齐标记</b>。每条 PCS 通道各有一个标记，成组插入。插入点在加扰之后，因此仍能从原始通道数据中识别标记。</li>
+    <li><b>FEC 前分配</b>：每 10 位作为一个符号，交替送入两个 Reed–Solomon 编码器。</li>
+    <li><b>RS(544,514) 编码</b>生成码字 A 和 B。AM 位于码字内，受到 FEC 保护。</li>
+    <li><b>符号分配</b>：将两个码字的 10 位符号轮流分配到 8 条 PCS 通道。</li>
   </ol>
   <figure>
     <div class="figwrap" id="fig-transcode"></div>
-    <figcaption>Transcoding packs the four 2-bit sync headers into one header bit plus a little control information. The 257-bit block carries the same 256 payload bits.</figcaption>
+    <figcaption>转码将四个 2 位同步头打包成一个头部位和少量控制信息。257 位块保留相同的 256 位有效载荷。</figcaption>
   </figure>
-  <p>The last step is why the receiver has so much work to do. Each PCS lane carries a slice of every codeword, so nothing can be decoded until all 8 lanes have been found, lined up and put in order.</p>
+  <p>最后一步决定了接收端必须先找到全部 8 条 PCS 通道，再对齐、重排，才能解码。每条通道只承载每个码字的一部分。</p>
   <figure>
     <div class="figwrap" id="fig-dist"></div>
-    <figcaption>Symbol distribution (IEEE 802.3 119.2.4.8). Symbols from codewords A and B alternate across lanes and over time in a checkerboard: lane 0 carries A0, B4, A8 …, lane 1 carries B0, A4, B8 …. Every codeword spans all 8 PCS lanes, and an error burst on one physical lane is split between two codewords.</figcaption>
+    <figcaption>符号分配（IEEE 802.3 119.2.4.8）。码字 A 和 B 的符号随通道和时间交替排列。通道 0 承载 A0、B4、A8……，通道 1 承载 B0、A4、B8……。每个码字跨越全部 8 条 PCS 通道。一条物理通道上的突发错误会分散到两个码字中。</figcaption>
   </figure>
-  <button type="button" class="btn showme" data-stage="3">Show stage 3 in the lab</button>
+  <button type="button" class="btn showme" data-stage="3">在实验中查看第 3 阶段</button>
 </section>
 
 <section id="am" aria-labelledby="am-title">
-  <p class="eyebrow">Part 3</p>
-  <h2 id="am-title">Alignment markers carry the lane identity</h2>
-  <p>Each PCS lane gets a 120-bit alignment marker at a fixed interval. The <b>common</b> bytes are the same on every lane, so the receiver can find AMs without knowing anything else. The <b>unique</b> bytes differ per lane and tell it which PCS lane it found. The pad bytes are ignored on receive.</p>
+  <p class="eyebrow">第 3 部分</p>
+  <h2 id="am-title">对齐标记携带通道编号</h2>
+  <p>每条 PCS 通道按固定间隔获得一个 120 位对齐标记。各通道的<b>公共</b>字节相同，接收端可据此找到 AM。<b>专有</b>字节随通道而异，用于识别 PCS 通道编号。接收端忽略填充字节。</p>
   <figure>
     <div class="figwrap" id="fig-am"></div>
-    <figcaption>One alignment marker, 15 bytes. The eight markers go in together, so they leave the transmitter lined up across all lanes.</figcaption>
+    <figcaption>一个对齐标记占 15 字节。8 个标记一起插入，因此离开发送端时在各条通道上对齐。</figcaption>
   </figure>
-  <p>In 200GBASE-R the AM group repeats every 81,920 257-bit blocks, which is exactly 2,048 codeword pairs: about 2.6 Mbit or 99 µs on each PCS lane. The lab puts a group in every codeword pair so you can watch markers pass. Because AMs are detected in raw lane data before FEC decoding, the receiver tolerates a few bit errors in them.</p>
-  <p>The group is not laid down marker by marker. Its 960 marker bits are pre-interleaved 10 bits at a time, so that after pre-FEC distribution and symbol distribution each PCS lane's first 12 symbols are exactly its own 120-bit marker. Open the bit lens in the lab to watch it happen.</p>
+  <p>200GBASE-R 每 81,920 个 257 位块重复一次 AM 组，恰好是 2,048 对码字，相当于每条 PCS 通道上约 2.6 Mbit 或 99 µs。为了便于观察，实验在每对码字中都插入一组 AM。接收端在 FEC 解码前从原始通道数据检测 AM，因此允许标记有少量比特错误。</p>
+  <p>一组 AM 的 960 个标记位以 10 位为单位预先交织。经过 FEC 前分配和符号分配后，每条 PCS 通道的前 12 个符号恰好组成自己的 120 位标记。可以在实验中的位级视图查看这个过程。</p>
 </section>
 
 <section id="mux" aria-labelledby="mux-title">
-  <p class="eyebrow">Part 4</p>
-  <h2 id="mux-title">PMA bit-multiplexing</h2>
-  <p>When there are fewer SerDes lanes than PCS lanes, the PMA interleaves PCS lanes <b>bit by bit</b>. Four SerDes lanes carry two PCS lanes each; two carry four each. The PMA picks which PCS lanes share a SerDes lane and holds that choice for as long as the link is up. A given PCS lane never wanders to another SerDes lane during normal operation.</p>
+  <p class="eyebrow">第 4 部分</p>
+  <h2 id="mux-title">PMA 比特复用</h2>
+  <p>SerDes 通道比 PCS 通道少时，PMA 将 PCS 通道<b>逐比特</b>交织。4 条 SerDes 通道时，每条承载 2 条 PCS 通道。2 条时，每条承载 4 条。PMA 选择共享同一 SerDes 通道的 PCS 通道，并在链路正常运行期间保持这个映射。</p>
   <figure>
     <div class="figwrap" id="fig-mux"></div>
-    <figcaption>Two PCS lanes on one PAM4 SerDes lane. Bits alternate, and each PAM4 symbol carries one bit from each.</figcaption>
+    <figcaption>一条 SerDes 通道的时延偏差会影响它承载的所有 PCS 通道，因此这些通道会一起迟到。一个错误的 PAM4 符号也可能同时影响两条 PCS 通道，这解释了为什么某些 PCS 通道的错误计数会成组上升。</figcaption>
   </figure>
-  <p>Two consequences matter in the lab. A SerDes lane's skew is shared by every PCS lane it carries, so the lanes slip together. And one bad PAM4 symbol can hit two PCS lanes at once, which is part of why per-PCS-lane error counts tend to rise in groups.</p>
-  <button type="button" class="btn showme" data-stage="5">Show the bit-mux in the lab</button>
+  <p>一条 PAM4 SerDes 通道承载两条 PCS 通道。比特交替排列，每个 PAM4 符号各取两条通道的一个比特。</p>
+  <button type="button" class="btn showme" data-stage="5">在实验中查看比特复用</button>
 </section>
 
 <section id="rx" aria-labelledby="rx-title">
-  <p class="eyebrow">Part 5</p>
-  <h2 id="rx-title">Receive: find, line up, reorder, then decode</h2>
-  <p>The RX PMA recovers each SerDes lane and demultiplexes it, but it cannot tell PCS lanes apart, and the bit phase it starts on is arbitrary. So the RX PCS gets 8 streams in an unknown order with unknown relative delay. It then:</p>
+  <p class="eyebrow">第 5 部分</p>
+  <h2 id="rx-title">接收：锁定、对齐、重排，再解码</h2>
+  <p>RX PMA 恢复并解复用每条 SerDes 通道。由于它无法区分 PCS 通道，且解复用的起始比特相位不固定，RX PCS 会收到顺序和相对时延都未知的 8 路数据流。处理步骤如下。</p>
   <ol class="steps">
-    <li><b>Locks</b> on each PMA lane by finding the common AM pattern repeating at the right spacing, and reads the lane number from the unique bytes.</li>
-    <li><b>Deskews</b> by buffering early lanes until all AMs line up. 802.3 budgets about 180 ns of skew at the PCS receive input.</li>
-    <li><b>Reorders</b> lanes into PCS lane order 0 to 7.</li>
-    <li>Sets <code>align_status</code> true. Only now can it de-interleave codewords, run <b>RS(544,514) decode</b>, remove AMs, descramble, reverse the transcode and decode 64B/66B.</li>
+    <li><b>锁定</b>：在每条 PMA 通道上查找按预期间隔重复的公共 AM 图样，从专有字节读出通道编号。</li>
+    <li><b>时延对齐（Deskew）</b>：缓存先到的通道，直到所有 AM 对齐。802.3 为 PCS 接收输入分配约 180 ns 的时延偏差预算。</li>
+    <li><b>重排</b>：按 PCS 通道编号 0 到 7 排列。</li>
+    <li>将 <code>align_status</code> 置为真。随后解交织码字，执行 <b>RS(544,514) 解码</b>，移除 AM，再解扰、逆转码并执行 64B/66B 解码。</li>
   </ol>
   <figure>
     <div class="figwrap" id="fig-deskew"></div>
-    <figcaption>Before deskew, AMs reach the PCS at different times. After deskew they line up, and the lanes are reordered by the lane number each AM carries.</figcaption>
+    <figcaption>时延对齐之前，各通道的 AM 在不同时间到达 PCS。对齐之后，根据各 AM 携带的通道编号重排。</figcaption>
   </figure>
-  <p>Deskew and reorder have to come before FEC, because every codeword is spread across all 8 lanes. A single missing lane means no codewords at all, which is why one bad SerDes lane takes the whole link down instead of just its share of the bandwidth.</p>
-  <button type="button" class="btn showme" data-stage="8">Show RX alignment in the lab</button>
+  <p>由于每个码字都分布在全部 8 条通道上，时延对齐和重排必须先于 FEC 解码。缺少任何一条 PCS 通道都会使码字无法重组。因此一条 SerDes 通道故障就可能导致整条链路中断。</p>
+  <button type="button" class="btn showme" data-stage="8">在实验中查看 RX 对齐</button>
 </section>
 
 <section id="debug" aria-labelledby="debug-title">
-  <p class="eyebrow">Part 6</p>
-  <h2 id="debug-title">Reading the link from the bottom up</h2>
-  <p>Work in the same order the receiver does. SerDes signal first (CDR lock, signal detect, eye or SNR). Then PCS alignment. Then FEC margin. Then the MAC. Each layer only means something once the one below it is healthy.</p>
+  <p class="eyebrow">第 6 部分</p>
+  <h2 id="debug-title">从底层开始排查链路</h2>
+  <p>按接收端的处理顺序排查。先看 SerDes 信号（CDR 锁定、信号检测、眼图或 SNR），再看 PCS 对齐，接着看 FEC 裕量，最后看 MAC。确认下层正常后，再检查上一层。</p>
   <div class="tablewrap">
     <table class="cmp debug">
-      <caption class="sr">Symptoms, what they suggest, and what to check next</caption>
-      <thead><tr><th scope="col">What you see</th><th scope="col">What it suggests</th><th scope="col">Check next</th></tr></thead>
+      <caption class="sr">现象、可能原因和下一步检查</caption>
+      <thead><tr><th scope="col">现象</th><th scope="col">可能原因</th><th scope="col">下一步检查</th></tr></thead>
       <tbody>
-        <tr><td>No AM lock on the PCS lanes of one SerDes lane</td><td>That physical lane is not delivering clean bits</td><td>CDR lock, signal detect, polarity, PRBS on that lane</td></tr>
-        <tr><td>No AM lock on one PCS lane, its SerDes neighbours fine</td><td>Lane content problem rather than signal</td><td>Mux or gearbox configuration, test pattern or loopback left enabled</td></tr>
-        <tr><td>All lanes locked, <code>align_status</code> false</td><td>Skew beyond the deskew budget, or a lane number repeated</td><td>Per-lane AM arrival offset; lane mapping for duplicates</td></tr>
-        <tr><td>Lane mapping differs after each reset</td><td>Normal demux start-up phase</td><td>Nothing, unless lane numbers repeat or go missing</td></tr>
-        <tr><td>Corrected codewords rising, uncorrectable zero</td><td>Normal on PAM4; FEC doing its job</td><td>Trend over time, per-lane symbol errors, codeword histogram</td></tr>
-        <tr><td>Symbol errors concentrated on some PCS lanes</td><td>One weak SerDes lane</td><td>Map those PCS lanes to their SerDes lane; tune that lane</td></tr>
-        <tr><td>Uncorrectable codewords increasing</td><td>Frames are being corrupted</td><td>Pre-FEC error rate on every lane; MAC FCS error counters</td></tr>
-        <tr><td>FCS errors at the MAC, FEC counters clean</td><td>Problem above the PCS</td><td>MAC, host interface, or the far-end transmitter</td></tr>
+        <tr><td>一条 SerDes 承载的 PCS 通道均未获得 AM 锁定</td><td>该物理通道的信号质量有问题</td><td>检查该通道的 CDR 锁定、信号检测、极性和 PRBS</td></tr>
+        <tr><td>只有一条 PCS 通道未获得 AM 锁定，同一 SerDes 上的其他通道正常</td><td>该通道的数据内容异常</td><td>检查复用器或 Gearbox 配置，以及测试码型或环回是否仍开启</td></tr>
+        <tr><td>所有通道已锁定，<code>align_status</code> 为假</td><td>时延偏差超出 Deskew 预算，或通道编号重复</td><td>检查各通道 AM 到达时间偏差，检查映射是否有重复</td></tr>
+        <tr><td>每次复位后的通道映射不同</td><td>解复用起始相位变化，属于正常现象</td><td>检查通道编号是否重复或缺失</td></tr>
+        <tr><td>已纠错码字数上升，不可纠正码字数为零</td><td>PAM4 链路的正常现象，FEC 正在纠错</td><td>观察变化趋势、逐通道符号错误计数及码字直方图</td></tr>
+        <tr><td>符号错误集中在部分 PCS 通道</td><td>可能有一条 SerDes 通道信号质量较差</td><td>通过映射找出对应的 SerDes 通道并调优</td></tr>
+        <tr><td>不可纠正码字数持续增加</td><td>帧数据受损</td><td>检查各通道的 FEC 前错误率和 MAC FCS 错误计数</td></tr>
+        <tr><td>MAC 出现 FCS 错误，FEC 计数器正常</td><td>问题可能在 PCS 以上</td><td>检查 MAC、主机接口或远端发送端</td></tr>
       </tbody>
     </table>
   </div>
   <aside class="margin">
-    <h3>Standard concept or vendor telemetry?</h3>
-    <p>IEEE 802.3 defines the ideas: alignment status, per-lane AM lock, the lane mapping, corrected and uncorrected codeword counts, and per-lane FEC symbol error counts, along with management variables for them. Register addresses, counter widths, clear-on-read behaviour, skew readouts, error histograms and BER estimates are up to each device. The lab's diagnostics panel keeps the two groups apart.</p>
+    <h3>标准定义的指标与厂商测量值</h3>
+    <p>IEEE 802.3 定义了对齐状态、逐通道 AM 锁定、通道映射、已纠错和不可纠正码字计数，以及逐通道 FEC 符号错误计数和对应的管理变量。寄存器地址、计数器位宽、读后清零行为、时延偏差读数、错误直方图和 BER 估计则依具体器件而定。实验的诊断面板分别展示这两类指标。</p>
   </aside>
-  <button type="button" class="btn showme" data-stage="9" data-fault="noise">Try a noisy lane in the lab</button>
+  <button type="button" class="btn showme" data-stage="9" data-fault="noise">在实验中模拟通道噪声</button>
 </section>
 
 <section id="scale" aria-labelledby="scale-title">
-  <p class="eyebrow">Part 7</p>
-  <h2 id="scale-title">Beyond 200G</h2>
-  <p><b>400GBASE-R</b> uses the same Clause 119 PCS with 16 PCS lanes instead of 8, and AM groups every 163,840 257-bit blocks. Everything above carries over at twice the width. For 400G, 16 PCS lanes allow 16, 8, 4, 2 or 1 physical lanes; at 200G, 8 PCS lanes allow 8, 4, 2 or 1.</p>
-  <p><b>800G</b> is often pictured as two 400G flows side by side, and the 800GBASE-R PCS does reuse 400G-style FEC groups. Treat that as a mental model. It is not a statement about how any particular device or PHY type is built. Newer PHYs with 200 Gb/s per physical lane also add sublayers not shown here.</p>
+  <p class="eyebrow">第 7 部分</p>
+  <h2 id="scale-title">从 200G 扩展到更高速率</h2>
+  <p><b>400GBASE-R</b> 使用同一套 IEEE 802.3 第 119 条 PCS，将 PCS 通道数从 8 增至 16，每 163,840 个 257 位块插入一组 AM。上述原理适用于通道数翻倍的情况。400G 的 16 条 PCS 通道可映射到 16、8、4、2 或 1 条物理通道。200G 的 8 条 PCS 通道可映射到 8、4、2 或 1 条物理通道。</p>
+  <p><b>800G</b> 常用两路并行的 400G 数据流来理解，800GBASE-R PCS 也复用了 400G 形式的 FEC 分组。具体器件和 PHY 的实现因型号而异。单条物理通道速率为 200 Gb/s 的新型 PHY 还有这里未展示的子层。</p>
 </section>
 
 <section id="refs" aria-labelledby="refs-title" class="refs">
-  <h2 id="refs-title">Sources</h2>
+  <h2 id="refs-title">参考资料</h2>
   <ul>
-    <li>IEEE Std 802.3, Clause 119 (200GBASE-R and 400GBASE-R PCS), Clause 120 (PMA), Clause 116 (architecture and skew budgets), Clause 45 (management). <a href="https://standards.ieee.org/ieee/802.3/10422/">IEEE 802.3-2022</a></li>
-    <li><a href="https://ethernetalliance.org/blog/2018/03/28/a-deep-dive-into-the-802-3bs-200gbase-r-and-400gbase-r-pcspma/">A Deep Dive into the 802.3bs 200GBASE-R and 400GBASE-R PCS/PMA</a>, Ethernet Alliance</li>
-    <li><a href="https://www.ieee802.org/3/bs/public/16_03/butter_3bs_02_0316.pdf">Alignment marker mapping and insertion</a>, IEEE P802.3bs task force</li>
-    <li><a href="https://www.ieee802.org/3/bs/">IEEE P802.3bs 200 Gb/s and 400 Gb/s Ethernet Task Force</a></li>
+    <li>IEEE 802.3 标准第 119 条（200GBASE-R 和 400GBASE-R PCS）、第 120 条（PMA）、第 116 条（架构与时延偏差预算）、第 45 条（管理）。<a href="https://standards.ieee.org/ieee/802.3/10422/">IEEE 802.3-2022</a></li>
+    <li><a href="https://ethernetalliance.org/blog/2018/03/28/a-deep-dive-into-the-802-3bs-200gbase-r-and-400gbase-r-pcspma/">深入解读 802.3bs 的 200GBASE-R 和 400GBASE-R PCS/PMA</a>，Ethernet Alliance</li>
+    <li><a href="https://www.ieee802.org/3/bs/public/16_03/butter_3bs_02_0316.pdf">对齐标记的映射和插入</a>，IEEE P802.3bs 工作组</li>
+    <li><a href="https://www.ieee802.org/3/bs/">IEEE P802.3bs 200 Gb/s 和 400 Gb/s 以太网工作组</a></li>
   </ul>
-  <p class="fine">Counts and timings in the lab are scaled so you can watch them. AM spacing and error rates are illustrative; the lock thresholds follow Figure 119–12. Diagnostic readouts are conceptual; no register addresses or vendor names are implied.</p>
+  <p class="fine">实验调整了计数和时间尺度，便于观察。AM 间隔和误码率为示例，锁定阈值遵循图 119–12。诊断读数用于演示概念。</p>
 </section>
 </article>
 
 <footer class="site-foot">
-  <p>Visual PCS · a teaching model of the IEEE 802.3 200GBASE-R PCS. Simplified for clarity; check the standard for normative behaviour.</p>
+  <p>Visual PCS · IEEE 802.3 200GBASE-R PCS 教学模型。部分过程经过简化，规范行为以标准为准。</p>
 </footer>
 
 <script src="visual-pcs-assets/three.min.js"></script>
@@ -919,9 +919,9 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   };
 
   P.PRESETS = {
-    grouped: 'Grouped',
-    interleaved: 'Interleaved',
-    remapped: 'Remapped'
+    grouped: '按组',
+    interleaved: '交织',
+    remapped: '重新映射'
   };
 
   // One example of an arbitrary fixed assignment (e.g. a gearbox mux table or
@@ -1666,65 +1666,65 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   // Sub-blocks drawn in the scene. lane: true spans the 8-lane stack.
   P.BOXES = [
     { x: [0, 4], name: 'MAC / RS', stage: 1 },
-    { x: [5, 9], name: '64B/66B encode', stage: 2, view: 'b66' },
-    { x: [10.5, 14.5], name: '256B/257B transcode', stage: 2, view: 'b257' },
-    { x: [16, 19], name: 'Scramble', stage: 3 },
-    { x: [20, 23], name: 'AM insertion', stage: 3, view: 'am' },
-    { x: [24.5, 26.5], name: 'Pre-FEC distribution', stage: 3, short: 'Pre-FEC dist.', view: 'prefec' },
-    { x: [27, 30.5], name: 'RS(544,514) encode', stage: 3, short: 'RS encode', view: 'rs' },
-    { x: [31, 32.5], name: 'Symbol distribution', stage: 3, lane: true, short: 'Symbol dist.', view: 'dist' },
-    { x: [44.5, 48.5], name: 'TX PMA bit-mux', stage: 5, lane: true, view: 'mux' },
-    { x: [67.5, 70.5], name: 'RX PMA demux', stage: 7, lane: true, view: 'demux' },
-    { x: [71.5, 73.5], name: 'Alignment lock', stage: 8, lane: true, short: 'AM lock', view: 'lock' },
-    { x: [74.5, 78.5], name: 'Deskew', stage: 8, lane: true, view: 'deskew' },
-    { x: [79.5, 83.5], name: 'Lane reorder', stage: 8, lane: true, view: 'reorder' },
-    { x: [85.25, 86.75], name: 'De-interleave', stage: 9, lane: true, short: 'De-intlv', view: 'deint' },
-    { x: [87.5, 91], name: 'RS(544,514) decode', stage: 9, short: 'RS decode', fec: true, view: 'rsdec' },
-    { x: [91.5, 93.5], name: 'Post-FEC interleave', stage: 9, short: 'Post-FEC', view: 'postfec' },
-    { x: [94, 97], name: 'AM removal', stage: 9, view: 'amr' },
-    { x: [98, 101], name: 'Descramble', stage: 9 },
-    { x: [102, 106], name: 'Reverse transcode', stage: 9, view: 'r257' },
-    { x: [107, 111], name: '64B/66B decode', stage: 9, view: 'd66' },
+    { x: [5, 9], name: '64B/66B 编码', stage: 2, view: 'b66' },
+    { x: [10.5, 14.5], name: '256B/257B 转码', stage: 2, view: 'b257' },
+    { x: [16, 19], name: '加扰', stage: 3 },
+    { x: [20, 23], name: '插入 AM', stage: 3, view: 'am' },
+    { x: [24.5, 26.5], name: 'FEC 前分配', stage: 3, short: 'FEC 前分配', view: 'prefec' },
+    { x: [27, 30.5], name: 'RS(544,514) 编码', stage: 3, short: 'RS 编码', view: 'rs' },
+    { x: [31, 32.5], name: '符号分配', stage: 3, lane: true, short: 'Symbol dist.', view: 'dist' },
+    { x: [44.5, 48.5], name: 'TX PMA 比特复用', stage: 5, lane: true, view: 'mux' },
+    { x: [67.5, 70.5], name: 'RX PMA 解复用', stage: 7, lane: true, view: 'demux' },
+    { x: [71.5, 73.5], name: '对齐锁定', stage: 8, lane: true, short: 'AM 锁定', view: 'lock' },
+    { x: [74.5, 78.5], name: '时延对齐', stage: 8, lane: true, view: 'deskew' },
+    { x: [79.5, 83.5], name: '通道重排', stage: 8, lane: true, view: 'reorder' },
+    { x: [85.25, 86.75], name: '解交织', stage: 9, lane: true, short: 'De-intlv', view: 'deint' },
+    { x: [87.5, 91], name: 'RS(544,514) 解码', stage: 9, short: 'RS 解码', fec: true, view: 'rsdec' },
+    { x: [91.5, 93.5], name: 'FEC 后交织', stage: 9, short: 'Post-FEC', view: 'postfec' },
+    { x: [94, 97], name: '移除 AM', stage: 9, view: 'amr' },
+    { x: [98, 101], name: '解扰', stage: 9 },
+    { x: [102, 106], name: '逆转码', stage: 9, view: 'r257' },
+    { x: [107, 111], name: '64B/66B 解码', stage: 9, view: 'd66' },
     { x: [112, 116], name: 'RS / MAC', stage: 9 }
   ];
 
   P.STAGES = [
-    { n: 1, side: 'TX', title: 'TX MAC and 200GMII', span: [-1, 6],
-      body: '<p>The MAC builds frames. The Reconciliation Sublayer maps them onto <b>200GMII</b>, a logical interface of 64-bit data plus control per transfer. It is usually internal to the chip, so you rarely probe it directly.</p>',
-      watch: 'Nothing here is per-lane. Lanes do not exist yet.' },
-    { n: 2, side: 'TX', title: '64B/66B encode, then 256B/257B transcode', span: [4, 15.5],
-      body: '<p>Every 8 bytes from 200GMII become one <b>66-bit block</b> (2-bit sync header plus 64-bit payload). The PCS then <b>transcodes</b> each group of four 66-bit blocks into one <b>257-bit block</b>: the four sync headers collapse into a 1-bit header plus a little control information, which frees room for FEC parity.</p><p>Transcoding is a lossless re-packing of the same data. It is not a second, independent line code; RX reverses it exactly.</p>',
-      watch: 'Four thin 66b slabs in, one wide 257b slab out.',
+    { n: 1, side: 'TX', title: 'TX MAC 与 200GMII', span: [-1, 6],
+      body: '<p>MAC 生成帧。协调子层将帧映射到 <b>200GMII</b>，每次传输 64 位数据及控制信息。这个逻辑接口通常位于芯片内部，很少直接探测。</p>',
+      watch: '当前处理的是整路数据，尚未拆分通道。' },
+    { n: 2, side: 'TX', title: '64B/66B 编码与 256B/257B 转码', span: [4, 15.5],
+      body: '<p>200GMII 每传输 8 字节，生成一个<b>66 位块</b>，由 2 位同步头和 64 位有效载荷组成。PCS 随后将每组四个 66 位块<b>转码</b>成一个 <b>257 位块</b>。四个同步头重新编码为 1 位头部及少量控制信息，为 FEC 校验留出空间。</p><p>转码是对相同数据的无损重打包。接收端可以完整还原。</p>',
+      watch: '输入四个较窄的 66 位块，输出一个较宽的 257 位块。',
       lens: ['b66', 'b257'] },
-    { n: 3, side: 'TX', title: 'Scramble, AM insertion, RS-FEC, distribution', span: [15, 33.5],
-      body: '<p>Standard order on transmit: <b>scramble</b> the 257-bit blocks, then <b>insert the alignment marker group</b>, then <b>pre-FEC distribution</b>, <b>RS(544,514) encode</b>, and <b>symbol distribution</b> onto the 8 PCS lanes.</p>' +
-        '<p><b>AM insertion.</b> Rate matching deletes idles so that, once every 81,920 257-bit blocks, there is a 1028-bit hole at the start of a codeword pair. The AM group fills it: 8 lane markers of 120 bits, plus a 65-bit pad and 3 status bits. It goes in after the scrambler, so it stays recognizable, and before the encoder, so FEC protects it.</p>' +
-        '<p><b>Pre-FEC distribution</b> cuts each 10,280-bit block (40 &times; 257 bits) into 10-bit symbols and deals them alternately to two messages, A and B: 514 symbols each. <b>RS(544,514)</b> appends 30 parity symbols to each, making two 544-symbol codewords.</p>',
-      watch: 'A gap opens in the 257-bit stream and the amber AM group drops into it. Two codeword rows follow; the dark parity cubes appear only after RS encode.',
+    { n: 3, side: 'TX', title: '加扰、插入 AM、RS-FEC 与分配', span: [15, 33.5],
+      body: '<p>发送侧的标准顺序是：对 257 位块<b>加扰</b>，<b>插入对齐标记组</b>，执行 <b>FEC 前分配</b>、<b>RS(544,514) 编码</b>，再将<b>符号分配</b>到 8 条 PCS 通道。</p>' +
+        '<p><b>插入 AM。</b>速率匹配删除 Idle，每 81,920 个 257 位块在一对码字起始处留出 1028 位。AM 组填入这段空间，包括 8 个 120 位通道标记、65 位填充及 3 位状态。AM 在加扰后插入，便于识别，在编码前插入以获得 FEC 保护。</p>' +
+        '<p><b>FEC 前分配</b>将每组 10,280 位（40 × 257 位）拆为 10 位符号，交替送入消息 A 和 B，各 514 个符号。<b>RS(544,514)</b> 为每条消息追加 30 个校验符号，形成两个各含 544 个符号的码字。</p>',
+      watch: '257 位数据流中留出空位，黄色 AM 组填入其间。随后出现两行码字，深色校验块在 RS 编码后才出现。',
       lens: ['am', 'prefec', 'rs'] },
-    { n: 4, side: 'TX', title: 'Symbol distribution and the 8 PCS lanes', span: [31, 45],
-      body: '<p><b>Symbol distribution</b> interleaves codewords A and B 10 bits at a time and deals the result across PCS lanes 0 to 7 in turn. Lane 0 receives A0, B4, A8, B12 &hellip;, lane 1 receives B0, A4, B8 &hellip;; each lane gets 136 symbols of every codeword pair, half from each codeword.</p>' +
-        '<p>Each PCS lane is a 26.5625 Gb/s stream. Its identity is in the data: the AM group was pre-interleaved so that each lane’s first 12 symbols are <b>its own 120-bit marker</b>, whose unique bytes name the lane. On transmit, PMA lane <i>i</i> carries PCS lane <i>i</i>.</p>',
-      watch: 'A cube is 4 lane symbols. The 3 tall cubes in full lane colour are the lane’s marker, launched on all 8 lanes together; data cubes are grey with a tint of their lane’s colour.',
+    { n: 4, side: 'TX', title: '符号分配到 8 条 PCS 通道', span: [31, 45],
+      body: '<p><b>符号分配</b>将码字 A 和 B 以 10 位为单位交织，轮流分配到 PCS 通道 0 至 7。通道 0 收到 A0、B4、A8、B12……，通道 1 收到 B0、A4、B8……。每条通道从每对码字得到 136 个符号，两个码字各占一半。</p>' +
+        '<p>每条 PCS 通道以 26.5625 Gb/s 传输。预交织的 AM 组使每条通道的前 12 个符号组成<b>本通道的 120 位标记</b>，其中专有字节给出通道编号。发送时，PMA 通道 <i>i</i> 承载 PCS 通道 <i>i</i>。</p>',
+      watch: '每个立方体代表 4 个通道符号。三个较高的彩色立方体代表通道标记，8 条通道同时发送标记。数据块以灰色为主，带有通道色。',
       lens: ['dist'] },
-    { n: 5, side: 'TX', title: 'PMA bit-multiplexing', span: [42, 51],
-      body: '<p>The PMA interleaves PCS lanes <b>bit by bit</b> onto fewer physical lanes. With 4 SerDes lanes, two PCS lanes share each one; with 2, four share each. Every bit of a given PCS lane follows the same physical path for as long as the mapping holds.</p><p>The PMA does not look inside the data. It does not move AMs, decode FEC, or care which lane number it carries.</p>',
-      watch: 'Lanes that share a SerDes lane merge into one track. The bit lens shows their bits alternating.',
+    { n: 5, side: 'TX', title: 'PMA 比特复用', span: [42, 51],
+      body: '<p>PMA 将 PCS 通道<b>逐比特</b>交织到更少的物理通道上。4 条 SerDes 通道时每条承载 2 条 PCS 通道，2 条 SerDes 通道时每条承载 4 条。映射有效期间，同一 PCS 通道的全部比特沿同一物理路径传送。</p><p>PMA 直接转发比特，无需识别 AM、执行 FEC 解码或识别 PCS 通道编号。</p>',
+      watch: '共享 SerDes 通道的 PCS 通道汇入同一路径。位级视图可看到比特交替排列。',
       lens: ['mux'] },
-    { n: 6, side: 'Link', title: 'Physical SerDes lanes', span: [48.5, 67.5],
-      body: '<p>These are the electrical or optical lanes: AUI, backplane, cable, or the media behind a PMD. Each has its own trace length, retimer path, and CDR, so lanes arrive at different times. That difference is <b>skew</b>.</p><p>Every PCS lane on a SerDes lane sees that lane\'s skew and its noise.</p>',
-      watch: 'Add skew in the fault lab and the AM plates on one physical lane fall behind.' },
-    { n: 7, side: 'RX', title: 'RX PMA demultiplex', span: [65.5, 72],
-      body: '<p>The RX PMA recovers the clock on each SerDes lane and splits it back into PMA lanes. It has no idea which PCS lane is which, so the bit-slot phase it starts on is arbitrary. RX PMA lane 3 may carry PCS lane 2 after one reset and PCS lane 3 after the next.</p>',
-      watch: 'Lane colours leave the demux in a different order than they entered the mux.',
+    { n: 6, side: 'Link', title: '物理 SerDes 通道', span: [48.5, 67.5],
+      body: '<p>这些是电通道或光通道，例如 AUI、背板、电缆或 PMD 后的传输介质。由于走线长度、Retimer 路径和 CDR 各异，数据到达时间不同，这种差异称为<b>时延偏差（Skew）</b>。</p><p>同一 SerDes 通道承载的所有 PCS 通道都受该通道时延偏差与噪声影响。</p>',
+      watch: '在故障实验中加入时延偏差，观察一条物理通道的 AM 落后。' },
+    { n: 7, side: 'RX', title: 'RX PMA 解复用', span: [65.5, 72],
+      body: '<p>RX PMA 恢复每条 SerDes 通道的时钟，并将其解复用到 PMA 通道。RX PMA 无法识别 PCS 通道编号，因此解复用起始相位可以变化。例如两次复位后，RX PMA 通道 3 可能分别承载 PCS 通道 2 和 3。</p>',
+      watch: '解复用输出的通道颜色顺序与复用输入不同。',
       lens: ['demux'] },
-    { n: 8, side: 'RX', title: 'Alignment lock, deskew, lane reorder', span: [70.5, 85],
-      body: '<p>The RX PCS hunts each PMA lane for the common AM pattern. When AMs repeat at the expected spacing, that lane has <b>alignment lock</b>, and the unique bytes say which PCS lane it is. With all lanes locked, the PCS lines their AMs up in a <b>deskew</b> buffer and <b>reorders</b> the lanes to 0..7.</p><p><b>align_status</b> becomes true only when all 8 lanes are locked and deskewed. This has to happen before FEC decode, because each codeword is spread across all 8 PCS lanes.</p>',
-      watch: 'Lock rings, the deskew buffer filling to absorb skew, and the crossover restoring lane order.',
+    { n: 8, side: 'RX', title: '对齐锁定、时延对齐与通道重排', span: [70.5, 85],
+      body: '<p>RX PCS 在每条 PMA 通道上搜索公共 AM 图样。AM 按预期间隔重复时，该通道获得<b>对齐锁定</b>，专有字节标识 PCS 通道。所有通道锁定后，PCS 用 <b>Deskew 缓冲区</b>对齐 AM，再按 0 到 7 <b>重排</b>通道。</p><p>全部 8 条通道锁定且时延对齐后，<b>align_status</b> 才为真。每个码字分布在全部 8 条 PCS 通道上，所以这一步必须先于 FEC 解码。</p>',
+      watch: '观察锁定环、吸收时延偏差的缓冲区，以及恢复通道顺序的交叉路径。',
       lens: ['lock', 'deskew', 'reorder'] },
-    { n: 9, side: 'RX', title: 'RX FEC, PCS decode, 200GMII and MAC', span: [84, 117],
-      body: '<p>Receive mirrors transmit: <b>de-interleave</b> symbols into codewords A and B, <b>RS(544,514) decode</b> (up to 15 symbol errors per codeword corrected), <b>post-FEC interleave</b>, <b>AM removal</b>, <b>descramble</b>, <b>reverse transcode</b> to 66-bit blocks, and <b>64B/66B decode</b> onto 200GMII.</p><p>An uncorrectable codeword is not passed on silently. The PCS marks the affected blocks as errors, so the MAC sees damaged frames as FCS errors.</p>',
-      watch: 'The decoder box flashes when it corrects or fails a codeword. Without align_status, nothing decodes and the MAC sees Local Fault.',
+    { n: 9, side: 'RX', title: 'RX FEC、PCS 解码、200GMII 与 MAC', span: [84, 117],
+      body: '<p>接收端按相反顺序还原：<b>解交织</b>出码字 A 和 B，执行 <b>RS(544,514) 解码</b>（每个码字最多纠正 15 个错误符号），<b>FEC 后交织</b>，<b>移除 AM</b>，<b>解扰</b>，<b>逆转码</b>为 66 位块，再经 <b>64B/66B 解码</b>送到 200GMII。</p><p>PCS 会将不可纠正码字影响的数据块标为错误，MAC 收到受损帧时会报告 FCS 错误。</p>',
+      watch: '解码器纠正码字或遇到不可纠正码字时会闪烁。align_status 为假时无法解码，MAC 收到 Local Fault。',
       lens: ['deint', 'rsdec', 'postfec', 'amr', 'r257', 'd66'] }
   ];
 })(globalThis.PCS = globalThis.PCS || {});
@@ -2504,7 +2504,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     card.id = 'inspector';
     card.hidden = true;
     card.setAttribute('role', 'dialog');
-    card.setAttribute('aria-label', 'Block contents');
+    card.setAttribute('aria-label', '数据块内容');
     host.appendChild(card);
 
     outline = new T.LineSegments(new T.EdgesGeometry(new T.BoxGeometry(1, 1, 1)),
@@ -2777,12 +2777,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 
   function render(d) {
     var h = '<header class="ins-head"><div><span class="ins-side">' + d.side + ' · ' + esc(d.where) + '</span>' +
-      '<h4>' + esc(d.title) + '</h4></div><button type="button" class="ins-x" data-act="close" aria-label="Close">×</button></header><div class="ins-body">';
+      '<h4>' + esc(d.title) + '</h4></div><button type="button" class="ins-x" data-act="close" aria-label="关闭">×</button></header><div class="ins-body">';
 
-    if (d.state === 'lf') h += '<p class="ins-warn">No data. The RX PCS is not aligned, so it sends Local Fault to the MAC.</p>';
-    if (d.state === 'unc') h += '<p class="ins-warn">This block came from an uncorrectable codeword. The PCS marks it as an error, and the MAC will see a bad frame.</p>';
-    if (d.state === 'err') h += '<p class="ins-warn">Channel noise flipped bits in this symbol. RS decode can repair up to 15 bad symbols per codeword.</p>';
-    if (d.state === 'los') h += '<p class="ins-warn">This SerDes lane has lost signal. The receiver gets no valid bits for any PCS lane it carries.</p>';
+    if (d.state === 'lf') h += '<p class="ins-warn">没有数据。RX PCS 尚未对齐，因此向 MAC 发送 Local Fault。</p>';
+    if (d.state === 'unc') h += '<p class="ins-warn">此数据块来自不可纠正的码字。PCS 将它标记为错误，MAC 会收到受损帧。</p>';
+    if (d.state === 'err') h += '<p class="ins-warn">信道噪声翻转了此符号中的比特。RS 解码最多可修复每个码字中的 15 个错误符号。</p>';
+    if (d.state === 'los') h += '<p class="ins-warn">此 SerDes 通道已丢失信号，其承载的 PCS 通道均无法向接收端传送有效比特。</p>';
     if (d.state === 'ambad') h += '<p class="ins-warn">This marker arrives corrupted. Enough bad markers in a row and lane ' + d.lane.pcs + ' loses lock.</p>';
 
     if (d.kind === 'mii' || d.kind === 'b66') {
@@ -2826,19 +2826,19 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var fw = P.followed && P.followed();
     if (fw) {
       var part = d.cover ? P.wordPart(d.cover, fw) : '';
-      h += '<p class="ins-follow">Following <b>\u201C' + esc(fw.text) + '\u201D</b>' + (part ? ': this block holds <b>' + esc(part) + '</b>' : ': not in this block') +
-        ' <button type="button" class="linkbtn" data-act="unfollow">Stop</button></p>';
+      h += '<p class="ins-follow">正在追踪 <b>\u201C' + esc(fw.text) + '\u201D</b>' + (part ? ': this block holds <b>' + esc(part) + '</b>' : ': not in this block') +
+        ' <button type="button" class="linkbtn" data-act="unfollow">停止</button></p>';
     } else if (d.cover && d.cover.length) {
-      h += '<p class="ins-hint">Click a word to light up every block that carries it.</p>';
+      h += '<p class="ins-hint">点击单词以高亮承载它的所有数据块。</p>';
     }
     if (d.lane) {
       var L = d.lane;
       h += '<p class="ins-path"><span class="sw l' + L.pcs + '"></span>PCS ' + L.pcs + ' → SerDes ' + L.serdes +
         (L.k > 1 ? ' (bit slot ' + (L.slot + 1) + ' of ' + L.k + ')' : '') + ' → RX PMA ' + L.rxPma + ' → reordered to PCS ' + L.pcs + '</p>';
     }
-    h += '</div><footer class="ins-foot"><button type="button" class="btn" data-act="prev" title="Block before this one">← Prev</button>' +
-      '<button type="button" class="btn" data-act="next" title="Block after this one">Next →</button>' +
-      (S.playing ? '' : '<button type="button" class="btn" data-act="resume">Resume and follow</button>') + '</footer>';
+    h += '</div><footer class="ins-foot"><button type="button" class="btn" data-act="prev" title="上一个数据块">← 上一个</button>' +
+      '<button type="button" class="btn" data-act="next" title="下一个数据块">下一个 →</button>' +
+      (S.playing ? '' : '<button type="button" class="btn" data-act="resume">继续播放并追踪</button>') + '</footer>';
     return h;
   }
 })(globalThis.PCS = globalThis.PCS || {});
@@ -2987,18 +2987,18 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   /* ---- views: what is in the box, how to step, what to call it ---- */
   var PF_SYMS = 8, PF_LAST = 1028 - PF_SYMS;
   var VIEWS = {
-    b66: { title: '64B/66B encode', stage: 2, steps: 9, rate: 3, h: 300,
+    b66: { title: '64B/66B 编码', stage: 2, steps: 9, rate: 3, h: 300,
       at: function () { return { t: nextData66(Math.round((S.u - boxMid('b66')) / U66), 1) }; },
       nav: function (c, d) { return { t: nextData66(c.t + d, d) }; },
       where: function (c) { var b = P.slot66(c.t).block; return '200GMII transfer ' + b + ' → 66-bit block ' + b; } },
-    b257: { title: '256B/257B transcode', stage: 2, steps: 5, rate: 2.5, h: 316,
+    b257: { title: '256B/257B 转码', stage: 2, steps: 5, rate: 2.5, h: 316,
       at: function () { return { s: nextData257(Math.round((S.u - boxMid('b257')) / U257), 1) }; },
       nav: function (c, d) { return { s: nextData257(c.s + d, d) }; },
       where: function (c) {
         var sl = P.slot257(c.s);
         return '66-bit blocks ' + 4 * sl.block + '–' + (4 * sl.block + 3) + ' → 257-bit block ' + sl.block + ' (slot ' + (sl.r + 1) + ' of 40, pair ' + sl.q + ')';
       } },
-    am: { title: 'AM insertion', stage: 3, steps: 0, rate: 6, h: 448,   // steps: AM_STEPS, set below
+    am: { title: '插入 AM', stage: 3, steps: 0, rate: 6, h: 448,   // steps: AM_STEPS, set below
       at: function () { var q = pairAt(boxMid('am')).q; return { q: q - mod(q, P.AM_PAIRS) }; },
       nav: function (c, d) { return { q: c.q + d * P.AM_PAIRS }; },
       where: function (c) {
@@ -3006,7 +3006,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         return 'AM insertion ' + c.q / P.AM_PAIRS + ': 4 AM blocks, then 257-bit blocks ' + b + '–' + (b + 2 * P.PAIR_SLOTS - P.AM_SLOTS - 1) + ' in slots 4–79';
       } },
     // PF_SYMS stream symbols per window: the most that fit on one row with readable bits.
-    prefec: { title: 'Pre-FEC distribution · Distribution details', stage: 3, steps: PF_SYMS, rate: 3, h: 330,
+    prefec: { title: 'FEC 前分配 · 分配细节', stage: 3, steps: PF_SYMS, rate: 3, h: 330,
       at: function () {
         var p = pairAt(boxMid('prefec')), j = Math.floor(p.f * 1028) - PF_SYMS / 2;
         return { q: p.q, j: Math.max(0, Math.min(PF_LAST, j - mod(j, 2))) };
@@ -3019,11 +3019,11 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         var n = PF_SYMS / 2 - 1;
         return 'Pair ' + c.q + ': stream symbols ' + c.j + '–' + (c.j + PF_SYMS - 1) + ' of 1028 → A' + c.j / 2 + '–A' + (c.j / 2 + n) + ' and B' + c.j / 2 + '–B' + (c.j / 2 + n);
       } },
-    rs: { title: 'RS(544,514) encode', stage: 3, steps: 30, rate: 8, h: 316,
+    rs: { title: 'RS(544,514) 编码', stage: 3, steps: 30, rate: 8, h: 316,
       at: function () { return { q: pairAt(boxMid('rs')).q }; },
       nav: function (c, d) { return { q: c.q + d }; },
       where: function (c) { return 'Codeword pair ' + c.q + ': A and B, 514 message symbols each → 544'; } },
-    dist: { title: 'Symbol distribution', stage: 4, steps: 32, rate: 8, h: 376,
+    dist: { title: '符号分配', stage: 4, steps: 32, rate: 8, h: 376,
       at: function () { var p = pairAt(boxMid('dist')); return { q: p.q, u: Math.min(P.UNITS_PER_PAIR - 1, Math.floor(p.f * P.UNITS_PER_PAIR)) }; },
       nav: function (c, d) {
         var u = c.u + d, q = c.q;
@@ -3033,7 +3033,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       where: function (c) {
         return 'Pair ' + c.q + ': lane symbols ' + 4 * c.u + '–' + (4 * c.u + 3) + ' of 136 on every PCS lane' + (P.isAmPair(c.q) && c.u < P.AM_UNITS ? ' (alignment marker)' : '');
       } },
-    mux: { title: 'PMA bit-mux', stage: 5, rate: 10,
+    mux: { title: 'PMA 比特复用', stage: 5, rate: 10,
       get steps() { return muxK() > 1 ? MUX_BITS : 0; },
       at: function () { return { q: pairAt((P.X.mux[0] + P.X.mux[1]) / 2).q, s: 0 }; },
       nav: function (c, d) { return { q: c.q, s: mod(c.s + d, S.link.width) }; },
@@ -3050,41 +3050,23 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 
   // Caption under each view, in words.
   var NOTES = {
-    b66: 'Every 200GMII transfer of 8 data bytes becomes one 66-bit block: a 2-bit sync header, then the same 64 bits unchanged. ' +
-      'Header 01 means all 8 bytes are data; 10 would mean the block carries control characters, which this model leaves out. Bit 0 of each byte is sent first.',
-    b257: 'Four 66-bit blocks become one 257-bit block. When all four are data, their four 2-bit sync headers (8 bits) are replaced by a single header bit 1, ' +
-      'and the four 64-bit payloads follow in order, unchanged: 4 × 66 = 264 bits become 257. The 7 bits saved per block make room for RS-FEC parity at the same line rate.',
-    am: 'As in IEEE 802.3 Figure 119–6, the PCS inserts 4 AM blocks (am_mapped, 4 × 257 = 1028 bits) once every ' + num(AM_STD) + ' × 257-bit blocks, ' +
-      'so ' + num(AM_STD - P.AM_SLOTS) + ' blocks of data pass between one group and the next. Rate matching has already deleted idles to leave the 4-block gap; ' +
-      'the 8 lane markers, interleaved 10 bits at a time, plus a pad and status field fill it exactly. The lab inserts a group every ' + AM_LAB + ' blocks so markers keep passing on screen.',
-    prefec: 'The 10,280-bit block is read as 1028 ten-bit symbols, in order, and dealt alternately: stream symbol 2i goes to codeword A as A_i, symbol 2i+1 to codeword B as B_i. ' +
-      'Nothing is changed or reordered within a symbol. Symbols ignore character boundaries, so most characters end up split between A and B.',
-    rs: 'RS(544,514) is systematic: the 514 message symbols of each codeword pass through unchanged, and the encoder appends 30 new parity symbols computed from them ' +
-      'over GF(2¹⁰). With 30 extra symbols the decoder can repair up to 15 bad symbols per codeword. Parity here is computed over the unscrambled bits the lab shows; a real link scrambles them first.',
-    dist: 'Codewords A and B are interleaved 10 bits at a time and dealt across PCS lanes 0–7 in turn. On even lane symbols, lanes 0, 2, 4, 6 take A and lanes 1, 3, 5, 7 take B; odd lane symbols swap them. ' +
-      'Each lane ends up with 136 symbols per codeword pair, half from each codeword. Tile colour is the lane a symbol goes to.',
-    mux: 'The PMA interleaves the bits of the PCS lanes that share a SerDes lane, one bit from each in turn; on PAM4 lanes each pair of bits becomes one of four levels. ' +
-      'Prev / Next walk the SerDes lanes; change SerDes lanes or the mapping in the toolbar to see 1, 2 or 4 PCS lanes per SerDes lane.',
-    demux: 'On receive, the PMA demultiplexes each SerDes lane back into PCS lanes. It only sees a stream of bits, so the PCS lanes may come out in any order (120.5.2). ' +
-      'That is why every PCS lane carries its own alignment marker: the PCS reads them to put the lanes back in order.',
-    lock: 'Before anything else the receiver must find the alignment markers in each lane’s bit stream. It tests 120-bit blocks against the common marker bytes, slipping a bit at a time; ' +
-      'once a marker is found, the next one, 4096 codewords later, must name the same PCS lane. Lock then holds until 5 markers in a row are bad. Markers are checked before FEC, so the match tolerates errors: 9 of 12 nibbles are enough.',
-    deskew: 'Each SerDes lane has its own path delay, so the markers of the 8 PCS lanes arrive at different times. Deskew holds the early lanes in a buffer until every marker has arrived, ' +
-      'then releases them together. Use the buttons or the fault lab’s skew slider; past 180 ns a lane cannot be aligned and align_status stays false.',
-    reorder: 'The demux and the board can deliver PCS lanes on any RX PMA lane. Each lane’s marker carries six unique bytes that name its PCS lane; the PCS reads them and puts the lanes back in order, ' +
-      'which FEC de-interleave needs because every codeword is spread across all 8 lanes.',
-    deint: 'With the lanes locked, deskewed and back in order, the receiver undoes symbol distribution: it reads the 8 PCS lanes 10 bits at a time, in turn, ' +
-      'and lane symbol k of lane p goes back to its place as symbol 4k + ⌊p/2⌋ of codeword A or B. A lane out of place would scramble both codewords.',
-    rsdec: 'The decoder computes 30 syndromes from the received 544 symbols. All zero means a valid codeword: the 514 message symbols pass on and the parity is dropped. ' +
-      'Otherwise it locates the bad symbols and their error values and fixes up to 15 per codeword; with more it marks the codeword uncorrectable. The decoding here is real RS(544,514) over the lab’s unscrambled bits.',
-    postfec: 'The inverse of pre-FEC distribution. The corrected messages are interleaved back into one stream of 1028 ten-bit symbols: A_i becomes stream symbol 2i, B_i symbol 2i+1. ' +
-      'Characters split between A and B come back together, and the stream is again 40 257-bit blocks.',
-    amr: 'The inverse of AM insertion. Once every ' + num(AM_STD) + ' × 257-bit blocks the first 1028 bits of a codeword pair are the AM group; the receiver has already used it for lock, deskew and reorder, ' +
-      'so it is taken out and its 4 block slots stay empty. Every other 257-bit block passes on unchanged and in order. The lab removes a group every ' + AM_LAB + ' blocks.',
-    r257: 'The inverse of 256B/257B transcoding. Header bit 1 says all four 64-bit payloads are data, so each gets sync header 01 back and becomes one 66-bit block: ' +
-      '257 bits become 4 × 66 = 264. A header bit 0 would mean control blocks, which this model leaves out.',
-    d66: 'The inverse of 64B/66B encoding. Sync header 01 says the block is all data, so the header is dropped and the 64 bits go onto 200GMII as 8 bytes, unchanged. ' +
-      'Header 10 would mean control characters, which this model leaves out. Bit 0 of each byte arrives first.'
+    b66: '200GMII 每传输 8 字节就生成一个 66 位块：2 位同步头加原样保留的 64 位数据。同步头 01 表示全是数据，10 表示包含控制字符（模型省略）。每个字节从位 0 开始发送。',
+    b257: '四个 66 位块转成一个 257 位块。四块全是数据时，四个 2 位同步头由单个头部位 1 代替，四组 64 位载荷按原顺序跟在后面。264 位缩减到 257 位，节省的 7 位为相同线速下的 RS-FEC 校验腾出空间。',
+    am: '按 IEEE 802.3 图 119–6，PCS 每 ' + num(AM_STD) + ' 个 257 位块插入 4 个 AM 块（am_mapped，共 1028 位）。两组 AM 间通过 ' + num(AM_STD - P.AM_SLOTS) + ' 个数据块。速率匹配删除 Idle，腾出 4 个块的位置，由逐 10 位交织的 8 个标记及填充、状态字段填满。实验每 ' + AM_LAB + ' 个块插入一组。',
+    prefec: '10,280 位数据按顺序拆成 1028 个 10 位符号并交替分配：符号 2i 成为码字 A 的 A_i，符号 2i+1 成为码字 B 的 B_i。符号内部保持不变。字符边界和符号边界不同，多数字符会分到两个码字。',
+    rs: 'RS(544,514) 是系统码，保留每个码字的 514 个消息符号并通过 GF(2¹⁰) 运算生成 30 个校验符号。接收端最多纠正每个码字的 15 个错误符号。模型对展示的未加扰数据计算校验，实际链路先加扰。',
+    dist: '码字 A 与 B 以 10 位为单位交织，轮流分配到 PCS 通道 0–7。偶数符号位置上，偶数通道取 A，奇数通道取 B。奇数符号位置上两者互换。每条通道从每对码字中取得 136 个符号，两个码字各占一半。颜色表示目标通道。',
+    mux: 'PMA 轮流从共享同一 SerDes 通道的 PCS 通道中各取一个比特。PAM4 将每两个比特编码为四种电平之一。用上一个或下一个按钮选择 SerDes 通道，也可调整通道数和映射，查看每条 SerDes 承载 1、2 或 4 条 PCS 通道的情况。',
+    demux: '接收时 PMA 将各 SerDes 通道解复用为 PCS 通道数据流。解复用只处理比特，因此输出顺序可以变化（120.5.2）。PCS 读取每条通道的对齐标记恢复顺序。',
+    lock: '接收端逐比特滑动，将 120 位区间与公共标记字节匹配。找到一个标记后，间隔 4096 个码字的下一个标记必须指向同一 PCS 通道。连续 5 个标记错误才会失锁。标记在 FEC 前检查，12 个半字节匹配 9 个即可。',
+    deskew: '各 SerDes 通道的传播时延不同，8 条 PCS 通道的标记会先后到达。Deskew 缓存先到的通道，等标记全部到齐后一起释放。用按钮或故障实验中的滑块改变时延。超过 180 ns 时无法对齐，align_status 保持为假。',
+    reorder: '解复用及布线可能将 PCS 通道送到任意 RX PMA 通道。PCS 从标记中读取六个专有字节识别通道编号并恢复顺序。每个码字分布在全部 8 条通道上，因此 FEC 解交织依赖正确的通道顺序。',
+    deint: '完成锁定、时延对齐和重排后，接收端轮流从 8 条 PCS 通道读取 10 位符号，逆向执行符号分配。通道 p 上的符号 k 放回码字 A 或 B 的 4k + ⌊p/2⌋ 位置。通道错位会扰乱两个码字。',
+    rsdec: '解码器从收到的 544 个符号计算 30 个伴随式。全为零时码字有效，解码器保留 514 个消息符号，去掉校验。否则定位错误符号和值，每个码字最多纠正 15 个，超过则标记为不可纠正。模型对未加扰的数据执行 RS(544,514) 解码。',
+    postfec: 'FEC 前分配的逆过程。两条已纠错消息重新交织成一路含 1028 个 10 位符号的数据流。A_i 成为符号 2i，B_i 成为符号 2i+1。分散在 A 和 B 中的字符重新拼合，恢复 40 个 257 位块。',
+    amr: '插入 AM 的逆过程。每 ' + num(AM_STD) + ' 个 257 位块，一对码字最前面的 1028 位是 AM 组。接收端完成锁定、时延对齐和重排后移除 AM 组，留下 4 个空位。其他块按原顺序通过。实验每 ' + AM_LAB + ' 个块移除一组。',
+    r257: '256B/257B 转码的逆过程。头部位 1 表示四组 64 位载荷全是数据，为每组恢复同步头 01，形成四个 66 位块。257 位还原为 264 位。头部位为 0 时表示含控制块（模型省略）。',
+    d66: '64B/66B 编码的逆过程。同步头 01 表示全数据，移除同步头后将 64 位数据原样作为 8 字节送到 200GMII。同步头 10 表示包含控制字符（模型省略）。各字节的位 0 最先到达。'
   };
 
   /* ---- drawing helpers ---- */
@@ -3161,7 +3143,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var blk = P.slot66(cur.t).block, start = 8 * blk, k = step, h = hot();
     var x0 = 116, hw = 54, gap = 8, tw = Math.min(84, (W - x0 - hw - gap - 16) / 8);
     var xb = x0 + hw + gap, yIn = 44, yOut = 150, th1 = 66;
-    label('in: one 200GMII transfer, 8 data bytes', xb, 18, th.ink, 11, 'left', 600);
+    label('输入：一次 200GMII 传输，8 字节数据', xb, 18, th.ink, 11, 'left', 600);
     label('200GMII', 8, yIn + th1 / 2 - 8, th.ink, 11, 'left', 600);
     label('64 bits in', 8, yIn + th1 / 2 + 8, th.muted, 10);
     label('66-bit block', 8, yOut + th1 / 2 - 8, th.ink, 11, 'left', 600);
@@ -3182,7 +3164,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     label('+ 2-bit sync header', x0 + hw / 2, yOut - 12, k >= 1 ? th.ink : th.muted, 10, 'center', 600);
     // The 66 bits in the order they are sent.
     var ys = yOut + th1 + 30, cw = (W - x0 - 16) / 66;
-    label('sent in order', 8, ys + 9, th.muted, 10);
+    label('按顺序发送', 8, ys + 9, th.muted, 10);
     for (var n = 0; n < 66; n++) {
       var bx = x0 + n * cw, on = n < 2 ? k >= 1 : k >= 2 + ((n - 2) >> 3);
       var bit = n < 2 ? '01'[n] : String((P.byteAt(start + ((n - 2) >> 3)) >> ((n - 2) & 7)) & 1);
@@ -3190,7 +3172,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       box(bx + 0.5, ys, cw - 1, 18, on ? f : null, on ? null : th.rule);
       if (on && cw > 8) label(bit, bx + cw / 2, ys + 9, onFill(f), 9, 'center');
     }
-    label('bit 0 → bit 65', x0, ys + 30, th.muted, 10);
+    label('位 0 → 位 65', x0, ys + 30, th.muted, 10);
   }
 
   /* ---- 256B/257B, laid out like the transcoder figure (Example 1: all data
@@ -3252,8 +3234,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     label('256', xR - 2, yB + rh + 10, th.muted, 9, 'right');
     label('tx_xcoded · 257-bit block ' + sl.block, (xB + xR) / 2, yB + rh + 14, th.ink, 11, 'center', 600);
     var yc = yB + rh + 42;
-    label('all four blocks are data (01), so the four sync headers become one header bit 1', x0, yc, th.ink, 10, 'left', 600);
-    label('d_0…d_3 are copied unchanged: 4 × 66 = 264 bits in, 1 + 4 × 64 = 257 bits out', x0, yc + 18, th.muted, 10);
+    label('四块均为数据（01），四个同步头合并为一个头部位 1', x0, yc, th.ink, 10, 'left', 600);
+    label('d_0…d_3 原样复制：输入 4 × 66 = 264 位，输出 1 + 4 × 64 = 257 位', x0, yc + 18, th.muted, 10);
   }
 
   // Fill for stream bit b: by source character (two shades so neighbours differ),
@@ -3299,7 +3281,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
      faint dashed lines; m_A and m_B are thin vertical bars below. Stepping deals
      one symbol at a time: even symbols down to m_A, odd ones to m_B. ---- */
   var PF_CON = 56, PF_ROWS = PF_CON / 2;   // symbols shown, and rows of each message bar
-  var PF_CONCEPT = { title: 'Pre-FEC distribution · Overview', steps: PF_CON, rate: 6, h: 432,
+  var PF_CONCEPT = { title: 'FEC 前分配 · 概览', steps: PF_CON, rate: 6, h: 432,
     nav: function (c, d) { return { q: c.q + d, j: c.j }; },
     where: function (c) { return 'Pair ' + c.q + ': 40 × 257 = 10,280 bits → 1028 ten-bit symbols → m_A and m_B, 514 symbols each'; } };
   function pfDash(x0, y0, x1, y1) {
@@ -3317,7 +3299,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     function cell(j) { return { x: xs[j & 1], y: yOut + (j >> 1) * ch }; }
     label(rx ? 'in: m_A and m_B after RS decode, 514 symbols each; out: rx_scrambled_am, 1028 ten-bit symbols = 40 × 257-bit blocks'
       : 'in: tx_scrambled_am, 40 × 257-bit blocks = 10,280 bits = 1028 ten-bit symbols, bit 0 first →', x0, 18, th.ink, 11, 'left', 600);
-    label('stream', 8, y0 + bh / 2, th.ink, 11, 'left', 700);
+    label('数据流', 8, y0 + bh / 2, th.ink, 11, 'left', 700);
     // The stream bar, each symbol in the colour of its message. TX: dealt symbols
     // fade while stepping. RX: a symbol appears once it has been taken.
     if (rx) box(x0, y0, xE - x0, bh, null, th.rule);
@@ -3396,11 +3378,11 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     label('s1027', lx0 + lw + 4, yLoc, th.muted, 9);
     label(rx ? 'in: m_A and m_B after RS decode, 10 bits per symbol; out: rx_scrambled_am, bit 0 first'
       : 'in: tx_scrambled_am, 10 bits per symbol, bit 0 first →', x0, 34, th.ink, 11, 'left', 600);
-    label('stream', 8, yS + 27, th.ink, 11, 'left', 700);
+    label('数据流', 8, yS + 27, th.ink, 11, 'left', 700);
     label('m_A', 8, yA + 18, th.ink, 11, 'left', 700);
-    label('even s', 8, yA + 32, th.muted, 9);
+    label('偶数 s', 8, yA + 32, th.muted, 9);
     label('m_B', 8, yB + 18, th.ink, 11, 'left', 700);
-    label('odd s', 8, yB + 32, th.muted, 9);
+    label('奇数 s', 8, yB + 32, th.muted, 9);
     // Byte index of stream bit b, or -1 when it is not a payload byte.
     function byteOf(b) { var s = P.pairBit(q, b); return s.src === 'b' ? s.idx : -1; }
     for (var t = 0; t < N; t++) {
@@ -3459,11 +3441,11 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var q = cur.q, k = step, h = hot();
     var x0 = 96, tw = Math.min(46, (W - 166) / 18.2), pw = tw * 0.62, th1 = 54, ph = 16, pg = 3, y0 = 44;
     var rx = x0 + 6 * tw + 44, px = rx + 6 * tw + 10, idx = [0, 1, 2, -1, 512, 513];
-    label('in: message, 514 symbols', x0, 18, th.ink, 11, 'left', 600);
-    label('out: codeword, 544 symbols', rx, 18, th.ink, 11, 'left', 600);
+    label('输入：消息，514 个符号', x0, 18, th.ink, 11, 'left', 600);
+    label('输出：码字，544 个符号', rx, 18, th.ink, 11, 'left', 600);
     [0, 1].forEach(function (w) {
       var y = y0 + w * (th1 + 40), par = P.cwParity(q, w);
-      label('codeword ' + cwName(w), 8, y + th1 / 2, th.ink, 11, 'left', 700);
+      label('码字 ' + cwName(w), 8, y + th1 / 2, th.ink, 11, 'left', 700);
       idx.forEach(function (i, n) { msgTile(x0 + n * tw, y, tw, th1, q, w, i); msgTile(rx + n * tw, y, tw, th1, q, w, i); });
       arrow(x0 + 6 * tw + 8, rx - 8, y + th1 / 2);
       for (var p = 0; p < 30; p++) {
@@ -3505,7 +3487,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
      below, one lane symbol per dashed row. Stepping deals tx_out symbols
      s = 8k + p in order: each lands on PCS lane p as lane symbol k. ---- */
   var DC_ROWS = 16, DC_SYMS = 4 * DC_ROWS, DC_STEPS = 8 * DC_ROWS;   // lane symbols shown, symbols per codeword, steps
-  var DIST_CONCEPT = { title: 'Symbol distribution · Overview', steps: DC_STEPS, rate: 12, h: 352,
+  var DIST_CONCEPT = { title: '符号分配 · 概览', steps: DC_STEPS, rate: 12, h: 352,
     nav: function (c, d) { return { q: c.q + d, u: c.u }; },
     where: function (c) { return 'Pair ' + c.q + ': A0–A' + (DC_SYMS - 1) + ' and B0–B' + (DC_SYMS - 1) + ' → lane symbols 0–' + (DC_ROWS - 1) + ' of 136 on PCS lanes 0–7'; } };
   // Tile colour on both symbol distribution pages: the lane's colour for a marker
@@ -3535,7 +3517,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     // stepping. RX: a symbol appears once it has been taken off its lane.
     [0, 1].forEach(function (w) {
       var y = ys[w];
-      label('codeword ' + cwName(w), 8, y + bh / 2, th.ink, 11, 'left', 700);
+      label('码字 ' + cwName(w), 8, y + bh / 2, th.ink, 11, 'left', 700);
       if (rx) box(x0, y, xE - x0, bh, null, th.rule);
       for (var i = 0; i < DC_SYMS; i++) {
         var o = dcOrder(w, i);
@@ -3606,8 +3588,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var laneL = rx ? 16 : mid + 74, laneR = rx ? W - mid - 74 : W - 16;
     var lw = (cwR - cwL) / 16, rw = (laneR - laneL) / 4;   // codeword tile, lane cell
     var cwIn = 'codewords A and B, symbols ' + i0 + '–' + (i0 + 15), lnIn = 'PCS lanes, lane symbols ' + k0 + '–' + (k0 + 3);
-    label('in: ' + (rx ? lnIn : cwIn), rx ? 8 : cwL, 18, th.ink, 11, 'left', 600);
-    label('out: ' + (rx ? cwIn : lnIn), rx ? cwL - 88 : laneL - 60, 18, th.ink, 11, 'left', 600);
+    label('输入：' + (rx ? lnIn : cwIn), rx ? 8 : cwL, 18, th.ink, 11, 'left', 600);
+    label('输出：' + (rx ? cwIn : lnIn), rx ? cwL - 88 : laneL - 60, 18, th.ink, 11, 'left', 600);
     // Lane symbol kk of lane p is codeword symbol 4kk + (p >> 1) of A or B, so
     // codeword symbol i sits at lane symbol i >> 2, on lane 2(i & 3) + (w xor parity of i >> 2).
     function dest(w, i) { var kk = i >> 2; return { p: 2 * (i & 3) + (w ^ (kk & 1)), kk: kk }; }
@@ -3615,7 +3597,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     function order(p, c) { return 8 * c + p; }
     [0, 1].forEach(function (w) {
       var y = w ? yB : yA;
-      label('codeword ' + cwName(w), rx ? cwL - 88 : 8, y + rh / 2, th.ink, 11, 'left', 700);
+      label('码字 ' + cwName(w), rx ? cwL - 88 : 8, y + rh / 2, th.ink, 11, 'left', 700);
       for (var n = 0; n < 16; n++) {
         var i = i0 + n, d = dest(w, i), o = order(d.p, d.kk - k0), x = cwL + n * lw, f = distFill(q, w, i);
         // TX: faded once dealt. RX: empty until taken off its lane.
@@ -3765,12 +3747,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var q = cur.q, g = amGeo(W), x0 = g.x0, sw = g.sw, hh = g.hh, k = amDetail(step);
     var y1 = g.rows[0][0], y1n = g.rows[0][1], y2 = g.rows[1][0], y2n = g.rows[1][1];
     var b0 = amSlotBlock(P.PAIR_SLOTS);
-    label('before', 8, y1 + hh / 2, th.muted, 11);
-    label('after', 8, y2 + hh / 2, th.muted, 11);
+    label('处理前', 8, y1 + hh / 2, th.muted, 11);
+    label('处理后', 8, y2 + hh / 2, th.muted, 11);
     function tile(x, y, b) { box(x + 1, y, sw - 2, hh, th.edge); if (sw > 18) label(String(b), x + sw / 2, y + hh / 2, th.paper, 9, 'center'); }
     // Slot numbers only under the before rows; the number inside a tile is the 257-bit block.
     [y1, y1n].forEach(function (y, r) {
-      label('slot', 8, y + hh + 9, th.muted, 9);
+      label('时隙', 8, y + hh + 9, th.muted, 9);
       if (sw > 12) for (var s = 0; s < 40; s++) label(String(40 * r + s), x0 + s * sw + sw / 2, y + hh + 9, th.muted, 9, 'center');
     });
     for (var i = 0; i < 40; i++) {
@@ -3806,10 +3788,10 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         group(gy);
         label('am_mapped<1027:0>', x0 + 2 * sw, gy - 9, th.ink, 10, 'center', 600);
       }
-      label('rate matching has left 4 block slots (1028 bits) empty', x0, y1 - 12, th.muted, 10);
+      label('速率匹配留下 4 个空位（1028 位）', x0, y1 - 12, th.muted, 10);
     }
     label(rx ? 'the 4 AM blocks (1028 bits) are taken out; the 257-bit blocks pass on unchanged' : '4 AM blocks (1028 bits), then the 257-bit blocks resume', x0, y2n + hh + 22, th.ink, 11, 'left', 600);
-    label('slots 40–79: 40 regular 257-bit blocks, no AM until 81,920 blocks after this group', x0, y2n + hh + 40, th.muted, 10);
+    label('时隙 40–79：40 个普通 257 位块，下一组 AM 间隔 81,920 个块', x0, y2n + hh + 40, th.muted, 10);
     label(rx ? 'colours = which lane’s marker each 10 bits belong to · number in a tile = 257-bit block · slots 0–3 are left empty'
       : 'colours = which lane’s marker each 10 bits belong to · number in a tile = 257-bit block · click a slot to see its bits', x0, y2n + hh + 56, th.muted, 10);
     // The picked slot, outlined in both the before and after rows.
@@ -3848,7 +3830,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       ctx.beginPath(); ctx.moveTo(x0 + t * bw, y); ctx.lineTo(x0 + t * bw, y + (t % 8 ? 3 : 6)); ctx.stroke();
       if (t % 8 === 0) label(Math.round(t * tb) + ' ps', x0 + t * bw, y - 7, th.muted, 9, t ? 'center' : 'left');
     }
-    label('time →', 8, y, th.muted, 9);
+    label('时间 →', 8, y, th.muted, 9);
   }
   // A short arrow from (x0, y0) down to (x1, y1), for the bit just moved.
   function muxRoute(x0, y0, x1, y1) {
@@ -3904,7 +3886,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         ctx.strokeStyle = th.muted; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(xx + 2, ys + 32); ctx.lineTo(xx + 2, ys + 36); ctx.lineTo(xx + 2 * bw - 2, ys + 36); ctx.lineTo(xx + 2 * bw - 2, ys + 32); ctx.stroke();
       }
       label('PAM4', 8, yl + 1.5 * lh - 6, th.ink, 10, 'left', 600);
-      label('level', 8, yl + 1.5 * lh + 8, th.muted, 9);
+      label('电平', 8, yl + 1.5 * lh + 8, th.muted, 9);
       for (var L = 0; L < 4; L++) {
         var gy = yl + (3 - L) * lh;
         ctx.strokeStyle = th.rule; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
@@ -3934,7 +3916,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
      onto its RX PMA lanes. The demux cannot tell where a PCS lane's bits start,
      so its start phase decides which PCS lane comes out where (120.5.2: the PCS
      lanes "may arrive in any sequence"). Phase cycles the start bit. ---- */
-  var MUX_RX = { title: 'RX PMA demux', stage: 7, rate: 10,
+  var MUX_RX = { title: 'RX PMA 解复用', stage: 7, rate: 10,
     get steps() { return muxK() > 1 ? MUX_BITS : 0; },
     at: function () { return { q: pairAt((P.X.demux[0] + P.X.demux[1]) / 2).q, s: 0 }; },
     nav: function (c, d) { muxPhase = null; return { q: c.q, s: mod(c.s + d, S.link.width) }; },
@@ -4061,7 +4043,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     }
     return ev;
   }
-  VIEWS.lock = { title: 'Alignment lock', stage: 8, rate: 3, h: 250,
+  VIEWS.lock = { title: '对齐锁定', stage: 8, rate: 3, h: 250,
     get steps() { return lkEvents(mod(cur.p, P.N_PCS)).length; },
     at: function () { return { q: pairAt(P.X.amLock).q, p: 0 }; },
     nav: function (c, d) { return { q: c.q, p: mod(c.p + d, P.N_PCS) }; },
@@ -4077,7 +4059,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var x0 = 70, nb = 144, b0 = -12, bw = (W - 16 - x0) / nb, ys = 62, lc = th.lanes[x];
     function bx(b) { return x0 + (b - b0) * bw; }
     label('RX PMA lane ' + j + ': the bits around marker ' + e.m + ', and the 120-bit block the receiver is testing', x0, 14, th.ink, 11, 'left', 600);
-    label('lane', 8, ys + 7, th.ink, 10, 'left', 600);
+    label('通道', 8, ys + 7, th.ink, 10, 'left', 600);
     // The received bits: marker bits in the lane's colour, the rest grey; corrupted bits red.
     for (var b = b0; b < b0 + nb; b++) {
       var v = laneBitQ(q, x, b), flip = lkFlip(x, e.m, b), f = flip ? th.bad : b >= 0 && b < 120 ? lc : mix(th.edge, lc, 0.35);
@@ -4102,14 +4084,14 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     if (who >= 0) for (var u = 0; u < 12; u++) {
       var Bu = UM_B[u >> 1]; box(bx(e.c + 8 * Bu + 4 * (u & 1)) + 0.5, yn, 4 * bw - 1, 9, th.lanes[who]);
     }
-    label('nibbles', 8, yn + 5, th.muted, 9);
+    label('半字节', 8, yn + 5, th.muted, 9);
     var yr = yn + 26;
     label('common CM0–CM5: ' + cm + ' of 12 nibbles match (9 needed) → ' + (cm >= 9 ? 'a marker' : 'not a marker' + (e.t === 'hunt' || e.t === 'slip' || e.t === 'init' ? ', slip one bit' : '')),
       x0, yr, cm >= 9 ? th.ink : th.bad, 10, 'left', 600);
     if (who >= 0) label('unique UM0–UM5 match PCS lane ' + who, bx(64), yr, th.ink, 10, 'left', 600);
     // One cell per marker, a marker period apart (4096 codewords in the standard).
     var yt = yr + 26, cwm = (W - 16 - x0) / LK_MARKERS;
-    label('markers', 8, yt + 11, th.ink, 10, 'left', 600);
+    label('标记', 8, yt + 11, th.ink, 10, 'left', 600);
     for (var m = 1; m <= LK_MARKERS; m++) {
       var mx = x0 + (m - 1) * cwm, last = null;
       for (var i = 0; i < k; i++) if (ev[i].m === m) last = ev[i];
@@ -4142,7 +4124,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
      RX PMA lanes; early lanes wait in a buffer until all line up. Up to 180 ns of
      skew between PCS lanes is absorbed; a lane beyond that cannot be aligned. */
   var DS_STEPS = 24;
-  VIEWS.deskew = { title: 'Deskew', stage: 8, steps: DS_STEPS, rate: 8, h: 330,
+  VIEWS.deskew = { title: '时延对齐', stage: 8, steps: DS_STEPS, rate: 8, h: 330,
     at: function () { return { q: pairAt((P.X.deskew[0] + P.X.deskew[1]) / 2).q }; },
     where: function () {
       var l = S.link;
@@ -4169,14 +4151,14 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     // The 180 ns budget.
     ctx.strokeStyle = th.bad; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
     ctx.beginPath(); ctx.moveTo(tx(P.DESKEW_CAP_NS), y0 - 12); ctx.lineTo(tx(P.DESKEW_CAP_NS), y0 + 8 * rh); ctx.stroke(); ctx.setLineDash([]);
-    label('180 ns budget', tx(P.DESKEW_CAP_NS), y0 - 18, th.bad, 9, 'center', 600);
+    label('180 ns 预算', tx(P.DESKEW_CAP_NS), y0 - 18, th.bad, 9, 'center', 600);
     var done = k >= DS_STEPS;
     rows.forEach(function (r) {
       var y = y0 + r.j * rh, l = r.l, lc = th.lanes[l.pcs], a = l.relSkewNs, mid = y + rh / 2;
       label('RX PMA ' + r.j, 8, mid, th.ink, 10, 'left', 600);
       box(72, mid - 5, 10, 10, lc); label('PCS ' + l.pcs, 88, mid, th.ink, 10, 'left', 600);
       ctx.strokeStyle = th.rule; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x0, mid); ctx.lineTo(xR, mid); ctx.stroke();
-      if (!r.ok) { label('no lock: markers corrupted or lost', x0 + 6, mid, th.bad, 10, 'left', 600); return; }
+      if (!r.ok) { label('未锁定：标记受损或丢失', x0 + 6, mid, th.bad, 10, 'left', 600); return; }
       if (tc < a) return;
       if (l.deskewFail) {
         box(tx(a) - 4, mid - 7, 8, 14, th.bad);
@@ -4211,7 +4193,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 
   /* Lane reorder (119.2.5.2): each RX PMA lane's unique marker bytes name its
      PCS lane, and the lanes are put back in order 0-7 for FEC de-interleave. */
-  VIEWS.reorder = { title: 'Lane reorder', stage: 8, steps: P.N_PCS, rate: 3, h: 336,
+  VIEWS.reorder = { title: '通道重排', stage: 8, steps: P.N_PCS, rate: 3, h: 336,
     at: function () { return { q: pairAt((P.X.reorder[0] + P.X.reorder[1]) / 2).q }; },
     where: function () {
       var o = S.link.byRxPma, same = o.every(function (x, j) { return x === j; });
@@ -4225,8 +4207,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   function drawReorder(W) {
     var link = S.link, k = stepping ? step : P.N_PCS, h = hot(), x0 = 90, tw = 36, y0 = 50, rh = 28, xr = W - 120;
     var xe = x0 + 6 * tw + 92;
-    label('in: RX PMA lanes, as the demux produced them', 8, 14, th.ink, 11, 'left', 600);
-    label('out: PCS lanes 0–7', xr - 10, 14, th.ink, 11, 'left', 600);
+    label('输入：解复用输出的 RX PMA 通道', 8, 14, th.ink, 11, 'left', 600);
+    label('输出：PCS 通道 0–7', xr - 10, 14, th.ink, 11, 'left', 600);
     UM_B.forEach(function (B, i) { label(P.AM_FIELDS[B], x0 + i * tw + tw / 2, y0 - 10, th.muted, 9, 'center'); });
     var placed = [];
     for (var j = 0; j < P.N_PCS; j++) {
@@ -4250,7 +4232,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       var yp = y0 + p * rh + rh / 2 - 2, got = placed[p] !== undefined;
       box(xr, yp - 10, 70, 20, got ? th.lanes[p] : null, got ? null : th.rule);
       label('PCS ' + p, xr + 35, yp, got ? onFill(th.lanes[p]) : th.muted, 10, 'center', 600);
-      if (got) label('from ' + placed[p], xr + 76, yp, th.muted, 9);
+      if (got) label('来自 ' + placed[p], xr + 76, yp, th.muted, 9);
     }
     var yc = y0 + 8 * rh + 18;
     label('the unique bytes UM0–UM5 of each lane’s marker name its PCS lane (9 of 12 nibbles must match); the PCS reorders by that number (119.2.5.2)', 8, yc, th.ink, 10, 'left', 600);
@@ -4268,18 +4250,18 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   }
   function rxU(view) { return S.u - P.rxLag() - boxMid(view); }
 
-  VIEWS.deint = { title: 'De-interleave', stage: 9, steps: 32, rate: 8, h: 376,
+  VIEWS.deint = { title: '解交织', stage: 9, steps: 32, rate: 8, h: 376,
     at: function () { var p = pairAtRx(boxMid('deint')); return { q: p.q, u: Math.min(P.UNITS_PER_PAIR - 1, Math.floor(p.f * P.UNITS_PER_PAIR)) }; },
     nav: VIEWS.dist.nav,
     where: function (c) {
       return 'Pair ' + c.q + ': lane symbols ' + 4 * c.u + '–' + (4 * c.u + 3) + ' of 136 on every PCS lane → A and B symbols ' + 16 * c.u + '–' + (16 * c.u + 15) +
         (P.isAmPair(c.q) && c.u < P.AM_UNITS ? ' (alignment marker)' : '');
     } };
-  var DEINT_CONCEPT = { title: 'De-interleave · Overview', steps: DC_STEPS, rate: 12, h: 352,
+  var DEINT_CONCEPT = { title: '解交织 · 概览', steps: DC_STEPS, rate: 12, h: 352,
     nav: DIST_CONCEPT.nav,
     where: function (c) { return 'Pair ' + c.q + ': lane symbols 0–' + (DC_ROWS - 1) + ' of 136 on PCS lanes 0–7 → A0–A' + (DC_SYMS - 1) + ' and B0–B' + (DC_SYMS - 1); } };
 
-  VIEWS.postfec = { title: 'Post-FEC interleave · Interleave details', stage: 9, steps: PF_SYMS, rate: 3, h: 346,
+  VIEWS.postfec = { title: 'FEC 后交织 · 交织细节', stage: 9, steps: PF_SYMS, rate: 3, h: 346,
     at: function () {
       var p = pairAtRx(boxMid('postfec')), j = Math.floor(p.f * 1028) - PF_SYMS / 2;
       return { q: p.q, j: Math.max(0, Math.min(PF_LAST, j - mod(j, 2))) };
@@ -4289,11 +4271,11 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       var n = PF_SYMS / 2 - 1;
       return 'Pair ' + c.q + ': A' + c.j / 2 + '–A' + (c.j / 2 + n) + ' and B' + c.j / 2 + '–B' + (c.j / 2 + n) + ' → stream symbols ' + c.j + '–' + (c.j + PF_SYMS - 1) + ' of 1028';
     } };
-  var PF_CONCEPT_RX = { title: 'Post-FEC interleave · Overview', steps: PF_CON, rate: 6, h: 432,
+  var PF_CONCEPT_RX = { title: 'FEC 后交织 · 概览', steps: PF_CON, rate: 6, h: 432,
     nav: PF_CONCEPT.nav,
     where: function (c) { return 'Pair ' + c.q + ': m_A and m_B, 514 symbols each → 1028 ten-bit symbols → 40 × 257 = 10,280 bits'; } };
 
-  VIEWS.amr = { title: 'AM removal', stage: 9, steps: AM_STEPS, rate: 6, h: 448,
+  VIEWS.amr = { title: '移除 AM', stage: 9, steps: AM_STEPS, rate: 6, h: 448,
     at: function () { var q = pairAtRx(boxMid('amr')).q; return { q: q - mod(q, P.AM_PAIRS) }; },
     nav: VIEWS.am.nav,
     where: function (c) {
@@ -4301,7 +4283,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       return 'AM removal ' + c.q / P.AM_PAIRS + ': 4 AM blocks out, 257-bit blocks ' + b + '–' + (b + 2 * P.PAIR_SLOTS - P.AM_SLOTS - 1) + ' pass on';
     } };
 
-  VIEWS.r257 = { title: 'Reverse transcode', stage: 9, steps: 5, rate: 2.5, h: 306,
+  VIEWS.r257 = { title: '逆转码', stage: 9, steps: 5, rate: 2.5, h: 306,
     at: function () { return { s: nextData257(Math.round(rxU('r257') / U257), 1) }; },
     nav: VIEWS.b257.nav,
     where: function (c) {
@@ -4309,7 +4291,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       return '257-bit block ' + sl.block + ' (slot ' + (sl.r + 1) + ' of 40, pair ' + sl.q + ') → 66-bit blocks ' + 4 * sl.block + '–' + (4 * sl.block + 3);
     } };
 
-  VIEWS.d66 = { title: '64B/66B decode', stage: 9, steps: 9, rate: 3, h: 300,
+  VIEWS.d66 = { title: '64B/66B 解码', stage: 9, steps: 9, rate: 3, h: 300,
     at: function () { return { t: nextData66(Math.round(rxU('d66') / U66), 1) }; },
     nav: VIEWS.b66.nav,
     where: function (c) { var b = P.slot66(c.t).block; return '66-bit block ' + b + ' → 200GMII transfer ' + b; } };
@@ -4343,7 +4325,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       res: !bad.length ? 'none' : dec.ok && right ? 'fixed' : dec.ok ? 'wrong' : 'fail' };
     return rsMemo[w];
   }
-  VIEWS.rsdec = { title: 'RS(544,514) decode', stage: 9, steps: RS_STEPS, rate: 8, h: 326,
+  VIEWS.rsdec = { title: 'RS(544,514) 解码', stage: 9, steps: RS_STEPS, rate: 8, h: 326,
     at: function () { return { q: pairAtRx(boxMid('rsdec')).q }; },
     nav: VIEWS.rs.nav,
     where: function (c) { var n = rsErrCount(); return 'Codeword pair ' + c.q + ': A and B, 544 received symbols each → 514 · ' + n + ' symbol error' + (n === 1 ? '' : 's') + ' per codeword'; },
@@ -4358,9 +4340,9 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var q = cur.q, k = step, h = hot(), out = k >= RS_STEPS;
     var x0 = 96, tw = Math.min(46, (W - 16 - x0 - 64) / 24.4), pw = tw * 0.62, th1 = 54, ph = 16, pg = 3, y0 = 44;
     var px = x0 + 6 * tw + 10, ax = px + 10 * pw + 8, rx = ax + 36, sx = rx + 6 * tw + 10, idx = [0, 1, 2, -1, 512, 513];
-    label('in: received codeword, 544 symbols', x0, 18, th.ink, 11, 'left', 600);
-    label('out: message, 514 symbols', rx, 18, th.ink, 11, 'left', 600);
-    label('syndromes', sx, 18, th.ink, 11, 'left', 600);
+    label('输入：收到的码字，544 个符号', x0, 18, th.ink, 11, 'left', 600);
+    label('输出：消息，514 个符号', rx, 18, th.ink, 11, 'left', 600);
+    label('伴随式', sx, 18, th.ink, 11, 'left', 600);
     function grid(x, y, p, fill, txt) {
       var cx = x + (p % 10) * pw, cy = y + Math.floor(p / 10) * (ph + pg);
       if (!fill) { box(cx + 0.5, cy, pw - 1, ph, null, th.rule); return; }
@@ -4371,7 +4353,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var R = [0, 1].map(function (w) { return rsRx(q, w); });
     [0, 1].forEach(function (w) {
       var y = y0 + w * (th1 + 40), r = R[w], fixed = r.res === 'fixed';
-      label('codeword ' + cwName(w), 8, y + th1 / 2, th.ink, 11, 'left', 700);
+      label('码字 ' + cwName(w), 8, y + th1 / 2, th.ink, 11, 'left', 700);
       idx.forEach(function (i, n) {
         msgTile(x0 + n * tw, y, tw, th1, q, w, i, i < 0 ? undefined : r.rx[i], i >= 0 && r.bad[i]);
         var xo = rx + n * tw;
@@ -4401,7 +4383,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     label('out', 8, yb + barH + gap + barH / 2, th.ink, 11, 'left', 600);
     [0, 1].forEach(function (w) {
       var bx = x0 + w * (hw + gap), c = w ? th.b : th.a, r = R[w], yo = yb + barH + gap;
-      label('codeword ' + cwName(w), bx + hw / 2, yb - 11, c, 9, 'center', 600);
+      label('码字 ' + cwName(w), bx + hw / 2, yb - 11, c, 9, 'center', 600);
       box(bx, yb, pm, barH, c);
       box(bx + pm, yb, hw - pm, barH, th.ink);
       if (out) box(bx, yo, pm, barH, c);
@@ -4573,7 +4555,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         (a.on === undefined ? '' : ' aria-pressed="' + a.on + '"') + '>' + esc(a.label) + '</button>';
     }).join('');
     if (ah !== actsKey) { actsKey = ah; $('opv-acts').innerHTML = ah; }
-    $('opv-play').textContent = anim ? 'Pause' : step < N ? 'Play' : 'Animate';
+    $('opv-play').textContent = anim ? '暂停' : step < N ? '播放' : '播放动画';
     $('opv-count').textContent = stepping ? Math.min(step, N) + ' / ' + N : '';
     cv.setAttribute('aria-label', v.title + '. ' + v.where(cur) + '.');
     pickPanel();
@@ -4781,7 +4763,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   P.setPlaying = function (on) {
     S.playing = on;
     var b = $('btn-play');
-    b.textContent = on ? 'Pause' : 'Resume';
+    b.textContent = on ? '暂停' : '继续';
     b.setAttribute('aria-pressed', String(on));
     P.emit('play');
   };
@@ -4831,12 +4813,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var d = $('stage-detail');
     d.innerHTML = '<div class="sd-head"><span class="sd-num">' + st.n + '</span><span class="sd-side ' + st.side.toLowerCase() + '">' +
       st.side + '</span><h3>' + st.title + '</h3></div><div class="sd-body">' + st.body +
-      '<p class="sd-watch"><b>In the scene:</b> ' + st.watch + '</p>' +
+      '<p class="sd-watch"><b>场景中：</b> ' + st.watch + '</p>' +
       (st.lens ? '<p class="sd-lens">See it at bit scale: ' + st.lens.map(function (m) {
         return '<button type="button" class="linkbtn" data-open-lens="' + m + '">' + P.VIEWS[m].title + '</button>';
       }).join(' · ') + '</p>' : '') + '</div><div class="sd-nav">' +
-      '<button type="button" class="btn" id="sd-prev"' + (n === 1 ? ' disabled' : '') + '>← Previous stage</button>' +
-      '<button type="button" class="btn" id="sd-next"' + (n === 9 ? ' disabled' : '') + '>Next stage →</button></div>';
+      '<button type="button" class="btn" id="sd-prev"' + (n === 1 ? ' disabled' : '') + '>← 上一阶段</button>' +
+      '<button type="button" class="btn" id="sd-next"' + (n === 9 ? ' disabled' : '') + '>下一阶段 →</button></div>';
     d.querySelectorAll('[data-open-lens]').forEach(function (b) {
       b.onclick = function () { P.openView(b.dataset.openLens); };
     });
@@ -4894,14 +4876,14 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       if (what === 'explore') {
         $('btn-explore').setAttribute('aria-pressed', String(P.g.explore));
         $('vp-help').textContent = P.g.explore
-          ? (matchMedia('(pointer: coarse)').matches ? 'Drag to pan · pinch to zoom and rotate' : 'Drag to pan · right-drag to rotate · Ctrl + scroll to zoom')
+          ? (matchMedia('(pointer: coarse)').matches ? '拖动平移 · 双指缩放及旋转' : '拖动平移 · 右键拖动旋转 · Ctrl + 滚轮缩放')
           : 'Camera locked so the page scrolls · use the stage rail, or turn on Drag to explore';
       }
     });
 
     var vp = $('viewport');
     vp.tabIndex = 0;
-    vp.setAttribute('aria-label', '3D lane diagram. Arrow keys pan, plus and minus zoom, Enter inspects the block nearest the centre.');
+    vp.setAttribute('aria-label', '3D 通道图。方向键平移，加号和减号缩放，Enter 查看离中心最近的数据块。');
     vp.addEventListener('keydown', function (e) {
       var c = P.g.controls, cam = P.g.camera;
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
@@ -4967,14 +4949,14 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         '<td class="num">' + Math.round(l.relSkewNs) + '</td>' +
         '<td><span class="pill ' + lv + '">' + LOCK_TXT[lv] + '</span></td></tr>';
     }).join('');
-    $('map-table').innerHTML = '<caption class="sr">PCS lane to SerDes lane mapping</caption>' +
-      '<thead><tr><th scope="col">PCS</th><th scope="col">TX PMA</th><th scope="col">SerDes · slot</th>' +
-      '<th scope="col">RX PMA</th><th scope="col">Skew ns</th><th scope="col">AM lock</th></tr></thead><tbody>' + rows + '</tbody>';
+    $('map-table').innerHTML = '<caption class="sr">PCS 到 SerDes 通道的映射</caption>' +
+      '<thead><tr><th scope="col">PCS</th><th scope="col">TX PMA</th><th scope="col">SerDes · 时隙</th>' +
+      '<th scope="col">RX PMA</th><th scope="col">时延偏差（ns）</th><th scope="col">AM 锁定</th></tr></thead><tbody>' + rows + '</tbody>';
     var k = link.k;
     $('map-note').textContent = (k === 1
-      ? 'One PCS lane per SerDes lane. '
-      : k + ' PCS lanes share each SerDes lane, one bit slot each. ') +
-      'The assignment is fixed while the link is up. A re-lock or a different mux setting can change which RX PMA lane carries which PCS lane; the alignment markers sort it out.';
+      ? '每条 SerDes 通道承载一条 PCS 通道。'
+      : k + ' 条 PCS 通道共享一条 SerDes 通道，各占一个比特时隙。') +
+      '映射在链路正常运行期间保持固定。重新锁定或更改复用设置后，RX PMA 与 PCS 的对应关系可能变化，接收端通过对齐标记恢复顺序。';
   };
 
   // Bit scope: each row is one TX SerDes lane, newest bits on the right.
@@ -5007,8 +4989,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     ctx.clearRect(0, 0, W, cv.height / dpr);
     ctx.font = '500 11px "IBM Plex Mono", ui-monospace, monospace';
     ctx.fillStyle = g.muted; ctx.textBaseline = 'middle';
-    ctx.fillText('older bits', x0, 10);
-    ctx.textAlign = 'right'; ctx.fillText('newer bits →', W - 6, 10); ctx.textAlign = 'left';
+    ctx.fillText('较早比特', x0, 10);
+    ctx.textAlign = 'right'; ctx.fillText('较新比特 →', W - 6, 10); ctx.textAlign = 'left';
     var tb = S.u / P.GAP * k, base = Math.floor(tb), frac = tb - base;
     var noiseP = f.noise > 0 ? Math.min(0.5, 0.04 + 0.08 * Math.log10(1 + P.noiseToSer(f.noise) * 1e6)) : 0;
     for (var s = 0; s < S.width; s++) {
@@ -5050,9 +5032,9 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   P.scopeNote = function () {
     var k = S.link.k, w = P.WIDTHS[S.width];
     $('scope-note').textContent = k === 1
-      ? 'Each SerDes lane carries one PCS lane, so every bit on a row has the same colour. Pale cells are alignment-marker bits.'
-      : 'Bits from ' + k + ' PCS lanes alternate on each SerDes lane, so a row cycles through ' + k + ' colours. Brackets mark ' + w.mod +
-        ' symbols of 2 bits: adjacent bits, so one symbol carries bits from two PCS lanes. Pale cells are alignment-marker bits; red outlines are bit errors. Click a row to follow its lanes.';
+      ? '每条 SerDes 通道承载一条 PCS 通道，各行的比特颜色一致。浅色格表示对齐标记比特。'
+      : '来自 ' + k + ' 条 PCS 通道的比特在各 SerDes 通道上交替传输，每行循环显示 ' + k + ' 种颜色。括号标出 ' + w.mod +
+        ' 的双比特符号，每个符号的相邻两位来自两条 PCS 通道。浅色格是对齐标记比特，红色边框是比特错误。点击一行可追踪对应通道。';
   };
 })(globalThis.PCS = globalThis.PCS || {});
 
@@ -5071,36 +5053,36 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   P.renderFaults = function () {
     var w = S.width;
     $('faults').innerHTML =
-      '<fieldset class="fault"><legend>Lane skew</legend>' +
-        '<div class="frow"><label for="f-skew-lane">Delay</label><select id="f-skew-lane">' + opts(w, F.skewLane, 'SerDes') + '</select>' +
+      '<fieldset class="fault"><legend>通道时延偏差</legend>' +
+        '<div class="frow"><label for="f-skew-lane">延迟</label><select id="f-skew-lane">' + opts(w, F.skewLane, 'SerDes') + '</select>' +
         '<output id="f-skew-out" for="f-skew">' + F.skewNs + ' ns</output></div>' +
         '<div class="rangewrap"><input type="range" id="f-skew" min="0" max="250" step="5" value="' + F.skewNs + '" aria-describedby="f-skew-help">' +
-        '<span class="cap" style="left:' + (P.DESKEW_CAP_NS / 250 * 100) + '%" aria-hidden="true">180 ns budget</span></div>' +
-        '<p class="fhelp" id="f-skew-help">All PCS lanes on that SerDes lane arrive late together. Deskew absorbs it up to the budget.</p>' +
+        '<span class="cap" style="left:' + (P.DESKEW_CAP_NS / 250 * 100) + '%" aria-hidden="true">180 ns 预算</span></div>' +
+        '<p class="fhelp" id="f-skew-help">该 SerDes 通道承载的所有 PCS 通道会一起迟到。时延对齐可补偿预算内的偏差。</p>' +
       '</fieldset>' +
-      '<fieldset class="fault"><legend>Alignment marker loss</legend>' +
-        '<div class="frow"><label class="check"><input type="checkbox" id="f-am"' + (F.amLoss ? ' checked' : '') + '> Corrupt AMs on</label>' +
-        '<select id="f-am-lane" aria-label="PCS lane with corrupted AMs">' + opts(8, F.amLane, 'PCS') + '</select></div>' +
-        '<p class="fhelp">After ' + P.AM_LOSS_COUNT + ' bad AMs in a row (Figure 119–12) that lane drops lock, and align_status with it.</p>' +
+      '<fieldset class="fault"><legend>对齐标记丢失</legend>' +
+        '<div class="frow"><label class="check"><input type="checkbox" id="f-am"' + (F.amLoss ? ' checked' : '') + '> 破坏 AM：</label>' +
+        '<select id="f-am-lane" aria-label="AM 受损的 PCS 通道">' + opts(8, F.amLane, 'PCS') + '</select></div>' +
+        '<p class="fhelp">在 ' + P.AM_LOSS_COUNT + ' 个 AM 连续受损后（图 119–12），该通道失锁，align_status 变为假。</p>' +
       '</fieldset>' +
-      '<fieldset class="fault"><legend>Loss of signal</legend>' +
-        '<div class="frow"><label class="check"><input type="checkbox" id="f-los"' + (F.los ? ' checked' : '') + '> Kill</label>' +
-        '<select id="f-los-lane" aria-label="SerDes lane to kill">' + opts(w, F.losLane, 'SerDes') + '</select></div>' +
-        '<p class="fhelp">Every PCS lane carried by that SerDes lane loses lock at once.</p>' +
+      '<fieldset class="fault"><legend>信号丢失</legend>' +
+        '<div class="frow"><label class="check"><input type="checkbox" id="f-los"' + (F.los ? ' checked' : '') + '> 断开</label>' +
+        '<select id="f-los-lane" aria-label="要断开的 SerDes 通道">' + opts(w, F.losLane, 'SerDes') + '</select></div>' +
+        '<p class="fhelp">该 SerDes 通道承载的全部 PCS 通道会同时失锁。</p>' +
       '</fieldset>' +
-      '<fieldset class="fault"><legend>Channel noise</legend>' +
-        '<div class="frow"><label for="f-noise-lane">On</label><select id="f-noise-lane">' + opts(w, F.noiseLane, 'SerDes', '<option value="-1"' + (F.noiseLane < 0 ? ' selected' : '') + '>all lanes</option>') + '</select>' +
+      '<fieldset class="fault"><legend>信道噪声</legend>' +
+        '<div class="frow"><label for="f-noise-lane">施加到</label><select id="f-noise-lane">' + opts(w, F.noiseLane, 'SerDes', '<option value="-1"' + (F.noiseLane < 0 ? ' selected' : '') + '>所有通道</option>') + '</select>' +
         '<output id="f-noise-out" for="f-noise"></output></div>' +
         '<input type="range" id="f-noise" min="0" max="100" step="1" value="' + F.noise + '" aria-describedby="f-noise-help">' +
-        '<p class="fhelp" id="f-noise-help">Raises the symbol error rate. Watch corrected codewords climb, then uncorrectable ones once codewords pass 15 bad symbols.</p>' +
+        '<p class="fhelp" id="f-noise-help">提高符号错误率。已纠错码字数先增加。单个码字的错误符号超过 15 个后，不可纠正码字数开始增加。</p>' +
       '</fieldset>' +
-      '<fieldset class="fault"><legend>Board lane swap</legend>' +
-        '<label class="check"><input type="checkbox" id="f-swap"' + (F.swap ? ' checked' : '') + '> Swap SerDes 0 and 1 in the channel</label>' +
-        '<p class="fhelp">Harmless: the PCS re-locks and reorders, and the RX PMA lane order changes.</p>' +
+      '<fieldset class="fault"><legend>电路板通道互换</legend>' +
+        '<label class="check"><input type="checkbox" id="f-swap"' + (F.swap ? ' checked' : '') + '> 在信道中互换 SerDes 0 和 1</label>' +
+        '<p class="fhelp">PCS 会重新锁定和重排，RX PMA 通道顺序随之改变，链路可恢复正常。</p>' +
       '</fieldset>' +
-      '<div class="factions"><button type="button" class="btn" id="f-clear">Clear faults</button>' +
-        '<button type="button" class="btn" id="f-relock">Re-lock link</button>' +
-        '<button type="button" class="btn" id="f-reset">Reset counters</button></div>';
+      '<div class="factions"><button type="button" class="btn" id="f-clear">清除故障</button>' +
+        '<button type="button" class="btn" id="f-relock">重新锁定链路</button>' +
+        '<button type="button" class="btn" id="f-reset">重置计数器</button></div>';
     bind();
     noiseOut();
   };
@@ -5140,17 +5122,17 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   var fmt = function (n) { return Math.round(n).toLocaleString('en-US'); };
 
   var STD = [
-    { id: 'align', name: 'PCS alignment status', help: 'True only when all 8 PCS lanes have AM lock and are deskewed. False means the RX PCS cannot decode anything and the MAC sees Local Fault. This is the first thing to read.' },
-    { id: 'lock', name: 'AM lock, per PCS lane', help: 'Which lanes the receiver can identify. A set of lanes failing together usually shares one SerDes lane, so look at the physical lane first. A single lane failing while its SerDes neighbours are fine points at whatever handles the lane content (a mux setting, a test pattern, a host-side issue).' },
-    { id: 'order', name: 'Lane mapping and deskew', help: 'Which RX PMA lane each PCS lane arrived on. Any order is legal and it may change after a reset. Repeated or missing lane numbers mean a mux configuration problem. Deskew fails when the spread between lanes exceeds what the receiver can buffer.' },
-    { id: 'corr', name: 'FEC corrected codewords', help: 'Codewords that had at least one symbol error and were fixed. Expected to grow on a healthy PAM4 link. Watch the rate and its trend, not the fact that it is non-zero.' },
-    { id: 'unc', name: 'FEC uncorrectable codewords', help: 'Codewords with more than 15 errored symbols. Should stay at zero. Any growth means corrupted frames reach the MAC (FCS errors), even if the link reports up.' },
-    { id: 'sym', name: 'FEC symbol errors, per PCS lane', help: 'Where the errors are. Map the noisiest PCS lanes back to their SerDes lane through the mapping table: errors concentrated on lanes that share a SerDes lane identify the weak physical lane.' }
+    { id: 'align', name: 'PCS 对齐状态', help: '只有全部 8 条 PCS 通道获得 AM 锁定且完成时延对齐时才为真。为假时，RX PCS 无法解码，MAC 收到 Local Fault。排障时先查看此项。' },
+    { id: 'lock', name: '逐 PCS 通道 AM 锁定', help: '显示接收端能识别哪些通道。一组通道同时失锁时，先检查它们共享的 SerDes 通道。只有一条 PCS 通道失锁时，检查复用配置、测试码型或主机侧数据。' },
+    { id: 'order', name: '通道映射与时延对齐', help: '显示每条 PCS 通道从哪条 RX PMA 通道到达。顺序可在复位后变化。编号重复或缺失表明复用配置可能有误。通道间时延差超出接收缓冲能力时，对齐失败。' },
+    { id: 'corr', name: 'FEC 已纠错码字', help: '统计含有一个或多个符号错误且已被纠正的码字。正常 PAM4 链路也会增加此计数，排查时关注增长速率及趋势。' },
+    { id: 'unc', name: 'FEC 不可纠正码字', help: '统计含有超过 15 个错误符号的码字。正常应维持为零。计数增长表示受损帧已到达 MAC 并产生 FCS 错误，链路仍可能显示已连接。' },
+    { id: 'sym', name: '逐 PCS 通道 FEC 符号错误', help: '显示错误集中在哪些 PCS 通道。通过映射表找出这些通道共享的 SerDes，可定位信号质量较差的物理通道。' }
   ];
   var IMPL = [
-    { id: 'skew', name: 'Measured skew, per lane', help: 'Often exposed as AM arrival offset or deskew FIFO depth. Margin under the budget matters more than the absolute value; lanes drifting toward it point at a long trace or a retimer adding latency.' },
-    { id: 'ser', name: 'Pre-FEC error rate estimate', help: 'Symbol errors divided by symbols received, over the counting window. Vendors report this as SER or as an estimated BER with their own formulas, so compare readings from the same device only.' },
-    { id: 'hist', name: 'Codeword error histogram', help: 'How many codewords had 0, 1, 2 … errored symbols. A healthy link keeps its weight at the left. Weight creeping toward 15 means the link is running out of FEC margin before any uncorrectable codeword appears.' }
+    { id: 'skew', name: '逐通道测得的时延偏差', help: '常以 AM 到达时间偏差或 Deskew FIFO 深度表示。接近预算上限时检查走线长度和 Retimer 引入的时延。' },
+    { id: 'ser', name: 'FEC 前错误率估计', help: '统计窗口内的错误符号数除以接收符号总数。厂商可能显示 SER 或用各自公式估算 BER，宜比较同一器件的读数。' },
+    { id: 'hist', name: '码字错误直方图', help: '显示具有 0、1、2……个错误符号的码字数量。正常链路的分布集中在左侧。向 15 偏移表明 FEC 裕量正在减少，此时可能还没有不可纠正码字。' }
   ];
 
   function row(r) {
@@ -5162,9 +5144,9 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   P.initDiag = function () {
     $('diag').innerHTML =
       '<div class="dbanner" id="d-banner" role="status"></div>' +
-      '<h4 class="dgroup">Standard-defined concepts <small>IEEE 802.3 Clause 119 PCS and RS-FEC</small></h4>' +
+      '<h4 class="dgroup">标准定义的指标 <small>IEEE 802.3 第 119 条 PCS 和 RS-FEC</small></h4>' +
       STD.map(row).join('') +
-      '<h4 class="dgroup impl">Implementation-specific telemetry <small>varies by device</small></h4>' +
+      '<h4 class="dgroup impl">器件实现相关的测量值 <small>视器件而异</small></h4>' +
       IMPL.map(row).join('') +
       '<p class="dfoot" id="d-foot"></p>';
   };
@@ -5179,18 +5161,18 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var c = S.c, link = S.link, last = S.lastTick, sel = S.selected;
     var banner = $('d-banner'), cls, txt;
     if (!S.align) {
-      var why = S.lock.some(function (L) { return L.state !== 'locked'; }) ? 'a PCS lane has no AM lock' : 'skew exceeds the deskew budget';
-      cls = 'bad'; txt = 'Link down · align_status false: ' + why + '. MAC sees Local Fault.';
+      var why = S.lock.some(function (L) { return L.state !== 'locked'; }) ? '有 PCS 通道未获得 AM 锁定' : '时延偏差超出对齐预算';
+      cls = 'bad'; txt = '链路中断 · align_status 为假：' + why + '。MAC 收到 Local Fault。';
     } else if (S.recentUnc > 0.5) {
-      cls = 'bad'; txt = 'Link up, dropping data · uncorrectable codewords are increasing.';
+      cls = 'bad'; txt = '链路已连接但正在丢失数据，不可纠正码字数上升。';
     } else if (last && last.lam > 2) {
-      cls = 'warn'; txt = 'Link up · FEC working hard. Corrections are high; margin is shrinking.';
-    } else { cls = 'ok'; txt = 'Link up · aligned, FEC correcting normally.'; }
+      cls = 'warn'; txt = '链路已连接。FEC 纠错频繁，裕量正在缩小。';
+    } else { cls = 'ok'; txt = '链路已连接并对齐，FEC 正常纠错。'; }
     banner.className = 'dbanner ' + cls; banner.textContent = txt;
 
     $('dv-align').innerHTML = '<span class="pill ' + (S.align ? 'locked' : 'nolock') + '">' + (S.align ? 'true' : 'false') + '</span>';
     var nLocked = S.lock.filter(function (L) { return L.state === 'locked'; }).length;
-    $('dv-lock').textContent = nLocked + ' / 8 locked';
+    $('dv-lock').textContent = nLocked + ' / 8 条已锁定';
     $('dz-lock').innerHTML = dots(function (p) {
       var v = P.lockView(S.lock[p]);
       return '<span class="dot ' + v + (sel >= 0 && sel !== p ? ' dim' : '') + '" title="PCS ' + p + ': ' + v + '">' + p + '</span>';
@@ -5255,7 +5237,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       h += '<path d="M380 ' + y + ' C 410 ' + y + ', 410 ' + ys + ', 440 ' + ys + '" class="ln thin" ' + laneS(i) + '/>';
     }
     h += '<line x1="322" y1="14" x2="322" y2="236" class="dash"/>';
-    h += '<rect x="376" y="20" width="70" height="210" class="blk"/>' + t(411, 250, 'PMA mux', 'mid');
+    h += '<rect x="376" y="20" width="70" height="210" class="blk"/>' + t(411, 250, 'PMA 复用', 'mid');
     for (var s2 = 0; s2 < 4; s2++) {
       var yc = y0 + (s2 * 2 + 0.5) * dy;
       h += '<rect x="452" y="' + (yc - 10) + '" width="380" height="20" rx="10" class="sheath"/>';
@@ -5264,11 +5246,11 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       }
       h += t(842, yc + 4, 'SerDes ' + s2, 'lab');
     }
-    h += t(62, 262, 'PCS lanes: logical, identified by AMs', 'cap');
+    h += t(62, 262, 'PCS 逻辑通道，由 AM 标识', 'cap');
     h += t(300, 262, '', 'cap');
-    h += t(452, 262, 'SerDes lanes: physical, 2 PCS lanes bit-interleaved on each', 'cap');
-    h += t(330, 10, 'PCS/PMA service interface', 'sm');
-    return wrap('0 0 920 272', 620, h, 'Eight PCS lanes become eight PMA lanes, then are multiplexed two per SerDes lane onto four SerDes lanes');
+    h += t(452, 262, '每条 SerDes 物理通道交织承载 2 条 PCS 通道', 'cap');
+    h += t(330, 10, 'PCS/PMA 服务接口', 'sm');
+    return wrap('0 0 920 272', 620, h, '八条 PCS 通道经过八条 PMA 通道，再两两复用到四条 SerDes 通道');
   }
 
   function transcode() {
@@ -5276,18 +5258,18 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     for (var i = 0; i < 4; i++) {
       var y = 18 + i * 34;
       h += '<rect x="20" y="' + y + '" width="16" height="24" class="hdr"/><rect x="38" y="' + y + '" width="200" height="24" class="pay"/>';
-      h += t(28, y + 16, '2', 'in mid') + t(138, y + 16, '64-bit payload', 'in mid');
+      h += t(28, y + 16, '2', 'in mid') + t(138, y + 16, '64 位有效载荷', 'in mid');
     }
-    h += t(20, 168, '4 × 66-bit blocks = 264 bits', 'cap');
+    h += t(20, 168, '4 × 66 位块 = 264 位', 'cap');
     h += '<path d="M260 80 L 330 80" class="arrow"/><path d="M322 74 L 332 80 L 322 86" class="arrowhead"/>';
-    h += t(296, 70, 'transcode', 'sm mid');
+    h += t(296, 70, '转码', 'sm mid');
     h += '<rect x="350" y="64" width="10" height="34" class="hdr"/>';
     h += '<rect x="362" y="64" width="380" height="34" class="pay"/>';
     for (var j = 1; j < 4; j++) h += '<line x1="' + (362 + j * 95) + '" y1="64" x2="' + (362 + j * 95) + '" y2="98" class="seam"/>';
-    h += t(552, 86, '256 bits: the same four payloads', 'in mid');
-    h += t(350, 120, '1 header bit; block types fold into the payload when control is present', 'cap');
-    h += t(350, 168, '1 × 257-bit block', 'cap');
-    return wrap('0 0 760 180', 560, h, 'Four 66-bit blocks are transcoded into one 257-bit block');
+    h += t(552, 86, '256 位：同样的四组有效载荷', 'in mid');
+    h += t(350, 120, '1 位头部。含控制信息时，块类型编码在有效载荷中', 'cap');
+    h += t(350, 168, '1 × 257 位块', 'cap');
+    return wrap('0 0 760 180', 560, h, '四个 66 位块转码为一个 257 位块');
   }
 
   function dist() {
@@ -5301,8 +5283,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         h += t(x0 + c * cw + (cw - 4) / 2, y + 15, a ? 'A' : 'B', 'in mid' + (a ? '' : ' dark'));
       }
     }
-    h += t(x0, 18, '10-bit symbols, time →', 'sm');
-    return wrap('0 0 700 240', 560, h, 'Checkerboard of codeword A and B symbols across eight PCS lanes');
+    h += t(x0, 18, '10 位符号，时间 →', 'sm');
+    return wrap('0 0 700 240', 560, h, '码字 A 和 B 的符号交错分布在八条 PCS 通道上');
   }
 
   function am() {
@@ -5313,11 +5295,11 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       h += '<rect x="' + (10 + i * w) + '" y="26" width="' + (w - 3) + '" height="34" class="' + cls + '"' + (cls === 'um' ? ' ' + lane(5) : '') + '/>';
       h += t(10 + i * w + (w - 3) / 2, 48, c, 'in mid' + (cls === 'up' ? ' dark' : ''));
     });
-    h += t(10, 16, '120 bits, first byte sent on the left', 'sm');
-    h += '<rect x="10" y="78" width="12" height="12" class="cm"/>' + t(28, 88, 'Common: identical on all lanes, used to find the marker', 'cap');
-    h += '<rect x="10" y="98" width="12" height="12" class="um" ' + lane(5) + '/>' + t(28, 108, 'Unique: different per lane, names the PCS lane', 'cap');
-    h += '<rect x="10" y="118" width="12" height="12" class="up"/>' + t(28, 128, 'Unique pad: varies per lane, ignored on receive', 'cap');
-    return wrap('0 0 720 140', 560, h, 'Alignment marker layout: common, unique and pad bytes');
+    h += t(10, 16, '120 位，左侧字节最先发送', 'sm');
+    h += '<rect x="10" y="78" width="12" height="12" class="cm"/>' + t(28, 88, '公共字节：各通道相同，用于查找标记', 'cap');
+    h += '<rect x="10" y="98" width="12" height="12" class="um" ' + lane(5) + '/>' + t(28, 108, '专有字节：各通道不同，用于识别 PCS 通道', 'cap');
+    h += '<rect x="10" y="118" width="12" height="12" class="up"/>' + t(28, 128, '专有填充：随通道变化，接收时忽略', 'cap');
+    return wrap('0 0 720 140', 560, h, '对齐标记布局：公共、专有和填充字节');
   }
 
   function mux() {
@@ -5334,14 +5316,14 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       if (j % 2 === 0) h += '<path d="M' + (x + 1) + ' 146 v5 h' + (2 * bw - 5) + ' v-5" class="brk"/>' + t(x + bw - 2, 166, 'PAM4', 'sm mid');
     }
     h += '<path d="M380 84 L 380 110" class="arrow"/><path d="M374 102 L 380 112 L 386 102" class="arrowhead"/>';
-    h += t(392, 102, 'bit-interleave at 2× the rate', 'sm');
-    return wrap('0 0 600 176', 560, h, 'Two PCS lanes bit-interleaved onto one PAM4 SerDes lane');
+    h += t(392, 102, '以 2 倍速率交织比特', 'sm');
+    return wrap('0 0 600 176', 560, h, '两条 PCS 通道逐比特交织到一条 PAM4 SerDes 通道');
   }
 
   function deskew() {
     var h = '', order = [2, 3, 0, 1, 6, 7, 4, 5], skew = [30, 30, 0, 0, 64, 64, 14, 14];
-    h += t(10, 16, 'At RX PMA output: arbitrary order, skewed', 'sm');
-    h += t(400, 16, 'After deskew and reorder', 'sm');
+    h += t(10, 16, 'RX PMA 输出：顺序任意，存在时延偏差', 'sm');
+    h += t(400, 16, '时延对齐及重排后', 'sm');
     for (var r = 0; r < 8; r++) {
       var y = 28 + r * 24, p = order[r];
       h += t(10, y + 12, 'PMA ' + r, 'sm');
@@ -5353,7 +5335,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       h += '<rect x="584" y="' + y + '" width="9" height="16" ' + lane(r) + ' class="amk"/>';
     }
     h += '<line x1="588" y1="22" x2="588" y2="222" class="dash"/>';
-    return wrap('0 0 720 232', 600, h, 'Alignment markers arrive skewed and out of order, then line up after deskew and reorder');
+    return wrap('0 0 720 232', 600, h, '标记到达时间和顺序各异，经时延对齐与重排后恢复');
   }
 
   P.drawFigures = function () {
@@ -5459,7 +5441,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     try {
       P.initScene(vp);
     } catch (err) {
-      vp.insertAdjacentHTML('beforeend', '<p class="noscript">This browser could not start WebGL, so the 3D view is unavailable. The mapping table, bit scope, fault lab and diagnostics below still work.</p>');
+      vp.insertAdjacentHTML('beforeend', '<p class="noscript">浏览器无法启动 WebGL，因此 3D 视图不可用。下方映射表、比特示波图、故障实验和诊断仍可使用。</p>');
       G.failed = true;
     }
     if (!G.failed) {
