@@ -27,6 +27,7 @@
   let renderer, scene, camera, controls, resize;
   let packets = [], paths = [], buttons = [], tx, rx, lanes, fault, state, fecResults, words;
   let transportFailed = false;
+  const modules = [];
 
   function faultInput() {
     return {
@@ -60,6 +61,58 @@
     resize();
   }
 
+  function addModule(index, y, height, title, color, width = 11) {
+    const geometry = new T.BoxGeometry(width, height, 3.2);
+    const material = new T.MeshLambertMaterial({ color });
+    const box = new T.Mesh(geometry, material);
+    box.position.set(x[index], y, -3);
+    box.add(new T.LineSegments(new T.EdgesGeometry(geometry),
+      new T.LineBasicMaterial({ color: 0x536576 })));
+    box.userData.stage = index;
+    scene.add(box);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#14283c';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 65px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(title, 256, 67, 472);
+    const label = new T.Sprite(new T.SpriteMaterial({
+      map: new T.CanvasTexture(canvas), depthTest: false
+    }));
+    label.scale.set(width, width / 4, 1);
+    label.position.set(x[index], y + height / 2 + 1.9, .9);
+    scene.add(label);
+    modules.push({ box, index });
+  }
+
+  function addModules() {
+    scene.add(new T.HemisphereLight(0xffffff, 0x8291a8, 1.1));
+    const light = new T.DirectionalLight(0xffffff, .55);
+    light.position.set(-15, 25, 40);
+    scene.add(light);
+
+    const neutral = 0x9dafc1;
+    addModule(0, 0, 5, 'TX MAC', neutral);
+    addModule(1, 0, 15, '66b 分流', neutral);
+    [0x80bedf, 0xe8a984].forEach((color, flow) => {
+      const y = flow ? -7 : 7;
+      addModule(2, y, 5.5, 'F' + flow + ' AM / FEC', color);
+      addModule(3, flow ? -8 : 8, 7, 'F' + flow + ' · 16 lane', color);
+      addModule(8, y, 5.5, 'F' + flow + ' 解码', color);
+    });
+    addModule(4, 0, 15, '32:8 PMA', neutral);
+    addModule(5, 0, 14, '8 路 PAM4', 0x8bbab4);
+    addModule(6, 0, 19, 'RX 解复用', neutral);
+    addModule(7, 0, 22, 'AM / Deskew', neutral);
+    addModule(9, 0, 5, 'RX MAC', neutral);
+  }
+
   function setupScene() {
     if (renderer || transportFailed) return;
     const host = get('scene');
@@ -74,13 +127,7 @@
       grid.material.transparent = true;
       grid.material.opacity = .22;
       scene.add(grid);
-      const marker = new T.BoxGeometry(.45, 1.6, 4);
-      x.forEach((position, index) => {
-        const mesh = new T.Mesh(marker, new T.MeshBasicMaterial({ color: 0x8396a7 }));
-        mesh.position.set(position, -12, 0);
-        mesh.userData.stage = index;
-        scene.add(mesh);
-      });
+      addModules();
       camera = new T.PerspectiveCamera(36, 1, .1, 500);
       controls = new T.OrbitControls(camera, canvas);
       controls.enablePan = true;
@@ -125,6 +172,9 @@
         if (hit) {
           get('lane').value = hit.object.userData.lane;
           refresh();
+        } else {
+          const moduleHit = ray.intersectObjects(modules.map(module => module.box))[0];
+          if (moduleHit) buttons[moduleHit.object.userData.stage].click();
         }
       });
     } catch (err) {
@@ -152,6 +202,10 @@
       mesh.position.copy(route(i, stage)).lerp(route(i, next), t);
       const corruptAM = fault.am && i === fault.lane && stage >= 6 && stage <= 7;
       mesh.material.color.copy(corruptAM ? new T.Color('#c9313e') : flowColor(i));
+    });
+    modules.forEach(({ box, index }) => {
+      box.material.emissive.setHex(index === stage ? 0x26719a : 0x000000);
+      box.material.emissiveIntensity = .55;
     });
     renderer.render(scene, camera);
   }
