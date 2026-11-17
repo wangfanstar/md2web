@@ -3,9 +3,26 @@
 .g800-controls label { display: inline-flex; align-items: center; gap: .35rem; font-size: .9rem; }
 .g800-controls select, .g800-controls input { accent-color: var(--focus); max-width: 100%; }
 .g800-controls select { background: var(--panel); color: var(--ink); border: 1px solid var(--rule); border-radius: .25rem; padding: .25rem; }
-.g800-stage { position: relative; height: clamp(280px, 48vw, 490px); background: var(--scene-bg); border: 1px solid var(--rule); border-radius: .4rem; overflow: hidden; }
+.g800-stage { position: relative; height: clamp(320px, 48vw, 560px); background: var(--scene-bg); border: 1px solid var(--rule); border-radius: .4rem; overflow: hidden; }
 .g800-stage canvas { width: 100%; height: 100%; display: block; touch-action: pan-y; }
-.g800-help { position: absolute; left: .65rem; bottom: .45rem; pointer-events: none; background: var(--panel); padding: .2rem .4rem; font-size: .76rem; }
+.g800-help { position: absolute; right: .65rem; bottom: .45rem; z-index: 3; pointer-events: none; background: var(--panel); padding: .2rem .4rem; font-size: .76rem; }
+.g800-legend { z-index: 3; row-gap: 2px; }
+.g800-legend .g800-lg-flow0 i, .g800-legend .g800-lg-flow1 i { width: 10px; height: 10px; border-radius: 2px; }
+.g800-legend .g800-lg-flow0 i { background: #268ec7; }
+.g800-legend .g800-lg-flow1 i { background: #d97139; }
+.g800-stage .scene-labels { z-index: 2; }
+.g800-stage .lbl { font-size: 9.5px; }
+.g800-stage .lbl-box { font-size: 10px; }
+.g800-stage .lbl-stage b { width: 18px; height: 18px; font-size: 10px; }
+.g800-stage .lbl-flow { font-family: var(--f-display); font-size: 10px; font-weight: 700; color: var(--ink); background: color-mix(in srgb, var(--scene-bg) 82%, transparent); padding: 0 4px; border-bottom: 2px solid var(--lc); }
+.g800-stage .lbl-flow span { font-family: var(--f-mono); font-weight: 500; color: var(--muted); margin-left: 3px; }
+.g800-stage .lbl-lane.f0 { --lc: #268ec7; }
+.g800-stage .lbl-lane.f1 { --lc: #d97139; }
+.g800-stage .lbl-serdes { font-size: 8.5px; line-height: 1.1; padding: 0 2px; }
+.g800-stage .lbl-callout { font-size: 10px; }
+.g800-stage .lbl-status { font-size: 10px; }
+.g800-stages { row-gap: .35rem; }
+.g800-stages .btn { min-height: 30px; padding: 2px 8px; font-size: .8rem; }
 .g800-detail { background: var(--panel); border: 1px solid var(--rule); padding: .75rem; border-radius: .4rem; margin-block: .75rem; }
 .g800-detail p + p { margin-top: .35rem; }
 .g800-table { overflow: auto; }

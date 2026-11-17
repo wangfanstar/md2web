@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Visual PCS（中文版）</title>
-<meta name="description" content="用交互式 3D 实验了解 200GBASE-R 以太网 PCS：PCS 通道、PMA 比特复用、SerDes 通道、时延对齐与 FEC 诊断。">
+<meta name="description" content="用交互式 3D 实验了解 200GBASE-R 与 800GBASE-R 以太网 PCS：PCS 通道、PMA 比特复用、SerDes/PAM4 通道、时延对齐与 FEC 诊断。">
 <link rel="stylesheet" href="visual-pcs-assets/fonts.css">
 <style>
 /* Layout: a lab bench. Full-bleed 3D lane diagram up top with its readouts
@@ -862,6 +862,15 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     </div>
     <p class="fine">800 Gb/s MAC · 32 × 26.5625 Gb/s PCS lane · 8 × 106.25 Gb/s PAM4（53.125 GBd）</p>
     <div class="g800-stage" id="g800-scene" aria-label="800GBASE-R TX 到 RX 三维动画">
+      <div class="legend g800-legend" aria-label="图例">
+        <span><i class="lg-cube"></i>数据单元</span>
+        <span><i class="lg-am"></i>AM 组</span>
+        <span><i class="lg-ring"></i>AM 锁定</span>
+        <span><i class="lg-sheath"></i>PAM4 物理通道</span>
+        <span><i class="lg-bad"></i>错误 / 失锁</span>
+        <span class="g800-lg-flow0"><i></i>Flow 0 · PCS 0–15</span>
+        <span class="g800-lg-flow1"><i></i>Flow 1 · PCS 16–31</span>
+      </div>
       <span class="g800-help" id="g800-help">拖动旋转 · 滚轮缩放 · 点击模块或数据块查看详情</span>
     </div>
     <nav class="g800-stages" id="g800-stages" aria-label="800G 处理阶段"></nav>
@@ -894,7 +903,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <div class="g800-table" tabindex="0" role="region" aria-label="800G PMA 映射表">
       <table class="cmp"><thead><tr><th scope="col">物理通道</th><th scope="col">TX 时隙（PCS lane）</th><th scope="col">RX PMA 输出（实际 PCS lane）</th><th scope="col">AM 锁定</th></tr></thead><tbody id="g800-rows"></tbody></table>
     </div>
-    <p class="fine">依据 IEEE 802.3df-2024 §172、§173。3D 路径和 AM 捕获以教学事件展示，时间与间距按可读性缩放。位级检查器演示纯数据块，AM 捕获按教学事件模拟。</p>
+    <p class="fine">依据 IEEE 802.3df-2024 §172、§173。3D 路径、AM 周期和间距按可读性缩放；标准规定每 Flow 每 163,840 个 257 位块插入一组 AM。位级检查器演示纯数据块，AM 捕获按教学事件模拟。</p>
   </section>
 </section>
 
