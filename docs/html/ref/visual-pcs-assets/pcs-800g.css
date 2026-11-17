@@ -45,3 +45,86 @@
 .g800-popup form { float: right; margin-left: .75rem; }
 .g800-popup p { margin-top: .75rem; }
 .g800-popup pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; }
+
+/* 字符/字节/块映射与放大查看：半透明玻璃面板，不遮挡 3D 场景。 */
+.g800-map { margin-block: .7rem; padding: .6rem .75rem .55rem; border: 1px solid color-mix(in srgb, var(--rule) 72%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--panel) 58%, transparent); backdrop-filter: blur(12px) saturate(1.08); }
+.g800-map-head { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem .85rem; }
+.g800-map-head h3 { font-size: var(--s-0); letter-spacing: .06em; text-transform: uppercase; }
+.g800-map-head label { display: inline-flex; align-items: center; gap: .35rem; font-size: .88rem; }
+.g800-map-head input { width: clamp(11rem, 26vw, 22rem); max-width: 100%; background: color-mix(in srgb, var(--panel) 70%, transparent); color: var(--ink); border: 1px solid var(--rule); border-radius: .3rem; padding: .35rem .5rem; font-family: var(--f-mono); font-size: .82rem; }
+.g800-map-head input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.g800-map-hint { font-family: var(--f-mono); font-size: .66rem; color: var(--muted); }
+.g800-map-scroll { overflow-x: auto; padding: .55rem 0 .15rem; scrollbar-width: thin; }
+.g800-map-groups { display: flex; gap: .55rem; min-width: max-content; }
+.g800-map-group { padding: .3rem .35rem .4rem; border: 1px solid color-mix(in srgb, var(--rule) 72%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--panel) 34%, transparent); transition: background .15s, border-color .15s, box-shadow .15s; }
+.g800-map-group.is-selected { border-color: var(--am); background: color-mix(in srgb, var(--am) 10%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--am) 50%, transparent), 0 0 18px color-mix(in srgb, var(--am) 14%, transparent); }
+.g800-map-block { display: block; margin-bottom: .25rem; font-family: var(--f-mono); font-size: .62rem; color: var(--muted); white-space: nowrap; }
+.g800-map-group.is-selected .g800-map-block { color: var(--ink); }
+.g800-map-cells { display: grid; grid-template-columns: repeat(8, minmax(2rem, 1fr)); gap: 2px; }
+.g800-ch { appearance: none; display: grid; gap: 0; min-width: 2rem; padding: 2px 1px; border: 1px solid transparent; border-radius: 4px; background: color-mix(in srgb, var(--panel) 42%, transparent); color: var(--ink); font-family: var(--f-mono); cursor: pointer; }
+.g800-ch b { font-size: .86rem; line-height: 1.12; font-weight: 700; }
+.g800-ch span { font-size: .55rem; color: var(--muted); }
+.g800-ch:hover { border-color: var(--am); background: color-mix(in srgb, var(--am) 15%, transparent); }
+.g800-ch.is-space b { color: var(--muted); }
+.g800-ch.is-wrap { border-style: dashed; opacity: .78; }
+.g800-ch.is-focus { border-color: var(--am); background: color-mix(in srgb, var(--am) 28%, transparent); }
+.g800-map-note { margin-top: .35rem; font-family: var(--f-mono); font-size: .64rem; color: var(--muted); }
+
+.g800-lens { width: min(1120px, calc(100vw - 20px)); max-width: none; max-height: calc(100vh - 20px); padding: 0; border: 0; background: transparent; color: var(--ink); }
+.g800-lens::backdrop { background: color-mix(in srgb, var(--paper) 30%, transparent); backdrop-filter: blur(5px); }
+.g800-lens-inner { display: grid; gap: 10px; max-height: calc(100vh - 20px); overflow: auto; padding: 12px 16px 14px; border: 1px solid color-mix(in srgb, var(--am) 34%, var(--rule)); border-radius: 14px; background: color-mix(in srgb, var(--panel) 72%, transparent); backdrop-filter: blur(18px) saturate(1.15); box-shadow: 0 24px 80px color-mix(in srgb, var(--ink) 24%, transparent); }
+.g800-lens-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; position: sticky; top: -12px; z-index: 3; padding: 6px 0 8px; background: color-mix(in srgb, var(--panel) 76%, transparent); backdrop-filter: blur(12px); }
+.g800-lens-head h3 { font-size: var(--s2); font-stretch: 90%; }
+.g800-lens-sub { margin-top: 2px; font-family: var(--f-mono); font-size: .7rem; color: var(--muted); }
+.g800-lens-tools { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+.g800-lens-tools .btn { min-height: 30px; padding: 2px 9px; font-size: .78rem; }
+.g800-lens-zoom-label { font-family: var(--f-mono); font-size: .68rem; color: var(--muted); min-width: 3.2em; text-align: right; }
+.g800-lens-body { --g800-lens-zoom: 1; display: grid; gap: 12px; min-width: 0; }
+.g800-lens-section { border-top: 1px solid color-mix(in srgb, var(--rule) 72%, transparent); padding-top: 9px; }
+.g800-lens-section h4 { margin-bottom: 6px; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.g800-lens-summary { display: flex; flex-wrap: wrap; gap: 5px 9px; font-family: var(--f-mono); font-size: .7rem; color: var(--muted); }
+.g800-lens-summary b { color: var(--ink); }
+.g800-byte-row { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; }
+.g800-byte-card { display: grid; gap: 1px; justify-items: center; padding: 5px 3px 6px; border: 1px solid color-mix(in srgb, var(--rule) 72%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--panel) 42%, transparent); }
+.g800-byte-card.is-focus { border-color: var(--am); background: color-mix(in srgb, var(--am) 14%, transparent); }
+.g800-byte-card b { font-family: var(--f-mono); font-size: .95rem; line-height: 1.1; }
+.g800-byte-card span { font-family: var(--f-mono); font-size: .62rem; color: var(--muted); }
+.g800-byte-card code { font-family: var(--f-mono); font-size: .6rem; color: var(--ink-2); letter-spacing: .02em; }
+.g800-bitgrid { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; overflow-x: auto; padding-bottom: 2px; }
+.g800-bytegroup { display: grid; gap: 2px; justify-items: center; padding-right: 6px; border-right: 1px dashed color-mix(in srgb, var(--rule) 70%, transparent); }
+.g800-bytegroup:last-child { border-right: 0; padding-right: 0; }
+.g800-byte-label { display: flex; gap: 3px; align-items: baseline; font-family: var(--f-mono); font-size: .6rem; color: var(--muted); white-space: nowrap; }
+.g800-byte-label b { color: var(--ink); font-size: .72rem; }
+.g800-bitrow { display: flex; gap: 2px; }
+.g800-bit { display: grid; place-items: center; width: calc(var(--g800-lens-zoom, 1) * 1.15rem); height: calc(var(--g800-lens-zoom, 1) * 1.45rem); border-radius: 3px; background: color-mix(in srgb, var(--panel) 46%, transparent); color: var(--ink-2); font-family: var(--f-mono); font-size: calc(var(--g800-lens-zoom, 1) * .66rem); line-height: 1; }
+.g800-bit.is-one { background: color-mix(in srgb, var(--am) 26%, transparent); color: var(--ink); font-weight: 700; }
+.g800-bit.is-header { background: color-mix(in srgb, var(--ink) 12%, transparent); }
+.g800-bit.is-focus { outline: 2px solid var(--am); outline-offset: 0; }
+.g800-b257 { display: grid; gap: 4px; }
+.g800-b257-line { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: 8px; align-items: start; padding: 4px 5px; border-radius: 6px; border: 1px solid transparent; }
+.g800-b257-line.is-active { border-color: color-mix(in srgb, var(--am) 50%, transparent); background: color-mix(in srgb, var(--am) 8%, transparent); }
+.g800-b257-label { font-family: var(--f-mono); font-size: .62rem; color: var(--muted); line-height: 1.3; }
+.g800-b257-label b { display: block; color: var(--ink); font-size: .68rem; }
+.g800-b257-line.is-active .g800-b257-label b { color: var(--am); }
+.g800-b257-bits { display: flex; gap: 2px; overflow-x: auto; padding-bottom: 2px; }
+.g800-lane-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.g800-lane-chip { font-family: var(--f-mono); font-size: .63rem; padding: 1px 5px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--rule) 75%, transparent); background: color-mix(in srgb, var(--panel) 32%, transparent); color: var(--muted); }
+.g800-lane-chip.is-flow0 { border-color: color-mix(in srgb, #268ec7 50%, var(--rule)); }
+.g800-lane-chip.is-flow1 { border-color: color-mix(in srgb, #d97139 50%, var(--rule)); }
+.g800-lens-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--rule) 72%, transparent); }
+.g800-lens-foot .btn { min-height: 32px; }
+.g800-lens-sp { flex: 1; }
+
+/* 透明化现有面板，保持前景信息清晰。 */
+.g800-detail { background: color-mix(in srgb, var(--panel) 72%, transparent); backdrop-filter: blur(8px); }
+.g800-popup { background: color-mix(in srgb, var(--panel) 82%, transparent); backdrop-filter: blur(14px); }
+.g800-popup::backdrop { background: color-mix(in srgb, var(--paper) 30%, transparent); backdrop-filter: blur(4px); }
+.g800-legend { background: color-mix(in srgb, var(--panel) 56%, transparent); backdrop-filter: blur(8px); }
+.g800-follow-bar { background: color-mix(in srgb, var(--panel) 70%, transparent); backdrop-filter: blur(12px); }
+
+@media (max-width: 760px) {
+  .g800-map-head input { width: 100%; }
+  .g800-byte-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .g800-b257-line { grid-template-columns: 1fr; }
+  .g800-lens-head { position: static; }
+}

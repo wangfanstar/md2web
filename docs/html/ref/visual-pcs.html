@@ -879,16 +879,25 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         <span id="g800-follow-where"></span>
         <button type="button" class="btn" id="g800-follow-stop">停止追踪</button>
       </div>
-      <span class="g800-help" id="g800-help">拖动旋转 · 滚轮缩放 · 点击 TX 数据块或输入块号追踪 MAC 块 · 点击模块查看详情</span>
+      <span class="g800-help" id="g800-help">拖动旋转 · 滚轮缩放 · 点击 TX 数据块或字符放大查看 · 点击模块查看详情</span>
     </div>
     <nav class="g800-stages" id="g800-stages" aria-label="800G 处理阶段"></nav>
+    <section class="g800-map" aria-labelledby="g800-map-title">
+      <div class="g800-map-head">
+        <h3 id="g800-map-title">MAC 字符串 → 字节 → 66b 块</h3>
+        <label>MAC 发送 <input id="g800-payload" type="text" maxlength="200" spellcheck="false" value="Visual PCS 800G: one character = one byte; eight bytes = one 66-bit block; four blocks per flow = one 257b block. " aria-label="MAC 发送的 ASCII 字符串" title="留空时使用默认示例文本"></label>
+        <button class="btn" type="button" id="g800-lens-open">放大查看块</button>
+        <span class="g800-map-hint">1 字符 = 1 字节 · 8 字节 = 1 个 66b 块 · 每 Flow 4 个 66b 块 = 1 个 257b 块</span>
+      </div>
+      <div class="g800-map-scroll" id="g800-map-strip" tabindex="0" role="region" aria-label="字符与字节一一映射"></div>
+      <p class="g800-map-note" id="g800-map-note"></p>
+    </section>
     <div class="g800-detail" aria-live="polite">
       <p><strong id="g800-stage-title"></strong></p>
       <p id="g800-stage-note"></p>
       <p id="g800-inspect"></p>
       <button class="btn" id="g800-open-data" type="button">查看当前数据</button>
       <div id="g800-data" hidden>
-        <label>数据示例 <input id="g800-payload" type="text" maxlength="64" value="Visual PCS 800G " aria-label="示例 ASCII 数据"></label>
         <pre id="g800-bits"></pre>
       </div>
     </div>
@@ -907,11 +916,35 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <p id="g800-popup-mapping"></p>
       <pre id="g800-popup-bits"></pre>
     </dialog>
+    <dialog class="g800-lens" id="g800-lens" aria-labelledby="g800-lens-title">
+      <div class="g800-lens-inner">
+        <header class="g800-lens-head">
+          <div>
+            <h3 id="g800-lens-title"></h3>
+            <p class="g800-lens-sub" id="g800-lens-sub"></p>
+          </div>
+          <div class="g800-lens-tools">
+            <span class="g800-lens-zoom-label" id="g800-lens-zoom-label">100%</span>
+            <button class="btn" type="button" id="g800-lens-zoom-out" aria-label="缩小" title="缩小（−）">−</button>
+            <button class="btn" type="button" id="g800-lens-zoom-in" aria-label="放大" title="放大（＋ / Ctrl + 滚轮）">＋</button>
+            <button class="btn" type="button" id="g800-lens-fit" title="恢复 100%">适应</button>
+            <button class="btn" type="button" id="g800-lens-close" aria-label="关闭" title="关闭（Esc）">×</button>
+          </div>
+        </header>
+        <div class="g800-lens-body" id="g800-lens-body"></div>
+        <footer class="g800-lens-foot">
+          <button class="btn" type="button" id="g800-lens-prev" title="上一个块（←）">← 上一个块</button>
+          <button class="btn" type="button" id="g800-lens-next" title="下一个块（→）">下一个块 →</button>
+          <span class="g800-lens-sp"></span>
+          <button class="btn primary" type="button" id="g800-lens-follow">追踪此块</button>
+        </footer>
+      </div>
+    </dialog>
     <p id="g800-diagnostics" role="status"></p>
     <div class="g800-table" tabindex="0" role="region" aria-label="800G PMA 映射表">
       <table class="cmp"><thead><tr><th scope="col">物理通道</th><th scope="col">TX 时隙（PCS lane）</th><th scope="col">RX PMA 输出（实际 PCS lane）</th><th scope="col">AM 锁定</th></tr></thead><tbody id="g800-rows"></tbody></table>
     </div>
-    <p class="fine">依据 IEEE 802.3df-2024 §172、§173。3D 路径、AM 周期和间距按可读性缩放；标准规定每 Flow 每 163,840 个 257 位块插入一组 AM。位级检查器演示纯数据块，AM 捕获按教学事件模拟。</p>
+    <p class="fine">依据 IEEE 802.3df-2024 §172、§173。3D 路径、AM 周期和间距按可读性缩放；标准规定每 Flow 每 163,840 个 257 位块插入一组 AM。字符/字节映射和放大视图演示纯数据块，AM 捕获按教学事件模拟。</p>
   </section>
 </section>
 

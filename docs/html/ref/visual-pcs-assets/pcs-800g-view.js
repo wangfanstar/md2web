@@ -57,6 +57,8 @@
   let lastHostBackground = '';
   let followActive = false, followBlock = 0, followU = 0, followInfo = null;
   let followTags = [], followTagHost, followTagEls = [], followPaper = null;
+  let mapSelectedBlock = 0, mapSelectedChar = -1;
+  let lensBlock = 0, lensOpen = false, lensZoom = 1;
   const MAX_FOLLOW_TAGS = 8;
   const moduleMeshes = [];
 
@@ -188,6 +190,9 @@
     if (input) input.value = followBlock;
     get('flow').value = -1;
     get('lane').value = -1;
+    mapSelectedBlock = followBlock;
+    mapSelectedChar = -1;
+    markMapSelection();
     syncFollowUI();
     setPlaying(true);
     updateState();
@@ -201,6 +206,212 @@
     syncFollowUI();
     updateFollowTags();
     draw();
+  }
+
+  function escHtml(value) {
+    return String(value).replace(/[&<>"']/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[ch]));
+  }
+
+  function byteHex(b) { return b.toString(16).padStart(2, '0').toUpperCase(); }
+
+  function bitsHtml(bytes, focusByte) {
+    let html = '';
+    bytes.forEach((b, bi) => {
+      M.range(8).forEach(bit => {
+        const v = (b >> bit) & 1;
+        html += '<span class="g800-bit' + (v ? ' is-one' : '') +
+          (focusByte === bi ? ' is-focus' : '') +
+          '" title="字节 ' + bi + ' · bit ' + bit + '">' + v + '</span>';
+      });
+    });
+    return html;
+  }
+
+  function byteGroupsHtml(bytes, focusByte) {
+    let html = '';
+    bytes.forEach((b, i) => {
+      const ch = b === 32 ? '·' : String.fromCharCode(b);
+      html += '<div class="g800-bytegroup' + (focusByte === i ? ' is-focus' : '') + '">' +
+        '<span class="g800-byte-label"><b>' + escHtml(ch) + '</b><span>0x' + byteHex(b) + '</span></span>' +
+        '<div class="g800-bitrow">' + bitsHtml([b], focusByte === i ? 0 : -1) + '</div></div>';
+    });
+    return html;
+  }
+
+  function byteCardsHtml(bytes, focusByte, base) {
+    let html = '';
+    bytes.forEach((b, i) => {
+      const ch = b === 32 ? '·' : String.fromCharCode(b);
+      html += '<div class="g800-byte-card' + (focusByte === i ? ' is-focus' : '') + '">' +
+        '<b>' + escHtml(ch) + '</b>' +
+        '<span>#' + (base + i) + ' · 0x' + byteHex(b) + '</span>' +
+        '<code>' + M.range(8).map(k => (b >> k) & 1).join('') + '</code></div>';
+    });
+    return html;
+  }
+
+  function renderPayloadMap() {
+    const strip = byId('g800-map-strip');
+    if (!strip) return;
+    const text = payload();
+    const groups = Math.max(1, Math.ceil(text.length / 8));
+    let html = '<div class="g800-map-groups">';
+    for (let block = 0; block < groups; block++) {
+      const flow = block % 2;
+      const group = Math.floor(block / 8);
+      const pos = Math.floor(block / 2) % 4;
+      html += '<div class="g800-map-group" data-block="' + block + '" role="group" aria-label="MAC 66b 块 ' + block + '">' +
+        '<span class="g800-map-block">B' + block + ' · F' + flow + ' · 257b #' + group +
+        ' · ' + (pos + 1) + '/4</span>' +
+        '<div class="g800-map-cells">';
+      for (let i = 0; i < 8; i++) {
+        const index = block * 8 + i;
+        const ch = text[index % text.length];
+        const wrapped = index >= text.length;
+        const hex = byteHex(ch.charCodeAt(0) & 127);
+        const glyph = ch === ' ' ? '·' : ch;
+        html += '<button type="button" class="g800-ch' +
+          (ch === ' ' ? ' is-space' : '') + (wrapped ? ' is-wrap' : '') +
+          '" data-index="' + index + '" data-block="' + block +
+          '" title="字节 #' + index + ' · 0x' + hex + ' · 块 #' + block +
+          (wrapped ? '（字符串循环）' : '') + '">' +
+          '<b>' + escHtml(glyph) + '</b><span>' + hex + '</span></button>';
+      }
+      html += '</div></div>';
+    }
+    html += '</div>';
+    strip.innerHTML = html;
+    markMapSelection();
+  }
+
+  function markMapSelection() {
+    const strip = byId('g800-map-strip');
+    const note = byId('g800-map-note');
+    if (!strip) return;
+    const groups = strip.querySelectorAll('.g800-map-group');
+    groups.forEach(group => {
+      group.classList.toggle('is-selected', +group.dataset.block === mapSelectedBlock);
+    });
+    strip.querySelectorAll('.g800-ch').forEach(cell => {
+      cell.classList.toggle('is-focus', +cell.dataset.index === mapSelectedChar);
+    });
+    const selected = strip.querySelector('.g800-map-group.is-selected');
+    if (selected) {
+      const sr = strip.getBoundingClientRect();
+      const gr = selected.getBoundingClientRect();
+      if (gr.left < sr.left || gr.right > sr.right) {
+        strip.scrollLeft += gr.left - sr.left - 12;
+      }
+    }
+    if (note) {
+      note.textContent = mapSelectedBlock >= groups.length
+        ? '当前选择块 #' + mapSelectedBlock + ' 超出本段字符串的 B0–B' + (groups.length - 1) +
+          '；放大视图仍按循环字符显示。'
+        : '本段字符串覆盖 B0–B' + (groups.length - 1) +
+          '；点击任意字符可放大查看对应 66b 块。字符按字节循环使用。';
+    }
+  }
+
+  function setLensZoom(value) {
+    lensZoom = Math.min(2.2, Math.max(0.65, Number(value) || 1));
+    const body = byId('g800-lens-body');
+    if (body) body.style.setProperty('--g800-lens-zoom', lensZoom);
+    const label = byId('g800-lens-zoom-label');
+    if (label) label.textContent = Math.round(lensZoom * 100) + '%';
+  }
+
+  function syncLensButtons() {
+    const prev = byId('g800-lens-prev');
+    if (prev) prev.disabled = lensBlock <= 0;
+    const follow = byId('g800-lens-follow');
+    if (follow) follow.textContent = followActive && followBlock === lensBlock ? '重新追踪此块' : '追踪此块';
+  }
+
+  function renderBlockLens() {
+    const body = byId('g800-lens-body');
+    const title = byId('g800-lens-title');
+    const sub = byId('g800-lens-sub');
+    if (!body || !title || !sub) return;
+    const bi = blockInfo(lensBlock);
+    const text = payload();
+    const start = bi.n * 8;
+    const wrapped = start + 7 >= text.length;
+    const focusByte = mapSelectedChar >= start && mapSelectedChar < start + 8
+      ? mapSelectedChar - start : -1;
+    title.textContent = 'MAC 66b 块 #' + bi.n;
+    sub.textContent = 'F' + bi.flow + ' · 257b 块 #' + bi.group +
+      ' · 组内 ' + (bi.pos + 1) + '/4' +
+      ' · 字节 #' + start + '–#' + (start + 7) +
+      (wrapped ? '（循环）' : '') + ' · “' + bi.ascii + '”';
+
+    const laneChips = M.range(16).map(i => {
+      const lane = bi.flow * 16 + i;
+      const physical = lanes[lane] == null ? '—' : lanes[lane];
+      return '<span class="g800-lane-chip is-flow' + bi.flow + '">PCS ' + lane + ' → PMA ' + physical + '</span>';
+    }).join('');
+    const rxChips = M.range(16).map(i => {
+      const lane = bi.flow * 16 + i;
+      const receive = rx.indexOf(lane);
+      return '<span class="g800-lane-chip">RX PMA ' + (receive < 0 ? '—' : receive) + '</span>';
+    }).join('');
+    const b257Rows = M.range(4).map(r => {
+      const child = blockInfo(bi.group * 8 + bi.flow + 2 * r);
+      const active = r === bi.pos;
+      return '<div class="g800-b257-line' + (active ? ' is-active' : '') + '">' +
+        '<span class="g800-b257-label"><b>块 ' + (r + 1) + ' · MAC #' + child.n + '</b>' +
+        escHtml(child.ascii) + '</span>' +
+        '<div class="g800-b257-bits">' + bitsHtml(child.bytes, -1) + '</div></div>';
+    }).join('');
+    body.innerHTML =
+      '<div class="g800-lens-summary">' +
+        '<span><b>MAC 块</b> #' + bi.n + '</span>' +
+        '<span><b>Flow</b> ' + bi.flow + '</span>' +
+        '<span><b>257b 块</b> #' + bi.group + '</span>' +
+        '<span><b>组内</b> ' + (bi.pos + 1) + '/4</span>' +
+        '<span><b>字节</b> #' + start + '–#' + (start + 7) + '</span>' +
+        (wrapped ? '<span>字符串循环补齐</span>' : '') +
+      '</div>' +
+      '<div class="g800-lens-section"><h4>字符 ↔ 字节（每字节 bit 0 先发送）</h4>' +
+        '<div class="g800-byte-row">' + byteCardsHtml(bi.bytes, focusByte, start) + '</div></div>' +
+      '<div class="g800-lens-section"><h4>66b 块 · 2 位同步头 + 64 位数据</h4>' +
+        '<div class="g800-bitgrid">' +
+          '<div class="g800-bytegroup"><span class="g800-byte-label"><b>SYNC</b><span>01</span></span>' +
+            '<div class="g800-bitrow"><span class="g800-bit is-header">0</span><span class="g800-bit is-header">1</span></div></div>' +
+          byteGroupsHtml(bi.bytes, focusByte) +
+        '</div></div>' +
+      '<div class="g800-lens-section"><h4>所在 257b 块 · 1 位头 + 4 × 64 位</h4>' +
+        '<div class="g800-b257">' +
+          '<div class="g800-b257-line"><span class="g800-b257-label"><b>257b 头</b>（1 位）</span>' +
+            '<div class="g800-b257-bits"><span class="g800-bit is-header">1</span></div></div>' +
+          b257Rows + '</div></div>' +
+      '<div class="g800-lens-section"><h4>32 PCS lane / PAM4 映射</h4>' +
+        '<p class="g800-lens-summary">Flow ' + bi.flow + ' 的 257b 块分布到 16 条 PCS lane，再经 32:8 PMA 到 8 条 PAM4 通道。</p>' +
+        '<div class="g800-lane-row">' + laneChips + '</div>' +
+        '<div class="g800-lane-row">' + rxChips + '</div></div>';
+    setLensZoom(lensZoom);
+    syncLensButtons();
+  }
+
+  function openBlockLens(block, focusChar) {
+    lensBlock = Math.max(0, Math.floor(Number(block) || 0));
+    mapSelectedBlock = lensBlock;
+    mapSelectedChar = (focusChar != null && Math.floor(focusChar / 8) === lensBlock)
+      ? focusChar : -1;
+    if (!followActive) get('follow-block').value = lensBlock;
+    markMapSelection();
+    renderBlockLens();
+    const dialog = byId('g800-lens');
+    if (!dialog) return;
+    if (!dialog.open) dialog.showModal();
+    lensOpen = true;
+  }
+
+  function closeBlockLens() {
+    const dialog = byId('g800-lens');
+    lensOpen = false;
+    if (dialog && dialog.open) dialog.close();
   }
 
   const SHADES = [0.7, 0.84, 1.18, 0.68, 1, 0.76];
@@ -309,7 +520,11 @@
     const width = 7.6;
     const geometry = new T.BoxGeometry(width, height, 5.4);
     const material = SHADES.map(shade =>
-      new T.MeshLambertMaterial({ color: color.clone().multiplyScalar(shade) }));
+      new T.MeshLambertMaterial({
+        color: color.clone().multiplyScalar(shade),
+        transparent: true,
+        opacity: 0.9
+      }));
     const box = new T.Mesh(geometry, material);
     box.position.set(x[index], y, -4.3);
     box.add(new T.LineSegments(new T.EdgesGeometry(geometry),
@@ -542,11 +757,11 @@
           const info = meta[packetHit.instanceId];
           if (info && info.n != null && info.n >= 0) {
             if (info.seg === 'agg' && info.phase === 'tx') {
-              startFollow(info.n);
+              openBlockLens(info.n);
               return;
             }
             if (info.seg === 'flow' && info.phase === 'tx') {
-              startFollow(info.n * 8 + info.flow);
+              openBlockLens(info.n * 8 + info.flow);
               return;
             }
           }
@@ -1019,7 +1234,8 @@
   }
 
   function payload() {
-    return get('payload').value.replace(/[^ -~]/g, '') || 'Visual PCS 800G ';
+    return get('payload').value.replace(/[^\x20-\x7E]/g, '?') ||
+      'Visual PCS 800G: one character = one byte; eight bytes = one 66-bit block; four blocks per flow = one 257b block. ';
   }
 
   function inspectData(flow) {
@@ -1138,7 +1354,10 @@
       if (entering) {
         if (window.PCS.setPlaying) window.PCS.setPlaying(false);
         window.PCS.state.stepTo = null;
-      } else setPlaying(false);
+      } else {
+        setPlaying(false);
+        closeBlockLens();
+      }
     }
     tabs.forEach((tab, i) => {
       tab.setAttribute('aria-selected', String(i === index));
@@ -1192,6 +1411,9 @@
     setPlaying(false);
     stage = progress = recovery = 0;
     stopFollow();
+    closeBlockLens();
+    mapSelectedBlock = 0;
+    mapSelectedChar = -1;
     get('follow-block').value = 0;
     ['flow', 'lane', 'mapping', 'phase', 'physical', 'skew', 'speed', 'errors'].forEach(key => {
       const control = get(key);
@@ -1200,6 +1422,7 @@
     });
     get('loss').checked = get('am').checked = false;
     refresh();
+    markMapSelection();
     resetCamera();
   };
   get('camera').onclick = resetCamera;
@@ -1211,11 +1434,72 @@
     event.preventDefault();
     startFollow(+get('follow-block').value || 0);
   });
+  get('lens-open').onclick = () => openBlockLens(mapSelectedBlock, mapSelectedChar);
+  get('lens-close').onclick = closeBlockLens;
+  get('lens-prev').onclick = () => openBlockLens(Math.max(0, lensBlock - 1), -1);
+  get('lens-next').onclick = () => openBlockLens(lensBlock + 1, -1);
+  get('lens-follow').onclick = () => {
+    const block = lensBlock;
+    closeBlockLens();
+    startFollow(block);
+  };
+  get('lens-zoom-in').onclick = () => setLensZoom(lensZoom + 0.12);
+  get('lens-zoom-out').onclick = () => setLensZoom(lensZoom - 0.12);
+  get('lens-fit').onclick = () => setLensZoom(1);
+  const lensDialog = byId('g800-lens');
+  if (lensDialog) {
+    lensDialog.addEventListener('click', event => {
+      if (event.target === lensDialog) closeBlockLens();
+    });
+    lensDialog.addEventListener('close', () => { lensOpen = false; });
+    lensDialog.addEventListener('keydown', event => {
+      if (event.target.closest('input, textarea, select')) return;
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        openBlockLens(Math.max(0, lensBlock - 1), -1);
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        openBlockLens(lensBlock + 1, -1);
+      } else if (event.key === '+' || event.key === '=') {
+        event.preventDefault();
+        setLensZoom(lensZoom + 0.12);
+      } else if (event.key === '-') {
+        event.preventDefault();
+        setLensZoom(lensZoom - 0.12);
+      }
+    });
+  }
+  const lensBody = byId('g800-lens-body');
+  if (lensBody) {
+    lensBody.addEventListener('wheel', event => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      event.preventDefault();
+      setLensZoom(lensZoom + (event.deltaY > 0 ? -0.12 : 0.12));
+    }, { passive: false });
+  }
+  const mapStrip = byId('g800-map-strip');
+  if (mapStrip) {
+    mapStrip.addEventListener('click', event => {
+      const cell = event.target.closest('.g800-ch');
+      if (!cell) return;
+      openBlockLens(+cell.dataset.block, +cell.dataset.index);
+    });
+  }
+  get('payload').oninput = () => {
+    renderPayloadMap();
+    if (followActive) {
+      followInfo = blockInfo(followBlock);
+      syncFollowUI();
+    }
+    if (lensOpen) renderBlockLens();
+  };
   get('payload').onchange = () => {
     words = null;
     if (followActive) followInfo = blockInfo(followBlock);
     refresh();
     syncFollowUI();
+    renderPayloadMap();
+    if (lensOpen) renderBlockLens();
   };
   ['mapping', 'phase', 'physical', 'loss', 'am', 'lane', 'flow', 'errors'].forEach(key => {
     get(key).onchange = () => refresh(['mapping', 'phase', 'physical', 'loss', 'am'].includes(key) ||
@@ -1239,5 +1523,7 @@
   new MutationObserver(themeChanged).observe(document.documentElement,
     { attributes: true, attributeFilter: ['data-theme', 'class'] });
 
+  renderPayloadMap();
+  setLensZoom(1);
   syncHash();
 })();
