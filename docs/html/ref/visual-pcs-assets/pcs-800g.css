@@ -13,3 +13,8 @@
 .g800-flow0 { color: #126ba7; }
 .g800-flow1 { color: #9a4213; }
 .g800-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; }
+.g800-popup { width: min(48rem, calc(100% - 2rem)); max-height: 85vh; overflow: auto; background: var(--panel); color: var(--ink); border: 1px solid var(--rule); border-radius: .5rem; padding: 1rem; }
+.g800-popup::backdrop { background: #10203099; }
+.g800-popup form { float: right; margin-left: .75rem; }
+.g800-popup p { margin-top: .75rem; }
+.g800-popup pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; }

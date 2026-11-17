@@ -862,13 +862,14 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     </div>
     <p class="fine">800 Gb/s MAC · 32 × 26.5625 Gb/s PCS lane · 8 × 106.25 Gb/s PAM4（53.125 GBd）</p>
     <div class="g800-stage" id="g800-scene" aria-label="800GBASE-R TX 到 RX 三维动画">
-      <span class="g800-help" id="g800-help">拖动旋转 · 滚轮缩放 · 点击模块查看阶段 · 点击数据单元追踪 lane</span>
+      <span class="g800-help" id="g800-help">拖动旋转 · 滚轮缩放 · 点击模块或数据块查看详情</span>
     </div>
     <nav class="g800-stages" id="g800-stages" aria-label="800G 处理阶段"></nav>
     <div class="g800-detail" aria-live="polite">
       <p><strong id="g800-stage-title"></strong></p>
       <p id="g800-stage-note"></p>
       <p id="g800-inspect"></p>
+      <button class="btn" id="g800-open-data" type="button">查看当前数据</button>
       <div id="g800-data" hidden>
         <label>数据示例 <input id="g800-payload" type="text" maxlength="64" value="Visual PCS 800G " aria-label="示例 ASCII 数据"></label>
         <pre id="g800-bits"></pre>
@@ -883,6 +884,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <label><input id="g800-am" type="checkbox"> 损坏选中 lane 的 AM（默认 lane 0）</label>
       <label>码字符号错误 <select id="g800-errors"><option>0</option><option>1</option><option>15</option><option>16</option></select></label>
     </div>
+    <dialog class="g800-popup" id="g800-popup" aria-labelledby="g800-popup-title">
+      <form method="dialog"><button class="btn" autofocus>关闭</button></form>
+      <h3 id="g800-popup-title"></h3>
+      <p id="g800-popup-mapping"></p>
+      <pre id="g800-popup-bits"></pre>
+    </dialog>
     <p id="g800-diagnostics" role="status"></p>
     <div class="g800-table" tabindex="0" role="region" aria-label="800G PMA 映射表">
       <table class="cmp"><thead><tr><th scope="col">物理通道</th><th scope="col">TX 时隙（PCS lane）</th><th scope="col">RX PMA 输出（实际 PCS lane）</th><th scope="col">AM 锁定</th></tr></thead><tbody id="g800-rows"></tbody></table>

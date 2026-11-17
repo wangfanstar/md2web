@@ -36,6 +36,7 @@
   let packets = [], paths = [], buttons = [], tx, rx, lanes, fault, state, fecResults, words;
   let transportFailed = false;
   const modules = [];
+  const laneLabels = [];
 
   function faultInput() {
     return {
@@ -65,40 +66,65 @@
 
   function resetCamera() {
     if (!camera) return;
-    camera.position.set(0, 34, 155);
+    camera.position.set(9, 43, 159);
     controls.target.set(0, 0, 0);
     controls.update();
     resize();
   }
 
-  function addModule(index, y, height, title, color, width = 11) {
-    const geometry = new T.BoxGeometry(width, height, 3.2);
-    const material = new T.MeshLambertMaterial({ color });
-    const box = new T.Mesh(geometry, material);
-    box.position.set(x[index], y, -3);
-    box.add(new T.LineSegments(new T.EdgesGeometry(geometry),
-      new T.LineBasicMaterial({ color: 0x536576 })));
-    box.userData.stage = index;
-    scene.add(box);
-
+  function badge(text, width, height, background = '#14283c') {
     const canvas = document.createElement('canvas');
     canvas.width = 512;
     canvas.height = 128;
     const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#14283c';
+    ctx.fillStyle = background;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 65px sans-serif';
+    ctx.font = 'bold 70px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(title, 256, 67, 472);
-    const label = new T.Sprite(new T.SpriteMaterial({
-      map: new T.CanvasTexture(canvas), depthTest: false
-    }));
-    label.scale.set(width, width / 4, 1);
-    label.position.set(x[index], y + height / 2 + 1.9, .9);
+    ctx.fillText(text, 256, 67, 472);
+    const map = new T.CanvasTexture(canvas);
+    const label = new T.Sprite(new T.SpriteMaterial({ map, depthTest: false }));
+    label.scale.set(width, height, 1);
     scene.add(label);
+    return label;
+  }
+
+  function addModule(index, y, height, title, color, flow = -1) {
+    const width = 11;
+    const geometry = new T.BoxGeometry(width, height, 5.8);
+    const base = new T.Color(color);
+    const material = [0.69, 0.83, 1.20, 0.64, 1, 0.74].map(shade =>
+      new T.MeshLambertMaterial({ color: base.clone().multiplyScalar(shade) }));
+    const box = new T.Mesh(geometry, material);
+    box.position.set(x[index], y, -4.3);
+    box.add(new T.LineSegments(new T.EdgesGeometry(geometry),
+      new T.LineBasicMaterial({ color: 0x46586e })));
+    box.userData.stage = index;
+    box.userData.flow = flow;
+    scene.add(box);
+    badge(title, width, width / 4).position.set(x[index], y + height / 2 + 1.9, .9);
     modules.push({ box, index });
+  }
+
+  function addPortLabels() {
+    for (const [index, side] of [[ST.lanes, 'TX'], [ST.align, 'RX']]) {
+      const direction = side === 'TX' ? 1 : -1;
+      for (const flow of [0, 1]) {
+        const color = flow ? '#8d431f' : '#15597e';
+        const group = badge(side + ' PCS ' + (flow ? '16–31' : '0–15'), 13, 2.5, color);
+        group.position.set(x[index] + direction * 1.5, flow ? -16.5 : 16.5, 2);
+      }
+      for (const lane of M.range(32)) {
+        const label = badge(side + ' PCS ' + lane, 10, 2, lane < 16 ? '#15597e' : '#8d431f');
+        laneLabels.push({ label, lane, index, direction });
+      }
+    }
+    for (const channel of M.range(8)) {
+      const label = badge('PAM4 ' + channel, 6.7, 1.4, '#205c56');
+      label.position.set(x[ST.link] - 1, (3.5 - channel) * 1.65, 2);
+    }
   }
 
   function addModules() {
@@ -116,7 +142,7 @@
     [0x80bedf, 0xe8a984].forEach((color, flow) => {
       [[3, '257b 转码'], [4, '加扰'], [5, 'AM / FEC'], [6, '16 lane'],
         [11, 'RX FEC'], [12, '解扰'], [13, '逆转码']].forEach(([i, name]) => {
-        addModule(i, flow ? -7 : 7, 5.5, 'F' + flow + ' ' + name, color);
+        addModule(i, flow ? -7 : 7, 5.5, 'F' + flow + ' ' + name, color, flow);
       });
     });
   }
@@ -136,6 +162,7 @@
       grid.material.opacity = .22;
       scene.add(grid);
       addModules();
+      addPortLabels();
       camera = new T.PerspectiveCamera(36, 1, .1, 500);
       controls = new T.OrbitControls(camera, canvas);
       controls.enablePan = true;
@@ -179,10 +206,20 @@
         const hit = ray.intersectObjects(packets.filter(p => p.visible))[0];
         if (hit) {
           get('lane').value = hit.object.userData.lane;
+          get('flow').value = Math.floor(value('lane') / 16);
           refresh();
+          showData();
         } else {
           const moduleHit = ray.intersectObjects(modules.map(module => module.box))[0];
-          if (moduleHit) buttons[moduleHit.object.userData.stage].click();
+          if (moduleHit) {
+            const info = moduleHit.object.userData;
+            if (info.flow >= 0) {
+              get('flow').value = info.flow;
+              if (value('lane') >= 0 && Math.floor(value('lane') / 16) !== info.flow) get('lane').value = -1;
+            }
+            buttons[info.stage].click();
+            showData();
+          }
         }
       });
     } catch (err) {
@@ -211,9 +248,19 @@
       const corruptAM = fault.am && i === fault.lane && stage >= ST.demux && stage <= ST.align;
       mesh.material.color.copy(corruptAM ? new T.Color('#c9313e') : flowColor(i));
     });
+    laneLabels.forEach(({ label, lane, index, direction }) => {
+      label.visible = lane === tracked;
+      if (label.visible) {
+        label.position.copy(route(lane, index));
+        label.position.x += direction * 4;
+        label.position.z = 3;
+      }
+    });
     modules.forEach(({ box, index }) => {
-      box.material.emissive.setHex(index === stage ? 0x26719a : 0x000000);
-      box.material.emissiveIntensity = .55;
+      for (const material of box.material) {
+        material.emissive.setHex(index === stage ? 0x26719a : 0x000000);
+        material.emissiveIntensity = .55;
+      }
     });
     renderer.render(scene, camera);
   }
@@ -310,6 +357,24 @@
     }
     get('inspect').textContent = detail;
     inspectData(flow);
+  }
+
+  function showData() {
+    setPlaying(false);
+    const tracked = value('lane');
+    const lane = tracked < 0 ? Math.max(0, value('flow')) * 16 : tracked;
+    const id = M.symbolAt(lane, 0);
+    const symbol = words[id.flow][id.word][id.index];
+    const bits = M.range(10).map(i => (symbol >> i) & 1).join('');
+    get('popup-title').textContent = stages[stage][0];
+    get('popup-mapping').textContent = get('inspect').textContent;
+    const decoded = stage >= ST.fec;
+    let data = '发送侧示例 · F' + id.flow + '-' + ['A', 'B'][id.word] + ' 符号 #' + id.index +
+      ' · 位 0 → 9：' + bits + ' · 0x' + symbol.toString(16).padStart(3, '0').toUpperCase();
+    if (decoded && (!state.aligned || !fecResults[id.flow].valid)) data += '\n接收数据不可用。';
+    if (!get('data').hidden) data += '\n\n' + get('bits').textContent;
+    get('popup-bits').textContent = data;
+    if (!get('popup').open) get('popup').showModal();
   }
 
   function updateState() {
@@ -418,6 +483,7 @@
     resetCamera();
   };
   get('camera').onclick = resetCamera;
+  get('open-data').onclick = showData;
   get('payload').onchange = () => { words = null; refresh(); };
   ['mapping', 'phase', 'physical', 'loss', 'am', 'lane', 'flow', 'errors'].forEach(key => {
     get(key).onchange = () => refresh(['mapping', 'phase', 'physical', 'loss', 'am'].includes(key) ||
