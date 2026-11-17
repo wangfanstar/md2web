@@ -634,17 +634,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 .ue-demo { margin-top: 18px; padding: clamp(12px, 2vw, 22px); border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); }
 .ue-demo h3 { font-size: var(--s2); }
 .ue-demo > p { color: var(--ink-2); font-size: var(--s-0); margin-top: 8px; }
-.ue-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-block: 14px; }
+.ue-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
 .ue-controls select { color: var(--ink); background: var(--panel); border: 1px solid var(--rule); padding: 6px; border-radius: var(--radius); font: inherit; max-width: 100%; }
-.ue-scene { position: relative; height: 152px; isolation: isolate; background: var(--scene-bg); border-radius: var(--radius); overflow: hidden; perspective: 500px; }
-.ue-track { position: absolute; inset: 48px 9% 35px; border-radius: 10px; background: var(--scene-box); border: 1px solid var(--scene-edge); transform: rotateX(53deg); box-shadow: 0 8px 0 var(--scene-edge); }
-.ue-track::after { content: ""; position: absolute; inset: 50% 6% auto; border-top: 2px dashed var(--scene-edge); }
-.ue-node { position: absolute; top: 65%; color: var(--ink); font: 700 0.85rem var(--f-display); }
-.ue-node.tx { left: 9%; }.ue-node.rx { right: 9%; }
-.ue-packet { position: absolute; top: 37%; left: 18%; transform: translateX(-50%); padding: 3px 7px; white-space: nowrap; border-radius: 4px; background: var(--focus); color: var(--panel); font: 700 0.8rem var(--f-mono); box-shadow: 0 4px 0 var(--scene-edge); }
-.ue-packet[data-kind="control"] { background: var(--good); }
-.ue-packet[data-kind="loss"] { background: var(--bad); }
-.ue-packet[data-kind="wait"] { background: var(--warn); }
 .ue-readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 132px), 1fr)); gap: 8px; margin: 12px 0 0; }
 .ue-readouts > div { padding: 7px 9px; border: 1px solid var(--rule); border-radius: var(--radius); }
 .ue-readouts dt { font-size: 0.8rem; color: var(--ink-2); }
@@ -774,6 +765,16 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <span class="keys" aria-hidden="true">快捷键：P 暂停 · . 单步 · 0–7 选择通道 · Enter 查看 · Esc 关闭</span>
   </div>
 
+  <div class="ue-controls" id="ue-animation">
+    <label for="ue-example">动画示例</label>
+    <select id="ue-example">
+      <option value="pcs">PCS：通道与 FEC</option>
+      <option value="credit">CBFC：信用耗尽与归还</option>
+      <option value="retry">LLR：丢帧、NACK 与重放</option>
+      <option value="combined">CBFC + LLR：重放不重复扣信用</option>
+    </select>
+    <button type="button" class="btn" id="ue-reset" hidden>重置示例</button>
+  </div>
   <div class="viewport" id="viewport">
     <div class="legend" aria-label="图例">
       <span><i class="lg-cube"></i>PCS 通道中的数据单元</span>
@@ -790,24 +791,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <noscript><p class="noscript">通道实验需要 JavaScript 和 WebGL。</p></noscript>
   </div>
 
-  <section class="ue-demo" id="ue-animation" aria-labelledby="ue-title">
-    <h3 id="ue-title">链路层动画 · CBFC / LLR</h3>
-    <p>以帧为单位观察 3D 通道两端的链路层行为。状态计数按步骤更新，可单步查看反馈与数据帧的方向。</p>
-    <div class="ue-controls">
-      <label for="ue-example">示例</label>
-      <select id="ue-example">
-        <option value="credit">CBFC：信用耗尽与归还</option>
-        <option value="retry">LLR：丢帧、NACK 与重放</option>
-        <option value="combined">CBFC + LLR：重放不重复扣信用</option>
-      </select>
-      <button type="button" class="btn primary" id="ue-play">播放</button>
-      <button type="button" class="btn" id="ue-step">单步</button>
-      <button type="button" class="btn" id="ue-reset">重置</button>
-    </div>
-    <div class="ue-scene" aria-hidden="true">
-      <div class="ue-track"></div><span class="ue-node tx">发送端 TX</span><span class="ue-node rx">接收端 RX</span>
-      <span class="ue-packet" id="ue-packet" hidden></span>
-    </div>
+  <section class="ue-demo" id="ue-readout-panel" aria-label="链路层示例状态" hidden>
     <dl class="ue-readouts" id="ue-readouts"></dl>
     <p class="ue-status" id="ue-status" role="status"></p>
   </section>
@@ -4978,6 +4962,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   };
 
   P.setPlaying = function (on) {
+    if (on && P.ueActive()) P.prepareUEPlay();
     S.playing = on;
     var b = $('btn-play');
     b.textContent = on ? '暂停' : '继续';
@@ -4987,6 +4972,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 
   P.step = function () {
     if (P.viewOpen && P.viewOpen()) { P.viewStep(); return; }
+    if (P.ueActive()) { P.stepUE(); return; }
     if (S.playing) P.setPlaying(false);
     S.stepTo = (S.stepTo != null ? S.stepTo : S.u) + P.GAP;
     P.fecPulse(P.tick());
@@ -5627,7 +5613,9 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     requestAnimationFrame(frame);
     var dt = Math.min((now - (last || now)) / 1000, 0.1);
     last = now;
-    if (S.playing) {
+    if (P.ueActive()) {
+      P.tickUE(dt);
+    } else if (S.playing) {
       S.u += dt * VEL * S.speed;
       S.stepTo = null;
       acc += dt * 1000 * S.speed;
@@ -5636,13 +5624,13 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       S.u = Math.min(S.stepTo, S.u + dt * VEL * 3);
       if (S.u >= S.stepTo) S.stepTo = null;
     }
-    P.processAms();
+    if (!P.ueActive()) P.processAms();
     P.viewTick(dt);           // the step view is a modal, so it runs even when the scene is offscreen
     diagAcc += dt;
     if (diagAcc > 0.12) { diagAcc = 0; P.renderDiag(); }
     if (!visible || document.hidden) return;
     P.updatePulse(dt);
-    P.drawPackets();
+    if (!P.ueActive()) P.drawPackets();
     P.updateCamera(now);
     P.updateInspector();
     P.updateFollowTags();
@@ -5693,7 +5681,15 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     new MutationObserver(themeChanged).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] });
     new IntersectionObserver(function (es) { visible = es[0].isIntersecting; }, { rootMargin: '120px' }).observe(vp);
     if (!G.failed) requestAnimationFrame(frame);
-    else setInterval(function () { if (S.playing) { P.tick(); } P.processAms(); P.renderDiag(); P.drawScope(); P.viewTick(0.1); S.u += 0.25 * S.speed; }, 100);
+    else setInterval(function () {
+      if (P.ueActive()) P.tickUE(0.1);
+      else {
+        if (S.playing) P.tick();
+        P.processAms();
+        S.u += 0.25 * S.speed;
+      }
+      P.renderDiag(); P.drawScope(); P.viewTick(0.1);
+    }, 100);
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', P.boot);
@@ -5764,11 +5760,11 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 
 
 <script>
-(function () {
+(function (P) {
   'use strict';
   var get = document.getElementById.bind(document);
-  var select = get('ue-example'), play = get('ue-play'), step = get('ue-step');
-  var packet = get('ue-packet'), readouts = get('ue-readouts'), status = get('ue-status');
+  var select = get('ue-example'), resetButton = get('ue-reset');
+  var readouts = get('ue-readouts'), status = get('ue-status');
   var reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   var examples = {
     credit: {
@@ -5803,38 +5799,80 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         { name: 'LLR_NACK', path: 'control', values: [0, 8, 0, 0], note: 'RX → TX：请求重放。即使可用信用为 0，也可重发已经扣过信用的帧。' },
         { name: '重放 41', path: 'data', values: [0, 8, 4, 0], note: 'TX → RX：重放 41。发送端 CC 仍为 8，接收端接纳后 CC 增加 4。' },
         { name: '重放 42', path: 'data', values: [0, 8, 8, 0], note: 'TX → RX：重放 42，发送端仍不重复扣信用。接收端 CC 追到 8。' },
-        { name: 'LLR_ACK 42', path: 'control', values: [0, 8, 8, 0], note: 'RX → TX：确认到 42，释放发送端重放缓冲。此时信用尚未归还。' },
+        { name: 'LLR_ACK 42', path: 'control', values: [0, 8, 8, 0], note: 'RX → TX：LLR_ACK 确认到 42，释放发送端重放缓冲。此时信用尚未归还。' },
         { values: [0, 8, 8, 8], note: 'RX 释放两帧占用的接收缓冲。接收端 CF 增加 8。' },
         { name: 'CF_Update', path: 'control', values: [8, 8, 8, 8], note: 'RX → TX：累计释放值到达 TX，8 个信用重新可用。' }
       ]
     }
   };
   var routes = {
-    data: { from: 18, to: 82 },
-    control: { from: 82, to: 18 },
-    loss: { from: 18, to: 50 },
-    discard: { from: 18, to: 82 },
-    wait: { from: 18, to: 18 }
+    data: [3, 114], control: [114, 3], loss: [3, 58],
+    discard: [3, 114], wait: [3, 3]
   };
-  var position = 0, timer = null, motion = null;
+  var position = 0, elapsed = 0, stepping = false, scene, sprite, body;
+  var stepSeconds = 1.85, travelSeconds = 0.95;
+
+  P.ueActive = function () { return select.value !== 'pcs'; };
 
   function currentExample() { return examples[select.value]; }
 
-  function render(animate) {
+  function addScene() {
+    var T = window.THREE;
+    scene = new T.Group();
+    var line = new T.BufferGeometry().setFromPoints([
+      new T.Vector3(3, 6.6, 0), new T.Vector3(114, 6.6, 0)
+    ]);
+    scene.add(new T.Line(line, new T.LineDashedMaterial({
+      color: 0x71849b, dashSize: 1.3, gapSize: 0.8
+    })).computeLineDistances());
+    body = new T.Mesh(new T.BoxGeometry(2.2, 1.1, 1.2), new T.MeshBasicMaterial());
+    scene.add(body);
+    sprite = new T.Sprite(new T.SpriteMaterial({ depthTest: false }));
+    sprite.scale.set(14, 3.5, 1);
+    scene.add(sprite);
+    P.g.scene.add(scene);
+  }
+
+  function drawLabel(name, color) {
+    var canvas = document.createElement('canvas');
+    canvas.width = 320; canvas.height = 80;
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 34px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(name, 160, 40, 298);
+    if (sprite.material.map) sprite.material.map.dispose();
+    var texture = new window.THREE.CanvasTexture(canvas);
+    texture.encoding = window.THREE.sRGBEncoding;
+    sprite.material.map = texture;
+    sprite.material.needsUpdate = true;
+    body.material.color.set(color);
+  }
+
+  function moveFrame() {
+    if (!sprite || !scene.visible) return;
+    var frame = currentExample().frames[position];
+    if (!frame.name) return;
+    var route = routes[frame.path];
+    var progress = reducedMotion.matches ? 1 : Math.min(elapsed / travelSeconds, 1);
+    var x = route[0] + (route[1] - route[0]) * progress;
+    body.position.set(x, 6.6, 0);
+    sprite.position.set(x, 9, 0);
+  }
+
+  function render() {
     var example = currentExample();
     var frame = example.frames[position];
-    if (motion) { motion.cancel(); motion = null; }
-    packet.hidden = !frame.name;
-    if (frame.name) {
-      var route = routes[frame.path];
-      var dropped = frame.path === 'loss' || frame.path === 'discard';
-      packet.textContent = frame.name;
-      packet.dataset.kind = dropped ? 'loss' : frame.path;
-      packet.style.left = route.to + '%';
-      if (animate && !reducedMotion.matches && route.from !== route.to) {
-        motion = packet.animate([{ left: route.from + '%' }, { left: route.to + '%' }], {
-          duration: 700, easing: 'ease-in-out'
-        });
+    if (scene && scene.visible) {
+      body.visible = sprite.visible = Boolean(frame.name);
+      if (frame.name) {
+        var color = frame.path === 'control' ? '#21754b'
+          : frame.path === 'loss' || frame.path === 'discard' ? '#b7273a'
+          : frame.path === 'wait' ? '#855800' : '#2947c4';
+        drawLabel(frame.name, color);
+        moveFrame();
       }
     }
     var items = example.labels.map(function (label, i) {
@@ -5846,50 +5884,87 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     });
     readouts.replaceChildren.apply(readouts, items);
     status.textContent = (position + 1) + ' / ' + example.frames.length + ' · ' + frame.note;
-    step.disabled = position === example.frames.length - 1;
-    play.textContent = timer !== null ? '暂停' : step.disabled ? '重播' : '播放';
-  }
-
-  function stop() {
-    if (timer !== null) clearInterval(timer);
-    timer = null;
   }
 
   function advance() {
     position++;
-    if (position === currentExample().frames.length - 1) stop();
-    render(true);
+    elapsed = 0;
+    render();
   }
 
-  function reset() {
-    stop();
-    position = 0;
-    render(false);
-  }
-
-  play.addEventListener('click', function () {
-    if (timer !== null) {
-      stop();
-      if (motion) motion.finish();
-      play.textContent = '播放';
+  P.tickUE = function (dt) {
+    if (!P.state.playing && !stepping) return;
+    if (P.state.playing) stepping = false;
+    elapsed += dt * P.state.speed;
+    moveFrame();
+    if (stepping && elapsed >= travelSeconds) {
+      stepping = false;
       return;
     }
-    if (step.disabled) position = 0;
-    timer = setInterval(advance, 1850);
-    advance();
-  });
-  step.addEventListener('click', function () { stop(); advance(); });
-  select.addEventListener('change', reset);
-  get('ue-reset').addEventListener('click', reset);
-  document.querySelectorAll('.show-ue').forEach(function (link) {
-    link.addEventListener('click', function () {
-      select.value = link.dataset.ueExample;
+    if (P.state.playing && elapsed >= stepSeconds) {
+      if (position + 1 === currentExample().frames.length) P.setPlaying(false);
+      else advance();
+    }
+  };
+
+  P.stepUE = function () {
+    P.setPlaying(false);
+    stepping = true;
+    if (position + 1 === currentExample().frames.length) {
+      position = 0;
+      elapsed = 0;
+      render();
+      stepping = false;
+    } else {
+      advance();
+    }
+  };
+
+  function reset() {
+    position = 0;
+    elapsed = 0;
+    stepping = false;
+    render();
+  }
+
+  function chooseMode() {
+    var active = P.ueActive();
+    get('ue-readout-panel').hidden = resetButton.hidden = !active;
+    get('vp-click').hidden = active;
+    if (P.g.inst) P.g.inst.visible = !active;
+    if (P.g.scene && !P.g.failed) {
+      if (active && !scene) addScene();
+      if (scene) scene.visible = active;
+      if (active) P.flyTo(P.framePose(-5, 122, 0.5), 450);
+    }
+    if (active) {
+      P.setPlaying(false);
+      P.state.stepTo = null;
       reset();
-      play.focus({ preventScroll: true });
+    }
+  }
+
+  select.addEventListener('change', chooseMode);
+  resetButton.addEventListener('click', function () { P.setPlaying(false); reset(); });
+  P.prepareUEPlay = function () {
+    if (position + 1 === currentExample().frames.length && elapsed >= stepSeconds) reset();
+  };
+  document.querySelectorAll('a[href="#ue-animation"]').forEach(function (link) {
+    link.addEventListener('click', function () {
+      if (!link.dataset.ueExample && P.ueActive()) return;
+      select.value = link.dataset.ueExample || 'combined';
+      chooseMode();
+      select.focus({ preventScroll: true });
     });
   });
-  reset();
-})();
+  document.querySelectorAll('.showme').forEach(function (button) {
+    button.addEventListener('click', function () {
+      if (!P.ueActive()) return;
+      select.value = 'pcs';
+      chooseMode();
+    });
+  });
+})(globalThis.PCS);
 </script>
 
 </body>
