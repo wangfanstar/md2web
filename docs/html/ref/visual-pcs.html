@@ -582,7 +582,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   display: block; padding: 8px 10px; border-inline-start: 3px solid transparent;
   border-radius: var(--radius); color: var(--ink-2); text-decoration: none;
 }
-.chapter-links a:nth-child(4) { margin-top: 10px; }
+.chapter-links a:nth-child(5) { margin-top: 10px; }
 .chapter-links a:hover { background: var(--panel); color: var(--ink); }
 .chapter-links a[aria-current="location"] {
   border-inline-start-color: var(--focus); color: var(--focus);
@@ -630,6 +630,26 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   .story section { padding: 14px; }
 }
 
+/* Link-layer animation in the channel lab. */
+.ue-demo { margin-top: 18px; padding: clamp(12px, 2vw, 22px); border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); }
+.ue-demo h3 { font-size: var(--s2); }
+.ue-demo > p { color: var(--ink-2); font-size: var(--s-0); margin-top: 8px; }
+.ue-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-block: 14px; }
+.ue-controls select { color: var(--ink); background: var(--panel); border: 1px solid var(--rule); padding: 6px; border-radius: var(--radius); font: inherit; max-width: 100%; }
+.ue-scene { position: relative; height: 152px; isolation: isolate; background: var(--scene-bg); border-radius: var(--radius); overflow: hidden; perspective: 500px; }
+.ue-track { position: absolute; inset: 48px 9% 35px; border-radius: 10px; background: var(--scene-box); border: 1px solid var(--scene-edge); transform: rotateX(53deg); box-shadow: 0 8px 0 var(--scene-edge); }
+.ue-track::after { content: ""; position: absolute; inset: 50% 6% auto; border-top: 2px dashed var(--scene-edge); }
+.ue-node { position: absolute; top: 65%; color: var(--ink); font: 700 0.85rem var(--f-display); }
+.ue-node.tx { left: 9%; }.ue-node.rx { right: 9%; }
+.ue-packet { position: absolute; top: 37%; left: 18%; transform: translateX(-50%); padding: 3px 7px; white-space: nowrap; border-radius: 4px; background: var(--focus); color: var(--panel); font: 700 0.8rem var(--f-mono); box-shadow: 0 4px 0 var(--scene-edge); }
+.ue-packet[data-kind="control"] { background: var(--good); }
+.ue-packet[data-kind="loss"] { background: var(--bad); }
+.ue-packet[data-kind="wait"] { background: var(--warn); }
+.ue-readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 132px), 1fr)); gap: 8px; margin: 12px 0 0; }
+.ue-readouts > div { padding: 7px 9px; border: 1px solid var(--rule); border-radius: var(--radius); }
+.ue-readouts dt { font-size: 0.8rem; color: var(--ink-2); }
+.ue-readouts dd { margin: 0; overflow-wrap: anywhere; font: 700 0.9rem var(--f-mono); color: var(--ink); }
+.ue-demo .ue-status { min-height: 3em; }
 </style>
 </head>
 <body>
@@ -645,6 +665,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <summary>目录</summary>
     <nav class="chapter-links" aria-label="章节目录">
       <a href="#lab">3D 通道实验</a>
+      <a href="#ue-animation">CBFC / LLR 动画</a>
       <a href="#mapping">通道映射与比特示波图</a>
       <a href="#fault-panel">故障注入与诊断</a>
       <a href="#lanes">1. 三类通道</a>
@@ -666,6 +687,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   <aside class="page-sidebar">
     <nav class="chapter-links" aria-label="章节目录">
       <a href="#lab">3D 通道实验</a>
+      <a href="#ue-animation">CBFC / LLR 动画</a>
       <a href="#mapping">通道映射与比特示波图</a>
       <a href="#fault-panel">故障注入与诊断</a>
       <a href="#lanes">1. 三类通道</a>
@@ -767,6 +789,28 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <p class="vp-help" id="vp-help">拖动平移 · 右键拖动旋转 · Ctrl + 滚轮缩放</p>
     <noscript><p class="noscript">通道实验需要 JavaScript 和 WebGL。</p></noscript>
   </div>
+
+  <section class="ue-demo" id="ue-animation" aria-labelledby="ue-title">
+    <h3 id="ue-title">链路层动画 · CBFC / LLR</h3>
+    <p>以帧为单位观察 3D 通道两端的链路层行为。状态计数按步骤更新，可单步查看反馈与数据帧的方向。</p>
+    <div class="ue-controls">
+      <label for="ue-example">示例</label>
+      <select id="ue-example">
+        <option value="credit">CBFC：信用耗尽与归还</option>
+        <option value="retry">LLR：丢帧、NACK 与重放</option>
+        <option value="combined">CBFC + LLR：重放不重复扣信用</option>
+      </select>
+      <button type="button" class="btn primary" id="ue-play">播放</button>
+      <button type="button" class="btn" id="ue-step">单步</button>
+      <button type="button" class="btn" id="ue-reset">重置</button>
+    </div>
+    <div class="ue-scene" aria-hidden="true">
+      <div class="ue-track"></div><span class="ue-node tx">发送端 TX</span><span class="ue-node rx">接收端 RX</span>
+      <span class="ue-packet" id="ue-packet" hidden></span>
+    </div>
+    <dl class="ue-readouts" id="ue-readouts"></dl>
+    <p class="ue-status" id="ue-status" role="status"></p>
+  </section>
 
   <section class="lens" id="lens" aria-labelledby="lens-title">
     <div class="lens-bar">
@@ -1001,6 +1045,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   </div>
   <p><b>排障：</b>链路已对齐但某个 VC 停发时，先检查端口和 VC 的剩余信用，再看接收缓冲是否释放、<code>CF_Update</code> 是否到达，以及 CC 计数是否逐步收敛。</p>
   <p class="fine">规范定位：UE Specification 1.1 §5.2.4–5.2.8，表 5-14、表 5-19。</p>
+  <a href="#ue-animation" class="show-ue" data-ue-example="credit">在通道实验中查看此示例</a>
 </section>
 
 <section id="llr" aria-labelledby="llr-title">
@@ -1015,6 +1060,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   </ol>
   <p><b>排障：</b>结合 MAC FCS 错误、<code>LLR_NACK</code>、重放超时及缓冲占用判断故障。Bad FCS 可以成为重放触发条件，显式标记的 Poisoned FCS 有单独处理规则，不因该标记触发 <code>LLR_NACK</code>。</p>
   <p class="fine">规范定位：UE Specification 1.1 §5.1、§5.1.3–5.1.9，图 5-1。</p>
+  <a href="#ue-animation" class="show-ue" data-ue-example="retry">在通道实验中查看此示例</a>
 </section>
 
 <section id="cbfc-llr" aria-labelledby="cbfc-llr-title">
@@ -1035,6 +1081,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   </div>
   <p><b>同步消息也受顺序约束。</b><code>CC_Update</code> 必须标记为 LLR-eligible。若它在丢弃窗口到达，接收端先丢弃，避免用越过缺口的消耗计数校准。待前序帧恢复后，再按序接收重放的更新。</p>
   <p class="fine">规范定位：UE Specification 1.1 §5.2.9，表 5-26、图 5-13 与图 5-14。表中的序列号和信用数为教学示例。</p>
+  <a href="#ue-animation" class="show-ue" data-ue-example="combined">在通道实验中查看此示例</a>
 </section>
 
 <section id="refs" aria-labelledby="refs-title" class="refs">
@@ -5712,6 +5759,136 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     }
   });
   scheduleLocation();
+})();
+</script>
+
+
+<script>
+(function () {
+  'use strict';
+  var get = document.getElementById.bind(document);
+  var select = get('ue-example'), play = get('ue-play'), step = get('ue-step');
+  var packet = get('ue-packet'), readouts = get('ue-readouts'), status = get('ue-status');
+  var reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  var examples = {
+    credit: {
+      labels: ['发送端可用信用', '发送端 CC', '接收端 CF'],
+      frames: [
+        { values: [4, 0, 0], note: '初始：这个 VC 有 4 个可用信用，每个示例帧需要 4 个信用。' },
+        { name: '数据帧 A', path: 'data', values: [0, 4, 0], note: 'TX → RX：发送 A，扣除 4 个信用，发送端 CC 增加到 4。' },
+        { name: 'B 等待', path: 'wait', values: [0, 4, 0], note: '可用信用为 0。帧 B 留在发送队列中。' },
+        { values: [0, 4, 4], note: 'RX 释放 A 的接收缓冲，CF 增至 4。TX 尚未收到更新，B 继续等待。' },
+        { name: 'CF_Update', path: 'control', values: [4, 4, 4], note: 'RX → TX：CF_Update 报告累计释放值 4。发送端恢复 4 个可用信用。' },
+        { name: '数据帧 B', path: 'data', values: [0, 8, 4], note: 'TX → RX：发送 B，发送端 CC 累计至 8。' }
+      ]
+    },
+    retry: {
+      labels: ['重放缓冲中的序列号', 'RX 期待序列号', '累计确认'],
+      frames: [
+        { values: ['—', 41, 40], note: '初始：LLR 已建立，RX 已确认到 40，下一帧期待 41。' },
+        { name: '41 丢失', path: 'loss', values: ['41', 41, 40], note: 'TX → RX：41 在链路中丢失，TX 的重放缓冲中保留 41。' },
+        { name: '42 失序', path: 'discard', values: ['41、42', 41, 40], note: 'TX → RX：42 到达，但 RX 仍期待 41，因此丢弃 42。' },
+        { name: 'LLR_NACK', path: 'control', values: ['41、42', 41, 40], note: 'RX → TX：LLR_NACK 指示序列缺口，TX 开始重放未确认的帧。' },
+        { name: '重放 41', path: 'data', values: ['41、42', 42, 40], note: 'TX → RX：RX 接纳重放的 41，下一帧期待 42。' },
+        { name: '重放 42', path: 'data', values: ['41、42', 43, 40], note: 'TX → RX：RX 接纳重放的 42，可累计确认到 42。' },
+        { name: 'LLR_ACK 42', path: 'control', values: ['—', 43, 42], note: 'RX → TX：累计确认到 42，TX 释放 41 和 42 的重放缓冲。' }
+      ]
+    },
+    combined: {
+      labels: ['发送端可用信用', '发送端 CC', '接收端 CC', '接收端 CF'],
+      frames: [
+        { values: [8, 0, 0, 0], note: '初始：同一无损 VC 有 8 个信用，帧 41 与 42 各需 4 个信用。计数从本示例起点算起。' },
+        { name: '41 丢失', path: 'loss', values: [4, 4, 0, 0], note: 'TX → RX：首发 41 消耗 4 个信用。帧在链路上丢失，接收端 CC 不变。' },
+        { name: '42 失序', path: 'discard', values: [0, 8, 0, 0], note: 'TX → RX：首发 42 再消耗 4 个信用，但接收端仍期待 41，因此丢弃 42。' },
+        { name: 'LLR_NACK', path: 'control', values: [0, 8, 0, 0], note: 'RX → TX：请求重放。即使可用信用为 0，也可重发已经扣过信用的帧。' },
+        { name: '重放 41', path: 'data', values: [0, 8, 4, 0], note: 'TX → RX：重放 41。发送端 CC 仍为 8，接收端接纳后 CC 增加 4。' },
+        { name: '重放 42', path: 'data', values: [0, 8, 8, 0], note: 'TX → RX：重放 42，发送端仍不重复扣信用。接收端 CC 追到 8。' },
+        { name: 'LLR_ACK 42', path: 'control', values: [0, 8, 8, 0], note: 'RX → TX：确认到 42，释放发送端重放缓冲。此时信用尚未归还。' },
+        { values: [0, 8, 8, 8], note: 'RX 释放两帧占用的接收缓冲。接收端 CF 增加 8。' },
+        { name: 'CF_Update', path: 'control', values: [8, 8, 8, 8], note: 'RX → TX：累计释放值到达 TX，8 个信用重新可用。' }
+      ]
+    }
+  };
+  var routes = {
+    data: { from: 18, to: 82 },
+    control: { from: 82, to: 18 },
+    loss: { from: 18, to: 50 },
+    discard: { from: 18, to: 82 },
+    wait: { from: 18, to: 18 }
+  };
+  var position = 0, timer = null, motion = null;
+
+  function currentExample() { return examples[select.value]; }
+
+  function render(animate) {
+    var example = currentExample();
+    var frame = example.frames[position];
+    if (motion) { motion.cancel(); motion = null; }
+    packet.hidden = !frame.name;
+    if (frame.name) {
+      var route = routes[frame.path];
+      var dropped = frame.path === 'loss' || frame.path === 'discard';
+      packet.textContent = frame.name;
+      packet.dataset.kind = dropped ? 'loss' : frame.path;
+      packet.style.left = route.to + '%';
+      if (animate && !reducedMotion.matches && route.from !== route.to) {
+        motion = packet.animate([{ left: route.from + '%' }, { left: route.to + '%' }], {
+          duration: 700, easing: 'ease-in-out'
+        });
+      }
+    }
+    var items = example.labels.map(function (label, i) {
+      var item = document.createElement('div');
+      var dt = document.createElement('dt'), dd = document.createElement('dd');
+      dt.textContent = label; dd.textContent = frame.values[i];
+      item.append(dt, dd);
+      return item;
+    });
+    readouts.replaceChildren.apply(readouts, items);
+    status.textContent = (position + 1) + ' / ' + example.frames.length + ' · ' + frame.note;
+    step.disabled = position === example.frames.length - 1;
+    play.textContent = timer !== null ? '暂停' : step.disabled ? '重播' : '播放';
+  }
+
+  function stop() {
+    if (timer !== null) clearInterval(timer);
+    timer = null;
+  }
+
+  function advance() {
+    position++;
+    if (position === currentExample().frames.length - 1) stop();
+    render(true);
+  }
+
+  function reset() {
+    stop();
+    position = 0;
+    render(false);
+  }
+
+  play.addEventListener('click', function () {
+    if (timer !== null) {
+      stop();
+      if (motion) motion.finish();
+      play.textContent = '播放';
+      return;
+    }
+    if (step.disabled) position = 0;
+    timer = setInterval(advance, 1850);
+    advance();
+  });
+  step.addEventListener('click', function () { stop(); advance(); });
+  select.addEventListener('change', reset);
+  get('ue-reset').addEventListener('click', reset);
+  document.querySelectorAll('.show-ue').forEach(function (link) {
+    link.addEventListener('click', function () {
+      select.value = link.dataset.ueExample;
+      reset();
+      play.focus({ preventScroll: true });
+    });
+  });
+  reset();
 })();
 </script>
 
