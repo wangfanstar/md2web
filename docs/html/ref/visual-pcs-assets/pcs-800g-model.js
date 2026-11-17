@@ -39,11 +39,47 @@
     };
   }
 
-  function codewords(codec) {
-    return range(2).map(flow => range(2).map(word => {
-      const message = range(514).map(i => (i * 73 + (1 + 2 * flow + word) * 137) & 1023);
-      return message.concat(codec.rsParity(message));
+  function byteBits(byte) {
+    return range(8).map(i => (byte >> i) & 1);
+  }
+
+  // Clause 49 self-synchronous scrambler, applied separately to each Flow.
+  function scramble(bits, flow, decode = false) {
+    const history = range(58).map(i => ((i + flow) % (flow ? 3 : 2)) === 0 ? 1 : 0);
+    return bits.map(bit => {
+      const out = bit ^ history[19] ^ history[0];
+      history.shift();
+      history.push(decode ? bit : out);
+      return out;
+    });
+  }
+
+  function sample(flow, input) {
+    const bytes = range(4).map((_, i) => range(8).map(j => {
+      const offset = (i * 2 + flow) * 8 + j;
+      return input.charCodeAt(offset % input.length) & 127;
     }));
+    const payloads = bytes.map(block => block.flatMap(byteBits));
+    const encoded = payloads.map(bits => [0, 1].concat(bits));
+    const transcoded = [1].concat(...payloads);
+    const scrambled = scramble(transcoded, flow);
+    const recovered = scramble(scrambled, flow, true);
+    const reverse = range(4).map(i => [0, 1].concat(recovered.slice(1 + i * 64, 65 + i * 64)));
+    const decoded = reverse.map(bits => range(8).map(i =>
+      range(8).reduce((byte, j) => byte | (bits[2 + i * 8 + j] << j), 0)));
+    return { bytes, encoded, transcoded, scrambled, recovered, reverse, decoded };
+  }
+
+  function codewords(codec, input = 'Visual PCS 800G ') {
+    return range(2).map(flow => {
+      const block = sample(flow, input).transcoded;
+      const stream = scramble(range(40).flatMap(() => block), flow);
+      return range(2).map(word => {
+        const message = range(514).map(i => range(10).reduce((symbol, bit) =>
+          symbol | (stream[20 * i + 10 * word + bit] << bit), 0));
+        return message.concat(codec.rsParity(message));
+      });
+    });
   }
 
   function receive(codec, words, rx, count, target) {
@@ -79,6 +115,6 @@
 
   root.PCS800Model = {
     deskewLimit, mapping, receiveMap, distribute, collect, alignment,
-    symbolAt, codewords, receive, pam4Pair, range
+    symbolAt, codewords, receive, pam4Pair, sample, range
   };
 })(globalThis);

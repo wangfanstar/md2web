@@ -869,6 +869,10 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <p><strong id="g800-stage-title"></strong></p>
       <p id="g800-stage-note"></p>
       <p id="g800-inspect"></p>
+      <div id="g800-data" hidden>
+        <label>数据示例 <input id="g800-payload" type="text" maxlength="64" value="Visual PCS 800G " aria-label="示例 ASCII 数据"></label>
+        <pre id="g800-bits"></pre>
+      </div>
     </div>
     <div class="g800-controls">
       <label>TX 映射 <select id="g800-mapping"><option value="group">相邻分组</option><option value="spread">跨组分布</option></select></label>
@@ -883,7 +887,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <div class="g800-table" tabindex="0" role="region" aria-label="800G PMA 映射表">
       <table class="cmp"><thead><tr><th scope="col">物理通道</th><th scope="col">TX 时隙（PCS lane）</th><th scope="col">RX PMA 输出（实际 PCS lane）</th><th scope="col">AM 锁定</th></tr></thead><tbody id="g800-rows"></tbody></table>
     </div>
-    <p class="fine">依据 IEEE 802.3df-2024 §172、§173。3D 路径和 AM 捕获以教学事件展示，时间与间距按可读性缩放。FEC 检查使用独立的示例 RS 码字。</p>
+    <p class="fine">依据 IEEE 802.3df-2024 §172、§173。3D 路径和 AM 捕获以教学事件展示，时间与间距按可读性缩放。位级检查器演示纯数据块，AM 捕获按教学事件模拟。</p>
   </section>
 </section>
 

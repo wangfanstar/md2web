@@ -12,3 +12,4 @@
 .g800-table table { min-width: 36rem; }
 .g800-flow0 { color: #126ba7; }
 .g800-flow1 { color: #9a4213; }
+.g800-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; }

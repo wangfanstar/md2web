@@ -8,18 +8,26 @@
   const panels = ['200g', '800g'].map(rate => byId('lab-' + rate));
   const motion = matchMedia('(prefers-reduced-motion: reduce)');
   const stages = [
-    ['800GMII', '64B/66B 编码产生单一 66 位块流，MAC 速率为 800 Gb/s。'],
-    ['分流', '偶数块进入 Flow 0，奇数块进入 Flow 1。每组四块转码为 257 位块，两个 Flow 独立加扰。'],
-    ['AM / FEC', '两个 Flow 在对应的原始块边界插入各自的 8 × 257 位 AM 组，每 Flow 的标准周期为 163,840 个 257 位块。每个 Flow 独立生成 A、B 两个 RS(544,514) 码字。'],
-    ['32 PCS lane', '每 Flow 将两个码字的符号分布到 16 条 PCS lane。Flow 0 使用 0–15，Flow 1 使用 16–31。'],
-    ['32:8 PMA', '每条物理通道按 Flow 0、Flow 0、Flow 1、Flow 1 的顺序复用四个 PCS 比特。相邻两位组成 PAM4 位对。'],
-    ['8 路 PAM4', '8 条物理通道各为 106.25 Gb/s。通道时延或信号丢失影响它承载的四条 PCS lane。'],
-    ['RX 解复用', 'RX PMA 恢复 32 路。起始槽相位可改变接收端服务接口上的 lane 顺序。'],
-    ['锁定 / Deskew', 'PCS 通过 AM 找到 lane ID。全部 32 条 lane 锁定并满足 152 ns Skew 预算后，按 ID 重排。'],
-    ['RX FEC', '重排后分回两个 Flow，分别解交织、解码、移除 AM、解扰并逆转码。'],
-    ['800GMII', '按 Flow 0、Flow 1 交替收集 66 位块，64B/66B 解码后交给接收 MAC。']
+    ['800GMII', 'MAC 提交一条 800 Gb/s 数据流。'],
+    ['64B/66B 编码', '示例每 8 字节数据加上数据同步头 01，形成一个 66 位块。'],
+    ['66b 分流', '偶数块进入 Flow 0，奇数块进入 Flow 1。'],
+    ['256B/257B 转码', '每个 Flow 将四个纯数据 66 位块转码成一个 257 位块。'],
+    ['加扰', '每个 Flow 单独运行自同步加扰器，采用 x⁵⁸ + x³⁹ + 1。'],
+    ['AM / FEC', '每 Flow 插入 AM 并生成 A、B 两个 RS(544,514) 码字。标准 AM 周期为 163,840 个 257 位块。'],
+    ['32 PCS lane', 'Flow 0 使用 PCS lane 0–15，Flow 1 使用 16–31。'],
+    ['32:8 PMA', '每条物理通道按 Flow 0、Flow 0、Flow 1、Flow 1 的顺序复用四个 PCS 比特。'],
+    ['8 路 PAM4', '8 条物理通道各为 106.25 Gb/s。每条承载四条 PCS lane。'],
+    ['RX 解复用', 'RX PMA 恢复 32 路。起始槽相位可改变接收端 lane 顺序。'],
+    ['锁定 / Deskew', 'PCS 通过 AM 找到 lane ID。全部 32 条 lane 满足锁定及 152 ns Skew 预算后按 ID 重排。'],
+    ['RX FEC / 移除 AM', '两个 Flow 分别解交织、解码、移除 AM。'],
+    ['解扰', '每个 Flow 按相同多项式，用接收的加扰位恢复原始 257 位块。'],
+    ['257b 逆转码', '恢复每个 Flow 的四个 66 位块及各自同步头。'],
+    ['66b 合流', '按 Flow 0、Flow 1 交替收集 66 位块。'],
+    ['64B/66B 解码', '由 66 位纯数据块读取同步头，并还原 8 字节。'],
+    ['RX MAC', '接收端通过 800GMII 交付恢复的数据。']
   ];
-  const x = [-63, -49, -35, -21, -7, 7, 21, 35, 49, 63];
+  const x = stages.map((_, i) => (i - (stages.length - 1) / 2) * 14);
+  const ST = { lanes: 6, mux: 7, link: 8, demux: 9, align: 10, fec: 11, rx: 16 };
   const original = M.range(8);
   const flows = M.distribute(original);
   let selected = -1, stage = 0, progress = 0, recovery = 0;
@@ -43,9 +51,11 @@
     const spread = (flow ? -1 : 1) * (5 + row * .37);
     const receiveSlot = rx.indexOf(lane);
     const rxSpread = (15.5 - receiveSlot) * .56;
-    const y = [0, flow ? -7 : 7, flow ? -7 : 7, spread,
-      (3.5 - physical) * 1.65, (3.5 - physical) * 1.65, rxSpread, spread, flow ? -7 : 7, 0];
-    const delayed = physical === fault.physical && index === 6 ? fault.skew * .042 : 0;
+    const branch = flow ? -7 : 7;
+    const physicalY = (3.5 - physical) * 1.65;
+    const y = [0, 0, branch, branch, branch, branch, spread, physicalY, physicalY,
+      rxSpread, spread, branch, branch, branch, 0, 0, 0];
+    const delayed = physical === fault.physical && index === ST.demux ? fault.skew * .042 : 0;
     return new T.Vector3(x[index] - delayed, y[index], (row % 4 - 1.5) * .48);
   }
 
@@ -55,7 +65,7 @@
 
   function resetCamera() {
     if (!camera) return;
-    camera.position.set(0, 25, 95);
+    camera.position.set(0, 34, 155);
     controls.target.set(0, 0, 0);
     controls.update();
     resize();
@@ -98,19 +108,17 @@
     scene.add(light);
 
     const neutral = 0x9dafc1;
-    addModule(0, 0, 5, 'TX MAC', neutral);
-    addModule(1, 0, 15, '66b 分流', neutral);
-    [0x80bedf, 0xe8a984].forEach((color, flow) => {
-      const y = flow ? -7 : 7;
-      addModule(2, y, 5.5, 'F' + flow + ' AM / FEC', color);
-      addModule(3, flow ? -8 : 8, 7, 'F' + flow + ' · 16 lane', color);
-      addModule(8, y, 5.5, 'F' + flow + ' 解码', color);
+    [[0, 'TX MAC'], [1, '64B/66B'], [2, '66b 分流'], [7, '32:8 PMA'],
+      [8, '8 路 PAM4'], [9, 'RX 解复用'], [10, 'AM / Deskew'],
+      [14, '66b 合流'], [15, '64B/66B 解码'], [16, 'RX MAC']].forEach(([i, name]) => {
+      addModule(i, 0, i >= 7 && i <= 10 ? 17 : i === 2 ? 15 : 5, name, neutral);
     });
-    addModule(4, 0, 15, '32:8 PMA', neutral);
-    addModule(5, 0, 14, '8 路 PAM4', 0x8bbab4);
-    addModule(6, 0, 19, 'RX 解复用', neutral);
-    addModule(7, 0, 22, 'AM / Deskew', neutral);
-    addModule(9, 0, 5, 'RX MAC', neutral);
+    [0x80bedf, 0xe8a984].forEach((color, flow) => {
+      [[3, '257b 转码'], [4, '加扰'], [5, 'AM / FEC'], [6, '16 lane'],
+        [11, 'RX FEC'], [12, '解扰'], [13, '逆转码']].forEach(([i, name]) => {
+        addModule(i, flow ? -7 : 7, 5.5, 'F' + flow + ' ' + name, color);
+      });
+    });
   }
 
   function setupScene() {
@@ -121,7 +129,7 @@
       renderer = new T.WebGLRenderer({ antialias: true });
       canvas = renderer.domElement;
       scene = new T.Scene();
-      const grid = new T.GridHelper(136, 34, 0x667889, 0x667889);
+      const grid = new T.GridHelper(240, 40, 0x667889, 0x667889);
       grid.position.y = -12;
       grid.scale.z = .16;
       grid.material.transparent = true;
@@ -193,14 +201,14 @@
     const next = Math.min(stage + 1, stages.length - 1);
     packets.forEach((mesh, i) => {
       const laneFlow = Math.floor(i / 16);
-      const blocked = stage >= 5 && fault.loss && lanes[i] === fault.physical;
-      const gated = stage >= 8 && (!state.aligned || !fecResults[laneFlow].valid);
+      const blocked = stage >= ST.link && fault.loss && lanes[i] === fault.physical;
+      const gated = stage >= ST.fec && (!state.aligned || !fecResults[laneFlow].valid);
       const shown = (filter < 0 || laneFlow === filter) && (tracked < 0 || i === tracked);
       paths[i].material.opacity = shown ? .48 : .07;
       mesh.visible = shown && !blocked && !gated;
       const t = motion.matches ? 0 : progress;
       mesh.position.copy(route(i, stage)).lerp(route(i, next), t);
-      const corruptAM = fault.am && i === fault.lane && stage >= 6 && stage <= 7;
+      const corruptAM = fault.am && i === fault.lane && stage >= ST.demux && stage <= ST.align;
       mesh.material.color.copy(corruptAM ? new T.Color('#c9313e') : flowColor(i));
     });
     modules.forEach(({ box, index }) => {
@@ -254,6 +262,32 @@
     }));
   }
 
+  function payload() {
+    return get('payload').value.replace(/[^ -~]/g, '') || 'Visual PCS 800G ';
+  }
+
+  function inspectData(flow) {
+    const detail = get('data');
+    detail.hidden = ![0, 1, 3, 4, 12, 13, 15, 16].includes(stage);
+    if (detail.hidden) return;
+    const sample = M.sample(flow, payload());
+    const bits = value => value.join('').match(/.{1,64}/g).join('\n');
+    const hex = blocks => blocks.map(block => block.map(byte =>
+      byte.toString(16).padStart(2, '0')).join(' ')).join('\n');
+    const lines = {
+      0: () => '输入字节（十六进制）\n' + hex(sample.bytes),
+      1: () => '首个 66 位数据块（发送顺序）\n' + bits(sample.encoded[0]),
+      3: () => '转码后的 257 位块\n' + bits(sample.transcoded),
+      4: () => '加扰输入\n' + bits(sample.transcoded) + '\n加扰输出\n' + bits(sample.scrambled),
+      12: () => '接收的加扰块\n' + bits(sample.scrambled) + '\n解扰输出\n' + bits(sample.recovered),
+      13: () => '恢复的首个 66 位块\n' + bits(sample.reverse[0]),
+      15: () => '解码字节（十六进制）\n' + hex(sample.decoded),
+      16: () => '恢复的 Flow 数据（十六进制）\n' + hex(sample.decoded)
+    };
+    get('bits').textContent = 'Flow ' + flow + '\n' +
+      (stage >= ST.fec && (!state.aligned || !fecResults[flow].valid) ? '接收数据不可用' : lines[stage]());
+  }
+
   function describeStage() {
     buttons.forEach((b, i) => b.setAttribute('aria-current', i === stage ? 'step' : 'false'));
     get('stage-title').textContent = stages[stage][0];
@@ -265,16 +299,17 @@
       ' · PAM4 通道 ' + lanes[i] + ' / TX 槽 ' + tx[lanes[i]].indexOf(i) + ' · RX PMA lane ' + rx.indexOf(i);
     const symbol = M.symbolAt(i, 0);
     detail += ' · F' + symbol.flow + '-' + ['A', 'B'][symbol.word] + ' 符号 #' + symbol.index;
-    if (stage === 4 || stage === 5) {
+    if (stage === ST.mux || stage === ST.link) {
       const td = tx[lanes[i]];
       const pair = M.pam4Pair(words, tx, lanes[i], 0, 0, Math.floor(td.indexOf(i) / 2));
       detail += ' · 位 0：lane ' + pair.ids.join(' / ') + ' → ' + pair.bits.join('') + ' → PAM4 电平 ' + pair.level;
     }
-    if (stage === 9) {
+    if (stage === ST.rx) {
       detail += state.aligned && fecResults.every(r => r.valid)
         ? ' · 收集顺序 ' + M.collect(flows).join(', ') : ' · 接收输出标记为错误';
     }
     get('inspect').textContent = detail;
+    inspectData(flow);
   }
 
   function updateState() {
@@ -291,7 +326,7 @@
     rx = M.receiveMap(tx, value('phase'));
     lanes = [];
     tx.forEach((row, physical) => row.forEach(lane => { lanes[lane] = physical; }));
-    if (!words) words = M.codewords(window.PCS);
+    if (!words) words = M.codewords(window.PCS, payload());
     fecResults = M.receive(window.PCS, words, rx, value('errors'), fault.lane);
     paths.forEach((line, lane) => {
       const p = line.geometry.attributes.position;
@@ -307,7 +342,7 @@
 
   function advance() {
     stage = (stage + 1) % stages.length;
-    if (stage === 7) recovery = Math.min(2, recovery + 1);
+    if (stage === ST.align) recovery = Math.min(2, recovery + 1);
     updateState();
   }
 
@@ -362,7 +397,7 @@
       setPlaying(false);
       stage = i;
       progress = 0;
-      if (i === 7) recovery = Math.min(2, recovery + 1);
+      if (i === ST.align) recovery = Math.min(2, recovery + 1);
       updateState();
     };
     get('stages').append(b);
@@ -383,6 +418,7 @@
     resetCamera();
   };
   get('camera').onclick = resetCamera;
+  get('payload').onchange = () => { words = null; refresh(); };
   ['mapping', 'phase', 'physical', 'loss', 'am', 'lane', 'flow', 'errors'].forEach(key => {
     get(key).onchange = () => refresh(['mapping', 'phase', 'physical', 'loss', 'am'].includes(key) ||
       (key === 'lane' && get('am').checked));
