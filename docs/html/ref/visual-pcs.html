@@ -631,6 +631,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 }
 
 </style>
+<link rel="stylesheet" href="visual-pcs-assets/pcs-800g.css">
 </head>
 <body>
 <a class="skip-link" href="#lab">跳到实验</a>
@@ -691,8 +692,14 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 </dl>
 
 <section class="lab" id="lab" aria-labelledby="lab-title">
+  <h2 id="lab-title">3D 通道实验</h2>
+  <div class="pcs-tabs" role="tablist" aria-label="PCS 速率">
+    <button type="button" class="btn" role="tab" id="tab-200g" aria-selected="true" aria-controls="lab-200g">200GBASE-R</button>
+    <button type="button" class="btn" role="tab" id="tab-800g" aria-selected="false" aria-controls="lab-800g" tabindex="-1">800GBASE-R</button>
+  </div>
+  <div role="tabpanel" id="lab-200g" aria-labelledby="tab-200g" tabindex="0">
   <div class="lab-head">
-    <h2 id="lab-title">通道实验 <span>200GBASE-R · 8 条 PCS 通道 · 链路单向演示</span></h2>
+    <h2>200GBASE-R <span>8 条 PCS 通道 · 链路单向演示</span></h2>
     <p id="lab-summary" class="lab-summary" aria-live="polite"></p>
     <button type="button" class="btn" id="reading-return" hidden>返回原章节</button>
   </div>
@@ -842,6 +849,42 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <div id="diag"></div>
     </section>
   </div>
+  </div>
+  <section role="tabpanel" id="lab-800g" aria-labelledby="tab-800g" hidden tabindex="0">
+    <div class="g800-controls">
+      <button class="btn primary" type="button" id="g800-play">播放</button>
+      <button class="btn" type="button" id="g800-step">单步</button>
+      <button class="btn" type="button" id="g800-reset">重置</button>
+      <button class="btn" type="button" id="g800-camera">全景</button>
+      <label>速度 <select id="g800-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
+      <label>Flow <select id="g800-flow"><option value="-1">全部</option><option value="0">Flow 0</option><option value="1">Flow 1</option></select></label>
+      <label>追踪 <select id="g800-lane"><option value="-1">所有 PCS lane</option></select></label>
+    </div>
+    <p class="fine">800 Gb/s MAC · 32 × 26.5625 Gb/s PCS lane · 8 × 106.25 Gb/s PAM4（53.125 GBd）</p>
+    <div class="g800-stage" id="g800-scene" aria-label="800GBASE-R TX 到 RX 三维动画">
+      <span class="g800-help" id="g800-help">拖动旋转 · 滚轮缩放 · 点击数据单元追踪 lane</span>
+    </div>
+    <nav class="g800-stages" id="g800-stages" aria-label="800G 处理阶段"></nav>
+    <div class="g800-detail" aria-live="polite">
+      <p><strong id="g800-stage-title"></strong></p>
+      <p id="g800-stage-note"></p>
+      <p id="g800-inspect"></p>
+    </div>
+    <div class="g800-controls">
+      <label>TX 映射 <select id="g800-mapping"><option value="group">相邻分组</option><option value="spread">跨组分布</option></select></label>
+      <label>RX 槽相位 <select id="g800-phase"><option>0</option><option>1</option><option>2</option><option>3</option></select></label>
+      <label>物理通道 <select id="g800-physical"></select></label>
+      <label>Skew <input id="g800-skew" type="range" min="0" max="180" value="0"> <output id="g800-skew-value">0 ns</output></label>
+      <label><input id="g800-loss" type="checkbox"> 信号丢失</label>
+      <label><input id="g800-am" type="checkbox"> 损坏选中 lane 的 AM（默认 lane 0）</label>
+      <label>码字符号错误 <select id="g800-errors"><option>0</option><option>1</option><option>15</option><option>16</option></select></label>
+    </div>
+    <p id="g800-diagnostics" role="status"></p>
+    <div class="g800-table" tabindex="0" role="region" aria-label="800G PMA 映射表">
+      <table class="cmp"><thead><tr><th scope="col">物理通道</th><th scope="col">TX 时隙（PCS lane）</th><th scope="col">RX PMA 输出（实际 PCS lane）</th><th scope="col">AM 锁定</th></tr></thead><tbody id="g800-rows"></tbody></table>
+    </div>
+    <p class="fine">依据 IEEE 802.3df-2024 §172、§173。3D 路径和 AM 捕获以教学事件展示，时间与间距按可读性缩放。FEC 检查使用独立的示例 RS 码字。</p>
+  </section>
 </section>
 
 <article class="story">
@@ -969,8 +1012,9 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 <section id="scale" aria-labelledby="scale-title">
   <p class="eyebrow">第 7 部分</p>
   <h2 id="scale-title">从 200G 扩展到更高速率</h2>
+  <a href="#lab-800g">打开 800GBASE-R 三维通道实验</a>
   <p><b>400GBASE-R</b> 使用同一套 IEEE 802.3 第 119 条 PCS，将 PCS 通道数从 8 增至 16，每 163,840 个 257 位块插入一组 AM。上述原理适用于通道数翻倍的情况。400G 的 16 条 PCS 通道可映射到 16、8、4、2 或 1 条物理通道。200G 的 8 条 PCS 通道可映射到 8、4、2 或 1 条物理通道。</p>
-  <p><b>800G</b> 常用两路并行的 400G 数据流来理解，800GBASE-R PCS 也复用了 400G 形式的 FEC 分组。具体器件和 PHY 的实现因型号而异。单条物理通道速率为 200 Gb/s 的新型 PHY 还有这里未展示的子层。</p>
+  <p><b>800GBASE-R</b> 按 IEEE 802.3df-2024 Clause 172，将一条 800GMII 的 66 位块流交替分到两个 Flow。每个 Flow 按 400GBASE-R 的方法分配符号，各使用 16 条 PCS lane。Clause 173 的 32:8 PMA 再把每个 Flow 的两条 lane 复用到每条物理通道。</p>
 </section>
 
 <section id="refs" aria-labelledby="refs-title" class="refs">
@@ -5515,6 +5559,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     requestAnimationFrame(frame);
     var dt = Math.min((now - (last || now)) / 1000, 0.1);
     last = now;
+    if (document.getElementById('lab-200g').hidden) return;
     if (S.playing) {
       S.u += dt * VEL * S.speed;
       S.stepTo = null;
@@ -5581,7 +5626,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     new MutationObserver(themeChanged).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] });
     new IntersectionObserver(function (es) { visible = es[0].isIntersecting; }, { rootMargin: '120px' }).observe(vp);
     if (!G.failed) requestAnimationFrame(frame);
-    else setInterval(function () { if (S.playing) { P.tick(); } P.processAms(); P.renderDiag(); P.drawScope(); P.viewTick(0.1); S.u += 0.25 * S.speed; }, 100);
+    else setInterval(function () { if (document.getElementById('lab-200g').hidden) return; if (S.playing) { P.tick(); } P.processAms(); P.renderDiag(); P.drawScope(); P.viewTick(0.1); S.u += 0.25 * S.speed; }, 100);
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', P.boot);
@@ -5650,5 +5695,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 })();
 </script>
 
+<script src="visual-pcs-assets/pcs-800g-model.js"></script>
+<script src="visual-pcs-assets/pcs-800g-view.js"></script>
 </body>
 </html>

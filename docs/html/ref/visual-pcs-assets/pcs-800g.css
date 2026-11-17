@@ -1,0 +1,14 @@
+.pcs-tabs, .g800-controls, .g800-stages { display: flex; gap: .5rem; flex-wrap: wrap; margin-block: .65rem; }
+.pcs-tabs [aria-selected="true"], .g800-stages [aria-current="step"] { background: var(--ink); color: var(--paper); }
+.g800-controls label { display: inline-flex; align-items: center; gap: .35rem; font-size: .9rem; }
+.g800-controls select, .g800-controls input { accent-color: var(--focus); max-width: 100%; }
+.g800-controls select { background: var(--panel); color: var(--ink); border: 1px solid var(--rule); border-radius: .25rem; padding: .25rem; }
+.g800-stage { position: relative; height: clamp(280px, 48vw, 490px); background: var(--scene-bg); border: 1px solid var(--rule); border-radius: .4rem; overflow: hidden; }
+.g800-stage canvas { width: 100%; height: 100%; display: block; touch-action: pan-y; }
+.g800-help { position: absolute; left: .65rem; bottom: .45rem; pointer-events: none; background: var(--panel); padding: .2rem .4rem; font-size: .76rem; }
+.g800-detail { background: var(--panel); border: 1px solid var(--rule); padding: .75rem; border-radius: .4rem; margin-block: .75rem; }
+.g800-detail p + p { margin-top: .35rem; }
+.g800-table { overflow: auto; }
+.g800-table table { min-width: 36rem; }
+.g800-flow0 { color: #126ba7; }
+.g800-flow1 { color: #9a4213; }
