@@ -561,21 +561,121 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 
 .site-foot { padding-inline: var(--gutter); padding-block: 18px 28px; border-top: 1px solid var(--rule); font-family: var(--f-mono); font-size: 0.72rem; color: var(--muted); }
 
+
+/* Reading navigation and section layout. */
+:root { --header-height: 64px; scroll-padding-top: calc(var(--header-height) + 16px); }
+.skip-link { position: fixed; z-index: 30; top: 8px; left: 8px; padding: 8px 12px; background: var(--panel); transform: translateY(-150%); }
+.skip-link:focus { transform: none; }
+.mast { position: sticky; top: 0; z-index: 20; background: var(--panel); }
+.mast .mast-shortcuts { gap: 6px; }
+.mast-shortcuts a, .mobile-toc summary { padding: 5px 10px; border-radius: var(--radius); }
+.mast-shortcuts a:hover, .mobile-toc summary:hover { background: var(--paper); }
+.page-layout { display: grid; grid-template-columns: 13rem minmax(0, 1fr); max-width: 1740px; margin-inline: auto; }
+.page-main { min-width: 0; }
+.page-sidebar {
+  position: sticky; top: var(--header-height); align-self: start;
+  max-height: calc(100vh - var(--header-height)); overflow: auto;
+  padding: 24px 12px; border-inline-end: 1px solid var(--rule);
+}
+.chapter-links { display: grid; gap: 3px; font: 500 0.9rem/1.45 var(--f-display); }
+.chapter-links a {
+  display: block; padding: 8px 10px; border-inline-start: 3px solid transparent;
+  border-radius: var(--radius); color: var(--ink-2); text-decoration: none;
+}
+.chapter-links a:nth-child(4) { margin-top: 10px; }
+.chapter-links a:hover { background: var(--panel); color: var(--ink); }
+.chapter-links a[aria-current="location"] {
+  border-inline-start-color: var(--focus); color: var(--focus);
+  background: color-mix(in srgb, var(--focus) 10%, var(--panel)); font-weight: 700;
+}
+.mobile-toc { display: none; }
+.hero { padding-top: clamp(18px, 3vw, 40px); }
+.hero .lede { max-width: 34em; }
+.rail-title { margin-top: 20px; font-size: var(--s1); }
+.rail { display: flex; overflow-x: auto; scroll-snap-type: x proximity; }
+.rail button { flex: 1 0 7rem; scroll-snap-align: nearest; }
+.rail .rt { display: block; overflow: visible; }
+.story {
+  max-width: 1120px; gap: 20px; padding-block-start: 8px;
+}
+.story section {
+  display: grid; grid-template-columns: minmax(0, 1fr);
+  gap: 14px; padding: clamp(16px, 3vw, 32px);
+  background: var(--panel); border: 1px solid var(--rule); border-radius: 8px;
+}
+.story section > .margin { grid-column: 1; grid-row: auto; }
+.story p, .story .steps, .story figcaption, .story .refs ul { max-width: 48em; }
+.story .eyebrow { border: 0; padding: 0; color: var(--focus); letter-spacing: 0; }
+.story .figwrap { background: var(--paper); }
+.story .cmp { line-height: 1.5; }
+.story .tablewrap { overscroll-behavior-inline: contain; }
+@media (max-width: 960px) {
+  .page-layout { display: block; }
+  .page-sidebar { display: none; }
+  .mobile-toc { display: block; }
+  .mobile-toc summary { cursor: pointer; font: 600 0.9rem var(--f-display); }
+  .mast .mobile-toc nav {
+    position: absolute; inset: 100% var(--gutter) auto auto;
+    display: grid; gap: 3px; padding: 8px;
+    width: min(17rem, calc(100% - 2 * var(--gutter))); max-height: 70vh; overflow: auto;
+    background: var(--panel); border: 1px solid var(--rule); border-radius: var(--radius);
+    box-shadow: 0 6px 18px #0002;
+  }
+  .mast .mobile-toc a[aria-current="location"] { color: var(--focus); }
+}
+@media (max-width: 560px) {
+  .mast { gap: 4px 8px; padding-block: 8px; }
+  .brand span { display: none; }
+  .mast-shortcuts a, .mobile-toc summary { padding: 6px 5px; }
+  .story section { padding: 14px; }
+}
+
 </style>
 </head>
 <body>
-<header class="mast">
-  <a class="brand" href="#top" id="top">Visual PCS（中文版） <span>IEEE 802.3 · 200GBASE-R</span></a>
-  <nav aria-label="章节">
-    <a href="#lab">通道实验</a>
-    <a href="#lanes">三类通道</a>
-    <a href="#tx">发送</a>
-    <a href="#mux">比特复用</a>
-    <a href="#rx">接收</a>
-    <a href="#debug">故障排查</a>
+<a class="skip-link" href="#lab">跳到实验</a>
+<header class="mast" id="page-header">
+  <a class="brand" href="#top">Visual PCS <span>200GBASE-R · 中文版</span></a>
+  <nav class="mast-shortcuts" aria-label="快捷入口">
+    <a href="#lab">实验</a>
+    <a href="#lanes">原理</a>
+    <a href="#debug">排障</a>
   </nav>
+  <details class="mobile-toc">
+    <summary>目录</summary>
+    <nav class="chapter-links" aria-label="章节目录">
+      <a href="#lab">3D 通道实验</a>
+      <a href="#mapping">通道映射与比特示波图</a>
+      <a href="#fault-panel">故障注入与诊断</a>
+      <a href="#lanes">1. 三类通道</a>
+      <a href="#tx">2. 发送流程</a>
+      <a href="#am">3. 对齐标记</a>
+      <a href="#mux">4. PMA 比特复用</a>
+      <a href="#rx">5. 接收流程</a>
+      <a href="#debug">6. 故障排查</a>
+      <a href="#scale">7. 更高速率</a>
+      <a href="#refs">参考资料</a>
+    </nav>
+  </details>
 </header>
 
+<div class="page-layout" id="top">
+  <aside class="page-sidebar">
+    <nav class="chapter-links" aria-label="章节目录">
+      <a href="#lab">3D 通道实验</a>
+      <a href="#mapping">通道映射与比特示波图</a>
+      <a href="#fault-panel">故障注入与诊断</a>
+      <a href="#lanes">1. 三类通道</a>
+      <a href="#tx">2. 发送流程</a>
+      <a href="#am">3. 对齐标记</a>
+      <a href="#mux">4. PMA 比特复用</a>
+      <a href="#rx">5. 接收流程</a>
+      <a href="#debug">6. 故障排查</a>
+      <a href="#scale">7. 更高速率</a>
+      <a href="#refs">参考资料</a>
+    </nav>
+  </aside>
+  <main class="page-main">
 <section class="hero" aria-labelledby="hero-title">
   <div>
     <p class="kicker">面向熟悉 SerDes 的读者：以太网 PCS</p>
@@ -594,6 +694,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   <div class="lab-head">
     <h2 id="lab-title">通道实验 <span>200GBASE-R · 8 条 PCS 通道 · 链路单向演示</span></h2>
     <p id="lab-summary" class="lab-summary" aria-live="polite"></p>
+    <button type="button" class="btn" id="reading-return" hidden>返回原章节</button>
   </div>
 
   <div class="toolbar" role="toolbar" aria-label="通道实验控件">
@@ -712,11 +813,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     </div>
   </dialog>
 
-  <nav class="rail" id="rail" aria-label="处理阶段"></nav>
+  <h3 class="rail-title" id="pipeline">链路处理阶段</h3>
+  <nav class="rail" id="rail" aria-labelledby="pipeline"></nav>
 
   <article class="stage-detail" id="stage-detail" aria-live="polite"></article>
 
-  <div class="panels">
+  <div class="panels" id="mapping">
     <section class="panel" aria-labelledby="map-title">
       <header><h3 id="map-title">PCS 到 SerDes 的映射</h3><span class="tag std">标准概念</span></header>
       <div class="order" id="order-strip"></div>
@@ -730,7 +832,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <p class="note" id="scope-note"></p>
     </section>
 
-    <section class="panel" aria-labelledby="fault-title">
+    <section class="panel" id="fault-panel" aria-labelledby="fault-title">
       <header><h3 id="fault-title">故障实验</h3><span class="tag">模拟</span></header>
       <div class="faults" id="faults"></div>
     </section>
@@ -882,6 +984,9 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   <p class="fine">实验调整了计数和时间尺度，便于观察。AM 间隔和误码率为示例，锁定阈值遵循图 119–12。诊断读数用于演示概念。</p>
 </section>
 </article>
+
+  </main>
+</div>
 
 <footer class="site-foot">
   <p>Visual PCS · IEEE 802.3 200GBASE-R PCS 教学模型。部分过程经过简化，规范行为以标准为准。</p>
@@ -5353,6 +5458,14 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   'use strict';
   P.initStory = function () {
     P.drawFigures();
+    var back = document.getElementById('reading-return');
+    var sourceButton = null;
+    back.addEventListener('click', function () {
+      if (!sourceButton) return;
+      sourceButton.focus({ preventScroll: true });
+      sourceButton.scrollIntoView({ block: 'center' });
+      back.hidden = true;
+    });
     document.querySelectorAll('.showme').forEach(function (b) {
       b.addEventListener('click', function () {
         if (b.dataset.fault === 'noise') {
@@ -5360,6 +5473,9 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
           f.noise = 62; f.noiseLane = 0;
           P.renderFaults(); P.emit('fault');
         }
+        sourceButton = b;
+        back.hidden = false;
+        back.focus({ preventScroll: true });
         document.getElementById('lab').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
         P.goStage(+b.dataset.stage);
         if (!P.state.playing) P.setPlaying(true);
@@ -5473,5 +5589,66 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 })(globalThis.PCS = globalThis.PCS || {});
 
 </script>
+
+<script>
+(function () {
+  'use strict';
+  var header = document.getElementById('page-header');
+  var toc = header.querySelector('.mobile-toc');
+  var links = Array.from(document.querySelectorAll('.chapter-links a'));
+  var sections = Array.from(new Set(links.map(function (link) {
+    return document.getElementById(link.hash.slice(1));
+  })));
+  var active = '';
+  var queued = false;
+
+  function updateLocation() {
+    queued = false;
+    var readingLine = header.offsetHeight + 40;
+    var current = '';
+    sections.forEach(function (section) {
+      if (section.getBoundingClientRect().top <= readingLine) current = '#' + section.id;
+    });
+    var root = document.documentElement;
+    if (window.scrollY > 0 && root.scrollHeight - window.innerHeight - window.scrollY < 3) {
+      current = '#refs';
+    }
+    if (current === active) return;
+    active = current;
+    links.forEach(function (link) {
+      if (link.hash === active) link.setAttribute('aria-current', 'location');
+      else link.removeAttribute('aria-current');
+    });
+  }
+
+  function scheduleLocation() {
+    if (!queued) {
+      queued = true;
+      requestAnimationFrame(updateLocation);
+    }
+  }
+
+  new ResizeObserver(function () {
+    document.documentElement.style.setProperty('--header-height', header.offsetHeight + 'px');
+    scheduleLocation();
+  }).observe(header);
+  window.addEventListener('scroll', scheduleLocation, { passive: true });
+  window.addEventListener('resize', scheduleLocation);
+  toc.addEventListener('click', function (event) {
+    if (event.target.closest('a')) toc.open = false;
+  });
+  document.addEventListener('click', function (event) {
+    if (toc.open && !toc.contains(event.target)) toc.open = false;
+  });
+  toc.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && toc.open) {
+      toc.open = false;
+      toc.querySelector('summary').focus();
+    }
+  });
+  scheduleLocation();
+})();
+</script>
+
 </body>
 </html>
