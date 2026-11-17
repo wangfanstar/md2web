@@ -654,6 +654,9 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <a href="#rx">5. 接收流程</a>
       <a href="#debug">6. 故障排查</a>
       <a href="#scale">7. 更高速率</a>
+      <a href="#cbfc">8. CBFC 信用流控</a>
+      <a href="#llr">9. LLR 链路重传</a>
+      <a href="#cbfc-llr">10. CBFC 与 LLR 联动</a>
       <a href="#refs">参考资料</a>
     </nav>
   </details>
@@ -672,6 +675,9 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <a href="#rx">5. 接收流程</a>
       <a href="#debug">6. 故障排查</a>
       <a href="#scale">7. 更高速率</a>
+      <a href="#cbfc">8. CBFC 信用流控</a>
+      <a href="#llr">9. LLR 链路重传</a>
+      <a href="#cbfc-llr">10. CBFC 与 LLR 联动</a>
       <a href="#refs">参考资料</a>
     </nav>
   </aside>
@@ -973,9 +979,68 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   <p><b>800G</b> 常用两路并行的 400G 数据流来理解，800GBASE-R PCS 也复用了 400G 形式的 FEC 分组。具体器件和 PHY 的实现因型号而异。单条物理通道速率为 200 Gb/s 的新型 PHY 还有这里未展示的子层。</p>
 </section>
 
+<section id="cbfc" aria-labelledby="cbfc-title">
+  <p class="eyebrow">第 8 部分 · Ultra Ethernet 链路层</p>
+  <h2 id="cbfc-title">CBFC：有接收缓冲信用才发送</h2>
+  <p>CBFC（Credit-based Flow Control）在一条全双工点对点链路上，按虚拟通道（VC）控制无损流量。信用代表对端可用的接收缓冲。发送端按帧大小计算所需信用，仅在端口和对应 VC 的信用额度都允许时调度该帧。</p>
+  <ol class="steps">
+    <li><b>初始化。</b>链路两端协商或配置兼容参数，包括 <code>CreditSize</code>、<code>PktOvhd</code> 和 VC 数。发送前根据接收缓冲建立端口及 VC 的信用上限。</li>
+    <li><b>发送。</b>所需信用为 <code>ceil((帧字节数 + PktOvhd) / CreditSize)</code>。举例：帧长 1500 B、开销 0 B、每信用 64 B，共需 24 个信用。新帧发出后，发送端增加已消耗计数（CC）。接收端接纳帧时记录相应的消耗。</li>
+    <li><b>归还。</b>接收缓冲释放后，接收端增加已释放计数（CF），再通过 <code>CF_Update</code> 将累计值发回发送端。</li>
+    <li><b>校准。</b>发送端周期性发送 <code>CC_Update</code> 同步累计消耗值，让接收端识别因链路错误丢包而遗漏的信用。CC 与 CF 使用循环计数器，后续累计值可以覆盖漏掉的更新。</li>
+  </ol>
+  <div class="tablewrap" tabindex="0" role="region" aria-label="CBFC 消息对照">
+    <table class="cmp">
+      <caption class="sr">CBFC 的两种点对点消息</caption>
+      <thead><tr><th scope="col">消息</th><th scope="col">方向与格式</th><th scope="col">作用</th></tr></thead>
+      <tbody>
+        <tr><th scope="row"><code>CF_Update</code></th><td>接收端 → 发送端，8 B CtlOS</td><td>较频繁，报告最多两个 VC 的累计释放计数。</td></tr>
+        <tr><th scope="row"><code>CC_Update</code></th><td>发送端 → 接收端，64 B 帧</td><td>较低频，报告最多 16 个 VC 的累计消耗计数，用于回收泄漏信用。</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><b>排障：</b>链路已对齐但某个 VC 停发时，先检查端口和 VC 的剩余信用，再看接收缓冲是否释放、<code>CF_Update</code> 是否到达，以及 CC 计数是否逐步收敛。</p>
+  <p class="fine">规范定位：UE Specification 1.1 §5.2.4–5.2.8，表 5-14、表 5-19。</p>
+</section>
+
+<section id="llr" aria-labelledby="llr-title">
+  <p class="eyebrow">第 9 部分 · Ultra Ethernet 链路层</p>
+  <h2 id="llr-title">LLR：在当前链路上重放丢失的帧</h2>
+  <p>LLR（Link Layer Retry）位于 MAC 客户端与 MAC Control 之间。PCS 的 RS-FEC 在物理层纠正符号错误。LLR 在相邻端口之间恢复未正确接收的合资格帧。重放范围是一跳，端到端传输层有自己的恢复机制。</p>
+  <ol class="steps">
+    <li><b>建立状态。</b>链路伙伴以 <code>LLR_INIT</code> 和 <code>LLR_INIT_ECHO</code> CtlOS 完成 LLR 初始化握手。</li>
+    <li><b>分配序列号。</b>LLR TX 对合资格帧分配序列号并写入重放缓冲。MAC 将序列号置于前导码。不合资格的帧按普通以太网帧发送。</li>
+    <li><b>确认并释放。</b>接收端按预期序列号接收合资格帧，周期性发送累计 <code>LLR_ACK</code>，确认连续成功接收的最新一帧。发送端据此释放已确认的数据。</li>
+    <li><b>发现缺口并重放。</b>后继合资格帧暴露序列缺口时，接收端丢弃失序帧并发出 <code>LLR_NACK</code>。随后等到预期帧正确到达。发送端在重放窗口内按序补送未确认帧。若反馈丢失或重放仍未取得进展，发送端可由重放定时器触发重试。</li>
+  </ol>
+  <p><b>排障：</b>结合 MAC FCS 错误、<code>LLR_NACK</code>、重放超时及缓冲占用判断故障。Bad FCS 可以成为重放触发条件，显式标记的 Poisoned FCS 有单独处理规则，不因该标记触发 <code>LLR_NACK</code>。</p>
+  <p class="fine">规范定位：UE Specification 1.1 §5.1、§5.1.3–5.1.9，图 5-1。</p>
+</section>
+
+<section id="cbfc-llr" aria-labelledby="cbfc-llr-title">
+  <p class="eyebrow">第 10 部分 · 联动案例</p>
+  <h2 id="cbfc-llr-title">丢帧后，重放如何与信用计数配合？</h2>
+  <p>两个功能同时启用时，CBFC 无损数据必须是 LLR-eligible。尽力而为数据可以选择是否使用 LLR，且不更新 CBFC 信用计数。下面假设同一无损 VC 连续发送序列号 40、41、42，每帧占用 4 个信用，接收端已按序收到 40。</p>
+  <div class="tablewrap" tabindex="0" role="region" aria-label="丢帧、重放与信用归还过程">
+    <table class="cmp">
+      <caption class="sr">LLR 重放期间的 CBFC 记账</caption>
+      <thead><tr><th scope="col">步骤</th><th scope="col">LLR 处理</th><th scope="col">CBFC 记账</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">首次发送 41、42</th><td>发送端缓存两帧。41 在链路上丢失。</td><td>发送端 CC 共增加 8。</td></tr>
+        <tr><th scope="row">42 先到</th><td>接收端仍期待 41，丢弃 42 并发送 <code>LLR_NACK</code>。</td><td>41 未收到，42 未被接纳。两帧均不增加接收端 CC。</td></tr>
+        <tr><th scope="row">重放 41、42</th><td>发送端重发，接收端按序接纳并随后确认。</td><td>发送端不重复增加 CC。接收端按正常接纳流程增加 8。</td></tr>
+        <tr><th scope="row">释放缓冲</th><td><code>LLR_ACK</code> 使发送端可以释放已确认帧的重放缓冲。</td><td>接收缓冲释放后，接收端 CF 增加 8，通过 <code>CF_Update</code> 归还信用。</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><b>同步消息也受顺序约束。</b><code>CC_Update</code> 必须标记为 LLR-eligible。若它在丢弃窗口到达，接收端先丢弃，避免用越过缺口的消耗计数校准。待前序帧恢复后，再按序接收重放的更新。</p>
+  <p class="fine">规范定位：UE Specification 1.1 §5.2.9，表 5-26、图 5-13 与图 5-14。表中的序列号和信用数为教学示例。</p>
+</section>
+
 <section id="refs" aria-labelledby="refs-title" class="refs">
   <h2 id="refs-title">参考资料</h2>
   <ul>
+    <li>Ultra Ethernet Consortium，UE Specification 1.1，第 5 章（§5.1 LLR、§5.2 CBFC、§5.2.9 联动处理）。</li>
     <li>IEEE 802.3 标准第 119 条（200GBASE-R 和 400GBASE-R PCS）、第 120 条（PMA）、第 116 条（架构与时延偏差预算）、第 45 条（管理）。<a href="https://standards.ieee.org/ieee/802.3/10422/">IEEE 802.3-2022</a></li>
     <li><a href="https://ethernetalliance.org/blog/2018/03/28/a-deep-dive-into-the-802-3bs-200gbase-r-and-400gbase-r-pcspma/">深入解读 802.3bs 的 200GBASE-R 和 400GBASE-R PCS/PMA</a>，Ethernet Alliance</li>
     <li><a href="https://www.ieee802.org/3/bs/public/16_03/butter_3bs_02_0316.pdf">对齐标记的映射和插入</a>，IEEE P802.3bs 工作组</li>
