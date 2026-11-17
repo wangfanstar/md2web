@@ -55,6 +55,9 @@
   let linkGroup, theme = {};
   let labelHost, labelItems = [];
   let lastHostBackground = '';
+  let followActive = false, followBlock = 0, followU = 0, followInfo = null;
+  let followTags = [], followTagHost, followTagEls = [], followPaper = null;
+  const MAX_FOLLOW_TAGS = 8;
   const moduleMeshes = [];
 
   function cssVar(name) {
@@ -86,6 +89,119 @@
   }
 
   function stageT(index) { return index / (stages.length - 1); }
+
+  // A MAC 66b block n is built from bytes n*8 .. n*8+7 of the cyclic payload.
+  // Flow 0 takes even blocks, Flow 1 odd blocks; every four blocks in a flow
+  // become one 257b transcoded block before AM/FEC.
+  function blockInfo(n) {
+    n = Math.max(0, Math.floor(Number(n) || 0));
+    const text = payload();
+    const bytes = M.range(8).map(i => text.charCodeAt((n * 8 + i) % text.length) & 127);
+    return {
+      n, flow: n % 2, local: Math.floor(n / 2),
+      group: Math.floor(n / 8), pos: Math.floor(n / 2) % 4,
+      bytes,
+      hex: bytes.map(b => b.toString(16).padStart(2, '0')).join(' '),
+      ascii: bytes.map(b => b >= 32 && b < 127 ? String.fromCharCode(b) : '.').join('')
+    };
+  }
+
+  function followLaneList(flow) {
+    return M.range(16).map(i => flow * 16 + i);
+  }
+
+  function followStageName(flow, u) {
+    if (u < stageT(2)) return '800GMII · 66b 块';
+    if (u < stageT(6)) return 'Flow ' + flow + ' · 转码 / 加扰 / AM / FEC';
+    if (u < stageT(7)) return '32 条 PCS lane';
+    if (u < stageT(9)) return '32:8 PMA / 8 路 PAM4';
+    if (u < stageT(11)) return 'RX PMA / Deskew / 重排';
+    if (u < stageT(14)) return 'RX Flow ' + flow + ' · FEC / 解扰 / 逆转码';
+    if (u < stageT(15)) return '66b 合流 / 64B/66B 解码';
+    return 'RX MAC / 800GMII';
+  }
+
+  function followBad(flow, u) {
+    if (u > stageT(7) && fault.loss) return true;
+    if (u > stageT(9) && state && !state.aligned) return true;
+    if (u > stageT(11) && fecResults[flow] && !fecResults[flow].valid) return true;
+    return false;
+  }
+
+  function followTag(position, text, color) {
+    if (followTags.length >= MAX_FOLLOW_TAGS) return;
+    followTags.push({ pos: position.clone(), text, color: color.getStyle() });
+  }
+
+  function initFollowTags(host) {
+    followTagHost = document.createElement('div');
+    followTagHost.className = 'follow-tags g800-follow-tags';
+    followTagHost.hidden = true;
+    followTagHost.setAttribute('aria-hidden', 'true');
+    host.appendChild(followTagHost);
+    for (let i = 0; i < MAX_FOLLOW_TAGS; i++) {
+      const el = document.createElement('span');
+      el.className = 'ftag g800-ftag';
+      el.style.visibility = 'hidden';
+      followTagHost.appendChild(el);
+      followTagEls.push({ el, text: '', shown: false, w: 0 });
+    }
+  }
+
+  function updateFollowBar() {
+    const bar = byId('g800-follow-bar');
+    if (!bar) return;
+    bar.hidden = !followActive;
+    if (!followActive || !followInfo) return;
+    const flow = followInfo.flow;
+    const label = byId('g800-follow-label');
+    const where = byId('g800-follow-where');
+    const labelText = 'MAC 66b 块 #' + followInfo.n;
+    const whereText = 'F' + flow +
+      ' · 257b #' + followInfo.group +
+      ' · 组内 ' + (followInfo.pos + 1) + '/4' +
+      ' · 字节 ' + followInfo.hex + ' “' + followInfo.ascii + '”' +
+      ' · ' + followStageName(flow, followU);
+    if (label.textContent !== labelText) label.textContent = labelText;
+    if (where.textContent !== whereText) where.textContent = whereText;
+  }
+
+  function syncFollowUI() {
+    const start = byId('g800-follow-start');
+    if (start) {
+      start.setAttribute('aria-pressed', String(followActive));
+      start.textContent = followActive ? '重新追踪' : '追踪动画';
+    }
+    if (followTagHost) followTagHost.hidden = !followActive;
+    updateFollowBar();
+  }
+
+  function startFollow(block) {
+    followBlock = Math.max(0, Math.floor(Number(block) || 0));
+    followU = 0;
+    followActive = true;
+    followInfo = blockInfo(followBlock);
+    stage = 0;
+    progress = 0;
+    recovery = 2;
+    const input = get('follow-block');
+    if (input) input.value = followBlock;
+    get('flow').value = -1;
+    get('lane').value = -1;
+    syncFollowUI();
+    setPlaying(true);
+    updateState();
+  }
+
+  function stopFollow() {
+    followActive = false;
+    followU = 0;
+    followInfo = null;
+    followTags = [];
+    syncFollowUI();
+    updateFollowTags();
+    draw();
+  }
 
   const SHADES = [0.7, 0.84, 1.18, 0.68, 1, 0.76];
 
@@ -389,6 +505,7 @@
         if (hit) setStage(+hit.dataset.stage);
       });
       host.appendChild(labelHost);
+      initFollowTags(host);
 
       resize = () => {
         if (!active || !host.clientWidth || !host.clientHeight) return;
@@ -404,7 +521,11 @@
       resize();
       resetCamera();
       if (document.fonts && document.fonts.ready) {
-        document.fonts.ready.then(() => { labelItems.forEach(item => { item.w = 0; }); draw(); });
+        document.fonts.ready.then(() => {
+          labelItems.forEach(item => { item.w = 0; });
+          followTagEls.forEach(tag => { tag.w = 0; });
+          draw();
+        });
       }
 
       let pointer;
@@ -419,6 +540,16 @@
         const packetHit = ray.intersectObject(inst)[0];
         if (packetHit && packetHit.instanceId != null) {
           const info = meta[packetHit.instanceId];
+          if (info && info.n != null && info.n >= 0) {
+            if (info.seg === 'agg' && info.phase === 'tx') {
+              startFollow(info.n);
+              return;
+            }
+            if (info.seg === 'flow' && info.phase === 'tx') {
+              startFollow(info.n * 8 + info.flow);
+              return;
+            }
+          }
           if (info) {
             if (info.seg === 'lane') {
               get('lane').value = info.lane;
@@ -452,17 +583,22 @@
     }
   }
 
-  function pushCube(position, sx, sy, sz, color, info) {
+  function pushCube(position, sx, sy, sz, color, info, marker) {
     if (count >= 1600) return;
+    let shown = color;
+    if (followActive && !marker) {
+      if (!followPaper) followPaper = new T.Color(theme.paper);
+      shown = color.clone().lerp(followPaper, 0.72);
+    }
     const matrix = new T.Matrix4();
     matrix.compose(position, new T.Quaternion(), new T.Vector3(sx, sy, sz));
     inst.setMatrixAt(count, matrix);
-    inst.setColorAt(count, color);
+    inst.setColorAt(count, shown);
     meta[count] = info;
     count++;
   }
 
-  function drawStreamSegment(from, to, y, z, color, info, flow) {
+  function drawStreamSegment(from, to, y, z, color, info, flow, phase) {
     const front = motion.matches ? stageT(stage) : stageT(stage) + progress / (stages.length - 1);
     const base = Math.floor(front / STEP_T);
     for (let i = 0; i < STREAM; i++) {
@@ -474,7 +610,7 @@
       const pos = new T.Vector3(px, typeof y === 'function' ? y(t) : y, z);
       const c = am ? new T.Color(theme.am).lerp(color, 0.22) : color.clone();
       pushCube(pos, am ? 2.2 : 1.75, am ? 1.0 : 0.5, am ? 0.9 : 0.55,
-        c, { seg: info, flow });
+        c, { seg: info, flow, n: base - i, phase });
     }
   }
 
@@ -499,7 +635,7 @@
       if (corruptAm && am && t > stageT(ST.demux)) c = new T.Color(theme.bad);
       if (fecError && t > stageT(10.4)) c = new T.Color(theme.bad);
       pushCube(pos, am ? 2.1 : 1.55, am ? 0.95 : 0.44, am ? 0.85 : 0.5,
-        c, { seg: 'lane', lane, flow });
+        c, { seg: 'lane', lane, flow, n: base - i, phase: 'lane' });
     }
   }
 
@@ -513,6 +649,8 @@
       rebuildTracks();
     }
     if (scene.background.getStyle() !== hostBackground) scene.background.set(hostBackground);
+    followPaper = new T.Color(theme.paper);
+    if (followActive) followTags = [];
     const filter = value('flow'), tracked = value('lane');
     const front = motion.matches ? stageT(stage) : stageT(stage) + progress / (stages.length - 1);
     const aligned = state.aligned;
@@ -522,22 +660,22 @@
     // One aggregate 800GMII stream at each end.
     drawStreamSegment(0, stageT(2), 0, 0,
       new T.Color(theme.ink).lerp(new T.Color(theme.bg), 0.2),
-      'agg', 0);
+      'agg', 0, 'tx');
     if (aligned && bothFec) {
       drawStreamSegment(stageT(14), 1, 0, 0,
         new T.Color(theme.ink).lerp(new T.Color(theme.bg), 0.2),
-        'agg', 1);
+        'agg', 1, 'rx');
     }
 
     // Two independent Flow streams on either side of the 32-lane section.
     for (let flow = 0; flow < 2; flow++) {
       const color = dimColor(flowColor(flow * 16), filter < 0 || filter === flow);
       drawStreamSegment(stageT(2), stageT(ST.lanes), t => flowTxY(flow, t), 0,
-        color, 'flow', flow);
+        color, 'flow', flow, 'tx');
       if (aligned && fecResults[flow] && fecResults[flow].valid) {
         const rxColor = flow === filter || filter < 0 ? flowColor(flow * 16) : dimColor(flowColor(flow * 16), false);
         drawStreamSegment(stageT(ST.fec), stageT(14), t => flowRxY(flow, t), 0,
-          rxColor, 'flow', flow);
+          rxColor, 'flow', flow, 'rx');
       }
     }
 
@@ -547,6 +685,7 @@
       if (filter >= 0 && lane >= flowStart(filter) + 16) continue;
       drawLaneStream(lane, lane < 16 ? 0 : 1, flowColor(lane), front);
     }
+    if (followActive) drawFollowMarker();
 
     inst.count = count;
     inst.instanceMatrix.needsUpdate = true;
@@ -592,6 +731,8 @@
     });
     renderer.render(scene, camera);
     updateLabels();
+    updateFollowTags();
+    updateFollowBar();
   }
 
   function flowStart(flow) { return flow * 16; }
@@ -728,6 +869,98 @@
     });
   }
 
+  function drawFollowMarker() {
+    if (!followActive || !followInfo) return;
+    const flow = followInfo.flow, u = followU;
+    const bad = followBad(flow, u);
+    const color = new T.Color(bad ? theme.bad : theme.am);
+    const suffix = bad ? ' · 错误' : '';
+    const marker = (pos, sx, sy, sz, text) => {
+      pushCube(pos, sx, sy, sz, color, { seg: 'follow', n: followInfo.n, flow }, true);
+      followTag(pos, text, color);
+    };
+
+    if (u < stageT(2)) {
+      marker(new T.Vector3(x[0] + u * SPAN, 0, 0), 4.2, 1.8, 1.5,
+        'MAC 66b #' + followInfo.n + suffix);
+    } else if (u < stageT(6)) {
+      marker(new T.Vector3(x[0] + u * SPAN, flowTxY(flow, u), 0), 4.2, 1.8, 1.5,
+        'F' + flow + ' 257b #' + followInfo.group + suffix);
+    } else if (u < stageT(11)) {
+      const avg = new T.Vector3();
+      followLaneList(flow).forEach(lane => {
+        const pos = curves[lane].getPointAt(u);
+        pushCube(pos, 2.8, 1.25, 1.1,
+          color, { seg: 'follow', lane, flow, n: followInfo.n }, true);
+        avg.add(pos);
+      });
+      avg.multiplyScalar(1 / 16);
+      followTag(avg, 'F' + flow + ' · 16 条 PCS lane' +
+        (u < stageT(9) ? ' · PAM4 0–7' : '') +
+        (bad ? ' · 失锁' : ''), color);
+    } else if (u < stageT(14)) {
+      marker(new T.Vector3(x[0] + u * SPAN, flowRxY(flow, u), 0), 4.2, 1.8, 1.5,
+        'RX F' + flow + ' 257b #' + followInfo.group + suffix);
+    } else {
+      marker(new T.Vector3(x[0] + u * SPAN, 0, 0), 4.2, 1.8, 1.5,
+        'RX 66b #' + followInfo.n + suffix);
+    }
+  }
+
+  function updateFollowTags() {
+    if (!followTagHost) return;
+    followTagHost.hidden = !followActive;
+    if (!followActive) {
+      followTagEls.forEach(tag => {
+        if (tag.shown) { tag.el.style.visibility = 'hidden'; tag.shown = false; }
+      });
+      return;
+    }
+    const host = get('scene');
+    const W = host.clientWidth, H = host.clientHeight;
+    if (!W || !H || !camera) return;
+    const placed = [];
+    const bar = byId('g800-follow-bar');
+    if (bar && !bar.hidden) {
+      const br = bar.getBoundingClientRect(), hr = get('scene').getBoundingClientRect();
+      placed.push({
+        x0: br.left - hr.left - 3, x1: br.right - hr.left + 3,
+        y0: br.top - hr.top - 3, y1: br.bottom - hr.top + 3
+      });
+    }
+    const v = new T.Vector3();
+    let used = 0;
+    followTags.forEach(item => {
+      if (used >= MAX_FOLLOW_TAGS) return;
+      v.copy(item.pos).project(camera);
+      if (v.z > 1) return;
+      const sx = (v.x + 1) / 2 * W;
+      const sy = (1 - v.y) / 2 * H - 5;
+      if (sx < 0 || sx > W || sy < 0 || sy > H) return;
+      const tag = followTagEls[used];
+      if (tag.text !== item.text) {
+        tag.el.textContent = item.text;
+        tag.text = item.text;
+        tag.w = 0;
+      }
+      if (!tag.w) tag.w = tag.el.offsetWidth || 30;
+      const h = tag.el.offsetHeight || 14;
+      const rect = { x0: sx - tag.w / 2 - 2, x1: sx + tag.w / 2 + 2, y0: sy - h - 2, y1: sy + 2 };
+      if (placed.some(other => rect.x0 < other.x1 && rect.x1 > other.x0 &&
+        rect.y0 < other.y1 && rect.y1 > other.y0)) return;
+      placed.push(rect);
+      tag.el.style.setProperty('--lc', item.color);
+      tag.el.style.transform = 'translate(' + Math.round(sx) + 'px,' + Math.round(sy) +
+        'px) translate(-50%, -100%)';
+      if (!tag.shown) { tag.el.style.visibility = 'visible'; tag.shown = true; }
+      used++;
+    });
+    for (let i = used; i < followTagEls.length; i++) {
+      const tag = followTagEls[i];
+      if (tag.shown) { tag.el.style.visibility = 'hidden'; tag.shown = false; }
+    }
+  }
+
   function setPlaying(on) {
     playing = on;
     get('play').textContent = on ? '暂停' : '播放';
@@ -745,12 +978,25 @@
   function tick(now) {
     pending = 0;
     if (!active || !playing) return;
-    progress += Math.min(0.1, (now - (last || now)) / 1000) * value('speed') / 0.85;
+    const dt = Math.min(0.1, (now - (last || now)) / 1000);
     last = now;
-    if (progress >= 1) {
-      progress = 0;
-      advance();
-    } else draw();
+    if (followActive) {
+      followU += dt * value('speed') / 9;
+      if (followU >= 1) followU -= 1;
+      const next = Math.min(stages.length - 1, Math.round(followU * (stages.length - 1)));
+      if (next !== stage) {
+        stage = next;
+        progress = 0;
+        if (stage === ST.align) recovery = 2;
+        updateState();
+      } else draw();
+    } else {
+      progress += dt * value('speed') / 0.85;
+      if (progress >= 1) {
+        progress = 0;
+        advance();
+      } else draw();
+    }
     pending = requestAnimationFrame(tick);
   }
 
@@ -874,12 +1120,14 @@
     setPlaying(false);
     stage = index;
     progress = 0;
+    if (followActive) followU = stageT(index);
     if (index === ST.align) recovery = 2;
     updateState();
   }
 
   function advance() {
     stage = (stage + 1) % stages.length;
+    if (followActive) followU = stageT(stage);
     if (stage === ST.align) recovery = 2;
     updateState();
   }
@@ -943,6 +1191,8 @@
   get('reset').onclick = () => {
     setPlaying(false);
     stage = progress = recovery = 0;
+    stopFollow();
+    get('follow-block').value = 0;
     ['flow', 'lane', 'mapping', 'phase', 'physical', 'skew', 'speed', 'errors'].forEach(key => {
       const control = get(key);
       if (control.tagName === 'SELECT') control.selectedIndex = key === 'speed' ? 1 : 0;
@@ -954,7 +1204,19 @@
   };
   get('camera').onclick = resetCamera;
   get('open-data').onclick = showData;
-  get('payload').onchange = () => { words = null; refresh(); };
+  get('follow-start').onclick = () => startFollow(+get('follow-block').value || 0);
+  get('follow-stop').onclick = stopFollow;
+  get('follow-block').addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    startFollow(+get('follow-block').value || 0);
+  });
+  get('payload').onchange = () => {
+    words = null;
+    if (followActive) followInfo = blockInfo(followBlock);
+    refresh();
+    syncFollowUI();
+  };
   ['mapping', 'phase', 'physical', 'loss', 'am', 'lane', 'flow', 'errors'].forEach(key => {
     get(key).onchange = () => refresh(['mapping', 'phase', 'physical', 'loss', 'am'].includes(key) ||
       (key === 'lane' && get('am').checked));

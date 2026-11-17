@@ -858,7 +858,9 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <button class="btn" type="button" id="g800-camera">全景</button>
       <label>速度 <select id="g800-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
       <label>Flow <select id="g800-flow"><option value="-1">全部</option><option value="0">Flow 0</option><option value="1">Flow 1</option></select></label>
-      <label>追踪 <select id="g800-lane"><option value="-1">所有 PCS lane</option></select></label>
+      <label>高亮 <select id="g800-lane"><option value="-1">所有 PCS lane</option></select></label>
+      <label>追踪 MAC 块 <input id="g800-follow-block" type="number" min="0" step="1" value="0" inputmode="numeric" aria-label="MAC 66b 块编号"></label>
+      <button class="btn" type="button" id="g800-follow-start" aria-pressed="false">追踪动画</button>
     </div>
     <p class="fine">800 Gb/s MAC · 32 × 26.5625 Gb/s PCS lane · 8 × 106.25 Gb/s PAM4（53.125 GBd）</p>
     <div class="g800-stage" id="g800-scene" aria-label="800GBASE-R TX 到 RX 三维动画">
@@ -868,10 +870,16 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         <span><i class="lg-ring"></i>AM 锁定</span>
         <span><i class="lg-sheath"></i>PAM4 物理通道</span>
         <span><i class="lg-bad"></i>错误 / 失锁</span>
+        <span><i class="lg-follow"></i>追踪的 MAC 块</span>
         <span class="g800-lg-flow0"><i></i>Flow 0 · PCS 0–15</span>
         <span class="g800-lg-flow1"><i></i>Flow 1 · PCS 16–31</span>
       </div>
-      <span class="g800-help" id="g800-help">拖动旋转 · 滚轮缩放 · 点击模块或数据块查看详情</span>
+      <div class="follow-bar g800-follow-bar" id="g800-follow-bar" hidden>
+        <span>正在追踪 <b id="g800-follow-label"></b></span>
+        <span id="g800-follow-where"></span>
+        <button type="button" class="btn" id="g800-follow-stop">停止追踪</button>
+      </div>
+      <span class="g800-help" id="g800-help">拖动旋转 · 滚轮缩放 · 点击 TX 数据块或输入块号追踪 MAC 块 · 点击模块查看详情</span>
     </div>
     <nav class="g800-stages" id="g800-stages" aria-label="800G 处理阶段"></nav>
     <div class="g800-detail" aria-live="polite">
