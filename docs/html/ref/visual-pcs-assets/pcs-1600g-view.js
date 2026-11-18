@@ -23,9 +23,6 @@
     ['257b 合流', '175.2.5.7', '先收集 Flow 0 的首块，再取 Flow 1 的首块，随后交替收集。'],
     ['逆转码 · 解码', '175.2.5.8–10', '合流后进行 257b 逆转码、64B/66B 解码和 RX 速率匹配，恢复 1.6TMII 传输。']
   ];
-  const short = ['1.6TMII', '64B/66B', '257b 转码', '分流', '加扰/AM', 'RS-FEC',
-    '16 PCS lane', '16:8 PMA', '8×PAM4', 'RX 解复用', '锁定/Deskew',
-    'RS 解码', '解扰', '合流', '解码'];
   const STEP = steps.length - 1;
   const SPACING = 12;
   const x = steps.map((_, i) => (i - STEP / 2) * SPACING);
@@ -42,6 +39,7 @@
   let cameraTouched = false, zoomAnchor = null, zoomAnchorAt = 0;
   let webglFailed = false;
   let decoded = [null, null];
+  let locks;
   const MAX_INST = 2600, STEP_T = 1 / 72, STREAM = 72;
 
   // ------------------------------------------------------------------ data
@@ -71,7 +69,41 @@
   function decode() {
     const lane = Math.max(0, Number(get('lane').value));
     const errorCount = Number(get('errors').value);
-    const received = range(16).map(i => laneSymbols[i].slice());
+    const physical = range(8).map(channel => range(34).flatMap(row =>
+      quartet(2 * channel, row).concat(quartet(2 * channel + 1, row))));
+    const lost = get('loss').checked ? Math.floor(lane / 2) : -1;
+    const skew = Number(get('skew').value);
+    const phase = Number(get('phase').value);
+    const slots = [];
+    let symbolLocks = 0;
+    physical.forEach((symbols, channel) => {
+      if (channel === lost) return;
+      const offset = channel === Math.floor(lane / 2) ? phase : 0;
+      const input = symbols.slice(offset).concat(symbols.slice(0, offset));
+      const expected = symbols.slice(0, 8);
+      const boundary = input.findIndex((_, i) => expected.every((value, j) =>
+        value === input[(i + j) % input.length]));
+      if (boundary < 0) return;
+      symbolLocks++;
+      const aligned = input.slice(boundary).concat(input.slice(0, boundary));
+      for (const side of [0, 1]) {
+        const id = 2 * channel + side;
+        slots[rxSlot(id)] = range(34).flatMap(row =>
+          aligned.slice(8 * row + 4 * side, 8 * row + 4 * side + 4));
+      }
+    });
+    const received = [];
+    slots.forEach(symbols => {
+      const id = range(16).find(i => quartet(i, 0).every((symbol, j) => symbol === symbols[j]));
+      if (id !== undefined) received[id] = symbols;
+    });
+    const amCount = received.filter(Boolean).length;
+    locks = { physical: symbolLocks, amCount, skew, aligned: amCount === 16 && skew <= 152,
+      lanes: range(16).map(i => Boolean(received[i])) };
+    if (!locks.aligned) {
+      decoded = [null, null];
+      return;
+    }
     for (let i = 0; i < errorCount; i++) received[lane][4 * i] ^= i + 1;
     const words = range(4).map(word => {
       const message = range(544).map(i => received[i % 16][4 * Math.floor(i / 16) + word]);
@@ -91,7 +123,7 @@
     return laneSymbols[lane].slice(4 * row, 4 * row + 4);
   }
   function hex(n, width) { return n.toString(16).toUpperCase().padStart(width || 3, '0'); }
-  function laneFlow(lane) { return lane < 8 ? 0 : 1; }
+  let selectedFlow = 0;
   function laneY(lane) { return (7.5 - lane) * 1.35; }
   function pmaY(s) { return (3.5 - s) * 2.8; }
   function rxSlot(lane) { return (lane * 5 + 3) % 16; }
@@ -219,8 +251,8 @@
     draw();
   }
 
-  function addModule(index, y, height, title, color, flow) {
-    const width = 8.4;
+  function addModule(index, y, height, title, color, flow, offset = 0, narrow = false) {
+    const width = narrow ? 3.6 : 8.4;
     const geometry = new T.BoxGeometry(width, height, 5.2);
     const material = SHADES.map(shade =>
       new T.MeshLambertMaterial({
@@ -229,12 +261,12 @@
         opacity: 0.9
       }));
     const box = new T.Mesh(geometry, material);
-    box.position.set(x[index], y, -4.2);
+    box.position.set(x[index] + offset, y, -4.2);
     box.add(new T.LineSegments(new T.EdgesGeometry(geometry),
       new T.LineBasicMaterial({ color: moduleColors().edge })));
-    box.userData = { stage: index, flow: flow == null ? -1 : flow };
+    box.userData = { stage: index, flow: flow == null ? -1 : flow, title };
     scene.add(box);
-    modules.push({ box, index, flow: flow == null ? -1 : flow });
+    modules.push({ box, index, title, flow: flow == null ? -1 : flow });
     moduleMeshes.push(box);
   }
   function buildModules() {
@@ -254,7 +286,20 @@
     ];
     layout.forEach(([index, y, height, title, flow]) => {
       const color = flow === 0 ? colors.flow0 : flow === 1 ? colors.flow1 : colors.neutral;
-      addModule(index, y, height, title, color, flow);
+      const parts = {
+        1: ['64B/66B', 'TX 速率匹配'],
+        4: ['加扰', 'AM 映射/插入'],
+        5: ['FEC 前分配', 'RS 编码'],
+        7: ['TX AM 锁定', '40 位对齐', '四元组复用'],
+        8: ['PAM4 编码', 'PAM4 解码'],
+        9: ['四元组锁定', '1:2 解复用', 'PCSL AM 锁定'],
+        10: ['PCS AM/Deskew', '按 UM 重排'],
+        11: ['去交织/RS 解码', 'FEC 后交织'],
+        12: ['AM 移除', '解扰'],
+        14: ['逆转码', '64B/66B 解码', 'RX 速率匹配']
+      }[index] || [title];
+      parts.forEach((part, i) => addModule(index, y, height, part, color, flow,
+        (i - (parts.length - 1) / 2) * 4, parts.length > 1));
     });
   }
 
@@ -275,14 +320,12 @@
     return pts;
   }
   function lanePoint(lane, index) {
-    const flow = laneFlow(lane);
     const y = [0, 0, 0, 0, 0, 0, laneY(lane), pmaY(Math.floor(lane / 2)),
-      pmaY(Math.floor(lane / 2)), rxY(lane), laneY(lane), flowY(flow), flowY(flow), 0, 0][index];
+      pmaY(Math.floor(lane / 2)), rxY(lane), laneY(lane), 0, 0, 0, 0][index];
     let z = 0;
     if (index === 6 || index === 10) z = (lane % 4 - 1.5) * 0.32;
     else if (index === 7 || index === 8) z = (lane % 2 - 0.5) * 0.55;
     else if (index === 9) z = (rxSlot(lane) % 4 - 1.5) * 0.36;
-    else if (index === 11 || index === 12) z = flow ? 0.1 : -0.1;
     return new T.Vector3(x[index], y, z);
   }
   function buildLink() {
@@ -408,16 +451,14 @@
     const top = BAND + 9;
 
     modules.forEach(module => {
-      const { index, flow } = module;
+      const { index, flow, title } = module;
       const y = module.box.position.y;
       const height = module.box.geometry.parameters.height;
-      const title = [4, 5, 11, 12].includes(index)
-        ? (flow === 0 ? 'F0 ' : 'F1 ') + short[index] : short[index];
-      const labelY = index === 14 ? y + height / 2 + 7
-        : index % 2 ? y - height / 2 - 0.95 : y + height / 2 + 0.95;
-      add('box' + index + flow, '<span data-stage="' + index + '">' + title + '</span>',
-        'lbl-box op', [x[index], labelY, 0], 3,
-        index === 0 ? 'l' : index === 14 ? 'r' : 'c');
+      const px = module.box.position.x;
+      const labelY = y + (px < x[index] || (px === x[index] && index % 2) ? -1 : 1) * (height / 2 + 1);
+      add('box' + index + ':' + flow + ':' + px, '<span data-stage="' + index + '">' +
+        (flow < 0 ? '' : 'F' + flow + ' ') + title + '</span>',
+        'lbl-box op', [px, labelY, 0], 3);
     });
     steps.forEach((_, index) => {
       add('stage' + index, '<b>' + (index + 1) + '</b>',
@@ -431,14 +472,14 @@
     const lane = sel < 0 ? 0 : sel;
     const quartetText = quartet(lane, 0).map((n, i) => 'ABCD'[i] + '=' + hex(n)).join(' ');
     if (sel >= 0) {
-      add('lane-in', 'PCS lane ' + lane, 'lbl-lane f' + laneFlow(lane),
+      add('lane-in', 'PCS lane ' + lane, 'lbl-lane',
         [x[6] - 4.2, laneY(lane), 0], 8, 'r');
       add('lane-q', quartetText, 'lbl-callout',
         [x[8] + 1.2, pmaY(Math.floor(lane / 2)) - 1.4, 0], 9);
       add('lane-rx', 'RX PMA ' + rxSlot(lane) + ' → PCS ' + lane, 'lbl-callout',
         [x[9] + 1.2, rxY(lane) - 0.9, 0], 9);
     }
-    add('align', 'align_status true · AM 锁定 16/16 · Skew 0 / 152 ns',
+    add('align', lockText(),
       'lbl-status ok',
       [x[10], -BAND - 7, 0], 7);
     add('quartet-note', '40 位符号四元组：每条输出 lane 交替接收两条 PCS lane 的四元组',
@@ -554,7 +595,7 @@
         const bad = Number(get('errors').value) > 15 && lane === selected && t > stageT(10);
         if (bad) c = new T.Color(theme.bad);
         pushCube(pos, am ? 2.0 : 1.4, am ? 0.9 : 0.42, am ? 0.82 : 0.48,
-          c, { seg: 'lane', lane, flow: laneFlow(lane), n: symbol, t });
+          c, { seg: 'lane', lane, flow: -1, n: symbol, t });
       }
     }
   }
@@ -606,7 +647,7 @@
     rings.forEach((ring, lane) => {
       ring.material.color.set(theme.good);
       ring.scale.setScalar(selected < 0 || selected === lane ? 1 : 0.75);
-      ring.visible = stage >= 10;
+      ring.visible = stage >= 10 && locks.lanes[lane];
     });
     sheaths.forEach((sheath, s) => {
       sheath.material.opacity = selected >= 0 && Math.floor(selected / 2) === s ? 0.18 : 0.085;
@@ -725,26 +766,33 @@
   function viewLane(lane, index) {
     const q = quartet(lane, 0);
     const bits = q.flatMap(n => range(10).map(k => (n >> k) & 1));
-    const flow = laneFlow(lane);
     return '<div class="g800-inspect-summary"><span><b>PCS lane</b> ' + lane +
       '</span><span><b>Flow</b> ' + flow + '</span>' +
       '<span><b>PMA lane</b> ' + Math.floor(lane / 2) + '</span>' +
       '<span><b>RX PMA lane</b> ' + rxSlot(lane) + '</span>' +
-      '<span><b>AM 锁定</b> ✓ 16/16</span></div>' +
+      '<span>' + lockText() + '</span></div>' +
       '<div class="g800-inspect-section"><h4>40 位符号四元组（4 × 10 位）</h4>' +
       '<div class="g800-sym-row">' + q.map((n, i) =>
         '<span class="g800-sym">' + 'ABCD'[i] + '=0x' + hex(n) + '</span>').join('') + '</div>' +
       '<div class="g800-bitrow">' + bitRowFromBits(bits, -1, 0, false) + '</div></div>' +
+      (index === 8 ? '<p>首个位对 ' + bits.slice(0, 2).join('') + ' → Gray 电平 ' +
+        [0, 1, 3, 2][2 * bits[0] + bits[1]] + ' → 接收位对 ' +
+        (locks.physical === 8 || !get('loss').checked ? bits.slice(0, 2).join('') : '按 lane 锁定状态判定') + '。</p>' : '') +
       '<div class="g800-inspect-section"><h4>16:8 SM-PMA</h4>' +
       '<p class="g800-inspect-note">PCS lane ' + (2 * Math.floor(lane / 2)) + ' 与 ' +
       (2 * Math.floor(lane / 2) + 1) + ' 的四元组交替送到 PMA lane ' + Math.floor(lane / 2) +
       '；输出 212.5 Gb/s（106.25 GBd）PAM4。</p></div>' +
       (index >= 9 ? '<div class="g800-inspect-section"><h4>AM 锁定 / Deskew</h4>' +
         '<p class="g800-inspect-note">RX PMA lane ' + rxSlot(lane) + ' → PCS lane ' + lane +
-        '；16 条 lane 全部锁定后按 ID 重排；PCS 最大 Skew 152 ns。</p></div>' : '');
+        '；' + lockText() + '。</p></div>' : '');
   }
   function viewBytes(flow, block, pos) {
-    const bytes = flowBytes(flow, block).slice(pos * 8, pos * 8 + 8);
+    const merged = decoded.every(Boolean) && range(36).flatMap(i =>
+      [receivedBlock(0, i), receivedBlock(1, i)]);
+    if (!merged) return '<p>RX 1.6TMII 示例输出不可用。</p>';
+    const bits = merged[2 * block + flow];
+    const bytes = range(8).map(i => range(8).reduce((byte, bit) =>
+      byte | (bits[1 + pos * 64 + 8 * i + bit] << bit), 0));
     const base = (block * 2 + flow) * 32 + pos * 8;
     return '<div class="g800-inspect-summary"><span><b>1.6TMII 交付</b> 8 字节</span>' +
       '<span><b>字节</b> #' + base + '–#' + (base + 7) + '</span></div>' +
@@ -762,7 +810,7 @@
     if (index === 9 || index === 10) return 'rx';
     return 'bytes';
   }
-  function showPopup(index, flow, lane) {
+  function showPopup(index, flow, lane, title) {
     flow = flow === 1 ? 1 : 0;
     lane = Math.max(0, Math.min(15, Number(lane) || 0));
     const kind = stageKind(index);
@@ -770,20 +818,50 @@
       b66: '66b 块', b257: '257b 块', am: 'AM 组', fec: 'A/B/C/D 码字',
       lane: 'PCS lane 四元组', pma: 'PMA 四元组', rx: 'RX lane / Deskew', bytes: '8 字节'
     }[kind] || '';
-    get('popup-title').textContent = steps[index][0] + ' · ' + label;
+    get('popup-title').textContent = (title || steps[index][0]) + ' · ' + label;
     get('popup-note').textContent = steps[index][1] + ' · ' + steps[index][2];
     let body = '';
     if (kind === 'b66') body = view66(flow, 0, 0);
-    else if (kind === 'b257') body = view257(flow, 0, steps[index][2]);
+    else if (kind === 'b257' && index >= 12) {
+      const streams = index === 13 ? [receivedBlock(0, 0), receivedBlock(1, 0)] : [receivedBlock(flow, 0)];
+      body = streams.every(Boolean) ? streams.map((bits, i) =>
+        '<p>Flow ' + (index === 13 ? i : flow) + ' · 首个恢复的 257b 块</p><div class="g800-bitrow">' +
+        bitRowFromBits(bits, -1, 0, false) + '</div>').join('') : '<p>接收输出不可用。</p>';
+    } else if (kind === 'b257') body = view257(flow, 0, steps[index][2]);
     else if (kind === 'am') body = viewAM(flow, 0);
     else if (kind === 'fec') body = viewFEC(flow, 0);
     else if (kind === 'bytes') body = viewBytes(flow, 0, 0);
     else body = viewLane(lane, index);
+    if (title === 'TX 速率匹配' || title === 'RX 速率匹配') {
+      body = title === 'TX 速率匹配'
+        ? '<p>补偿 AM 插入可按规则删除 Idle 控制字符或序列有序集。时钟域补偿还允许插入 Idle。</p><p>示意　数据 A · Idle · 数据 B → 数据 A · 数据 B</p>'
+        : '<p>补偿 AM 移除可插入 Idle。时钟域补偿另按 119.2.3.5 和 119.2.3.8 的插删规则处理。</p><p>示意　数据 A · 数据 B → 数据 A · Idle · 数据 B</p>' + body;
+    }
+    const moduleNotes = {
+      'TX AM 锁定': '176.4.2.2 · 教学输入已提供合成 AM 边界。',
+      '40 位对齐': '176.4.2.3.3 · 各 PCS lane 对齐到相对于 AM 起点的 40 位边界。',
+      '四元组锁定': '176.4.3.2.2 · 用合成 AM 样本搜寻起點。可改变选中物理 lane 的起始符号偏移，再观察锁定结果。',
+      'PCSL AM 锁定': '176.4.3.2.3 · 在解复用得到的 PCS lane 上识别合成 AM。',
+      '按 UM 重排': '175.2.5.2 · PCS 按 AM 的 UM 识别 lane 号。教学模型按收到的合成标记识别并恢复顺序。',
+      'FEC 前分配': '175.2.4.7 · 每流把 10 位符号依次交替送入两条消息。',
+      'FEC 后交织': '175.2.5.4 · 每流依次交替取纠错后的两条消息各一个 10 位符号。',
+      'AM 移除': '175.2.5.5 · 从纠错并后交织的数据移除开头 1,028 位 AM，余下位进入解扰。'
+    };
+    if (moduleNotes[title]) body = '<p>' + moduleNotes[title] + '</p>' + body;
     get('popup-data').innerHTML = body;
     if (!get('popup').open) get('popup').showModal();
   }
 
   // -------------------------------------------------------------- stage/detail
+  function lockText() {
+    return 'TX PMA AM 16/16 · RX PMA 四元组锁定 ' + locks.physical + '/8 · PCSL AM ' + locks.amCount +
+      '/16 · PCS align_status ' + locks.aligned + ' · ' + locks.skew + ' ns';
+  }
+
+  function receivedBlock(flow, block) {
+    return decoded[flow]?.slice(block * 257, (block + 1) * 257);
+  }
+
   function stageData(index, flow) {
     const lane = Math.max(0, Number(get('lane').value));
     const q = quartet(lane, 0).map((n, i) => 'ABCD'[i] + '=' + hex(n)).join(' ');
@@ -799,7 +877,8 @@
     if (index === 5 || index === 11) return 'Flow ' + flow + ' 的 ' + (flow ? 'C/D' : 'A/B') +
       ' 码字：514 数据符号 + 30 校验符号；' +
       (decoded[flow] ? '当前 FEC 正常/已纠正。' : '当前码字不可纠正。');
-    if (index >= 6 && index <= 10) return 'PCS lane ' + lane + ' 的四元组 [' + q +
+    if (index >= 9 && index <= 10) return lockText();
+    if (index >= 6 && index <= 8) return 'PCS lane ' + lane + ' 的四元组 [' + q +
       ']；PMA lane ' + pma + '，RX PMA lane ' + rxSlot(lane) + '；每输出 lane 212.5 Gb/s（106.25 GBd）PAM4。';
     if (index === 12) return 'Flow ' + flow + ' 解扰后恢复 257b 块；' +
       (decoded[flow] ? '首块前 33 位 ' + decoded[flow].slice(0, 33).join('') : '输出不可用。');
@@ -812,7 +891,7 @@
     const [name, clause, note] = steps[stage];
     get('title').textContent = (stage + 1) + ' · ' + name + ' · ' + clause;
     get('note').textContent = note;
-    get('data').textContent = stageData(stage, laneFlow(Number(get('lane').value)));
+    get('data').textContent = stageData(stage, selectedFlow);
     get('count').textContent = (stage + 1) + ' / ' + steps.length;
     get('progress').value = stage;
     stepButtons.forEach((button, i) => button.setAttribute('aria-current', i === stage ? 'step' : 'false'));
@@ -820,7 +899,7 @@
       buildLabels();
       draw();
     }
-    if (get('popup').open) showPopup(stage, laneFlow(Number(get('lane').value)), Number(get('lane').value));
+    if (get('popup').open) showPopup(stage, selectedFlow, Number(get('lane').value));
   }
 
   // ----------------------------------------------------------------- controls
@@ -879,13 +958,25 @@
     pause();
     get('lane').value = -1;
     get('errors').value = '0';
+    get('skew').value = '0';
+    get('phase').value = '0';
+    get('loss').checked = false;
+    selectedFlow = 0;
     decode();
     select(0);
     resetCamera();
   };
-  get('errors').onchange = get('lane').onchange = () => {
+  get('loss').onchange = get('phase').onchange = get('skew').onchange =
+    get('errors').onchange = get('lane').onchange = () => {
     decode();
     select(stage);
+  };
+  get('test-pattern').onclick = () => {
+    pause();
+    get('popup-title').textContent = 'Scrambled Idle 测试模式';
+    get('popup-note').textContent = '175.2.4.11 · tx_test_mode = 1 时，PCS 输出等同于 1.6TMII 持续输入 Idle 控制字符时的结果。';
+    get('popup-data').textContent = '全 Idle 控制字符 → 64B/66B 控制块 → 257b 转码 → 双 Flow 加扰 → AM 和 RS-FEC → PCS lane。此入口展示测试路径。';
+    get('popup').showModal();
   };
   document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
 
@@ -983,12 +1074,12 @@
         const module = ray.intersectObjects(moduleMeshes, false)[0];
         if (module) {
           const info = module.object.userData;
-          if (info.flow >= 0) get('lane').value = info.flow * 8;
+          if (info.flow >= 0) selectedFlow = info.flow;
           decode();
           pause();
           select(info.stage);
-          showPopup(info.stage, info.flow >= 0 ? info.flow : laneFlow(Number(get('lane').value)),
-            Number(get('lane').value));
+          showPopup(info.stage, info.flow >= 0 ? info.flow : selectedFlow,
+            Number(get('lane').value), info.title);
         }
       });
       const observer = new MutationObserver(() => {

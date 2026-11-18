@@ -960,6 +960,10 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <button class="btn" id="g1600-reset" type="button">重置</button>
       <label>PCS lane <select id="g1600-lane"></select></label>
       <label>码字 A 错误符号 <select id="g1600-errors"><option>0</option><option>1</option><option>15</option><option>16</option></select></label>
+      <label>选中通道偏差 <select id="g1600-skew"><option value="0">0 ns</option><option value="152">152 ns</option><option value="153">153 ns</option></select></label>
+      <label><input id="g1600-loss" type="checkbox">选中物理 lane 失锁</label>
+      <label>选中物理 lane 起始符号偏移 <select id="g1600-phase"><option>0</option><option>1</option><option>2</option><option>3</option></select></label>
+      <button class="btn" id="g1600-test-pattern" type="button">Scrambled Idle</button>
     </div>
     <div class="g800-stage g1600-scene" id="g1600-scene" aria-label="1.6TBASE-R 收发三维通道"></div>
     <p class="fine">上排为 Flow 0（A/B），下排为 Flow 1（C/D）。通道段显示 16 条 106.25 Gb/s PCS lane 与 8 条 212.5 Gb/s（106.25 GBd）PAM4 lane。拖动平移，右键拖动旋转，滚轮朝光标缩放；点击模块或数据块查看对应阶段的数据格式。</p>
