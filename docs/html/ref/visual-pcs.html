@@ -962,14 +962,14 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <label>码字 A 错误符号 <select id="g1600-errors"><option>0</option><option>1</option><option>15</option><option>16</option></select></label>
     </div>
     <div class="g800-stage g1600-scene" id="g1600-scene" aria-label="1.6TBASE-R 收发三维通道"></div>
-    <p class="fine">上排为 Flow 0（A/B），下排为 Flow 1（C/D）。通道段显示 16 条 PCS lane 与 8 条 PAM4 lane。拖动旋转，滚轮缩放，点击立体模块查看数据。</p>
+    <p class="fine">上排为 Flow 0（A/B），下排为 Flow 1（C/D）。通道段显示 16 条 106.25 Gb/s PCS lane 与 8 条 212.5 Gb/s（106.25 GBd）PAM4 lane。拖动平移，右键拖动旋转，滚轮朝光标缩放；点击模块或数据块查看对应阶段的数据格式。</p>
     <h3 class="rail-title" id="g1600-pipeline">链路处理阶段</h3>
     <nav class="g800-stages" id="g1600-stages" aria-labelledby="g1600-pipeline"></nav>
     <div class="g800-stage-progress"><progress id="g1600-progress" aria-label="1.6T 链路阶段进度"></progress><span id="g1600-count"></span></div>
     <div class="g800-detail" aria-live="polite"><strong id="g1600-title"></strong><p id="g1600-note"></p><p id="g1600-data"></p></div>
     <dialog class="g800-popup" id="g1600-popup" aria-labelledby="g1600-popup-title">
       <form method="dialog"><button class="btn" aria-label="关闭">关闭</button></form>
-      <h3 id="g1600-popup-title"></h3><p id="g1600-popup-note"></p><p id="g1600-popup-data"></p>
+      <h3 id="g1600-popup-title"></h3><p id="g1600-popup-note"></p><div id="g1600-popup-data" class="g800-inspect-body"></div>
     </dialog>
     <p class="fine">依据 IEEE P802.3dj/D2.0（未批准草案）第 175 条和第 176 条。示例采用 16:8 SM-PMA，按 40 位符号四元组复用。外层 RS-FEC 示例使用合成 AM，CDR、锁定和波形按教学方式示意。</p>
   </section>

@@ -16,6 +16,9 @@
 .g800-follow-bar #g800-follow-where { font-family: var(--f-mono); font-size: .72rem; color: var(--muted); }
 .g800-follow-tags { z-index: 4; }
 .g800-follow-tags .ftag { --lc: var(--am); }
+.g800-stage .lbl-flow.f0 { --lc: #268ec7; }
+.g800-stage .lbl-flow.f1 { --lc: #d97139; }
+.g800-legend .lg-quartet { width: 16px; height: 10px; background: linear-gradient(90deg, #2f9fd8 0 25%, #8ac9e8 0 50%, #d97139 0 75%, #f0b07a 0); border-radius: 2px; }
 @media (max-width: 760px) {
   .g800-follow-bar { bottom: 46px; }
   .g800-follow-bar #g800-follow-where { display: none; }
