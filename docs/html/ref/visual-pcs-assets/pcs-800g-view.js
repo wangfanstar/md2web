@@ -29,14 +29,23 @@
   ];
   // Box names shown in the scene. The flow stages are duplicated for Flow 0/1.
   const modules = [
+    [1, 15, 5, 'Scrambled Idle', -1, 0, 'idle'],
     [0, 0, 8, 'TX MAC'], [1, 0, 8, '64B/66B', -1, -0.25, 'encode'],
     [1, 0, 8, 'TX 速率匹配', -1, 0.25, 'txRate'], [2, 0, 24, '66b 分流'],
     [7, 0, 27, '32:8 PMA'], [8, 0, 27, '8× PAM4'],
     [7, 0, 27, 'PAM4 预编码（条件）', -1, 0.5, 'precode'],
+    [8, 0, 27, '信号驱动（电接口）', -1, -0.39, 'driver'],
+    [9, 15, 5, '逆预编码（条件）', -1, 0, 'inverse'],
+    [9, 20, 5, 'PMA SIGNAL_OK', -1, 0, 'signal'],
+    [7, 26, 5, 'PMA 图样发生', -1, 0, 'patternTx'],
+    [9, 26, 5, 'PMA 图样检测', -1, 0, 'patternRx'],
+    [8, -24, 5, '本地环回', -1, 0, 'localLoop'],
+    [8, -31, 5, '远端环回', -1, 0, 'remoteLoop'],
     [9, 0, 27, 'CDR', -1, -0.33, 'cdr'],
     [9, 0, 27, 'Gray 解映射', -1, 0, 'gray'],
     [9, 0, 27, 'RX 解复用', -1, 0.33, 'demux'],
     [10, 0, 27, 'AM / Deskew'],
+    [10, 0, 27, '按 UM 重排', -1, 0.43, 'reorder'],
     [14, 0, 8, '66b 合流'], [15, 0, 8, '64B/66B 解码', -1, -0.25, 'decode'],
     [15, 0, 8, 'RX 速率匹配', -1, 0.25, 'rxRate'], [16, 0, 8, 'RX MAC']
   ];
@@ -48,9 +57,10 @@
       [5, y, 10, 'FEC 前分配', flow, 0, 'fecSplit'],
       [5, y, 10, 'RS 编码', flow, 0.33, 'rsEncode'],
       [6, y, 10, '16 lane', flow],
-      [11, y, 10, '去交织 / RS 解码', flow, -0.33, 'rsDecode'],
-      [11, y, 10, 'FEC 后交织', flow, 0, 'fecJoin'],
-      [11, y, 10, 'AM 移除', flow, 0.33, 'amRemove'],
+      [11, y, 10, '去交织', flow, -0.38, 'deinterleave'],
+      [11, y, 10, 'RS 解码', flow, -0.13, 'rsDecode'],
+      [11, y, 10, 'FEC 后交织', flow, 0.13, 'fecJoin'],
+      [11, y, 10, 'AM 移除', flow, 0.38, 'amRemove'],
       [12, y, 10, '解扰', flow], [13, y, 10, '逆转码', flow]
     );
   }
@@ -62,6 +72,7 @@
   const original = M.range(8);
   const flows = M.distribute(original);
   let stage = 14, progress = 0, recovery = 2;
+  let idleMode = false;
   let active = false, playing = false, pending = 0, last = 0;
   let renderer, scene, camera, controls, resize;
   let cameraTouched = false;
@@ -790,7 +801,7 @@
   }
 
   function addModule(index, y, height, title, color, flow = -1, offset = 0, operation) {
-    const width = operation ? 4.4 : 7.6;
+    const width = index === 11 ? 3.6 : operation ? 4.4 : 7.6;
     const geometry = new T.BoxGeometry(width, height, 5.4);
     const material = SHADES.map(shade =>
       new T.MeshLambertMaterial({
@@ -823,6 +834,15 @@
     modules.forEach(([index, y, height, title, f, offset, operation]) => {
       if (f == null || f === -1) addModule(index, y, height, title, colors.neutral, -1, offset, operation);
     });
+    const color = 0x8d72c9;
+    for (const [y, from, to] of [[26, 7, 9], [-24, 7, 9], [-31, 9, 7]]) {
+      const points = [[x[from], 0], [x[from], y], [x[to], y], [x[to], 0]]
+        .map(([px, py]) => new T.Vector3(px, py, -7));
+      scene.add(new T.Line(new T.BufferGeometry().setFromPoints(points), new T.LineBasicMaterial({ color })));
+      const direction = Math.sign(to - from);
+      scene.add(new T.ArrowHelper(new T.Vector3(direction, 0, 0),
+        new T.Vector3(x[to] - direction * 8, y, -6.8), 6, color, 2, 1.2));
+    }
   }
 
   function addGround() {
@@ -1291,7 +1311,7 @@
         ? y + height / 2 + 12.5
         : index % 2 ? y - height / 2 - 0.95 : y + height / 2 + 0.95;
       const labelX = index === 0 ? x[index] + 6 : index === 16 ? x[index] - 12 : x[index];
-      add('box' + index + ':' + flow + ':' + offset, '<span data-stage="' + index + '" data-operation="' + (operation || '') + '" data-flow="' + (flow ?? -1) + '">' +
+      add('box' + index + ':' + flow + ':' + offset + ':' + y, '<span data-stage="' + index + '" data-operation="' + (operation || '') + '" data-flow="' + (flow ?? -1) + '">' +
         (flow >= 0 ? 'F' + flow + ' ' : '') + title + '</span>',
       'lbl-box op', [labelX + offset * pitch, labelY + Math.sign(offset) * 2.8, 0], 3,
       index === 0 ? 'l' : index === 16 ? 'r' : 'c');
@@ -1516,7 +1536,7 @@
     const lock = state.aligned ? '已对齐' : '未对齐';
     const fec = fecResults.map((result, i) => 'F' + i + ' ' + (!state.aligned ? '等待对齐' :
       result.corrected ? '纠正 ' + result.errors + ' 个符号' : result.valid ? '正常' : '不可纠正'));
-    get('diagnostics').textContent = lock + ' · AM 锁定 ' + n + '/32 · Skew ' + fault.skew +
+    get('diagnostics').textContent = 'PMA SIGNAL_OK ' + signalStatus().ok + ' · ' + lock + ' · AM 锁定 ' + n + '/32 · Skew ' + fault.skew +
       ' / ' + M.deskewLimit + ' ns · ' + fec.join(' · ');
     get('rows').replaceChildren(...tx.map((row, i) => {
       const tr = document.createElement('tr');
@@ -1529,6 +1549,24 @@
     }));
   }
 
+  function signalStatus() {
+    const inputs = fault.loss ? 7 : 8;
+    const outputs = rx.filter((lane, slot) => lane !== undefined &&
+      (!fault.loss || Math.floor(slot / 4) !== fault.physical)).length;
+    const pmdOk = !get('pmd-fail').checked;
+    return { inputs, outputs, pmdOk, ok: inputs === 8 && outputs === 32 && pmdOk ? 'OK' : 'FAIL' };
+  }
+
+  function pmaTestSample() {
+    let register = 0x7fffffff;
+    return M.range(48).map(() => {
+      const bit = register >>> 30;
+      const feedback = ((register >>> 30) ^ (register >>> 27)) & 1;
+      register = ((register << 1) | feedback) & 0x7fffffff;
+      return bit;
+    }).join('');
+  }
+
   function payload() {
     return get('payload').value.replace(/[^\x20-\x7E]/g, '?') ||
       'Visual PCS 800G: one character = one byte; eight bytes = one 66-bit block; four blocks per flow = one 257b block. ';
@@ -1538,6 +1576,10 @@
     const detail = get('data');
     detail.hidden = ![0, 1, 3, 4, 12, 13, 15, 16].includes(stage);
     if (detail.hidden) return;
+    if (idleMode) {
+      get('bits').textContent = 'Scrambled Idle 模式 · 请在 PCS lane 模块查看测试符号。';
+      return;
+    }
     const sample = M.sample(flow, payload(), stage >= ST.fec ? fecResults[flow].data : undefined);
     const bits = value => value.join('').match(/.{1,64}/g).join('\n');
     const hex = blocks => blocks.map(block => block.map(byte =>
@@ -1604,8 +1646,29 @@
     const result = fecResults[flow];
     const pair = M.pam4Pair(words, tx, lanes[lane], 0, 0, Math.floor(tx[lanes[lane]].indexOf(lane) / 2));
     const symbols = word => word.slice(0, 4).map(v => v.toString(16).padStart(3, '0')).join(' ');
-    const boundary = bits => bits.slice(M.markerOffset - 8, M.markerOffset + 8).join('');
+    const boundary = bits => bits.slice(0, 16).join('');
     switch (operation) {
+      case 'idle': return '172.2.4.11 · 800GMII 持续输入 Idle 控制字符。用上方按钮切换，教学转码样本会重新经过加扰、AM、RS-FEC 及 lane 分发。当前 ' +
+        (idleMode ? '测试模式' : '业务模式') + ' · 当前物理 lane 的第 14 行首个位对 ' +
+        M.pam4Pair(words, tx, lanes[lane], 14, 0, Math.floor(tx[lanes[lane]].indexOf(lane) / 2)).bits
+          .join('') + '。';
+      case 'driver': return '173.5.6 · 实例化电接口时由驱动器输出电信号。800GAUI-8 C2C 与 C2M 的电气、抖动及时序分别见附录 120F、120G。';
+      case 'inverse': return '173.5.7.2 · 适用接收 lane 的逆预编码可选。以前一接收电平为 1，本例编码电平 ' +
+        ((pair.level + 3) % 4) + ' 加 1 取模 4 得 ' + pair.level + '。主通路旁路。';
+      case 'signal': {
+        const { inputs, outputs, pmdOk, ok } = signalStatus();
+        return '173.5.8.1 · 输入 ' + inputs + '/8，输出 ' + outputs + '/32，下层 PMD 指示 ' +
+          (pmdOk ? 'OK' : 'FAIL') + '。PMA SIGNAL_OK = ' + ok + '，PCS align_status = ' + state.aligned + '。';
+      }
+      case 'reorder': return 'RX 时隙 ' + rx.indexOf(lane) + ' → 教学 AM 中的 UM → PCS lane ' + lane +
+        '。PCS 按 lane 编号排序，再分派到两个 Flow。';
+      case 'deinterleave': return '每个 Flow 的 16 条 PCS lane 按符号序列重建 A/B 两个码字，再送入 RS 解码。';
+      case 'localLoop': return '173.5.9 · 可选本地环回，MAC 侧 TX → PMA → MAC 侧 RX。正常 TX 同时继续发送。';
+      case 'remoteLoop': return '173.5.10 · 可选远端环回，介质侧 RX → PMA → 介质侧 TX。正常 RX 同时继续交付。';
+      case 'patternTx': return '173.5.11 · 可选。实例化接口的 PRBS31 教学样本前 48 位为 ' + pmaTestSample() + '。';
+      case 'patternRx': return fault.loss
+        ? '173.5.11 · 可选。物理输入丢失，检测器等待测试图样。'
+        : '173.5.11 · 可选。已同步示例中检测到 ' + pmaTestSample() + '，与参考样本逐位一致。';
       case 'txRate': return '为补偿 AM 插入，TX PCS 可删除 Idle 控制字符或序列有序集。为补偿 800GMII 与 PMA 服务接口的时钟域差异，还可按规则删除上述内容或插入 Idle 控制字符。插删规则见 119.2.3.5 和 119.2.3.8。';
       case 'rxRate': return 'RX PCS 可插入 Idle 控制字符以补偿 AM 移除。为补偿 PMA 服务接口与 800GMII 的时钟域差异，可按规则删除 Idle 控制字符或序列有序集，也可插入 Idle 控制字符。插删规则见 119.2.3.5 和 119.2.3.8。';
       case 'amInsert': return '按图 172–3，Flow 0 在含 66b 块 k 的 257b 块之前插入 AM 组，Flow 1 则在含 k+1 的块之前插入。AM 编码见表 172–2、172–3。本演示缩短插入间隔并采用合成 AM。发送侧插入边界：' +
@@ -1619,8 +1682,8 @@
         if (!state.aligned || !result.valid) return '对齐和 RS 解码成功后才有可用数据。';
         if (operation === 'rsDecode') return 'PCS 按 AM 的 UM0–UM5 识别 lane 编号并重排。每个 Flow 的 16 条 lane 去交织重建两个码字。RS 解码成功，本例注入 ' + result.errors + ' 个符号错误，每码字输出 514 个消息符号。';
         if (operation === 'fecJoin') return '交替取 A、B 的 10 位消息符号。前四个符号的位序列：' + result.interleaved.slice(0, 40).join('');
-        return '删除合成 AM 前的边界：' + boundary(result.interleaved) +
-          '。移除后相邻数据位：' + boundary(result.data) + '，随后进入解扰器。';
+        return '移除前的 AM 起始位：' + boundary(result.interleaved) +
+          '。移除后的首个数据位序列：' + boundary(result.data) + '，随后进入解扰器。';
       }
       case 'cdr': return fault.loss && lanes[lane] === fault.physical
         ? '该通道信号丢失，示例不输出判决。'
@@ -1644,7 +1707,10 @@
     encode: '172.2.4.1', txRate: '172.2.4.2', decode: '172.2.5.9', rxRate: '172.2.5.10',
     amInsert: '172.2.4.6', fecSplit: '172.2.4.7', rsEncode: '172.2.4.8',
     rsDecode: '172.2.5.2–3', fecJoin: '172.2.5.4', amRemove: '172.2.5.5',
-    cdr: '173.5.1', gray: '173.5.7.1', precode: '173.5.7.2', demux: '173.5.2.1'
+    cdr: '173.5.1', gray: '173.5.7.1', precode: '173.5.7.2', demux: '173.5.2.1',
+    idle: '172.2.4.11', driver: '173.5.6', inverse: '173.5.7.2', signal: '173.5.8.1',
+    reorder: '172.2.5.2', deinterleave: '172.2.5.2',
+    localLoop: '173.5.9', remoteLoop: '173.5.10', patternTx: '173.5.11', patternRx: '173.5.11'
   };
 
   function showData(forceKind, blockOverride) {
@@ -1666,6 +1732,9 @@
     else if (kind === 'scramble' || kind === 'descramble') body = viewScrambleHtml(block, kind === 'descramble');
     else if (kind === 'amfec') body = viewAmFecHtml(block);
     else body = viewLaneHtml(lane, stage);
+    if (idleMode && ['b66', 'bytes', 'b257', 'scramble', 'descramble'].includes(kind)) {
+      body = '<p>当前为 Scrambled Idle 教学测试。可在 PCS lane 模块查看当前发送码字符号。</p>';
+    }
     const labels = {
       b66: '66b 块', bytes: '字节 / MAC', b257: '257b 块',
       scramble: '加扰', descramble: '解扰', amfec: 'AM / FEC',
@@ -1685,6 +1754,7 @@
 
   function updateState() {
     state = M.alignment(tx, fault, recovery);
+    if (get('pmd-fail').checked) state = { locked: M.range(32).fill(false), aligned: false };
     diagnostics();
     describeStage();
     buildLabels();
@@ -1695,11 +1765,12 @@
     fault = faultInput();
     if (reacquire) recovery = 0;
     tx = M.mapping(get('mapping').value);
-    rx = M.receiveMap(tx, value('phase'));
     lanes = [];
     tx.forEach((row, physical) => row.forEach(lane => { lanes[lane] = physical; }));
-    if (!words) words = M.codewords(window.PCS, payload());
-    fecResults = M.receive(window.PCS, words, rx, value('errors'), fault.lane);
+    if (!words) words = M.codewords(window.PCS, payload(), idleMode);
+    const reception = M.receive(window.PCS, words, tx, value('phase'), value('errors'), fault.lane);
+    rx = reception.recovered;
+    fecResults = reception.results;
     get('skew-value').textContent = fault.skew + ' ns';
     rebuildTracks();
     updateState();
@@ -1785,6 +1856,15 @@
   });
   get('play').onclick = () => setPlaying(!playing);
   get('step').onclick = () => { setPlaying(false); progress = 0; advance(); };
+  get('idle').onclick = () => {
+    idleMode = !idleMode;
+    get('idle').setAttribute('aria-pressed', String(idleMode));
+    words = null;
+    refresh();
+    setStage(1);
+    showData('idle');
+  };
+  get('pmd-fail').onchange = () => refresh(true);
   get('reset').onclick = () => {
     setPlaying(false);
     stage = progress = recovery = 0;
@@ -1799,6 +1879,10 @@
       else control.value = 0;
     });
     get('loss').checked = get('am').checked = false;
+    get('pmd-fail').checked = false;
+    idleMode = false;
+    get('idle').setAttribute('aria-pressed', 'false');
+    words = null;
     refresh();
     markMapSelection();
     resetCamera();

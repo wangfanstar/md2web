@@ -856,6 +856,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <button class="btn primary" type="button" id="g800-play">播放</button>
       <button class="btn" type="button" id="g800-step">单步</button>
       <button class="btn" type="button" id="g800-reset">重置</button>
+      <button class="btn" type="button" id="g800-idle" aria-pressed="false">Scrambled Idle</button>
       <button class="btn" type="button" id="g800-camera">全景</button>
       <label>速度 <select id="g800-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
       <label>Flow <select id="g800-flow"><option value="-1">全部</option><option value="0">Flow 0</option><option value="1">Flow 1</option></select></label>
@@ -913,6 +914,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <label>物理通道 <select id="g800-physical"></select></label>
       <label>Skew <input id="g800-skew" type="range" min="0" max="180" value="0"> <output id="g800-skew-value">0 ns</output></label>
       <label><input id="g800-loss" type="checkbox"> 信号丢失</label>
+      <label><input id="g800-pmd-fail" type="checkbox">下层 PMD SIGNAL_OK = FAIL</label>
       <label><input id="g800-am" type="checkbox"> 损坏选中 lane 的 AM（默认 lane 0）</label>
       <label>码字符号错误 <select id="g800-errors"><option>0</option><option>1</option><option>15</option><option>16</option></select></label>
     </div>

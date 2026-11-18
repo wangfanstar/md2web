@@ -56,7 +56,12 @@
 
   const blockSize = 257;
   const markerSize = 8 * blockSize;
-  const markerOffset = blockSize;
+  const markerOffset = 0;
+  const umOctets = [8, 9, 10, 12, 13, 14];
+  const markerFor = (lane, bit) => bit >= 64 ? (lane >> (bit % 5)) & 1 : (bit % 7 < 3 ? 1 : 0);
+  const umFor = lane => umOctets.flatMap(octet =>
+    range(8).map(bit => markerFor(lane, 8 * octet + bit))).join('');
+  const markerIds = new Map(range(32).map(lane => [umFor(lane), lane]));
   const messageBits = pair => range(514).flatMap(i =>
     pair.flatMap(word => range(10).map(bit => (word[i] >> bit) & 1)));
 
@@ -76,12 +81,22 @@
     return { bytes, encoded, transcoded, scrambled, recovered, reverse, decoded };
   }
 
-  function codewords(codec, input = 'Visual PCS 800G ') {
+  function codewords(codec, input = 'Visual PCS 800G ', idle = false) {
     return range(2).map(flow => {
-      const block = sample(flow, input).transcoded;
+      // Teaching control-block representation for an all-Idle input.
+      const idlePayload = byteBits(0x1e).concat(range(56).fill(0));
+      const block = idle ? [0].concat(idlePayload, idlePayload, idlePayload, idlePayload)
+        : sample(flow, input).transcoded;
       const data = scramble(range(40).flatMap(() => block), flow);
       // A shortened teaching interval and synthetic marker bits.
       const marker = range(markerSize).map(i => ((i + flow) % 5 < 2 ? 1 : 0));
+      for (const local of range(16)) {
+        const lane = 16 * flow + local;
+        for (const row of range(12)) {
+          const { word, index } = symbolAt(lane, row);
+          for (const bit of range(10)) marker[20 * index + 10 * word + bit] = markerFor(lane, 10 * row + bit);
+        }
+      }
       const stream = data.slice(0, markerOffset).concat(marker, data.slice(markerOffset));
       return range(2).map(word => {
         const message = range(514).map(i => range(10).reduce((symbol, bit) =>
@@ -91,19 +106,37 @@
     });
   }
 
-  function receive(codec, words, rx, count, target) {
+  function receive(codec, words, tx, phase, count, target) {
     const incoming = range(2).map(() => range(2).map(() => Array(544)));
-    rx.forEach(lane => {
-      for (let row = 0; row < 68; row++) {
-        const { flow, word, index } = symbolAt(lane, row);
-        incoming[flow][word][index] = words[flow][word][index];
+    const recovered = [];
+    for (const lanes of tx) {
+      const physical = range(68).flatMap(row => {
+        const symbols = lanes.map(lane => {
+          const { flow, word, index } = symbolAt(lane, row);
+          return words[flow][word][index];
+        });
+        return range(10).flatMap(bit => symbols.map(symbol => (symbol >> bit) & 1));
+      });
+      for (const slot of range(4)) {
+        const source = (slot + phase) % 4;
+        const bits = range(680).map(i => physical[4 * i + source]);
+        const lane = markerIds.get(umOctets.flatMap(octet => bits.slice(8 * octet, 8 * octet + 8)).join(''));
+        recovered.push(lane);
+        if (lane === undefined) continue;
+        for (let row = 0; row < 68; row++) {
+          const { flow, word, index } = symbolAt(lane, row);
+          incoming[flow][word][index] = range(10).reduce((symbol, bit) => symbol | (bits[10 * row + bit] << bit), 0);
+        }
       }
-    });
+    }
     const id = symbolAt(target, 0);
     for (let i = 0; i < count; i++) {
       incoming[id.flow][id.word][id.index + 16 * i] ^= i + 1;
     }
-    return incoming.map((pair, flow) => {
+    const results = incoming.map((pair, flow) => {
+      if (recovered.some(lane => lane === undefined)) {
+        return { errors: 0, corrected: false, valid: false, interleaved: [], data: [] };
+      }
       const decoded = pair.map(word => codec.rsDecode(word));
       const valid = decoded.every((result, i) => result.ok &&
         result.cw.every((symbol, j) => symbol === words[flow][i][j]));
@@ -112,6 +145,7 @@
       const errors = flow === id.flow ? count : 0;
       return { errors, corrected: errors > 0 && valid, valid, interleaved, data };
     });
+    return { results, recovered };
   }
 
   function pam4Pair(words, tx, channel, row, bit, pair) {
