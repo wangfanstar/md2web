@@ -45,6 +45,8 @@
   let stage = 14, progress = 0, recovery = 2;
   let active = false, playing = false, pending = 0, last = 0;
   let renderer, scene, camera, controls, resize;
+  let cameraTouched = false;
+  let zoomAnchor = null, zoomAnchorAt = 0;
   let inst, meta = [], count = 0;
   let tracks = [], curves = [], highlight = null, rings = [], bars = [], sheaths = [];
   let flowLines = [], aggLines = [];
@@ -196,6 +198,7 @@
     syncFollowUI();
     setPlaying(true);
     updateState();
+    resetCamera();
   }
 
   function stopFollow() {
@@ -505,8 +508,53 @@
     }
   }
 
+  // Wheel zoom toward the point under the cursor, so a data block can fill
+  // the view without first panning it to the centre.
+  function wheelZoom(event) {
+    if (!active || !camera || !controls || !inst) return;
+    event.preventDefault();
+    if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+    else event.stopPropagation();
+    const host = get('scene');
+    const rect = host.getBoundingClientRect();
+    const pointer = new T.Vector2(
+      (event.clientX - rect.left) / rect.width * 2 - 1,
+      1 - (event.clientY - rect.top) / rect.height * 2);
+    const ray = new T.Raycaster();
+    const zoomIn = event.deltaY < 0;
+    const scale = zoomIn ? 0.893 : 1 / 0.893;
+    const now = performance.now();
+    if (zoomIn) {
+      if (!zoomAnchor || now - zoomAnchorAt > 400) {
+        zoomAnchor = null;
+        const offsets = [[0, 0], [6, 0], [-6, 0], [0, 6], [0, -6], [9, 9], [-9, 9], [9, -9], [-9, -9]];
+        for (let i = 0; i < offsets.length && !zoomAnchor; i++) {
+          ray.setFromCamera(new T.Vector2(
+            pointer.x + offsets[i][0] / rect.width * 2,
+            pointer.y - offsets[i][1] / rect.height * 2), camera);
+          const hit = ray.intersectObject(inst, false)[0];
+          if (hit) zoomAnchor = hit.point.clone();
+        }
+      }
+      zoomAnchorAt = now;
+      if (zoomAnchor) controls.target.lerp(zoomAnchor, 1 - scale);
+    } else {
+      zoomAnchor = null;
+      zoomAnchorAt = 0;
+    }
+    const offset = camera.position.clone().sub(controls.target);
+    offset.setLength(Math.min(520, Math.max(3, offset.length() * scale)));
+    camera.position.copy(controls.target).add(offset);
+    cameraTouched = true;
+    controls.update();
+    draw();
+  }
+
   function resetCamera() {
     if (!camera) return;
+    cameraTouched = false;
+    zoomAnchor = null;
+    zoomAnchorAt = 0;
     const host = get('scene');
     const aspect = Math.max(0.8, (host.clientWidth || 16) / (host.clientHeight || 9));
     const dist = frameNeed(aspect);
@@ -696,10 +744,21 @@
       controls.enableDamping = true;
       controls.dampingFactor = 0.12;
       controls.screenSpacePanning = true;
-      controls.minDistance = 70;
+      controls.minDistance = 3;
       controls.maxDistance = 520;
+      controls.zoomSpeed = 2.2;
       controls.maxPolarAngle = 1.52;
+      controls.mouseButtons = {
+        LEFT: T.MOUSE.PAN, MIDDLE: T.MOUSE.DOLLY, RIGHT: T.MOUSE.ROTATE
+      };
+      controls.touches = { ONE: T.TOUCH.PAN, TWO: T.TOUCH.DOLLY_ROTATE };
+      controls.addEventListener('start', () => {
+        cameraTouched = true;
+        zoomAnchor = null;
+        zoomAnchorAt = 0;
+      });
       controls.addEventListener('change', draw);
+      canvas.addEventListener('wheel', wheelZoom, { passive: false, capture: true });
       renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
       host.prepend(canvas);
 
@@ -726,7 +785,7 @@
         if (!active || !host.clientWidth || !host.clientHeight) return;
         camera.aspect = host.clientWidth / host.clientHeight;
         camera.updateProjectionMatrix();
-        fitCameraMin();
+        if (!cameraTouched) fitCameraMin();
         renderer.setSize(host.clientWidth, host.clientHeight, false);
         draw();
         updateLabels();
@@ -938,10 +997,21 @@
     aggLines.forEach(line => {
       line.material.opacity = aligned ? 0.3 : 0.12;
     });
+    const viewDistance = camera.position.distanceTo(controls.target);
+    const expose = Math.min(1, Math.max(0, (viewDistance - 12) / 60));
+    const boxOpacity = 0.12 + 0.78 * expose;
+    const edgeOpacity = 0.18 + 0.72 * expose;
     moduleMeshes.forEach(({ box, index }) => {
       for (const material of box.material) {
         material.emissive.setHex(index === stage ? 0x26719a : 0x000000);
         material.emissiveIntensity = 0.55;
+        material.opacity = boxOpacity;
+        material.depthWrite = boxOpacity > 0.82;
+      }
+      const edge = box.children[0];
+      if (edge && edge.material) {
+        edge.material.transparent = true;
+        edge.material.opacity = edgeOpacity;
       }
     });
     renderer.render(scene, camera);
