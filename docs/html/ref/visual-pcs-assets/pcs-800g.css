@@ -34,6 +34,24 @@
 .g800-stage .lbl-serdes { font-size: 8.5px; line-height: 1.1; padding: 0 2px; }
 .g800-stage .lbl-callout { font-size: 10px; }
 .g800-stage .lbl-status { font-size: 10px; }
+.g1600-states { position: absolute; top: .6rem; right: .6rem; z-index: 3; display: grid; gap: 2px; justify-items: end; max-width: 46%; padding: .35rem .5rem; border: 1px solid color-mix(in srgb, var(--rule) 72%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--panel) 58%, transparent); backdrop-filter: blur(10px); font-family: var(--f-mono); font-size: .6rem; line-height: 1.35; color: var(--muted); cursor: pointer; }
+.g1600-states b { font-family: var(--f-display); font-size: .62rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink); }
+.g1600-states .st { padding: 0 4px; border-radius: 3px; border: 1px solid transparent; }
+.g1600-states .st::before { content: "○ "; }
+.g1600-states .st.on { color: var(--ink); border-color: color-mix(in srgb, var(--good) 55%, transparent); background: color-mix(in srgb, var(--good) 14%, transparent); }
+.g1600-states .st.on::before { content: "● "; color: var(--good); }
+.g1600-states:hover { border-color: var(--am); }
+#g1600-test-pattern[aria-pressed="true"] { background: var(--am); color: var(--ink); border-color: var(--am); }
+.g1600-mini { width: 100%; border-collapse: collapse; font-family: var(--f-mono); font-size: .64rem; }
+.g1600-mini th, .g1600-mini td { padding: 3px 5px; border-bottom: 1px solid color-mix(in srgb, var(--rule) 62%, transparent); text-align: left; vertical-align: top; }
+.g1600-mini thead th { font-family: var(--f-display); font-size: .62rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.g1600-mini tbody th { color: var(--ink); font-weight: 700; white-space: nowrap; }
+.g1600-mini td b { display: block; color: var(--ink); }
+.g1600-mini td span { display: block; color: var(--muted); font-size: .58rem; }
+.g1600-mini td code { display: block; color: var(--ink-2); font-size: .62rem; }
+@media (max-width: 760px) {
+  .g1600-states { max-width: 54%; font-size: .55rem; }
+}
 .g800-stages { row-gap: .35rem; }
 .g800-stages .btn { min-height: 30px; padding: 2px 8px; font-size: .8rem; }
 .g800-stage-progress { display: flex; align-items: center; gap: .75rem; margin-block: .5rem 1rem; }

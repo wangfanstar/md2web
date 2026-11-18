@@ -963,10 +963,10 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <label>选中通道偏差 <select id="g1600-skew"><option value="0">0 ns</option><option value="152">152 ns</option><option value="153">153 ns</option></select></label>
       <label><input id="g1600-loss" type="checkbox">选中物理 lane 失锁</label>
       <label>选中物理 lane 起始符号偏移 <select id="g1600-phase"><option>0</option><option>1</option><option>2</option><option>3</option></select></label>
-      <button class="btn" id="g1600-test-pattern" type="button">Scrambled Idle</button>
+      <button class="btn" id="g1600-test-pattern" type="button" aria-pressed="false">Scrambled Idle</button>
     </div>
     <div class="g800-stage g1600-scene" id="g1600-scene" aria-label="1.6TBASE-R 收发三维通道"></div>
-    <p class="fine">上排为 Flow 0（A/B），下排为 Flow 1（C/D）。通道段显示 16 条 106.25 Gb/s PCS lane 与 8 条 212.5 Gb/s（106.25 GBd）PAM4 lane。拖动平移，右键拖动旋转，滚轮朝光标缩放；点击模块或数据块查看对应阶段的数据格式。</p>
+    <p class="fine">上排为 Flow 0（A/B），下排为 Flow 1（C/D）。通道段显示 16 条 106.25 Gb/s PCS lane 与 8 条 212.5 Gb/s（106.25 GBd）PAM4 lane。拖动平移，右键拖动旋转，滚轮朝光标缩放；点击模块或数据块查看对应阶段的数据格式。右上角状态面板显示 PCS 与 PMA 状态变量，点击可查看判定依据。</p>
     <h3 class="rail-title" id="g1600-pipeline">链路处理阶段</h3>
     <nav class="g800-stages" id="g1600-stages" aria-labelledby="g1600-pipeline"></nav>
     <div class="g800-stage-progress"><progress id="g1600-progress" aria-label="1.6T 链路阶段进度"></progress><span id="g1600-count"></span></div>
