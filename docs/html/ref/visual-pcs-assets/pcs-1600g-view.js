@@ -450,13 +450,13 @@
       list.push({ id, html, cls, pos, pri, anchor });
     const top = BAND + 9;
 
-    modules.forEach(module => {
+    modules.forEach((module, moduleIndex) => {
       const { index, flow, title } = module;
       const y = module.box.position.y;
       const height = module.box.geometry.parameters.height;
       const px = module.box.position.x;
       const labelY = y + (px < x[index] || (px === x[index] && index % 2) ? -1 : 1) * (height / 2 + 1);
-      add('box' + index + ':' + flow + ':' + px, '<span data-stage="' + index + '">' +
+      add('box' + moduleIndex, '<span data-module="' + moduleIndex + '">' +
         (flow < 0 ? '' : 'F' + flow + ' ') + title + '</span>',
         'lbl-box op', [px, labelY, 0], 3);
     });
@@ -767,7 +767,7 @@
     const q = quartet(lane, 0);
     const bits = q.flatMap(n => range(10).map(k => (n >> k) & 1));
     return '<div class="g800-inspect-summary"><span><b>PCS lane</b> ' + lane +
-      '</span><span><b>Flow</b> ' + flow + '</span>' +
+      '</span><span>Flow 0 · A/B ｜ Flow 1 · C/D</span>' +
       '<span><b>PMA lane</b> ' + Math.floor(lane / 2) + '</span>' +
       '<span><b>RX PMA lane</b> ' + rxSlot(lane) + '</span>' +
       '<span>' + lockText() + '</span></div>' +
@@ -899,7 +899,13 @@
       buildLabels();
       draw();
     }
-    if (get('popup').open) showPopup(stage, selectedFlow, Number(get('lane').value));
+  }
+
+  function openModule({ stage: index, flow, title }) {
+    pause();
+    if (flow >= 0) selectedFlow = flow;
+    select(index);
+    showPopup(index, selectedFlow, Number(get('lane').value), title);
   }
 
   // ----------------------------------------------------------------- controls
@@ -1031,8 +1037,8 @@
       labelHost.className = 'scene-labels';
       labelHost.setAttribute('aria-hidden', 'true');
       labelHost.addEventListener('click', event => {
-        const hit = event.target.closest('[data-stage]');
-        if (hit) { pause(); select(+hit.dataset.stage); }
+        const hit = event.target.closest('.lbl-box.op')?.querySelector('[data-module]');
+        if (hit) openModule(modules[Number(hit.dataset.module)].box.userData);
       });
       host.appendChild(labelHost);
       initOverlay();
@@ -1059,27 +1065,23 @@
         ray.setFromCamera(new T.Vector2(
           (event.clientX - rect.left) / rect.width * 2 - 1,
           1 - (event.clientY - rect.top) / rect.height * 2), camera);
+        const module = ray.intersectObjects(moduleMeshes, false)[0];
+        if (module) {
+          openModule(module.object.userData);
+          return;
+        }
         const packet = ray.intersectObject(inst)[0];
         if (packet && packet.instanceId != null) {
           const info = meta[packet.instanceId];
           if (info) {
             if (info.seg === 'lane') get('lane').value = info.lane;
+            if (info.flow >= 0) selectedFlow = info.flow;
             decode();
             pause();
             select(stageAtPath(info.t));
-            showPopup(stage, info.flow, info.seg === 'lane' ? info.lane : Number(get('lane').value));
+            showPopup(stage, selectedFlow, Number(get('lane').value));
             return;
           }
-        }
-        const module = ray.intersectObjects(moduleMeshes, false)[0];
-        if (module) {
-          const info = module.object.userData;
-          if (info.flow >= 0) selectedFlow = info.flow;
-          decode();
-          pause();
-          select(info.stage);
-          showPopup(info.stage, info.flow >= 0 ? info.flow : selectedFlow,
-            Number(get('lane').value), info.title);
         }
       });
       const observer = new MutationObserver(() => {
