@@ -28,15 +28,33 @@
   ];
   // Box names shown in the scene. The flow stages are duplicated for Flow 0/1.
   const modules = [
-    [0, 0, 8, 'TX MAC'], [1, 0, 8, '64B/66B'], [2, 0, 24, '66b 分流'],
-    [3, 10.8, 10, '257b 转码', 0], [4, 10.8, 10, '加扰', 0],
-    [5, 10.8, 10, 'AM / FEC', 0], [6, 10.8, 10, '16 lane', 0],
-    [7, 0, 27, '32:8 PMA'], [8, 0, 27, '8× PAM4'], [9, 0, 27, 'RX 解复用'],
+    [0, 0, 8, 'TX MAC'], [1, 0, 8, '64B/66B', -1, -0.25, 'encode'],
+    [1, 0, 8, 'TX 速率匹配', -1, 0.25, 'txRate'], [2, 0, 24, '66b 分流'],
+    [7, 0, 27, '32:8 PMA'], [8, 0, 27, '8× PAM4'],
+    [7, 0, 27, 'PAM4 预编码（条件）', -1, 0.5, 'precode'],
+    [9, 0, 27, 'CDR', -1, -0.33, 'cdr'],
+    [9, 0, 27, 'Gray 解映射', -1, 0, 'gray'],
+    [9, 0, 27, 'RX 解复用', -1, 0.33, 'demux'],
     [10, 0, 27, 'AM / Deskew'],
-    [11, -10.8, 10, 'RX FEC', 1], [12, -10.8, 10, '解扰', 1], [13, -10.8, 10, '逆转码', 1],
-    [14, 0, 8, '66b 合流'], [15, 0, 8, '64B/66B 解码'], [16, 0, 8, 'RX MAC']
+    [14, 0, 8, '66b 合流'], [15, 0, 8, '64B/66B 解码', -1, -0.25, 'decode'],
+    [15, 0, 8, 'RX 速率匹配', -1, 0.25, 'rxRate'], [16, 0, 8, 'RX MAC']
   ];
-  const x = stages.map((_, i) => (i - (stages.length - 1) / 2) * 9.5);
+  for (const flow of [0, 1]) {
+    const y = flow === 0 ? 10.8 : -10.8;
+    modules.push(
+      [3, y, 10, '257b 转码', flow], [4, y, 10, '加扰', flow],
+      [5, y, 10, 'AM 插入', flow, -0.33, 'amInsert'],
+      [5, y, 10, 'FEC 前分配', flow, 0, 'fecSplit'],
+      [5, y, 10, 'RS 编码', flow, 0.33, 'rsEncode'],
+      [6, y, 10, '16 lane', flow],
+      [11, y, 10, '去交织 / RS 解码', flow, -0.33, 'rsDecode'],
+      [11, y, 10, 'FEC 后交织', flow, 0, 'fecJoin'],
+      [11, y, 10, 'AM 移除', flow, 0.33, 'amRemove'],
+      [12, y, 10, '解扰', flow], [13, y, 10, '逆转码', flow]
+    );
+  }
+  const pitch = 16;
+  const x = stages.map((_, i) => (i - (stages.length - 1) / 2) * pitch);
   const SPAN = x[x.length - 1] - x[0];
   const ST = { lanes: 6, mux: 7, link: 8, demux: 9, align: 10, fec: 11, rx: 16 };
   const BAND = 16, FLOW_Y = 10.8, STEP_T = 1 / 56, STREAM = 40;
@@ -374,22 +392,29 @@
   }
 
   function viewScrambleHtml(block, rx) {
+    if (rx) {
+      const flow = block % 2;
+      const result = fecResults[flow];
+      if (!state.aligned || !result.valid) return '<p>对齐和 RS 解码成功后才有可用数据。</p>';
+      const input = result.data.slice(0, 257);
+      const output = M.scramble(input, flow, true);
+      return '<p>Flow ' + flow + ' · 纠错并移除 AM 后的首个 257b 块</p>' +
+        '<div class="g800-b257-bits">' + bitRowFromBits(input, 1, 64) + '</div>' +
+        '<p>解扰输出</p><div class="g800-b257-bits">' + bitRowFromBits(output, 1, 64) + '</div>';
+    }
     const bi = blockInfo(block);
     const plain = block257Bits(bi);
     const scrambled = M.scramble(plain, bi.flow);
-    const recovered = M.scramble(scrambled, bi.flow, true);
     const focus = 1 + 64 * bi.pos;
-    const input = rx ? scrambled : plain;
-    const output = rx ? recovered : scrambled;
     return '<div class="g800-inspect-summary">' +
         '<span><b>Flow</b> ' + bi.flow + '</span>' +
         '<span><b>257b 块</b> #' + bi.group + '</span>' +
         '<span><b>选中 MAC 块</b> #' + bi.n + ' · 组内 ' + (bi.pos + 1) + '/4</span>' +
         '<span>“' + escHtml(bi.ascii) + '”</span></div>' +
-      '<div class="g800-inspect-section"><h4>' + (rx ? '接收的加扰 257b 块' : '输入 257b 块（未加扰）') + '</h4>' +
-        '<div class="g800-b257-bits">' + bitRowFromBits(input, focus, 64) + '</div></div>' +
-      '<div class="g800-inspect-section"><h4>' + (rx ? '解扰恢复的 257b 块' : '加扰输出 257b 块') + '</h4>' +
-        '<div class="g800-b257-bits">' + bitRowFromBits(output, focus, 64) + '</div></div>' +
+      '<div class="g800-inspect-section"><h4>输入 257b 块（未加扰）</h4>' +
+        '<div class="g800-b257-bits">' + bitRowFromBits(plain, focus, 64) + '</div></div>' +
+      '<div class="g800-inspect-section"><h4>加扰输出 257b 块</h4>' +
+        '<div class="g800-b257-bits">' + bitRowFromBits(scrambled, focus, 64) + '</div></div>' +
       '<p class="g800-inspect-note">自同步加扰器 x⁵⁸+x³⁹+1；两个 Flow 独立运行。高亮为选中 66b 块对应的 64 位，bit 0 先发送。</p>';
   }
 
@@ -763,8 +788,8 @@
     draw();
   }
 
-  function addModule(index, y, height, title, color, flow = -1) {
-    const width = 7.6;
+  function addModule(index, y, height, title, color, flow = -1, offset = 0, operation) {
+    const width = operation ? 4.4 : 7.6;
     const geometry = new T.BoxGeometry(width, height, 5.4);
     const material = SHADES.map(shade =>
       new T.MeshLambertMaterial({
@@ -773,7 +798,8 @@
         opacity: 0.9
       }));
     const box = new T.Mesh(geometry, material);
-    box.position.set(x[index], y, -4.3);
+    box.position.set(x[index] + offset * pitch, y, -4.3);
+    box.userData.operation = operation;
     box.add(new T.LineSegments(new T.EdgesGeometry(geometry),
       new T.LineBasicMaterial({ color: moduleColors().edge })));
     box.userData.stage = index;
@@ -789,12 +815,12 @@
     scene.add(light);
     const colors = moduleColors();
     [colors.flow0, colors.flow1].forEach((color, flow) => {
-      modules.forEach(([index, y, height, title, f]) => {
-        if (f === flow) addModule(index, y, height, title, color, flow);
+      modules.forEach(([index, y, height, title, f, offset, operation]) => {
+        if (f === flow) addModule(index, y, height, title, color, flow, offset, operation);
       });
     });
-    modules.forEach(([index, y, height, title, f]) => {
-      if (f == null) addModule(index, y, height, title, colors.neutral);
+    modules.forEach(([index, y, height, title, f, offset, operation]) => {
+      if (f == null || f === -1) addModule(index, y, height, title, colors.neutral, -1, offset, operation);
     });
   }
 
@@ -975,7 +1001,7 @@
       labelHost.setAttribute('aria-hidden', 'true');
       labelHost.addEventListener('click', event => {
         const hit = event.target.closest('[data-stage]');
-        if (hit) setStage(+hit.dataset.stage);
+        if (hit) openModule(+hit.dataset.stage, +hit.dataset.flow, hit.dataset.operation);
       });
       host.appendChild(labelHost);
       initFollowTags(host);
@@ -1041,12 +1067,7 @@
         const moduleHit = ray.intersectObjects(moduleMeshes.map(module => module.box))[0];
         if (moduleHit) {
           const info = moduleHit.object.userData;
-          if (info.flow >= 0) {
-            get('flow').value = info.flow;
-            if (value('lane') >= 0 && Math.floor(value('lane') / 16) !== info.flow) get('lane').value = -1;
-          }
-          setStage(info.stage);
-          showData();
+          openModule(info.stage, info.flow, info.operation);
         }
       });
     } catch (err) {
@@ -1259,16 +1280,16 @@
       list.push({ id, html, cls, pos, pri, anchor });
     const top = BAND + 11;
 
-    modules.forEach(([index, y, height, title, flow]) => {
+    modules.forEach(([index, y, height, title, flow, offset = 0, operation]) => {
       // Alternate labels above and below the boxes: at 17 stages the
       // horizontal pitch is narrow, so a single row would overlap.
       const labelY = index === 16
         ? y + height / 2 + 12.5
         : index % 2 ? y - height / 2 - 0.95 : y + height / 2 + 0.95;
       const labelX = index === 0 ? x[index] + 6 : index === 16 ? x[index] - 12 : x[index];
-      add('box' + index, '<span data-stage="' + index + '">' +
+      add('box' + index + ':' + flow + ':' + offset, '<span data-stage="' + index + '" data-operation="' + (operation || '') + '" data-flow="' + (flow ?? -1) + '">' +
         (flow >= 0 ? 'F' + flow + ' ' : '') + title + '</span>',
-      'lbl-box op', [labelX, labelY, 0], 3,
+      'lbl-box op', [labelX + offset * pitch, labelY + Math.sign(offset) * 2.8, 0], 3,
       index === 0 ? 'l' : index === 16 ? 'r' : 'c');
     });
     stages.forEach((_, index) => {
@@ -1513,7 +1534,7 @@
     const detail = get('data');
     detail.hidden = ![0, 1, 3, 4, 12, 13, 15, 16].includes(stage);
     if (detail.hidden) return;
-    const sample = M.sample(flow, payload());
+    const sample = M.sample(flow, payload(), stage >= ST.fec ? fecResults[flow].data : undefined);
     const bits = value => value.join('').match(/.{1,64}/g).join('\n');
     const hex = blocks => blocks.map(block => block.map(byte =>
       byte.toString(16).padStart(2, '0')).join(' ')).join('\n');
@@ -1563,6 +1584,49 @@
     inspectData(flow);
   }
 
+  function openModule(index, flow, operation) {
+    if (flow >= 0) {
+      get('flow').value = flow;
+      if (value('lane') >= 0 && Math.floor(value('lane') / 16) !== flow) get('lane').value = -1;
+    }
+    setStage(index);
+    showData(operation || undefined);
+  }
+
+  function operationDetail(operation, lane, flow) {
+    const result = fecResults[flow];
+    const pair = M.pam4Pair(words, tx, lanes[lane], 0, 0, Math.floor(tx[lanes[lane]].indexOf(lane) / 2));
+    const symbols = word => word.slice(0, 4).map(v => v.toString(16).padStart(3, '0')).join(' ');
+    const boundary = bits => bits.slice(M.markerOffset - 8, M.markerOffset + 8).join('');
+    switch (operation) {
+      case 'txRate': return '66b 序列示意　数据 A → Idle → 数据 B，删除允许调整的 Idle 后为 数据 A → 数据 B。';
+      case 'rxRate': return '接收端在允许补偿时可调整 Idle。示例为 数据 A → 数据 B，经补偿后为 数据 A → Idle → 数据 B。';
+      case 'amInsert': return '演示在首个 257b 块后插入 8 个 257b 的合成 AM。标准周期为 163,840 块。发送侧插入边界：' +
+        boundary(M.messageBits(words[flow]));
+      case 'fecSplit':
+      case 'rsEncode': return '每 10 位交替分给 A/B。A 前四符号：' + symbols(words[flow][0]) +
+        '；B 前四符号：' + symbols(words[flow][1]) + '。各附加 30 个校验符号。';
+      case 'rsDecode':
+      case 'fecJoin':
+      case 'amRemove': {
+        if (!state.aligned || !result.valid) return '对齐和 RS 解码成功后才有可用数据。';
+        if (operation === 'rsDecode') return 'RS 解码成功。注入 ' + result.errors + ' 个符号错误，每个码字输出 514 个消息符号。';
+        if (operation === 'fecJoin') return '交替取 A、B 的 10 位消息符号。前四个符号的位序列：' + result.interleaved.slice(0, 40).join('');
+        return '删除合成 AM 前的边界：' + boundary(result.interleaved) +
+          '。移除后相邻数据位：' + boundary(result.data) + '，随后进入解扰器。';
+      }
+      case 'cdr': return fault.loss && lanes[lane] === fault.physical
+        ? '该通道信号丢失，示例不输出判决。'
+        : '从输入信号恢复符号采样时钟（53.125 GBd），本例判决电平为 ' + pair.level + '。';
+      case 'gray': return fault.loss && lanes[lane] === fault.physical
+        ? '该通道信号丢失，无法恢复位对。'
+        : '判决电平 ' + pair.level + ' → Gray 位对 ' + pair.recovered.join('') + ' → RX 解复用。';
+      case 'precode': return '主动画采用旁路。CR8、KR8 与 800GAUI-8 C2C 发送侧需支持预编码。开启示例：当前电平 ' +
+        pair.level + '，前一预编码电平 1，模 4 差得到 ' + ((pair.level + 3) % 4) + '。';
+      default: return '';
+    }
+  }
+
   function showData(forceKind, blockOverride) {
     setPlaying(false);
     const tracked = value('lane');
@@ -1570,9 +1634,10 @@
     const flow = Math.floor(lane / 16);
     let block = blockOverride != null ? blockOverride : (followActive ? followBlock : mapSelectedBlock);
     if (block % 2 !== flow) block = flow;
+    const detail = operationDetail(forceKind, lane, flow);
     const kind = forceKind === 'lane'
       ? (stage === 7 || stage === 8 ? 'pma' : stage === 9 || stage === 10 ? 'lock' : 'lane')
-      : (forceKind || dataKindForStage(stage));
+      : dataKindForStage(stage);
     const note = stageDataNote(stage);
     let body = '';
     if (kind === 'b66') body = view66bHtml(block, note);
@@ -1586,10 +1651,12 @@
       scramble: '加扰', descramble: '解扰', amfec: 'AM / FEC',
       lane: 'PCS lane 符号', pma: 'PAM4 时隙', lock: 'RX lane 锁定'
     };
-    get('popup-title').textContent = (stage + 1) + ' · ' + stages[stage][0] +
+    const module = modules.find(entry => forceKind && entry[6] === forceKind);
+    get('popup-title').textContent = (stage + 1) + ' · ' + (module ? module[3] : stages[stage][0]) +
       (labels[kind] ? ' · ' + labels[kind] : '');
     get('popup-mapping').textContent = get('inspect').textContent;
-    get('popup-body').innerHTML = body;
+    get('popup-body').innerHTML = detail
+      ? '<p class="g800-inspect-note">' + escHtml(detail) + '</p>' : body;
     get('popup-bits').textContent = '';
     if (!get('popup').open) get('popup').showModal();
   }
