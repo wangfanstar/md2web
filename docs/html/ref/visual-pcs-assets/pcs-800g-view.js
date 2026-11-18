@@ -12,18 +12,18 @@
     ['64B/66B 编码', '示例每 8 字节数据加上数据同步头 01，形成一个 66 位块。'],
     ['66b 分流', '偶数块进入 Flow 0，奇数块进入 Flow 1。标准要求逐块交替分配。'],
     ['256B/257B 转码', '每个 Flow 将四个纯数据 66 位块转码成一个 257 位块。'],
-    ['加扰', '每个 Flow 单独运行自同步加扰器，采用 x⁵⁸ + x³⁹ + 1。建议两个 Flow 使用不同初值。'],
-    ['AM / FEC', '每 Flow 插入 AM 组（8 × 257 位），再进行 FEC 前分配并生成 A、B 两个 RS(544,514) 码字。标准 AM 周期为 163,840 个 257 位块。'],
+    ['加扰', '每个 Flow 使用独立的自同步加扰器，多项式为 x⁵⁸ + x³⁹ + 1。实现若采用固定初态，两个加扰器宜使用不同初态。'],
+    ['AM / FEC', '两个 Flow 在原始 66b 序列的同一相对位置插入 AM 组，再按 10 位符号交替分配至 A、B 两个 RS(544,514) 码字。'],
     ['32 PCS lane', 'Flow 0 使用 PCS lane 0–15，Flow 1 使用 16–31；每条 lane 26.5625 Gb/s。'],
-    ['32:8 PMA', '每条物理通道按 Flow 0、Flow 0、Flow 1、Flow 1 的顺序复用四个 PCS 比特；接收方向为不受限比特复用。'],
+    ['32:8 PMA', 'TX 每条输出 lane 从 Flow 0 的两条 PCS lane 各取一位，再从 Flow 1 的两条 PCS lane 各取一位，按此顺序复用。'],
     ['8 路 PAM4', '8 条物理通道各为 106.25 Gb/s，PAM4 符号率 53.125 GBd。每条承载四条 PCS lane；若经过 8:8 PMA，映射还须保持 PAM4 Gray 符号序列或仅交换位对。'],
-    ['RX 解复用', 'RX PMA 恢复 32 路。起始槽相位可改变接收端 lane 顺序，PCS 依靠 AM 识别真实编号。'],
+    ['RX 解复用', '32:8 PMA 在接收方向执行不受限的位级复用，将 8 条输入 lane 的数据送至 32 条输出 lane。PCS 使用 AM 识别 PCS lane 编号。'],
     ['锁定 / Deskew', 'PCS 通过 AM 的公共部分锁定，并用专用部分识别 lane ID。全部 32 条 lane 满足锁定及 152 ns Skew 预算后按 ID 重排。'],
-    ['RX FEC / 移除 AM', '两个 Flow 分别解交织、解码、移除 AM。RS(544,514) 每码字最多纠正 15 个错误符号。'],
+    ['RX FEC / 移除 AM', '重排后，每个 Flow 先去交织重建 A/B 码字，再执行 RS 解码、FEC 后交织、AM 移除。每个码字最多纠正 15 个未知位置的错误符号。'],
     ['解扰', '每个 Flow 按相同多项式，用接收的加扰位恢复原始 257 位块。'],
     ['257b 逆转码', '恢复每个 Flow 的四个 66 位块及各自同步头。'],
-    ['66b 合流', '按 Flow 0、Flow 1 交替收集 66 位块，与发送端的分流互逆。'],
-    ['64B/66B 解码', '由 66 位纯数据块读取同步头，并还原 8 字节。'],
+    ['66b 合流', 'AM 组后的首个 Flow 0 块紧接首个 Flow 1 块，随后继续交替收集，恢复单条 66b 流。'],
+    ['64B/66B 解码', '每个 66b 块还原一次 800GMII 传输的 64 位数据及 8 位控制指示。图中显示纯数据块的 8 字节。'],
     ['RX MAC', '接收端通过 800GMII 交付恢复的数据。']
   ];
   // Box names shown in the scene. The flow stages are duplicated for Flow 0/1.
@@ -320,12 +320,12 @@
     if (index === 3) return '256B/257B 转码：4 个 66b 块重打包为 1 个 257b 块（1 位头 + 4×64 位）。';
     if (index === 4) return '加扰：每个 Flow 独立使用 x⁵⁸+x³⁹+1，输入/输出均为 257b 块。';
     if (index === 5) return 'AM/FEC：AM 组 8×257 位；每 Flow 生成 A/B 两个 RS(544,514) 码字。';
-    if (index === 6) return '32 PCS lane：257b 块按 10 位符号分配到本 Flow 的 16 条 lane。';
+    if (index === 6) return '每个 Flow 将两个 RS 码字的 10 位符号分发到本 Flow 的 16 条 PCS lane。';
     if (index === 7) return '32:8 PMA：每物理通道按 F0、F0、F1、F1 复用四个 PCS 位。';
     if (index === 8) return '8 路 PAM4：每通道 106.25 Gb/s，Gray 映射 0,1,3,2。';
     if (index === 9) return 'RX PMA：不受限比特复用，起始槽相位可改变 RX lane 顺序。';
     if (index === 10) return 'AM 锁定/Deskew：全部 32 lane 锁定并满足 152 ns Skew 后按 ID 重排。';
-    if (index === 11) return 'RX FEC：分离 Flow 0/1，解交织、RS 解码并移除 AM。';
+    if (index === 11) return stages[index][1];
     if (index === 12) return '解扰：按相同多项式恢复 257b 块。';
     if (index === 13) return '257b 逆转码：恢复每 Flow 的四个 66b 块及同步头。';
     if (index === 14) return '66b 合流：按 Flow 0、Flow 1 交替恢复原始 66b 流。';
@@ -1599,9 +1599,9 @@
     const symbols = word => word.slice(0, 4).map(v => v.toString(16).padStart(3, '0')).join(' ');
     const boundary = bits => bits.slice(M.markerOffset - 8, M.markerOffset + 8).join('');
     switch (operation) {
-      case 'txRate': return '66b 序列示意　数据 A → Idle → 数据 B，删除允许调整的 Idle 后为 数据 A → 数据 B。';
-      case 'rxRate': return '接收端在允许补偿时可调整 Idle。示例为 数据 A → 数据 B，经补偿后为 数据 A → Idle → 数据 B。';
-      case 'amInsert': return '演示在首个 257b 块后插入 8 个 257b 的合成 AM。标准周期为 163,840 块。发送侧插入边界：' +
+      case 'txRate': return '为补偿 AM 插入，TX PCS 可删除 Idle 控制字符或序列有序集。为补偿 800GMII 与 PMA 服务接口的时钟域差异，还可按规则删除上述内容或插入 Idle 控制字符。插删规则见 119.2.3.5 和 119.2.3.8。';
+      case 'rxRate': return 'RX PCS 可插入 Idle 控制字符以补偿 AM 移除。为补偿 PMA 服务接口与 800GMII 的时钟域差异，可按规则删除 Idle 控制字符或序列有序集，也可插入 Idle 控制字符。插删规则见 119.2.3.5 和 119.2.3.8。';
+      case 'amInsert': return '按图 172–3，Flow 0 在含 66b 块 k 的 257b 块之前插入 AM 组，Flow 1 则在含 k+1 的块之前插入。AM 编码见表 172–2、172–3。本演示缩短插入间隔并采用合成 AM。发送侧插入边界：' +
         boundary(M.messageBits(words[flow]));
       case 'fecSplit':
       case 'rsEncode': return '每 10 位交替分给 A/B。A 前四符号：' + symbols(words[flow][0]) +
@@ -1610,22 +1610,35 @@
       case 'fecJoin':
       case 'amRemove': {
         if (!state.aligned || !result.valid) return '对齐和 RS 解码成功后才有可用数据。';
-        if (operation === 'rsDecode') return 'RS 解码成功。注入 ' + result.errors + ' 个符号错误，每个码字输出 514 个消息符号。';
+        if (operation === 'rsDecode') return 'PCS 按 AM 的 UM0–UM5 识别 lane 编号并重排。每个 Flow 的 16 条 lane 去交织重建两个码字。RS 解码成功，本例注入 ' + result.errors + ' 个符号错误，每码字输出 514 个消息符号。';
         if (operation === 'fecJoin') return '交替取 A、B 的 10 位消息符号。前四个符号的位序列：' + result.interleaved.slice(0, 40).join('');
         return '删除合成 AM 前的边界：' + boundary(result.interleaved) +
           '。移除后相邻数据位：' + boundary(result.data) + '，随后进入解扰器。';
       }
       case 'cdr': return fault.loss && lanes[lane] === fault.physical
         ? '该通道信号丢失，示例不输出判决。'
-        : '从输入信号恢复符号采样时钟（53.125 GBd），本例判决电平为 ' + pair.level + '。';
+        : '接收 PMA 从输入信号恢复时钟和数据。本例的 PAM4 符号率为 53.125 GBd，教学判决电平为 ' + pair.level + '。';
       case 'gray': return fault.loss && lanes[lane] === fault.physical
         ? '该通道信号丢失，无法恢复位对。'
         : '判决电平 ' + pair.level + ' → Gray 位对 ' + pair.recovered.join('') + ' → RX 解复用。';
-      case 'precode': return '主动画采用旁路。CR8、KR8 与 800GAUI-8 C2C 发送侧需支持预编码。开启示例：当前电平 ' +
+      case 'precode': return '接至 800GBASE‑CR8/KR8 PMD 服务接口或属于 800GAUI‑8 C2C 链路的 PMA，须逐发送 lane 支持 1/(1+D) mod 4 预编码，逐接收 lane 的解码能力可选。各端口逐 lane 独立启用，本动画采用旁路。开启示例：当前电平 ' +
         pair.level + '，前一预编码电平 1，模 4 差得到 ' + ((pair.level + 3) % 4) + '。';
       default: return '';
     }
   }
+
+  const stageClauses = [
+    '170', '172.2.4.1–2', '172.2.4.3', '172.2.4.4', '172.2.4.5',
+    '172.2.4.6–8', '172.2.4.9–10', '173.5.2.1', '173.5.7.1',
+    '173.5.1、173.5.2.1、173.5.7.1', '172.2.5.1–2', '172.2.5.2–5',
+    '172.2.5.6', '172.2.5.7', '172.2.5.8', '172.2.5.9–10', '170'
+  ];
+  const operationClauses = {
+    encode: '172.2.4.1', txRate: '172.2.4.2', decode: '172.2.5.9', rxRate: '172.2.5.10',
+    amInsert: '172.2.4.6', fecSplit: '172.2.4.7', rsEncode: '172.2.4.8',
+    rsDecode: '172.2.5.2–3', fecJoin: '172.2.5.4', amRemove: '172.2.5.5',
+    cdr: '173.5.1', gray: '173.5.7.1', precode: '173.5.7.2', demux: '173.5.2.1'
+  };
 
   function showData(forceKind, blockOverride) {
     setPlaying(false);
@@ -1655,8 +1668,10 @@
     get('popup-title').textContent = (stage + 1) + ' · ' + (module ? module[3] : stages[stage][0]) +
       (labels[kind] ? ' · ' + labels[kind] : '');
     get('popup-mapping').textContent = get('inspect').textContent;
-    get('popup-body').innerHTML = detail
-      ? '<p class="g800-inspect-note">' + escHtml(detail) + '</p>' : body;
+    const clause = operationClauses[forceKind] || stageClauses[stage];
+    get('popup-body').innerHTML = (detail
+      ? '<p class="g800-inspect-note">' + escHtml(detail) + '</p>' : body) +
+      '<p class="g800-inspect-note">IEEE Std 802.3df-2024 · ' + clause + '</p>';
     get('popup-bits').textContent = '';
     if (!get('popup').open) get('popup').showModal();
   }
