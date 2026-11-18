@@ -38,6 +38,9 @@
   let linkGroup, labelHost, labelItems = [], theme = {};
   let cameraTouched = false, zoomAnchor = null, zoomAnchorAt = 0;
   let webglFailed = false;
+  let focusMode = false, stageBand = null, stageBadge = null, focusBtn = null;
+  let hoverStage = -1, hoverFlow = -1;
+  let camTween = null, camTweenFrame = 0, camTweenTimer = 0;
   let decoded = [null, null];
   let decodedWords = [null, null, null, null];
   let locks;
@@ -260,6 +263,7 @@
   }
   function resetCamera() {
     if (!camera) return;
+    camTween = null;
     cameraTouched = false;
     zoomAnchor = null;
     zoomAnchorAt = 0;
@@ -271,8 +275,122 @@
     controls.update();
     draw();
   }
+
+  // 阶段聚焦：把相机平滑移到当前处理列，并只保留该阶段的模块标签。
+  function focusStageCamera(index) {
+    if (!camera || !controls) return;
+    const host = get('scene');
+    const aspect = Math.max(0.8, (host.clientWidth || 16) / (host.clientHeight || 9));
+    const tanHalf = Math.tan(camera.fov * Math.PI / 360);
+    const need = Math.max(96, (BAND + 18) / tanHalf, 32 / (tanHalf * aspect));
+    const dir = new T.Vector3(0.05, 0.21, 0.975).normalize();
+    const look = new T.Vector3(x[index], 0, 0);
+    tweenCamera(look.clone().addScaledVector(dir, need), look);
+  }
+
+  function tweenCamera(toPos, toLook) {
+    if (!camera || !controls) return;
+    camTween = {
+      fromPos: camera.position.clone(), fromLook: controls.target.clone(),
+      toPos, toLook, start: performance.now(), dur: 420
+    };
+    // 动画帧在后台标签页可能被暂停，用定时器兜底保证最终机位生效。
+    clearTimeout(camTweenTimer);
+    camTweenTimer = setTimeout(() => {
+      if (!camTween) return;
+      camTween = null;
+      camera.position.copy(toPos);
+      controls.target.copy(toLook);
+      controls.update();
+      draw();
+    }, 540);
+    if (!camTweenFrame) camTweenFrame = requestAnimationFrame(stepTween);
+  }
+
+  function stepTween(now) {
+    camTweenFrame = 0;
+    if (!camTween || !camera || !controls) return;
+    const k = Math.min(1, (now - camTween.start) / camTween.dur);
+    const ease = k * k * (3 - 2 * k);
+    camera.position.lerpVectors(camTween.fromPos, camTween.toPos, ease);
+    controls.target.lerpVectors(camTween.fromLook, camTween.toLook, ease);
+    controls.update();
+    draw();
+    if (k < 1) {
+      camTweenFrame = requestAnimationFrame(stepTween);
+    } else {
+      camTween = null;
+      clearTimeout(camTweenTimer);
+    }
+  }
+
+  function setFocusMode(on) {
+    focusMode = on;
+    if (focusBtn) {
+      focusBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      focusBtn.textContent = on ? '退出聚焦' : '聚焦阶段';
+    }
+    if (on) focusStageCamera(stage);
+    else resetCamera();
+    if (renderer) {
+      buildLabels();
+      draw();
+    }
+  }
+
+  function buildStageBand() {
+    if (stageBand) return;
+    stageBand = new T.Mesh(new T.PlaneGeometry(3.6, BAND * 2 + 10),
+      new T.MeshBasicMaterial({
+        color: new T.Color(theme.ink), transparent: true, opacity: 0.05, depthWrite: false
+      }));
+    stageBand.position.set(x[stage], 0, -9);
+    scene.add(stageBand);
+  }
+
+  function buildFlowArrows() {
+    const color = new T.Color(theme.muted);
+    const spots = [
+      [x[0] + (x[1] - x[0]) / 2, 0],
+      [x[13] + (x[14] - x[13]) / 2, 0]
+    ];
+    [0, 1].forEach(flow => {
+      const y = flow ? -FLOW_Y : FLOW_Y;
+      spots.push([x[3] + (x[4] - x[3]) / 2, y], [x[12] + (x[13] - x[12]) / 2, y]);
+    });
+    spots.forEach(([px, py]) => {
+      const cone = new T.Mesh(new T.ConeGeometry(0.55, 1.7, 10),
+        new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.55 }));
+      cone.position.set(px, py, 1.4);
+      cone.rotation.z = -Math.PI / 2;
+      scene.add(cone);
+    });
+  }
+
+  function buildStageBadge(host) {
+    stageBadge = document.createElement('button');
+    stageBadge.type = 'button';
+    stageBadge.className = 'g800-stage-badge';
+    stageBadge.setAttribute('aria-pressed', 'false');
+    stageBadge.title = '点击切换聚焦模式：只显示当前阶段标签并把相机移到该列';
+    stageBadge.setAttribute('aria-label', '当前阶段与聚焦开关');
+    stageBadge.addEventListener('click', () => setFocusMode(!focusMode));
+    host.appendChild(stageBadge);
+  }
+
+  function updateBadge() {
+    if (!stageBadge) return;
+    const sig = stage + ':' + focusMode;
+    if (stageBadge.dataset.sig === sig) return;
+    stageBadge.dataset.sig = sig;
+    stageBadge.innerHTML = '<b>' + (stage + 1) + ' / ' + steps.length + '</b>' +
+      '<span>' + steps[stage][0] + '</span>' + (focusMode ? '<i>聚焦</i>' : '');
+    stageBadge.setAttribute('aria-pressed', focusMode ? 'true' : 'false');
+    stageBadge.classList.toggle('is-focus', focusMode);
+  }
   function wheelZoom(event) {
     if (!active || !camera || !controls || !inst) return;
+    camTween = null;
     event.preventDefault();
     if (event.stopImmediatePropagation) event.stopImmediatePropagation();
     else event.stopPropagation();
@@ -526,15 +644,33 @@
       list.push({ id, html, cls, pos, pri, anchor });
     const top = BAND + 9;
 
+    const primaryKey = {};
+    modules.forEach(module => {
+      if (Math.abs(module.box.position.y) > FLOW_Y + 2) return;
+      const offset = module.box.position.x - x[module.index];
+      const current = primaryKey[module.index];
+      if (current == null || Math.abs(offset) < Math.abs(current.offset)) {
+        primaryKey[module.index] = {
+          offset,
+          key: module.index + ':' + module.flow + ':' + module.box.position.x
+        };
+      }
+    });
     modules.forEach((module, moduleIndex) => {
       const { index, flow, title } = module;
       const y = module.box.position.y;
       const height = module.box.geometry.parameters.height;
       const px = module.box.position.x;
       const labelY = y + (px < x[index] || (px === x[index] && index % 2) ? -1 : 1) * (height / 2 + 1);
-      add('box' + moduleIndex, '<span data-module="' + moduleIndex + '">' +
-        (flow < 0 ? '' : 'F' + flow + ' ') + title + '</span>',
-        'lbl-box op', [px, labelY, 0], 3);
+      add('box' + moduleIndex, '<span title="' + (flow < 0 ? '' : 'Flow ' + flow + ' · ') +
+        title + '" data-module="' + moduleIndex + '">' + title + '</span>',
+        'lbl-box op' + (flow < 0 ? '' : (flow ? ' f1' : ' f0')),
+        [px, labelY + (px - x[index]) * 0.55, 0], 3);
+      const key = index + ':' + flow + ':' + px;
+      const item = list[list.length - 1];
+      item.moduleStage = index;
+      item.flow = flow;
+      item.minor = !(primaryKey[index] && primaryKey[index].key === key);
     });
     steps.forEach((_, index) => {
       add('stage' + index, '<b>' + (index + 1) + '</b>',
@@ -568,7 +704,11 @@
       add('testmode', 'tx_test_mode = 1 · Scrambled Idle', 'lbl-status ok',
         [x[1], BAND + 4, 0], 9);
     }
-    setLabels(list);
+    setLabels(list.filter(item => {
+      if (item.moduleStage == null) return true;
+      if (focusMode) return item.moduleStage === stage;
+      return !item.minor || item.moduleStage === stage || item.moduleStage === hoverStage;
+    }));
   }
   function updateLabels() {
     if (!labelHost || !camera) return;
@@ -579,6 +719,7 @@
     const v = new T.Vector3();
     labelItems.forEach(item => {
       v.set(item.pos[0], item.pos[1], item.pos[2]).project(camera);
+      const force = hoverStage >= 0 && item.moduleStage === hoverStage;
       let show = v.z < 1 && v.x > -1.1 && v.x < 1.1 && v.y > -1.1 && v.y < 1.1;
       if (show) {
         if (!item.w) {
@@ -591,8 +732,8 @@
           x0: left - 2, y0: sy - item.h / 2 - 1,
           x1: left + item.w + 2, y1: sy + item.h / 2 + 1
         };
-        show = rect.x0 > -4 && rect.x1 < W + 4 && !placed.some(other =>
-          rect.x0 < other.x1 && rect.x1 > other.x0 && rect.y0 < other.y1 && rect.y1 > other.y0);
+        show = rect.x0 > -4 && rect.x1 < W + 4 && (force || !placed.some(other =>
+          rect.x0 < other.x1 && rect.x1 > other.x0 && rect.y0 < other.y1 && rect.y1 > other.y0));
         if (show) {
           placed.push(rect);
           const transform = 'translate(' + Math.round(left) + 'px,' + Math.round(sy - item.h / 2) + 'px)';
@@ -600,6 +741,7 @@
             item.el.style.transform = transform;
             item.t = transform;
           }
+          item.el.style.zIndex = force ? '5' : '';
         }
       }
       if (show !== item.shown) {
@@ -651,7 +793,13 @@
       ['rx_am_sf', values.rx_am_sf],
       ['PMA align_status_mux', values.align_status_mux],
       ['PMA all_locked_demux', values.all_locked_demux]
-    ].map(row => '<span class="st' + (row[1] ? ' on' : '') + '">' + row[0] + '</span>').join('');
+    ].map(row => {
+      const value = row[1];
+      const text = typeof value === 'boolean' ? '' : '=' + value;
+      const on = value === true || (typeof value === 'string' && value !== '' &&
+        value !== '\u2014' && !/^0+$/.test(value));
+      return '<span class="st' + (on ? ' on' : '') + '">' + row[0] + text + '</span>';
+    }).join('');
     const html = '<b>状态变量</b>' + rows;
     if (stateHost.dataset.sig !== html) {
       stateHost.innerHTML = html;
@@ -739,19 +887,24 @@
     const viewDistance = camera.position.distanceTo(controls.target);
     const expose = Math.min(1, Math.max(0, (viewDistance - 12) / 60));
     const boxOpacity = 0.12 + 0.78 * expose;
+    if (stageBand) {
+      stageBand.position.x = x[stage];
+      stageBand.material.opacity = focusMode ? 0.16 : 0.06;
+    }
     moduleMeshes.forEach(box => {
+      const dim = focusMode && box.userData.stage !== stage;
       for (const material of box.material) {
         const glow = box.userData.stage === stage ? 0x26719a
           : testMode && box.userData.stage <= 7 ? 0x8a6a12 : 0x000000;
         material.emissive.setHex(glow);
         material.emissiveIntensity = 0.55;
-        material.opacity = boxOpacity;
-        material.depthWrite = boxOpacity > 0.82;
+        material.opacity = boxOpacity * (dim ? 0.3 : 1);
+        material.depthWrite = boxOpacity > 0.82 && !dim;
       }
       const edge = box.children[0];
       if (edge && edge.material) {
         edge.material.transparent = true;
-        edge.material.opacity = 0.18 + 0.72 * expose;
+        edge.material.opacity = (0.18 + 0.72 * expose) * (dim ? 0.5 : 1);
       }
     });
     tracks.forEach((line, lane) => {
@@ -769,6 +922,7 @@
     renderer.render(scene, camera);
     updateLabels();
     updateStates();
+    updateBadge();
   }
 
   // ---------------------------------------------------------------- popup
@@ -1272,7 +1426,7 @@
     }
     return '逆转码与 64B/66B 解码后，通过 1.6TMII 交付 8 字节。';
   }
-  function select(index) {
+  function select(index, frame) {
     stage = Math.max(0, Math.min(STEP, index));
     progress = 0;
     const [name, clause, note] = steps[stage];
@@ -1286,6 +1440,7 @@
       buildLabels();
       draw();
     }
+    if (focusMode && frame && camera) focusStageCamera(stage);
     if (get('popup').open) {
       if (lastPopup && lastPopup.view === 'states') {
         get('popup-data').innerHTML = viewStates();
@@ -1299,7 +1454,7 @@
   function openModule({ stage: index, flow, title }) {
     pause();
     if (flow >= 0) selectedFlow = flow;
-    select(index);
+    select(index, true);
     showPopup(index, selectedFlow, Number(get('lane').value), title);
   }
 
@@ -1309,7 +1464,7 @@
     button.type = 'button';
     button.className = 'btn';
     button.textContent = (index + 1) + ' · ' + name;
-    button.onclick = () => { pause(); select(index); };
+    button.onclick = () => { pause(); select(index, true); };
     get('stages').append(button);
     return button;
   });
@@ -1354,7 +1509,7 @@
     get('play').setAttribute('aria-pressed', 'true');
     frame = requestAnimationFrame(tick);
   };
-  get('step').onclick = () => { pause(); select((stage + 1) % steps.length); };
+  get('step').onclick = () => { pause(); select((stage + 1) % steps.length, true); };
   get('reset').onclick = () => {
     pause();
     get('lane').value = -1;
@@ -1368,8 +1523,10 @@
     selectedFlow = 0;
     decode();
     select(0);
-    resetCamera();
+    setFocusMode(false);
   };
+  focusBtn = get('focus');
+  if (focusBtn) focusBtn.onclick = () => setFocusMode(!focusMode);
   get('loss').onchange = get('phase').onchange = get('skew').onchange =
     get('errors').onchange = get('lane').onchange = () => {
     decode();
@@ -1436,6 +1593,7 @@
       controls.touches = { ONE: T.TOUCH.PAN, TWO: T.TOUCH.DOLLY_ROTATE };
       controls.addEventListener('start', () => {
         cameraTouched = true;
+        camTween = null;
         zoomAnchor = null;
         zoomAnchorAt = 0;
       });
@@ -1461,6 +1619,36 @@
       host.appendChild(labelHost);
       initOverlay();
       buildLink();
+      buildStageBand();
+      buildFlowArrows();
+      buildStageBadge(host);
+      renderer.domElement.addEventListener('dblclick', () => focusStageCamera(stage));
+      renderer.domElement.addEventListener('pointermove', event => {
+        const rect = renderer.domElement.getBoundingClientRect();
+        const ray = new T.Raycaster();
+        ray.setFromCamera(new T.Vector2(
+          (event.clientX - rect.left) / rect.width * 2 - 1,
+          1 - (event.clientY - rect.top) / rect.height * 2), camera);
+        const hit = ray.intersectObjects(moduleMeshes, false)[0];
+        const nextStage = hit ? hit.object.userData.stage : -1;
+        const nextFlow = hit ? (hit.object.userData.flow ?? -1) : -1;
+        if (nextStage !== hoverStage || nextFlow !== hoverFlow) {
+          hoverStage = nextStage;
+          hoverFlow = nextFlow;
+          labelItems.forEach(item => { item.w = 0; });
+          buildLabels();
+          updateLabels();
+        }
+        renderer.domElement.style.cursor = hit ? 'pointer' : '';
+      });
+      renderer.domElement.addEventListener('pointerleave', () => {
+        if (hoverStage < 0) return;
+        hoverStage = -1;
+        hoverFlow = -1;
+        labelItems.forEach(item => { item.w = 0; });
+        buildLabels();
+        updateLabels();
+      });
       new ResizeObserver(resize).observe(host);
       window.addEventListener('resize', resize);
       resize();
@@ -1496,7 +1684,7 @@
             if (info.flow >= 0) selectedFlow = info.flow;
             decode();
             pause();
-            select(stageAtPath(info.t));
+            select(stageAtPath(info.t), true);
             showPopup(stage, selectedFlow, Number(get('lane').value));
             return;
           }

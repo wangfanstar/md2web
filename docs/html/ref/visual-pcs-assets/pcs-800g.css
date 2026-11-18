@@ -49,8 +49,20 @@
 .g1600-mini td b { display: block; color: var(--ink); }
 .g1600-mini td span { display: block; color: var(--muted); font-size: .58rem; }
 .g1600-mini td code { display: block; color: var(--ink-2); font-size: .62rem; }
+/* 工程师阅读增强：阶段徽标、聚焦模式与标签芯片 */
+.g800-stage-badge { position: absolute; left: .65rem; bottom: .45rem; z-index: 4; display: inline-flex; align-items: baseline; gap: .45rem; padding: .2rem .55rem; border: 1px solid color-mix(in srgb, var(--rule) 80%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--panel) 80%, transparent); backdrop-filter: blur(10px); color: var(--ink); cursor: pointer; font-family: var(--f-mono); font-size: .62rem; }
+.g800-stage-badge b { font-family: var(--f-display); font-size: .72rem; letter-spacing: .04em; }
+.g800-stage-badge span { color: var(--ink-2); }
+.g800-stage-badge i { font-style: normal; padding: 0 5px; border-radius: 999px; background: var(--am); color: var(--ink); font-weight: 700; font-size: .58rem; }
+.g800-stage-badge.is-focus { border-color: var(--am); box-shadow: 0 0 0 1px color-mix(in srgb, var(--am) 40%, transparent); }
+.g800-stage-badge:hover { border-color: var(--am); }
+.g800-stage .lbl-box { background: color-mix(in srgb, var(--panel) 86%, transparent); border: 1px solid color-mix(in srgb, var(--rule) 72%, transparent); border-radius: 4px; padding: 1px 5px; box-shadow: 0 1px 3px color-mix(in srgb, var(--ink) 12%, transparent); font-size: 10px; }
+.g800-stage .lbl-box.f0 { border-left: 3px solid #268ec7; }
+.g800-stage .lbl-box.f1 { border-left: 3px solid #d97139; }
+.g800-stage .lbl-stage:not(.on) b { opacity: .55; }
 @media (max-width: 760px) {
   .g1600-states { max-width: 54%; font-size: .55rem; }
+  .g800-stage-badge { font-size: .56rem; padding: .15rem .45rem; }
 }
 .g800-stages { row-gap: .35rem; }
 .g800-stages .btn { min-height: 30px; padding: 2px 8px; font-size: .8rem; }
