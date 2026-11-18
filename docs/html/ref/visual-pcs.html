@@ -945,7 +945,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <div class="g800-table" tabindex="0" role="region" aria-label="800G PMA 映射表">
       <table class="cmp"><thead><tr><th scope="col">物理通道</th><th scope="col">TX 时隙（PCS lane）</th><th scope="col">RX PMA 输出（实际 PCS lane）</th><th scope="col">AM 锁定</th></tr></thead><tbody id="g800-rows"></tbody></table>
     </div>
-    <p class="fine">依据 IEEE 802.3df-2024 §172、§173。3D 路径、AM 周期和间距按可读性缩放；标准规定每 Flow 每 163,840 个 257 位块插入一组 AM。字符/字节映射和放大视图演示纯数据块，AM 捕获按教学事件模拟。</p>
+    <p class="fine">本实验采用 IEEE 802.3df-2024 第 172 条 PCS 与第 173 条 32:8 PMA 拓扑。字符视图演示纯数据块。FEC 示例使用合成 AM 和缩短的插入间隔，AM 锁定与 CDR 以教学事件呈现。<a href="#scale">查看 800G 收发通路及对应条款</a></p>
   </section>
 </section>
 
@@ -1076,12 +1076,29 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   <h2 id="scale-title">从 200G 扩展到更高速率</h2>
   <a href="#lab-800g">打开 800GBASE-R 三维通道实验</a>
   <p><b>400GBASE-R</b> 使用同一套 IEEE 802.3 第 119 条 PCS，将 PCS 通道数从 8 增至 16，每 163,840 个 257 位块插入一组 AM。上述原理适用于通道数翻倍的情况。400G 的 16 条 PCS 通道可映射到 16、8、4、2 或 1 条物理通道。200G 的 8 条 PCS 通道可映射到 8、4、2 或 1 条物理通道。</p>
-  <p><b>800GBASE-R</b> 按 IEEE 802.3df-2024 Clause 172，将一条 800GMII 的 66 位块流交替分到两个 Flow。每个 Flow 按 400GBASE-R 的方法分配符号，各使用 16 条 PCS lane。Clause 173 的 32:8 PMA 再把每个 Flow 的两条 lane 复用到每条物理通道。</p>
+  <h3>800GBASE-R 收发通路</h3>
+  <p>IEEE 802.3df-2024 图 172–2 给出了 800GBASE-R PCS 的双 Flow 架构。800GMII 侧使用一条聚合数据流，PMA 服务接口侧使用 32 条 PCS lane。实验选用图 173–3 的 32:8 PMA，32 条 PCS lane 各为 26.5625 Gb/s，8 条 PAM4 lane 各为 106.25 Gb/s（53.125 GBd）。</p>
+  <div class="tablewrap">
+    <table class="cmp">
+      <caption class="sr">800GBASE-R 收发处理与 IEEE 802.3df-2024 条款</caption>
+      <thead><tr><th scope="col">环节</th><th scope="col">数据如何处理</th><th scope="col">标准条款</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">TX 编码、速率匹配与分流</th><td>PCS 将每次 800GMII 传输的 64 位数据和 8 位控制指示编码成一个 66b 块。TX 可删除 Idle 控制字符或序列有序集来补偿 AM 插入。补偿时钟域差异时，还可按规则插入 Idle 控制字符。速率匹配后的首块送往 Flow 0，次块送往 Flow 1，此后继续交替。</td><td>172.2.4.1–172.2.4.3</td></tr>
+        <tr><th scope="row">TX 转码、加扰与 AM</th><td>每个 Flow 将四个 66b 块转码成一个 257b 块，并独立加扰。两个 Flow 在原始 66b 序列的同一相对边界插入 AM 组。按图 172–3，Flow 0 的 AM 位于包含块 k 的 257b 块之前，Flow 1 的 AM 位于包含块 k+1 的块之前。各 lane 的 AM 编码见表 172–2、172–3。</td><td>172.2.4.4–172.2.4.6</td></tr>
+        <tr><th scope="row">TX FEC 与 lane 分发</th><td>每个 Flow 交替将 10 位符号分给 A、B 两路。每个 RS(544,514) 码字包含 514 个消息符号和 30 个校验符号。Flow 0 使用 PCS lane 0–15，Flow 1 使用 lane 16–31。</td><td>172.2.4.7–172.2.4.10</td></tr>
+        <tr><th scope="row">PMA 与 PAM4</th><td>TX 的每条输出 lane 每轮依次从 Flow 0 的两条 PCS lane、Flow 1 的两条 PCS lane 各取一位。PAM4 用 Gray 映射将位对映射为电平。接收侧恢复时钟和数据，将电平还原为位对，并以不受限的位级复用从 8 条输入 lane 恢复 32 条输出 lane。</td><td>173.5.1、173.5.2.1、173.5.7.1</td></tr>
+        <tr><th scope="row">RX 对齐、重排与纠错</th><td>PCS 对 32 条 lane 执行 AM 锁定和 deskew，最大 Skew 为 152 ns，再按 AM 的独有字段 UM0–UM5 识别并重排 lane。每个 Flow 将本组 16 条 lane 去交织成两个码字。每个码字最多纠正 15 个未知位置的符号错误。</td><td>172.2.5.1–172.2.5.3</td></tr>
+        <tr><th scope="row">RX 还原 800GMII</th><td>每个 Flow 交替取纠错后的 A、B 消息符号，再移除 AM、解扰并逆转码。合流从 AM 后的首个 Flow 0 块开始，与 Flow 1 交替收集。每个 66b 块解码为一次 800GMII 传输。RX 可插入 Idle 控制字符补偿 AM 移除，也可按插删规则补偿时钟域差异。</td><td>172.2.5.4–172.2.5.10</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>对于连接 800GBASE-CR8 或 800GBASE-KR8 PMD 服务接口，或属于 800GAUI-8 C2C 链路的 PMA，第 173.5.7.2 条要求每条发送 lane 支持 1/(1+D) mod 4 预编码。接收 lane 的预编码解码能力可选。各方向接口逐 lane 独立启用，主动画展示旁路情况。</p>
 </section>
 
 <section id="refs" aria-labelledby="refs-title" class="refs">
   <h2 id="refs-title">参考资料</h2>
   <ul>
+    <li>IEEE Std 802.3df-2024，第 170 条（800GMII）、第 172 条（800GBASE-R PCS）、第 173 条（PMA）。<a href="../../pdf/8023df-2024.pdf">本地 PDF</a></li>
     <li>IEEE 802.3 标准第 119 条（200GBASE-R 和 400GBASE-R PCS）、第 120 条（PMA）、第 116 条（架构与时延偏差预算）、第 45 条（管理）。<a href="https://standards.ieee.org/ieee/802.3/10422/">IEEE 802.3-2022</a></li>
     <li><a href="https://ethernetalliance.org/blog/2018/03/28/a-deep-dive-into-the-802-3bs-200gbase-r-and-400gbase-r-pcspma/">深入解读 802.3bs 的 200GBASE-R 和 400GBASE-R PCS/PMA</a>，Ethernet Alliance</li>
     <li><a href="https://www.ieee802.org/3/bs/public/16_03/butter_3bs_02_0316.pdf">对齐标记的映射和插入</a>，IEEE P802.3bs 工作组</li>
@@ -1095,7 +1112,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 </div>
 
 <footer class="site-foot">
-  <p>Visual PCS · IEEE 802.3 200GBASE-R PCS 教学模型。部分过程经过简化，规范行为以标准为准。</p>
+  <p>Visual PCS · IEEE 802.3 200GBASE-R 与 800GBASE-R PCS/PMA 教学模型。</p>
 </footer>
 
 <script src="visual-pcs-assets/three.min.js"></script>
