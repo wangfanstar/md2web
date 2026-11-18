@@ -4,8 +4,9 @@
   const byId = id => document.getElementById(id);
   const get = key => byId('g800-' + key);
   const value = key => +get(key).value;
-  const tabs = ['200g', '800g'].map(rate => byId('tab-' + rate));
-  const panels = ['200g', '800g'].map(rate => byId('lab-' + rate));
+  const rates = ['200g', '800g', '1600g'];
+  const tabs = rates.map(rate => byId('tab-' + rate));
+  const panels = rates.map(rate => byId('lab-' + rate));
   const motion = matchMedia('(prefers-reduced-motion: reduce)');
   const stages = [
     ['800GMII', 'MAC 提交一条 800 Gb/s 数据流。'],
@@ -1737,24 +1738,28 @@
       panels[i].hidden = i !== index;
     });
     active = entering;
+    window.PCS1600View.setActive(index === 2);
     if (entering) {
       setupScene();
       refresh();
       if (resize) resize();
     }
-    if (historyMode && location.hash !== (entering ? '#lab-800g' : '#lab')) {
-      history.pushState(null, '', entering ? '#lab-800g' : '#lab');
+    const hash = index === 0 ? '#lab' : '#' + panels[index].id;
+    if (historyMode && location.hash !== hash) {
+      history.pushState(null, '', hash);
     }
   }
 
-  function syncHash() { openTab(location.hash === '#lab-800g' ? 1 : 0, false); }
+  function syncHash() { openTab(Math.max(0, panels.findIndex(panel => '#' + panel.id === location.hash)), false); }
 
   tabs.forEach((tab, i) => {
     tab.addEventListener('click', () => openTab(i, true));
     tab.addEventListener('keydown', e => {
       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
       e.preventDefault();
-      tabs[e.key === 'Home' ? 0 : e.key === 'End' ? 1 : 1 - i].focus();
+      const next = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1
+        : (i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+      tabs[next].focus();
     });
   });
   window.addEventListener('popstate', syncHash);
