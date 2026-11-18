@@ -1136,6 +1136,9 @@
   }
 
   function draw() {
+    const position = followActive && !motion.matches ? followU * (stages.length - 1)
+      : stage + (motion.matches ? 0 : progress);
+    get('progress').value = Math.min(position, stages.length - 1);
     if (!active || !renderer || !state) return;
     const hostBackground = getComputedStyle(get('scene')).backgroundColor;
     if (hostBackground !== lastHostBackground) {
@@ -1554,6 +1557,9 @@
 
   function describeStage() {
     buttons.forEach((button, i) => button.setAttribute('aria-current', i === stage ? 'step' : 'false'));
+    const label = '第 ' + (stage + 1) + ' / ' + stages.length + ' 阶段';
+    get('progress-label').textContent = label;
+    get('progress').setAttribute('aria-valuetext', label + ' · ' + stages[stage][0]);
     get('stage-title').textContent = (stage + 1) + ' · ' + stages[stage][0];
     get('stage-note').textContent = stages[stage][1];
     const track = value('lane');
@@ -1761,6 +1767,7 @@
   }
   fillOptions('physical', 8, '通道 ');
   fillOptions('lane', 32, 'PCS lane ');
+  get('progress').max = stages.length - 1;
   buttons = stages.map(([title, note], i) => {
     const button = document.createElement('button');
     button.className = 'btn';

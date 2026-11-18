@@ -33,6 +33,9 @@
 .g800-stage .lbl-status { font-size: 10px; }
 .g800-stages { row-gap: .35rem; }
 .g800-stages .btn { min-height: 30px; padding: 2px 8px; font-size: .8rem; }
+.g800-stage-progress { display: flex; align-items: center; gap: .75rem; margin-block: .5rem 1rem; }
+.g800-stage-progress progress { flex: 1; min-width: 4rem; height: .65rem; accent-color: var(--ink); }
+.g800-stage-progress span { font-size: .8rem; font-variant-numeric: tabular-nums; }
 .g800-detail { background: var(--panel); border: 1px solid var(--rule); padding: .75rem; border-radius: .4rem; margin-block: .75rem; }
 .g800-detail p + p { margin-top: .35rem; }
 .g800-table { overflow: auto; }

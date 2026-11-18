@@ -881,7 +881,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       </div>
       <span class="g800-help" id="g800-help">拖动平移 · 右键拖动旋转 · 滚轮缩放 · 点击数据块查看对应阶段格式 · 点击模块查看详情</span>
     </div>
-    <nav class="g800-stages" id="g800-stages" aria-label="800G 处理阶段"></nav>
+    <h3 class="rail-title" id="g800-pipeline">链路处理阶段</h3>
+    <nav class="g800-stages" id="g800-stages" aria-labelledby="g800-pipeline"></nav>
+    <div class="g800-stage-progress">
+      <progress id="g800-progress" aria-label="800G 链路阶段进度"></progress>
+      <span id="g800-progress-label"></span>
+    </div>
     <section class="g800-map" aria-labelledby="g800-map-title">
       <div class="g800-map-head">
         <h3 id="g800-map-title">MAC 字符串 → 字节 → 66b 块</h3>
