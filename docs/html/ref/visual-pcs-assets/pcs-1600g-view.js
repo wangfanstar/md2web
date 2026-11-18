@@ -354,13 +354,29 @@
         8: ['PAM4 编码', '预编码/逆预编码', 'PAM4 解码'],
         9: ['四元组锁定', '1:2 解复用', 'PCSL AM 锁定'],
         10: ['PCS AM/Deskew', '按 UM 重排'],
-        11: ['去交织/RS 解码', 'FEC 后交织'],
+        11: ['去交织', 'RS 解码', 'FEC 后交织'],
         12: ['AM 移除', '解扰'],
         14: ['逆转码', '64B/66B 解码', 'RX 速率匹配']
       }[index] || [title];
       parts.forEach((part, i) => addModule(index, y, height, part, color, flow,
         (i - (parts.length - 1) / 2) * (parts.length === 2 ? 5.2 : 4), parts.length > 1));
     });
+    const branchColor = new T.Color(0x8d72c9);
+    const branches = [
+      { y: 23, from: 7, to: 9, nodes: [[7, '图样发生器'], [9, '图样检测器']] },
+      { y: -23, from: 7, to: 9, nodes: [[8, '本地环回']] },
+      { y: -30, from: 9, to: 7, nodes: [[8, '远端环回']] }
+    ];
+    for (const { y, from, to, nodes } of branches) {
+      for (const [index, title] of nodes) addModule(index, y, 4, title, branchColor, null);
+      const points = [[x[from], 0], [x[from], y], [x[to], y], [x[to], 0]]
+        .map(([px, py]) => new T.Vector3(px, py, -7));
+      scene.add(new T.Line(new T.BufferGeometry().setFromPoints(points),
+        new T.LineBasicMaterial({ color: branchColor })));
+      const direction = Math.sign(to - from);
+      scene.add(new T.ArrowHelper(new T.Vector3(direction, 0, 0),
+        new T.Vector3(x[to] - direction * 7, y, -6.8), 5, branchColor.getHex(), 2, 1.2));
+    }
   }
 
   function disposeGroup(group) {
@@ -1002,6 +1018,42 @@
       '<p class="g800-inspect-note">PCS lane ' + (2 * pma) + ' 与 ' + (2 * pma + 1) +
       ' 的四元组交替送到 PMA lane ' + pma + '；输出 212.5 Gb/s（106.25 GBd）PAM4。相邻配对是本实验实例，标准允许任选两条 PCSL。</p></div>';
   }
+
+  function precodingSequence(lane, enabled) {
+    const bits = quartet(lane, 0).flatMap(symbol => range(10).map(i => (symbol >> i) & 1));
+    const levels = range(bits.length / 2).map(i => [0, 1, 3, 2][2 * bits[2 * i] + bits[2 * i + 1]]);
+    let previous = 0;
+    const tx = levels.map(level => {
+      previous = enabled ? (level - previous + 4) % 4 : level;
+      return previous;
+    });
+    const rx = tx.map((level, i) => enabled ? (level + (tx[i - 1] ?? 0)) % 4 : level);
+    return { levels, tx, rx };
+  }
+
+  function pmaPattern(flip) {
+    let state = 0x7fffffff;
+    const tx = range(64).map(() => {
+      const bit = (state >>> 30) & 1;
+      const feedback = ((state >>> 30) ^ (state >>> 27)) & 1;
+      state = ((state << 1) | feedback) & 0x7fffffff;
+      return bit;
+    });
+    const rx = tx.map((bit, i) => flip && i === 35 ? bit ^ 1 : bit);
+    return { tx, rx, errors: rx.filter((bit, i) => bit !== tx[i]).length };
+  }
+
+  function renderPmaSample(kind, lane, enabled) {
+    let text;
+    if (kind === 'precoding') {
+      const { levels, tx, rx } = precodingSequence(lane, enabled);
+      text = ['Gray     ' + levels.join(' '), 'TX       ' + tx.join(' '), 'RX       ' + rx.join(' ')].join('\n');
+    } else {
+      const { tx, rx, errors } = pmaPattern(enabled);
+      text = 'TX ' + tx.join('') + '\nRX ' + rx.join('') + '\n错误位数 ' + errors;
+    }
+    get('pma-sample').textContent = text;
+  }
   function viewPcsRx(lane, index) {
     const chips = range(16).map(i =>
       '<span class="g800-sym' + (locks.lanes[i] ? ' is-parity' : '') + '">PCS ' + i +
@@ -1124,9 +1176,15 @@
     else if (title === 'RX 速率匹配') body = viewRateMatch('rx');
     else if (title === 'FEC 前分配') body = viewPreFec(flow);
     else if (title === 'FEC 后交织') body = viewPostFec(flow);
-    else if (title === '去交织/RS 解码') body = viewFecDecode(flow);
+    else if (title === '去交织' || title === 'RS 解码') body = viewFecDecode(flow);
     else if (title === 'RS 编码') body = viewFEC(flow, 0);
-    else if (title === 'AM 移除') body = view257(flow, 0, '移除开头 1,028 位 AM 后恢复的 257b 块。');
+    else if (title === 'AM 移除') {
+      const pair = decodedWords.slice(2 * flow, 2 * flow + 2);
+      const bits = pair.every(Boolean) && range(514).flatMap(i => pair.flatMap(word =>
+        range(10).map(bit => (word[543 - i] >> bit) & 1))).slice(1028, 1285);
+      body = bits ? '<p>移除 1,028 位 AM 后的首个加扰 257b 块</p><div class="g800-bitrow">' +
+        bitRowFromBits(bits, -1, 0, false) + '</div>' : '<p>接收输出不可用。</p>';
+    }
     else if (kind === 'b66') body = view66(flow, 0, 0);
     else if (kind === 'b257' && index >= 12) {
       const streams = index === 13 ? [receivedBlock(0, 0), receivedBlock(1, 0)] : [receivedBlock(flow, 0)];
@@ -1152,16 +1210,28 @@
     };
     if (moduleNotes[title]) body = '<p>' + moduleNotes[title] + '</p>' + body;
     if (title === '预编码/逆预编码') {
-      const symbol = quartet(lane, 0)[0] & 3;
-      const level = [0, 1, 3, 2][(symbol >> 1) + 2 * (symbol & 1)];
-      const encoded = (level + 3) % 4;
       body = '<p>176.7.1.2 · 适用于连接 KR、CR、DR、FRn-500 PMD 的接口，或 AUI C2C/C2M 链路。' +
         '适用输出 lane 须具备预编码能力，输入 lane 的逆预编码能力可选，逐 lane 独立使能。</p>' +
-        '<p>以选中 lane 的首个位对示例。假设前一预编码电平为 1，当前 Gray 电平 ' + level +
-        ' 经模 4 减法得到 ' + encoded + '，RX 再加 1 还原为 ' + ((encoded + 1) % 4) +
-        '。主通路采用旁路。</p>';
+        '<p>选中 PCS lane 的首个四元组提供位对。TX 按模 4 减去前一输出，RX 加上前一接收电平。此开关作用于当前示例。</p>' +
+        '<label><input id="g1600-pma-sample-toggle" type="checkbox">启用预编码与逆预编码</label><pre id="g1600-pma-sample"></pre>';
+    }
+    if (title === '图样发生器' || title === '图样检测器') {
+      body = '<p>176.7.4.1 · PRBS31 发生器将图样送往接口，对端检测器比较接收位。下方展示同种子同步的 64 位样本。</p>' +
+        '<label><input id="g1600-pma-sample-toggle" type="checkbox">翻转一个接收位</label><pre id="g1600-pma-sample"></pre>';
+    }
+    if (title === '本地环回') body = '<p>176.7.2 · MAC 侧 TX → 本地 PMA 环回 → MAC 侧 RX。TX 同时继续向链路发送。</p>';
+    if (title === '远端环回') body = '<p>176.7.3 · 介质侧 RX → 远端 PMA 环回 → 介质侧 TX。RX 同时继续向 MAC 交付。</p>';
+    if (['图样发生器', '图样检测器', '本地环回', '远端环回'].includes(title)) {
+      get('popup-title').textContent = title;
+      get('popup-note').textContent = 'PMA 测试与环回支路';
     }
     get('popup-data').innerHTML = body;
+    const toggle = get('pma-sample-toggle');
+    if (toggle) {
+      const kind = title === '预编码/逆预编码' ? 'precoding' : 'pattern';
+      toggle.onchange = () => renderPmaSample(kind, lane, toggle.checked);
+      toggle.onchange();
+    }
     lastPopup = { index, flow, lane, title };
     if (!get('popup').open) get('popup').showModal();
   }
