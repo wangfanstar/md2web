@@ -93,6 +93,9 @@
   }
 
   function stageT(index) { return index / (stages.length - 1); }
+  function stageAtPath(t) {
+    return Math.max(0, Math.min(stages.length - 1, Math.round(t * (stages.length - 1))));
+  }
 
   // A MAC 66b block n is built from bytes n*8 .. n*8+7 of the cyclic payload.
   // Flow 0 takes even blocks, Flow 1 odd blocks; every four blocks in a flow
@@ -232,6 +235,32 @@
     return html;
   }
 
+  function bitRowFromBits(bits, focusStart, focusLen) {
+    let html = '';
+    bits.forEach((bit, i) => {
+      html += '<span class="g800-bit' + (bit ? ' is-one' : '') +
+        (i === 0 ? ' is-header' : '') +
+        (i >= focusStart && i < focusStart + focusLen ? ' is-focus' : '') +
+        '" title="bit ' + i + '">' + bit + '</span>';
+    });
+    return html;
+  }
+
+  function b257RowsHtml(group, flow, activePos) {
+    let html = '<div class="g800-b257-line">' +
+      '<span class="g800-b257-label"><b>257b 头</b>（1 位）</span>' +
+      '<div class="g800-b257-bits"><span class="g800-bit is-header">1</span></div></div>';
+    M.range(4).forEach(r => {
+      const child = blockInfo(group * 8 + flow + 2 * r);
+      const active = r === activePos;
+      html += '<div class="g800-b257-line' + (active ? ' is-active' : '') + '">' +
+        '<span class="g800-b257-label"><b>块 ' + (r + 1) + ' · MAC #' + child.n + '</b>' +
+        escHtml(child.ascii) + '</span>' +
+        '<div class="g800-b257-bits">' + bitsHtml(child.bytes, -1) + '</div></div>';
+    });
+    return html;
+  }
+
   function byteGroupsHtml(bytes, focusByte) {
     let html = '';
     bytes.forEach((b, i) => {
@@ -253,6 +282,186 @@
         '<code>' + M.range(8).map(k => (b >> k) & 1).join('') + '</code></div>';
     });
     return html;
+  }
+
+  function dataKindForStage(index) {
+    if (index <= 2 || index === 14) return 'b66';
+    if (index === 3 || index === 13) return 'b257';
+    if (index === 4) return 'scramble';
+    if (index === 12) return 'descramble';
+    if (index === 5 || index === 11) return 'amfec';
+    if (index === 6) return 'lane';
+    if (index === 7 || index === 8) return 'pma';
+    if (index === 9 || index === 10) return 'lock';
+    return 'bytes';
+  }
+
+  function stageDataNote(index) {
+    if (index <= 1) return 'MAC/800GMII：每 8 字节编码为 1 个 66b 块（01 + 64 位数据）。';
+    if (index === 2) return '66b 分流：偶数块进 Flow 0，奇数块进 Flow 1；每 4 个 66b 块转码为 1 个 257b 块。';
+    if (index === 3) return '256B/257B 转码：4 个 66b 块重打包为 1 个 257b 块（1 位头 + 4×64 位）。';
+    if (index === 4) return '加扰：每个 Flow 独立使用 x⁵⁸+x³⁹+1，输入/输出均为 257b 块。';
+    if (index === 5) return 'AM/FEC：AM 组 8×257 位；每 Flow 生成 A/B 两个 RS(544,514) 码字。';
+    if (index === 6) return '32 PCS lane：257b 块按 10 位符号分配到本 Flow 的 16 条 lane。';
+    if (index === 7) return '32:8 PMA：每物理通道按 F0、F0、F1、F1 复用四个 PCS 位。';
+    if (index === 8) return '8 路 PAM4：每通道 106.25 Gb/s，Gray 映射 0,1,3,2。';
+    if (index === 9) return 'RX PMA：不受限比特复用，起始槽相位可改变 RX lane 顺序。';
+    if (index === 10) return 'AM 锁定/Deskew：全部 32 lane 锁定并满足 152 ns Skew 后按 ID 重排。';
+    if (index === 11) return 'RX FEC：分离 Flow 0/1，解交织、RS 解码并移除 AM。';
+    if (index === 12) return '解扰：按相同多项式恢复 257b 块。';
+    if (index === 13) return '257b 逆转码：恢复每 Flow 的四个 66b 块及同步头。';
+    if (index === 14) return '66b 合流：按 Flow 0、Flow 1 交替恢复原始 66b 流。';
+    if (index === 15) return '64B/66B 解码：由 66b 块还原 8 字节，经 800GMII 交付。';
+    return 'RX MAC：接收端通过 800GMII 交付恢复的数据。';
+  }
+
+  function view66bHtml(block, note) {
+    const bi = blockInfo(block);
+    const start = bi.n * 8;
+    return '<div class="g800-inspect-summary">' +
+        '<span><b>MAC 66b 块</b> #' + bi.n + '</span>' +
+        '<span><b>Flow</b> ' + bi.flow + '</span>' +
+        '<span><b>257b 块</b> #' + bi.group + ' · 组内 ' + (bi.pos + 1) + '/4</span>' +
+        '<span><b>字节</b> #' + start + '–#' + (start + 7) + '</span>' +
+        '<span>“' + escHtml(bi.ascii) + '”</span></div>' +
+      '<div class="g800-inspect-section"><h4>字符 ↔ 字节</h4>' +
+        '<div class="g800-byte-row">' + byteCardsHtml(bi.bytes, -1, start) + '</div></div>' +
+      '<div class="g800-inspect-section"><h4>66b 块 · 2 位同步头 + 64 位数据</h4>' +
+        '<div class="g800-bitgrid">' +
+          '<div class="g800-bytegroup"><span class="g800-byte-label"><b>SYNC</b><span>01</span></span>' +
+            '<div class="g800-bitrow"><span class="g800-bit is-header">0</span><span class="g800-bit is-header">1</span></div></div>' +
+          byteGroupsHtml(bi.bytes, -1) +
+        '</div></div>' +
+      (note ? '<p class="g800-inspect-note">' + note + '</p>' : '');
+  }
+
+  function viewBytesHtml(block, note) {
+    const bi = blockInfo(block);
+    const start = bi.n * 8;
+    return '<div class="g800-inspect-summary">' +
+        '<span><b>MAC 66b 块</b> #' + bi.n + '</span>' +
+        '<span><b>Flow</b> ' + bi.flow + '</span>' +
+        '<span><b>字节</b> #' + start + '–#' + (start + 7) + '</span></div>' +
+      '<div class="g800-inspect-section"><h4>800GMII 交付字节</h4>' +
+        '<div class="g800-byte-row">' + byteCardsHtml(bi.bytes, -1, start) + '</div>' +
+        '<p class="g800-inspect-text">“' + escHtml(bi.ascii) + '”</p></div>' +
+      (note ? '<p class="g800-inspect-note">' + note + '</p>' : '');
+  }
+
+  function view257bHtml(block, note) {
+    const bi = blockInfo(block);
+    return '<div class="g800-inspect-summary">' +
+        '<span><b>Flow</b> ' + bi.flow + '</span>' +
+        '<span><b>257b 块</b> #' + bi.group + '</span>' +
+        '<span><b>选中 MAC 块</b> #' + bi.n + ' · 组内 ' + (bi.pos + 1) + '/4</span>' +
+        '<span>“' + escHtml(bi.ascii) + '”</span></div>' +
+      '<div class="g800-inspect-section"><h4>257b 块 · 1 位头 + 4 × 64 位</h4>' +
+        '<div class="g800-b257">' + b257RowsHtml(bi.group, bi.flow, bi.pos) + '</div></div>' +
+      '<div class="g800-inspect-section"><h4>选中 66b 块的字节</h4>' +
+        '<div class="g800-byte-row">' + byteCardsHtml(bi.bytes, -1, bi.n * 8) + '</div></div>' +
+      (note ? '<p class="g800-inspect-note">' + note + '</p>' : '');
+  }
+
+  function block257Bits(bi) {
+    const bits = [1];
+    M.range(4).forEach(r => {
+      const child = blockInfo(bi.group * 8 + bi.flow + 2 * r);
+      child.bytes.forEach(b => {
+        M.range(8).forEach(k => bits.push((b >> k) & 1));
+      });
+    });
+    return bits;
+  }
+
+  function viewScrambleHtml(block, rx) {
+    const bi = blockInfo(block);
+    const plain = block257Bits(bi);
+    const scrambled = M.scramble(plain, bi.flow);
+    const recovered = M.scramble(scrambled, bi.flow, true);
+    const focus = 1 + 64 * bi.pos;
+    const input = rx ? scrambled : plain;
+    const output = rx ? recovered : scrambled;
+    return '<div class="g800-inspect-summary">' +
+        '<span><b>Flow</b> ' + bi.flow + '</span>' +
+        '<span><b>257b 块</b> #' + bi.group + '</span>' +
+        '<span><b>选中 MAC 块</b> #' + bi.n + ' · 组内 ' + (bi.pos + 1) + '/4</span>' +
+        '<span>“' + escHtml(bi.ascii) + '”</span></div>' +
+      '<div class="g800-inspect-section"><h4>' + (rx ? '接收的加扰 257b 块' : '输入 257b 块（未加扰）') + '</h4>' +
+        '<div class="g800-b257-bits">' + bitRowFromBits(input, focus, 64) + '</div></div>' +
+      '<div class="g800-inspect-section"><h4>' + (rx ? '解扰恢复的 257b 块' : '加扰输出 257b 块') + '</h4>' +
+        '<div class="g800-b257-bits">' + bitRowFromBits(output, focus, 64) + '</div></div>' +
+      '<p class="g800-inspect-note">自同步加扰器 x⁵⁸+x³⁹+1；两个 Flow 独立运行。高亮为选中 66b 块对应的 64 位，bit 0 先发送。</p>';
+  }
+
+  function viewAmFecHtml(block) {
+    const bi = blockInfo(block);
+    const pair = words && words[bi.flow];
+    const fec = fecResults[bi.flow];
+    let symbols = '';
+    if (pair) {
+      symbols = pair[0].slice(0, 24).map((v, i) =>
+        '<span class="g800-sym" title="F' + bi.flow + '-A 符号 #' + i + '">' +
+        i + ':' + v.toString(16).toUpperCase().padStart(3, '0') + '</span>').join('');
+    }
+    return '<div class="g800-inspect-summary">' +
+        '<span><b>Flow</b> ' + bi.flow + '</span>' +
+        '<span><b>257b 块</b> #' + bi.group + '</span>' +
+        '<span><b>选中 MAC 块</b> #' + bi.n + ' · 组内 ' + (bi.pos + 1) + '/4</span></div>' +
+      '<div class="g800-inspect-section"><h4>257b 块 · 1 位头 + 4 × 64 位</h4>' +
+        '<div class="g800-b257">' + b257RowsHtml(bi.group, bi.flow, bi.pos) + '</div></div>' +
+      '<div class="g800-inspect-section"><h4>AM 组 / RS(544,514)</h4>' +
+        '<p class="g800-inspect-note">AM 组为 8×257 位，标准每 163,840 个 257b 块插入一次；每 Flow 生成 A/B 两个码字，514 个数据符号 + 30 个校验符号，最多纠正 15 个符号。</p>' +
+        '<div class="g800-sym-row"><span class="g800-sym">AM 组 · 8×257 位</span>' +
+          '<span class="g800-sym">F' + bi.flow + '-A · 544 符号</span>' +
+          '<span class="g800-sym">F' + bi.flow + '-B · 544 符号</span>' +
+          (fec ? '<span class="g800-sym">' + (fec.valid ? (fec.corrected ? 'FEC 纠正 ' + fec.errors + ' 个符号' : 'FEC 正常') : 'FEC 不可纠正') + '</span>' : '') +
+        '</div>' +
+        '<p class="g800-inspect-note">A 码字前 24 个 10 位符号（十六进制）：</p>' +
+        '<div class="g800-sym-row">' + symbols + '</div></div>';
+  }
+
+  function viewLaneHtml(lane, stageIndex) {
+    const flow = Math.floor(lane / 16);
+    const id = M.symbolAt(lane, 0);
+    const symbol = (words && words[flow] && words[flow][id.word]) ? words[flow][id.word][id.index] : 0;
+    const bits = M.range(10).map(k => (symbol >> k) & 1);
+    const physical = lanes[lane];
+    const channelLanes = physical != null && tx[physical] ? tx[physical] : [];
+    const slot = channelLanes.indexOf(lane);
+    const rxLane = rx.indexOf(lane);
+    const locked = state ? state.locked[lane] : false;
+    let pam = null;
+    if (physical != null && tx[physical] && slot >= 0) {
+      pam = M.pam4Pair(words, tx, physical, 0, 0, Math.floor(slot / 2));
+    }
+    const symbolHtml = bits.map((bit, i) =>
+      '<span class="g800-bit' + (bit ? ' is-one' : '') + '" title="bit ' + i + '">' + bit + '</span>').join('');
+    const pamHtml = pam
+      ? '<div class="g800-inspect-section"><h4>32:8 PMA / PAM4</h4>' +
+        '<p class="g800-inspect-note">物理通道 ' + physical + '，TX 时隙 ' + (slot + 1) + '/4。位对：PCS lane ' +
+        pam.ids.join(' / ') + ' → ' + pam.bits.join('') + ' → PAM4 电平 ' + pam.level +
+        '（Gray 映射 0,1,3,2）。</p></div>'
+      : '';
+    const rxHtml = stageIndex >= 9
+      ? '<div class="g800-inspect-section"><h4>RX PMA / Deskew</h4>' +
+        '<p class="g800-inspect-note">RX PMA lane ' + (rxLane < 0 ? '—' : rxLane) +
+        ' → PCS lane ' + lane + '；AM 锁定 ' + (locked ? '✓' : '—') +
+        '；align_status ' + (state && state.aligned ? 'true' : 'false') +
+        '；Skew ' + fault.skew + ' / ' + M.deskewLimit + ' ns。</p></div>'
+      : '';
+    return '<div class="g800-inspect-summary">' +
+        '<span><b>PCS lane</b> ' + lane + '</span>' +
+        '<span><b>Flow</b> ' + flow + '</span>' +
+        '<span><b>PAM4</b> ' + (physical == null ? '—' : physical) + '</span>' +
+        '<span><b>TX 时隙</b> ' + (slot < 0 ? '—' : (slot + 1) + '/4') + '</span>' +
+        '<span><b>RX PMA</b> ' + (rxLane < 0 ? '—' : rxLane) + '</span>' +
+        '<span><b>AM 锁定</b> ' + (locked ? '✓' : '—') + '</span></div>' +
+      '<div class="g800-inspect-section"><h4>10 位 PCS lane 符号</h4>' +
+        '<div class="g800-bitrow">' + symbolHtml + '</div>' +
+        '<p class="g800-inspect-note">F' + flow + '-' + ['A', 'B'][id.word] + ' 符号 #' + id.index +
+        ' · 0x' + symbol.toString(16).toUpperCase().padStart(3, '0') +
+        ' · 位 0→9：' + bits.join('') + '（bit 0 先发送）。</p></div>' +
+      pamHtml + rxHtml;
   }
 
   function renderPayloadMap() {
@@ -359,14 +568,7 @@
       const receive = rx.indexOf(lane);
       return '<span class="g800-lane-chip">RX PMA ' + (receive < 0 ? '—' : receive) + '</span>';
     }).join('');
-    const b257Rows = M.range(4).map(r => {
-      const child = blockInfo(bi.group * 8 + bi.flow + 2 * r);
-      const active = r === bi.pos;
-      return '<div class="g800-b257-line' + (active ? ' is-active' : '') + '">' +
-        '<span class="g800-b257-label"><b>块 ' + (r + 1) + ' · MAC #' + child.n + '</b>' +
-        escHtml(child.ascii) + '</span>' +
-        '<div class="g800-b257-bits">' + bitsHtml(child.bytes, -1) + '</div></div>';
-    }).join('');
+    const b257Rows = b257RowsHtml(bi.group, bi.flow, bi.pos);
     body.innerHTML =
       '<div class="g800-lens-summary">' +
         '<span><b>MAC 块</b> #' + bi.n + '</span>' +
@@ -385,10 +587,7 @@
           byteGroupsHtml(bi.bytes, focusByte) +
         '</div></div>' +
       '<div class="g800-lens-section"><h4>所在 257b 块 · 1 位头 + 4 × 64 位</h4>' +
-        '<div class="g800-b257">' +
-          '<div class="g800-b257-line"><span class="g800-b257-label"><b>257b 头</b>（1 位）</span>' +
-            '<div class="g800-b257-bits"><span class="g800-bit is-header">1</span></div></div>' +
-          b257Rows + '</div></div>' +
+        '<div class="g800-b257">' + b257Rows + '</div></div>' +
       '<div class="g800-lens-section"><h4>32 PCS lane / PAM4 映射</h4>' +
         '<p class="g800-lens-summary">Flow ' + bi.flow + ' 的 257b 块分布到 16 条 PCS lane，再经 32:8 PMA 到 8 条 PAM4 通道。</p>' +
         '<div class="g800-lane-row">' + laneChips + '</div>' +
@@ -814,27 +1013,29 @@
         const packetHit = ray.intersectObject(inst)[0];
         if (packetHit && packetHit.instanceId != null) {
           const info = meta[packetHit.instanceId];
-          if (info && info.n != null && info.n >= 0) {
+          if (info) {
             if (info.seg === 'agg' && info.phase === 'tx') {
               openBlockLens(info.n);
               return;
             }
-            if (info.seg === 'flow' && info.phase === 'tx') {
-              openBlockLens(info.n * 8 + info.flow);
-              return;
-            }
-          }
-          if (info) {
             if (info.seg === 'lane') {
               get('lane').value = info.lane;
               get('flow').value = info.lane < 16 ? 0 : 1;
-            } else {
-              get('lane').value = -1;
-              get('flow').value = info.flow;
+              refresh();
+              setStage(info.t != null ? stageAtPath(info.t) : stage);
+              showData('lane');
+              return;
             }
-            refresh();
-            showData();
-            return;
+            if (info.seg === 'flow' || info.seg === 'agg') {
+              get('lane').value = -1;
+              get('flow').value = info.seg === 'agg' ? 0 : info.flow;
+              refresh();
+              setStage(info.t != null ? stageAtPath(info.t) : stage);
+              const clickedBlock = info.n != null && info.n >= 0
+                ? (info.seg === 'flow' ? info.n * 8 + info.flow : info.n) : undefined;
+              showData(undefined, clickedBlock);
+              return;
+            }
           }
         }
         const moduleHit = ray.intersectObjects(moduleMeshes.map(module => module.box))[0];
@@ -884,7 +1085,7 @@
       const pos = new T.Vector3(px, typeof y === 'function' ? y(t) : y, z);
       const c = am ? new T.Color(theme.am).lerp(color, 0.22) : color.clone();
       pushCube(pos, am ? 2.2 : 1.75, am ? 1.0 : 0.5, am ? 0.9 : 0.55,
-        c, { seg: info, flow, n: base - i, phase });
+        c, { seg: info, flow, n: base - i, phase, t });
     }
   }
 
@@ -909,7 +1110,7 @@
       if (corruptAm && am && t > stageT(ST.demux)) c = new T.Color(theme.bad);
       if (fecError && t > stageT(10.4)) c = new T.Color(theme.bad);
       pushCube(pos, am ? 2.1 : 1.55, am ? 0.95 : 0.44, am ? 0.85 : 0.5,
-        c, { seg: 'lane', lane, flow, n: base - i, phase: 'lane' });
+        c, { seg: 'lane', lane, flow, n: base - i, phase: 'lane', t });
     }
   }
 
@@ -1362,21 +1563,34 @@
     inspectData(flow);
   }
 
-  function showData() {
+  function showData(forceKind, blockOverride) {
     setPlaying(false);
     const tracked = value('lane');
     const lane = tracked < 0 ? Math.max(0, value('flow')) * 16 : tracked;
-    const id = M.symbolAt(lane, 0);
-    const symbol = words[id.flow][id.word][id.index];
-    const bits = M.range(10).map(i => (symbol >> i) & 1).join('');
-    get('popup-title').textContent = (stage + 1) + ' · ' + stages[stage][0];
+    const flow = Math.floor(lane / 16);
+    let block = blockOverride != null ? blockOverride : (followActive ? followBlock : mapSelectedBlock);
+    if (block % 2 !== flow) block = flow;
+    const kind = forceKind === 'lane'
+      ? (stage === 7 || stage === 8 ? 'pma' : stage === 9 || stage === 10 ? 'lock' : 'lane')
+      : (forceKind || dataKindForStage(stage));
+    const note = stageDataNote(stage);
+    let body = '';
+    if (kind === 'b66') body = view66bHtml(block, note);
+    else if (kind === 'bytes') body = viewBytesHtml(block, note);
+    else if (kind === 'b257') body = view257bHtml(block, note);
+    else if (kind === 'scramble' || kind === 'descramble') body = viewScrambleHtml(block, kind === 'descramble');
+    else if (kind === 'amfec') body = viewAmFecHtml(block);
+    else body = viewLaneHtml(lane, stage);
+    const labels = {
+      b66: '66b 块', bytes: '字节 / MAC', b257: '257b 块',
+      scramble: '加扰', descramble: '解扰', amfec: 'AM / FEC',
+      lane: 'PCS lane 符号', pma: 'PAM4 时隙', lock: 'RX lane 锁定'
+    };
+    get('popup-title').textContent = (stage + 1) + ' · ' + stages[stage][0] +
+      (labels[kind] ? ' · ' + labels[kind] : '');
     get('popup-mapping').textContent = get('inspect').textContent;
-    const decoded = stage >= ST.fec;
-    let data = '发送侧示例 · F' + id.flow + '-' + ['A', 'B'][id.word] + ' 符号 #' + id.index +
-      ' · 位 0 → 9：' + bits + ' · 0x' + symbol.toString(16).padStart(3, '0').toUpperCase();
-    if (decoded && (!state.aligned || !fecResults[id.flow].valid)) data += '\n接收数据不可用。';
-    if (!get('data').hidden) data += '\n\n' + get('bits').textContent;
-    get('popup-bits').textContent = data;
+    get('popup-body').innerHTML = body;
+    get('popup-bits').textContent = '';
     if (!get('popup').open) get('popup').showModal();
   }
 
@@ -1496,7 +1710,7 @@
     resetCamera();
   };
   get('camera').onclick = resetCamera;
-  get('open-data').onclick = showData;
+  get('open-data').onclick = () => showData();
   get('follow-start').onclick = () => startFollow(+get('follow-block').value || 0);
   get('follow-stop').onclick = stopFollow;
   get('follow-block').addEventListener('keydown', event => {

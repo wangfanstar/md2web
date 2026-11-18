@@ -45,6 +45,17 @@
 .g800-popup form { float: right; margin-left: .75rem; }
 .g800-popup p { margin-top: .75rem; }
 .g800-popup pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; }
+.g800-popup { width: min(64rem, calc(100% - 2rem)); }
+.g800-inspect-body { display: grid; gap: 10px; min-width: 0; }
+.g800-inspect-summary { display: flex; flex-wrap: wrap; gap: 4px 10px; font-family: var(--f-mono); font-size: .72rem; color: var(--muted); }
+.g800-inspect-summary b { color: var(--ink); }
+.g800-inspect-section { border-top: 1px solid color-mix(in srgb, var(--rule) 72%, transparent); padding-top: 8px; }
+.g800-inspect-section h4 { margin-bottom: 6px; font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.g800-inspect-note { font-family: var(--f-mono); font-size: .68rem; color: var(--muted); line-height: 1.5; }
+.g800-inspect-text { font-family: var(--f-mono); font-size: .86rem; color: var(--ink); }
+.g800-sym-row { display: flex; flex-wrap: wrap; gap: 3px; }
+.g800-sym { font-family: var(--f-mono); font-size: .62rem; padding: 2px 4px; border-radius: 3px; border: 1px solid color-mix(in srgb, var(--rule) 70%, transparent); background: color-mix(in srgb, var(--panel) 40%, transparent); color: var(--ink-2); }
+.g800-sym.is-parity { border-style: dashed; color: var(--muted); }
 
 /* 字符/字节/块映射与放大查看：半透明玻璃面板，不遮挡 3D 场景。 */
 .g800-map { margin-block: .7rem; padding: .6rem .75rem .55rem; border: 1px solid color-mix(in srgb, var(--rule) 72%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--panel) 58%, transparent); backdrop-filter: blur(12px) saturate(1.08); }

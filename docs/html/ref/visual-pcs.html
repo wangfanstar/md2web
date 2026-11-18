@@ -879,7 +879,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         <span id="g800-follow-where"></span>
         <button type="button" class="btn" id="g800-follow-stop">停止追踪</button>
       </div>
-      <span class="g800-help" id="g800-help">拖动平移 · 右键拖动旋转 · 滚轮缩放 · 点击 TX 数据块或字符放大查看 · 点击模块查看详情</span>
+      <span class="g800-help" id="g800-help">拖动平移 · 右键拖动旋转 · 滚轮缩放 · 点击数据块查看对应阶段格式 · 点击模块查看详情</span>
     </div>
     <nav class="g800-stages" id="g800-stages" aria-label="800G 处理阶段"></nav>
     <section class="g800-map" aria-labelledby="g800-map-title">
@@ -914,7 +914,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <form method="dialog"><button class="btn" autofocus>关闭</button></form>
       <h3 id="g800-popup-title"></h3>
       <p id="g800-popup-mapping"></p>
-      <pre id="g800-popup-bits"></pre>
+      <div id="g800-popup-body" class="g800-inspect-body"></div>
+      <pre id="g800-popup-bits" hidden></pre>
     </dialog>
     <dialog class="g800-lens" id="g800-lens" aria-labelledby="g800-lens-title">
       <div class="g800-lens-inner">

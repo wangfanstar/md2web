@@ -115,6 +115,6 @@
 
   root.PCS800Model = {
     deskewLimit, mapping, receiveMap, distribute, collect, alignment,
-    symbolAt, codewords, receive, pam4Pair, sample, range
+    symbolAt, codewords, receive, pam4Pair, sample, scramble, range
   };
 })(globalThis);
