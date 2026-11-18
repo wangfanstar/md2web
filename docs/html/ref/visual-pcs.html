@@ -964,6 +964,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <label><input id="g1600-loss" type="checkbox">选中物理 lane 失锁</label>
       <label>选中物理 lane 起始符号偏移 <select id="g1600-phase"><option>0</option><option>1</option><option>2</option><option>3</option></select></label>
       <button class="btn" id="g1600-test-pattern" type="button" aria-pressed="false">Scrambled Idle</button>
+      <button class="btn" id="g1600-pma-tests" type="button">PMA 测试与环回</button>
     </div>
     <div class="g800-stage g1600-scene" id="g1600-scene" aria-label="1.6TBASE-R 收发三维通道"></div>
     <p class="fine">上排为 Flow 0（A/B），下排为 Flow 1（C/D）。通道段显示 16 条 106.25 Gb/s PCS lane 与 8 条 212.5 Gb/s（106.25 GBd）PAM4 lane。拖动平移，右键拖动旋转，滚轮朝光标缩放；点击模块或数据块查看对应阶段的数据格式。右上角状态面板显示 PCS 与 PMA 状态变量，点击可查看判定依据。</p>
@@ -975,7 +976,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <form method="dialog"><button class="btn" aria-label="关闭">关闭</button></form>
       <h3 id="g1600-popup-title"></h3><p id="g1600-popup-note"></p><div id="g1600-popup-data" class="g800-inspect-body"></div>
     </dialog>
-    <p class="fine">依据 IEEE P802.3dj/D2.0（未批准草案）第 175 条和第 176 条。示例采用 16:8 SM-PMA，按 40 位符号四元组复用。外层 RS-FEC 示例使用合成 AM，CDR、锁定和波形按教学方式示意。</p>
+    <p class="fine">依据 IEEE P802.3dj/D2.0（未批准草案）第 175 条和第 176 条。16:8 SM-PMA 按 40 位符号四元组复用。AM 采用表 175–2 的标记和图 175–4 的映射，示例展示一个带 AM 的组。CDR、锁定时序及波形采用教学示意。</p>
   </section>
 </section>
 

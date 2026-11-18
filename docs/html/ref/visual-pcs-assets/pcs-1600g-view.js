@@ -59,9 +59,6 @@
   }
   const blocks = [0, 1].map(flow => range(36).map(block => flowBlockBits(flow, block)));
   const dataBits = blocks.map(list => list.flat());
-  function amBits(flow) {
-    return range(1028).map(i => (((i * 13 + flow * 7) % 17) < 8 ? 1 : 0));
-  }
   // 图 175-3 的 am_x<119:0> 字段布局；octets 取表 175-2 中 PCS lane 0 的实测值。
   const AM_FIELDS = [
     { name: 'CM0–CM2', from: 0, bits: 24, octets: 3, note: '码字标记低位' },
@@ -79,17 +76,48 @@
   function octetBits(octets) {
     return octets.flatMap(value => range(8).map(bit => (value >> bit) & 1));
   }
-  const streams = dataBits.map((bits, flow) => amBits(flow).concat(M.scramble(bits, flow)));
-  // 码字按标准符号序号存放：cX<k>（k=0 为最后发送，k=543 为最先发送）。
-  // 175.2.4.7：mX<513-i> = tx_scrambled_am<20i+9 : 20i>。
-  const codewords = streams.flatMap(stream => [0, 1].map(word => {
-    const message = range(514).map(k => range(10).reduce((n, bit) =>
-      n | (stream[20 * (513 - k) + 10 * word + bit] << bit), 0));
-    return message.concat(window.PCS.rsParity(message));
-  }));
-  // 175.2.4.9：pcsl_i<40j+39:40j> = {cA,cB,cC,cD}<543-16j-i><9:0>，bit<0> 先发。
-  const laneSymbols = range(16).map(lane =>
-    range(34).flatMap(j => codewords.map(word => word[543 - 16 * j - lane])));
+  const amSuffixes = [
+    'D9 FE 8E 0C 26 01 71 F3', '04 67 A5 21 81 98 5A DE 7E',
+    '46 FE C1 0C A9 01 3E F3 56', '5A 84 79 7F 2F 7B 86 80 D0',
+    'E1 19 D5 AE 0D E6 2A 51 F2', 'F2 4E ED B0 2E B1 12 4F D1',
+    '3D EE BD 63 5E 11 42 9C A1', '22 32 29 89 A4 CD D6 76 5B',
+    '60 9F 1E 8C 8A 60 E1 73 75', '6B A2 8E 3B C3 5D 71 C4 3C',
+    'FA 04 6A 14 27 FB 95 EB D8', '6C 71 DD 99 C7 8E 22 66 38',
+    '18 5B 5D 09 6A A4 A2 F6 95', '14 CC CE 68 3C 33 31 97 C3',
+    'D0 B1 35 04 59 4E CA FB A6', 'B4 56 59 45 86 A9 A6 BA 79'
+  ];
+  const markers = amSuffixes.map((suffix, lane) => lane === 0 ? octetBits(AM_LANE0)
+    : octetBits(AM_LANE0.slice(0, 6).concat(suffix.split(' ').map(octet => parseInt(octet, 16)))));
+  let receivedAmStatus = null;
+  function amBits(flow) {
+    let state = 0x1ff;
+    const pad = range(flow ? 65 : 68).map(() => {
+      const bit = state & 1;
+      state = (state >> 1) | (((state ^ (state >> 5)) & 1) << 8);
+      return bit;
+    });
+    const mapped = range(3).flatMap(row => markers.flatMap(bits =>
+      bits.slice(40 * row + 20 * flow, 40 * row + 20 * flow + 20)));
+    return mapped.concat(pad, flow ? [0, 0, 0] : []);
+  }
+  // Teaching representation of a run of all-Idle control blocks.
+  const idleBlock = octetBits([0x1e, ...range(7).map(() => 0)]);
+  const idleBits = range(36).flatMap(() => [0].concat(idleBlock, idleBlock, idleBlock, idleBlock));
+  let streams, codewords, laneSymbols;
+
+  function buildTransmit() {
+    streams = dataBits.map((bits, flow) => amBits(flow).concat(M.scramble(testMode ? idleBits : bits, flow)));
+    // RS 编码器按发送顺序接收消息；码字按草案符号序号存储。
+    codewords = streams.flatMap(stream => [0, 1].map(word => {
+      const message = range(514).map(k => range(10).reduce((n, bit) =>
+        n | (stream[20 * k + 10 * word + bit] << bit), 0));
+      return message.concat(window.PCS.rsParity(message)).reverse();
+    }));
+    // 175.2.4.9：每条 lane 按 A/B/C/D 交替发送 cX<543-16j-i>。
+    laneSymbols = range(16).map(lane =>
+      range(34).flatMap(j => codewords.map(word => word[543 - 16 * j - lane])));
+  }
+  buildTransmit();
 
   function decode() {
     const lane = Math.max(0, Number(get('lane').value));
@@ -99,13 +127,14 @@
     const lost = get('loss').checked ? Math.floor(lane / 2) : -1;
     const skew = Number(get('skew').value);
     const phase = Number(get('phase').value);
+    receivedAmStatus = null;
     const slots = [];
     let symbolLocks = 0;
     physical.forEach((symbols, channel) => {
       if (channel === lost) return;
       const offset = channel === Math.floor(lane / 2) ? phase : 0;
       const input = symbols.slice(offset).concat(symbols.slice(0, offset));
-      const expected = symbols.slice(0, 8);
+      const expected = symbols.slice(0, 24);
       const boundary = input.findIndex((_, i) => expected.every((value, j) =>
         value === input[(i + j) % input.length]));
       if (boundary < 0) return;
@@ -119,8 +148,11 @@
     });
     const received = [];
     slots.forEach(symbols => {
-      const id = range(16).find(i => quartet(i, 0).every((symbol, j) => symbol === symbols[j]));
-      if (id !== undefined) received[id] = symbols;
+      const um = symbols.slice(0, 12).flatMap(symbol => range(10).map(bit => (symbol >> bit) & 1));
+      const id = markers.findIndex(marker => [64, 96].every(start =>
+        marker.slice(start, start + 24).every((bit, i) => bit === um[start + i])));
+      if (id < 0) return;
+      received[id] = symbols;
     });
     const amCount = received.filter(Boolean).length;
     locks = { physical: symbolLocks, amCount, skew, aligned: amCount === 16 && skew <= 152,
@@ -132,16 +164,17 @@
     }
     for (let i = 0; i < errorCount; i++) received[lane][4 * i] ^= i + 1;
     const words = range(4).map(word => {
-      const message = range(544).map(i => received[i % 16][4 * Math.floor(i / 16) + word]).reverse();
+      const message = range(544).map(i => received[i % 16][4 * Math.floor(i / 16) + word]);
       const result = window.PCS.rsDecode(message);
-      return result.ok && result.cw.every((n, i) => n === codewords[word][i]) ? result.cw : null;
+      return result.ok && result.cw.every((n, i) => n === codewords[word][543 - i]) ? result.cw.reverse() : null;
     });
     decodedWords = words;
     decoded = [0, 1].map(flow => {
       const pair = words.slice(2 * flow, 2 * flow + 2);
       if (pair.some(word => !word)) return null;
       const stream = range(514).flatMap(i => pair.flatMap(word =>
-        range(10).map(bit => (word[513 - i] >> bit) & 1)));
+        range(10).map(bit => (word[543 - i] >> bit) & 1)));
+      if (flow === 1) receivedAmStatus = stream.slice(1025, 1028).reverse().join('');
       return M.scramble(stream.slice(1028), flow, true);
     });
   }
@@ -318,7 +351,7 @@
         4: ['加扰', 'AM 映射/插入'],
         5: ['FEC 前分配', 'RS 编码'],
         7: ['TX AM 锁定', '40 位对齐', '四元组复用'],
-        8: ['PAM4 编码', 'PAM4 解码'],
+        8: ['PAM4 编码', '预编码/逆预编码', 'PAM4 解码'],
         9: ['四元组锁定', '1:2 解复用', 'PCSL AM 锁定'],
         10: ['PCS AM/Deskew', '按 UM 重排'],
         11: ['去交织/RS 解码', 'FEC 后交织'],
@@ -840,7 +873,7 @@
       '；各 lane 的 CM/UM/UP 取值见 Table 175–2，此处用 lane 0 的实测 octets 展示字段布局与比特顺序。UM0–UM5 承载 lane 号，接收端据此重排；rx_am_sf&lt;2:0&gt; = am_rx&lt;1027:1025&gt;（仅 Flow 1）。</p></div>' +
       '<div class="g800-inspect-section"><h4>紧随 AM 的 257b 数据块</h4>' +
       '<div class="g800-b257">' + b257Html(flow, block, -1) + '</div></div>' +
-      '<p class="g800-inspect-note">AM 在加扰后插入，不参与加扰；每 Flow 每 327,680 个 257b 块插入一次。带 AM 的组 = 1,028 位 AM + 36 个加扰数据块。三维场景中的 AM 位为教学合成序列，字段结构与比特顺序按图 175-3。</p>';
+      '<p class="g800-inspect-note">AM 在加扰后插入，不参与加扰；每 Flow 每 327,680 个 257b 块插入一次。带 AM 的组 = 1,028 位 AM + 36 个加扰数据块。三维场景按表 175-2 构造标记，按图 175-4 映射，状态字段演示值为 000。</p>';
   }
   function viewFEC(flow, block) {
     const wordA = codewords[2 * flow], wordB = codewords[2 * flow + 1];
@@ -908,9 +941,9 @@
     const labels = flow ? ['C', 'D'] : ['A', 'B'];
     const wordA = decodedWords[2 * flow], wordB = decodedWords[2 * flow + 1];
     const pairs = range(3).map(k => {
-      const a = wordA ? wordA[513 - k] : null, b = wordB ? wordB[513 - k] : null;
-      return '<tr><th scope="row">k=' + k + '</th><td>' + labels[0] + '&lt;' + (513 - k) + '&gt;</td><td>' +
-        (a == null ? '—' : '0x' + hex(a)) + '</td><td>' + labels[1] + '&lt;' + (513 - k) + '&gt;</td><td>' +
+      const a = wordA ? wordA[543 - k] : null, b = wordB ? wordB[543 - k] : null;
+      return '<tr><th scope="row">k=' + k + '</th><td>' + labels[0] + '&lt;' + (543 - k) + '&gt;</td><td>' +
+        (a == null ? '—' : '0x' + hex(a)) + '</td><td>' + labels[1] + '&lt;' + (543 - k) + '&gt;</td><td>' +
         (b == null ? '—' : '0x' + hex(b)) + '</td></tr>';
     }).join('');
     return '<div class="g800-inspect-summary"><span><b>Flow</b> ' + flow +
@@ -932,12 +965,12 @@
       return '<p>当前码字不可纠正，后交织输出无效：数据流在阶段 13 之后标红。</p>';
     }
     const rows = range(3).map(k => {
-      const a = wordA[513 - k], b = wordB[513 - k];
+      const a = wordA[543 - k], b = wordB[543 - k];
       const bits = range(10).map(bit => (a >> bit) & 1)
         .concat(range(10).map(bit => (b >> bit) & 1));
       return '<div class="g800-b257-line"><span class="g800-b257-label"><b>轮次 ' + k + '</b>' +
-        labels[0] + '&lt;' + (513 - k) + '&gt; 0x' + hex(a) + '<br>' + labels[1] + '&lt;' +
-        (513 - k) + '&gt; 0x' + hex(b) + '</span>' +
+        labels[0] + '&lt;' + (543 - k) + '&gt; 0x' + hex(a) + '<br>' + labels[1] + '&lt;' +
+        (543 - k) + '&gt; 0x' + hex(b) + '</span>' +
         '<div class="g800-b257-bits">' + bitRowFromBits(bits, -1, 0, false) + '</div></div>';
     }).join('');
     return '<div class="g800-inspect-summary"><span><b>Flow</b> ' + flow +
@@ -1009,14 +1042,13 @@
   }
   function stateValues() {
     const errors = Number(get('errors').value);
-    const lost = get('loss').checked;
     return {
       align_status: locks.aligned,
       hi_ser: errors >= 16,
       FEC_degraded_SER: errors > 0 && errors < 16,
-      tx_am_sf: lost,
-      rx_am_sf: locks.amCount < 16,
-      align_status_mux: locks.physical === 8,
+      tx_am_sf: '000',
+      rx_am_sf: receivedAmStatus ?? '—',
+      align_status_mux: true,
       all_locked_demux: locks.physical === 8 && locks.amCount === 16
     };
   }
@@ -1028,7 +1060,7 @@
       ['PCS', 'FEC_degraded_SER', '175.2.5.3：符号错误率高于降级门限但仍在纠错能力内'],
       ['PCS', 'tx_am_sf', '发送 AM 状态字段（教学：选中物理 lane 失锁时置位）'],
       ['PCS', 'rx_am_sf', 'am_rx<1027:1025>，仅 Flow 1；16 条 lane 未全锁时置位'],
-      ['PMA', 'align_status_mux', '176.4.4：8 条物理输入全部取得四元组锁定'],
+      ['PMA', 'align_status_mux', '176.4.4：TX 复用器输入已对齐，本例预先对齐'],
       ['PMA', 'all_locked_demux', '176.4.4：解复用后 16 条 PCSL 全部取得 AM 锁定']
     ].map(row => '<tr><th scope="row">' + row[0] + '</th><td>' + row[1] + '</td><td>' +
       (values[row[1]] ? 'true' : 'false') + '</td><td>' + row[2] + '</td></tr>').join('');
@@ -1040,16 +1072,20 @@
       '<p class="g800-inspect-note">本实验把「错误符号数」映射为 hi_ser / FEC_degraded_SER：1–15 个符号错误判为降级，≥16 个判为 hi_ser；失锁与偏差驱动 align_status 和 PMA 状态。标准的状态迁移与计数器门限见 175.2.6、176.4.4。</p></div>';
   }
   function viewTestPattern() {
+    if (!testMode) return '<p>已恢复正常业务数据。可在 PCS lane 模块中查看更新后的四元组。</p>';
     return '<p class="g800-inspect-note">175.2.4.11：tx_test_mode = 1 时，PCS 输出等同于 1.6TMII 持续输入 idle 控制字符时的结果（scrambled idle test pattern）。</p>' +
       '<div class="g800-inspect-section"><h4>测试图样路径</h4>' +
       '<div class="g800-sym-row">' + ['全 Idle', '64B/66B 控制块', '257b 转码', '双 Flow 加扰',
         'AM + RS-FEC', '16 PCS lane', '16:8 PMA', '8×PAM4'].map(text =>
         '<span class="g800-sym">' + text + '</span>').join('') + '</div></div>' +
       '<div class="g800-inspect-section"><h4>测试图样首块（示意）</h4>' +
-      '<div class="g800-b257-bits">' + bitRowFromBits(blocks[0][0].slice(0, 66), -1, 0, false) + '</div>' +
+      '<div class="g800-b257-bits">' + bitRowFromBits(streams[0].slice(1028, 1094), -1, 0, false) + '</div>' +
+      '<p>PCS lane 0 · A/B/C/D = ' + quartet(0, 0).map(n => hex(n)).join(' / ') +
+      '。Idle 转码使用教学样本，随后实际执行加扰、RS 编码和 lane 分发。</p>' +
       '<p class="g800-inspect-note">启用后发送链模块以琥珀色高亮，图中其余阶段仍可点击查看；再次点击按钮退出测试模式。</p></div>';
   }
   function viewBytes(flow, block, pos) {
+    if (testMode) return '<p>当前输入为 Scrambled Idle 测试序列，1.6TMII 显示 Idle 控制字符而无业务字节。</p>';
     const merged = decoded.every(Boolean) && range(36).flatMap(i =>
       [receivedBlock(0, i), receivedBlock(1, i)]);
     if (!merged) return '<p>RX 1.6TMII 示例输出不可用。</p>';
@@ -1105,16 +1141,26 @@
     else if (kind === 'rx') body = viewPcsRx(lane, index);
     else body = viewBytes(flow, 0, 0);
     const moduleNotes = {
-      'TX AM 锁定': '176.4.2.2 · 教学输入已提供合成 AM 边界。',
+      'TX AM 锁定': '176.4.2.2 · 教学输入已提供AM 边界。',
       '40 位对齐': '176.4.2.3.3 · 各 PCS lane 对齐到相对于 AM 起点的 40 位边界。',
-      '四元组锁定': '176.4.3.2.2 · 用合成 AM 样本搜寻起点。可改变选中物理 lane 的起始符号偏移，再观察锁定结果。',
-      'PCSL AM 锁定': '176.4.3.2.3 · 在解复用得到的 PCS lane 上识别合成 AM。',
-      '按 UM 重排': '175.2.5.2 · PCS 按 AM 的 UM 识别 lane 号。教学模型按收到的合成标记识别并恢复顺序。',
+      '四元组锁定': '176.4.3.2.2 · 用AM 样本搜寻起点。可改变选中物理 lane 的起始符号偏移，再观察锁定结果。',
+      'PCSL AM 锁定': '176.4.3.2.3 · 在解复用得到的 PCS lane 上识别AM。',
+      '按 UM 重排': '175.2.5.2 · PCS 按 AM 的 UM 识别 lane 号。教学模型按收到的UM 字段识别并恢复顺序。',
       'FEC 前分配': '175.2.4.7 · 每流把 10 位符号依次交替送入两条消息。',
       'FEC 后交织': '175.2.5.4 · 每流依次交替取纠错后的两条消息各一个 10 位符号。',
       'AM 移除': '175.2.5.5 · 从纠错并后交织的数据移除开头 1,028 位 AM，余下位进入解扰。'
     };
     if (moduleNotes[title]) body = '<p>' + moduleNotes[title] + '</p>' + body;
+    if (title === '预编码/逆预编码') {
+      const symbol = quartet(lane, 0)[0] & 3;
+      const level = [0, 1, 3, 2][(symbol >> 1) + 2 * (symbol & 1)];
+      const encoded = (level + 3) % 4;
+      body = '<p>176.7.1.2 · 适用于连接 KR、CR、DR、FRn-500 PMD 的接口，或 AUI C2C/C2M 链路。' +
+        '适用输出 lane 须具备预编码能力，输入 lane 的逆预编码能力可选，逐 lane 独立使能。</p>' +
+        '<p>以选中 lane 的首个位对示例。假设前一预编码电平为 1，当前 Gray 电平 ' + level +
+        ' 经模 4 减法得到 ' + encoded + '，RX 再加 1 还原为 ' + ((encoded + 1) % 4) +
+        '。主通路采用旁路。</p>';
+    }
     get('popup-data').innerHTML = body;
     lastPopup = { index, flow, lane, title };
     if (!get('popup').open) get('popup').showModal();
@@ -1248,6 +1294,7 @@
     get('loss').checked = false;
     get('test-pattern').setAttribute('aria-pressed', 'false');
     testMode = false;
+    buildTransmit();
     selectedFlow = 0;
     decode();
     select(0);
@@ -1261,6 +1308,9 @@
   get('test-pattern').onclick = () => {
     pause();
     testMode = !testMode;
+    buildTransmit();
+    decode();
+    select(stage);
     get('test-pattern').setAttribute('aria-pressed', testMode ? 'true' : 'false');
     get('popup-title').textContent = 'Scrambled Idle 测试模式';
     get('popup-note').textContent = '175.2.4.11 · tx_test_mode = ' + (testMode ? '1' : '0');
@@ -1271,6 +1321,16 @@
       buildLabels();
       draw();
     }
+  };
+  get('pma-tests').onclick = () => {
+    pause();
+    get('popup-title').textContent = 'PMA 测试与环回';
+    get('popup-note').textContent = 'IEEE P802.3dj/D2.0 · 176.7.2–4';
+    get('popup-data').innerHTML =
+      '<h4>测试图样</h4><p>图样发生器 → 实例化接口 → 对端图样检测器。根据 AUI、Inner FEC 或 PMD 接口选择适用图样。</p>' +
+      '<h4>本地环回（可选）</h4><p>MAC 侧 TX → PMA → MAC 侧 RX。正常 TX 继续向下发送。</p>' +
+      '<h4>远端环回（可选）</h4><p>介质侧 RX → PMA → 介质侧 TX。正常 RX 继续向 MAC 交付。</p>';
+    if (!get('popup').open) get('popup').showModal();
   };
   document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
 
