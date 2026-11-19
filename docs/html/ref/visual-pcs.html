@@ -2088,17 +2088,43 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     { x: [102, 106], name: '逆转码', short: 'RX 1 · 逆转码', stage: 9, view: 'r257' },
     { x: [107, 111], name: '64B/66B 解码', short: 'RX 2 · 64B/66B', stage: 9, view: 'd66' },
     { x: [112, 116], name: 'RX 1588 · 200GMII', stage: 9, view: 'ptpRx' },
-    { x: [0, 5], name: 'TX 前导码 / IPG', short: 'TX 1 · 前导码', stage: 1, view: 'frameTx', overlay: 'frame', raised: true },
-    { x: [9.1, 10.4], name: 'TX Idle 调整', short: 'TX 3 · Idle', stage: 2, view: 'idleTx', overlay: 'frame', raised: true },
-    { x: [111.1, 113], name: 'RX Idle 调整', short: 'RX 3 · Idle', stage: 9, view: 'idleRx', overlay: 'frame', raised: true },
-    { x: [113.5, 117], name: 'RX 帧提取', short: 'RX 4 · 去前导码', stage: 9, view: 'frameRx', overlay: 'frame', raised: true },
-    { x: [0, 4], name: 'A · LLR', stage: 1, view: 'ueLlr', overlay: 'llr', raised: true, heightOffset: 9, ueAnchor: 'ptpTx' },
-    { x: [4.5, 8.5], name: 'A · CBFC', stage: 1, view: 'ueCbfc', overlay: 'cbfc', raised: true, heightOffset: 9, ueAnchor: 'ptpTx' },
-    { x: [7, 11], name: 'A · CtlOS', stage: 2, view: 'ueCtl', overlay: 'ue', raised: true, heightOffset: 5.5, ueAnchor: 'b66' },
-    { x: [108, 112], name: 'B · CBFC', stage: 9, view: 'ueCbfcRx', overlay: 'cbfc', raised: true, heightOffset: 9, ueAnchor: 'ptpRx' },
-    { x: [112.5, 116.5], name: 'B · LLR', stage: 9, view: 'ueLlrRx', overlay: 'llr', raised: true, heightOffset: 9, ueAnchor: 'ptpRx' },
-    { x: [105.5, 109.5], name: 'B · CtlOS', stage: 9, view: 'ueCtlRx', overlay: 'ue', raised: true, heightOffset: 5.5, ueAnchor: 'd66' }
+    { x: [0, 5], name: 'TX 前导码 / IPG', short: 'TX 1 · 前导码', stage: 1, view: 'frameTx', overlay: 'frame' },
+    { x: [9.1, 10.4], name: 'TX Idle 调整', short: 'TX 3 · Idle', stage: 2, view: 'idleTx', overlay: 'frame' },
+    { x: [111.1, 113], name: 'RX Idle 调整', short: 'RX 3 · Idle', stage: 9, view: 'idleRx', overlay: 'frame' },
+    { x: [113.5, 117], name: 'RX 帧提取', short: 'RX 4 · 去前导码', stage: 9, view: 'frameRx', overlay: 'frame' },
+    { x: [0, 4], name: 'A · LLR', stage: 1, view: 'ueLlr', overlay: 'llr' },
+    { x: [4.5, 8.5], name: 'A · CBFC', stage: 1, view: 'ueCbfc', overlay: 'cbfc' },
+    { x: [7, 11], name: 'A · CtlOS', stage: 2, view: 'ueCtl', overlay: 'ue' },
+    { x: [108, 112], name: 'B · CBFC', stage: 9, view: 'ueCbfcRx', overlay: 'cbfc' },
+    { x: [112.5, 116.5], name: 'B · LLR', stage: 9, view: 'ueLlrRx', overlay: 'llr' },
+    { x: [105.5, 109.5], name: 'B · CtlOS', stage: 9, view: 'ueCtlRx', overlay: 'ue' }
   ];
+
+  // Fit the enabled modules into the straight MAC/PCS portions of the path.
+  P.sceneBoxes = function () {
+    var visible = P.BOXES.filter(function (box) { return P.showOverlay(box.overlay); });
+    var ranges = [
+      { from: 0, to: 15.5, order: ['ueLlr', 'ueCbfc', 'frameTx', 'ptpTx', 'ueCtl', 'b66', 'idleTx', 'b257'] },
+      { from: 101.5, to: 117, order: ['r257', 'd66', 'idleRx', 'ueCtlRx', 'ptpRx', 'frameRx', 'ueCbfcRx', 'ueLlrRx'] }
+    ];
+    ranges.forEach(function (range) {
+      var boxes = range.order.map(function (view) {
+        return visible.find(function (box) { return box.view === view; });
+      }).filter(Boolean);
+      if (!boxes.some(function (box) { return box.overlay; })) return;
+      var pitch = (range.to - range.from) / boxes.length;
+      boxes.forEach(function (box, i) {
+        var start = range.from + pitch * i;
+        var end = start + pitch;
+        visible[visible.indexOf(box)] = Object.assign({}, box, {
+          x: [start + 0.1, end - 0.1],
+          labelY: i % 2 === 0 ? 1.7 : 3.3,
+          lineLabel: true
+        });
+      });
+    });
+    return visible;
+  };
 
   P.STAGES = [
     { n: 1, side: 'TX', title: 'TX MAC 与 200GMII', span: [-1, 6],
@@ -2294,13 +2320,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     if (P.resetBoxHover) P.resetBoxHover();
     var grp = G.boxGroup = new T.Group();
     G.boxes = [];
-    P.BOXES.forEach(function (b) {
-      if (!P.showOverlay(b.overlay)) return;
-      var w = b.x[1] - b.x[0], h = b.raised ? 2.5 : b.lane ? LANE_H : AGG_H;
+    P.sceneBoxes().forEach(function (b) {
+      var w = b.x[1] - b.x[0], h = b.lane ? LANE_H : AGG_H;
       var geo = new T.BoxGeometry(w, h, DEPTH);
       var mat = new T.MeshBasicMaterial({ color: G.col.box, transparent: true, opacity: b.lane ? 0.32 : 0.5, depthWrite: false });
       var mesh = new T.Mesh(geo, mat);
-      mesh.position.set((b.x[0] + b.x[1]) / 2, b.raised ? (b.heightOffset || 4) : 0, 0);
+      mesh.position.set((b.x[0] + b.x[1]) / 2, 0, 0);
       mesh.renderOrder = 2;
       var edges = new T.LineSegments(new T.EdgesGeometry(geo),
         new T.LineBasicMaterial({ color: G.col.edge, transparent: true, opacity: 0.9 }));
@@ -2308,16 +2333,14 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       grp.add(mesh);
       G.boxes.push({ def: b, mesh: mesh, edges: edges, h: h });
     });
-    G.boxes.forEach(function (box) {
-      if (!box.def.ueAnchor) return;
-      var anchor = G.boxes.find(function (candidate) { return candidate.def.view === box.def.ueAnchor; });
-      var from = box.mesh.position.clone(), to = anchor.mesh.position.clone();
-      from.y -= box.h / 2;
-      to.y += anchor.h / 2;
-      from.z = to.z = DEPTH / 2 + 0.15;
-      var cable = new T.BufferGeometry().setFromPoints([from, to]);
-      grp.add(new T.Line(cable, new T.LineBasicMaterial({ color: G.col.ink, transparent: true, opacity: 0.68 })));
-    });
+    if (G.boxes.some(function (box) { return box.def.lineLabel; })) {
+      G.boxes.filter(function (box) { return box.def.lineLabel; }).forEach(function (box) {
+        var from = new T.Vector3(box.def.x[0] - 0.1, 0, 0);
+        var to = new T.Vector3(box.def.x[1] + 0.1, 0, 0);
+        var path = new T.BufferGeometry().setFromPoints([from, to]);
+        grp.add(new T.Line(path, new T.LineBasicMaterial({ color: G.col.edge })));
+      });
+    }
     // Ground grid and the TX | link | RX dividers.
     var gy = -LANE_H / 2 - 1.2;
     var grid = new T.GridHelper(130, 65, G.col.rule, G.col.rule);
@@ -2733,11 +2756,10 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   P.buildLabels = function () {
     var S = P.state, link = S.link, X = P.X, L = [], sel = S.selected;
     var top = 4 * P.LANE_SP + 0.4;
-    P.BOXES.forEach(function (b, i) {
-      if (!P.showOverlay(b.overlay)) return;
-      var y = b.raised ? (b.heightOffset || 4) + 1.55 : b.lane ? top + 0.3 : 1.6;
+    P.sceneBoxes().forEach(function (b, i) {
+      var y = b.labelY || (b.lane ? top + 0.3 : 1.6);
       L.push({ id: 'box' + i, html: b.view ? '<span data-view="' + b.view + '" title="How ' + b.name + ' works">' + (b.short || b.name) + '</span>' : b.short || b.name,
-               cls: 'lbl-box' + (b.view ? ' op' : ''), pos: [(b.x[0] + b.x[1]) / 2, y, 0], pri: b.raised ? 5 : b.lane ? 3 : 2 });
+               cls: 'lbl-box' + (b.view ? ' op' : ''), pos: [(b.x[0] + b.x[1]) / 2, y, 0], pri: b.lineLabel ? 5 : b.lane ? 3 : 2 });
     });
     P.STAGES.forEach(function (st) {
       L.push({ id: 'st' + st.n, html: '<b>' + st.n + '</b>', cls: 'lbl-stage' + (S.stage === st.n ? ' on' : ''),
@@ -2809,7 +2831,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 
   function stageAt(x) {
     var best = null;
-    P.BOXES.forEach(function (b) { if (!best && P.showOverlay(b.overlay) && x >= b.x[0] - 0.75 && x <= b.x[1] + 0.75) best = b; });
+    P.sceneBoxes().forEach(function (b) { if (!best && x >= b.x[0] - 0.75 && x <= b.x[1] + 0.75) best = b; });
     if (best) return best.name;
     var X = P.X;
     if (x > X.chan[0] && x < X.chan[1]) return 'Physical SerDes lane';
@@ -2951,7 +2973,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       if (down) return;
       var r = el.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top;
       var bx = boxAt(sx, sy), onBlock = blockAt(sx, sy, bx) >= 0;
-      if (onBlock) bx = null;
+      if (onBlock && !(bx && bx.def.overlay)) bx = null;
       setHoverBox(bx);
       el.style.cursor = onBlock || bx ? 'pointer' : '';
       el.title = bx ? 'How ' + bx.def.name + ' works' : '';
@@ -3005,7 +3027,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   }
   function pickAt(sx, sy) {
     var bx = boxAt(sx, sy);
-    if (bx && bx.def.raised) { P.closeInspector(); P.openView(bx.def.view); return; }
+    if (bx && bx.def.overlay) { P.closeInspector(); P.openView(bx.def.view); return; }
     var i = blockAt(sx, sy, bx);
     if (i >= 0) { open(P.packetMeta(i)); return; }
     if (bx) { P.closeInspector(); P.openView(bx.def.view); return; }
@@ -5903,7 +5925,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         if (G.failed) return;
         P.buildBoxes();
         P.buildLabels();
-        if (choice.checked) P.flyTo(P.framePose(-2, 118, 0.35));
+        if (choice.checked && S.stage == null) P.flyTo(P.framePose(-2, 118, 0.35));
       };
     });
     syncOverlays();
