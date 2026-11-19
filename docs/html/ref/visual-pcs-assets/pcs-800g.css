@@ -202,3 +202,12 @@
 @media (prefers-reduced-motion: reduce) {
   .pcs-module-demo-track li { transition: none; transform: none; }
 }
+
+.pcs-link-fault { margin-block: 1rem; padding: .8rem; border: 1px solid var(--rule); border-radius: .4rem; }
+.pcs-fault-diagram { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .5rem; align-items: center; text-align: center; }
+.pcs-fault-diagram > b, .pcs-fault-diagram p { border: 1px solid var(--rule); border-radius: .35rem; padding: .35rem; }
+.pcs-fault-diagram p { margin: .25rem 0; }
+#pcs-fault-forward { border-color: var(--bad); }
+#pcs-fault-reverse { border-color: var(--focus); }
+.pcs-fault-steps { display: flex; flex-wrap: wrap; gap: .4rem; padding: 0; list-style: none; }
+.pcs-fault-steps [aria-current="step"] { border-color: var(--focus); background: color-mix(in srgb, var(--am) 24%, var(--panel)); }

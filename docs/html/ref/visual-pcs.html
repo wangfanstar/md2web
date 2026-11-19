@@ -998,6 +998,26 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     </dialog>
     <p class="fine">依据 IEEE P802.3dj/D2.0（未批准草案）第 175 条和第 176 条。16:8 SM-PMA 按 40 位符号四元组复用。AM 采用表 175–2 的标记和图 175–4 的映射，示例展示一个带 AM 的组。CDR、锁定时序及波形采用教学示意。</p>
   </section>
+  <section class="panel pcs-link-fault" aria-labelledby="pcs-link-fault-title">
+    <header><h3 id="pcs-link-fault-title">Local Fault / Remote Fault 产生流程</h3></header>
+    <p>以下以单向接收故障为例。A、B 各代表一个完整端口，包含 RS 和 PHY。此图独立演示双端信令，可在三个速率标签下查看。</p>
+    <div class="g800-controls">
+      <label for="pcs-fault-rx">故障方向</label>
+      <select id="pcs-fault-rx">
+        <option value="B">A → B（B 接收故障）</option>
+        <option value="A">B → A（A 接收故障）</option>
+      </select>
+      <label><input type="checkbox" id="pcs-fault-return" checked> 反向链路可用</label>
+    </div>
+    <div class="pcs-fault-diagram" aria-label="双端信令方向图">
+      <b>端口 A<br><small>RS · PHY</small></b>
+      <div><p id="pcs-fault-forward"></p><p id="pcs-fault-reverse"></p></div>
+      <b>端口 B<br><small>PHY · RS</small></b>
+    </div>
+    <ol id="pcs-fault-steps" class="pcs-fault-steps" aria-label="故障信令步骤"></ol>
+    <p id="pcs-fault-detail" role="status"></p>
+    <p class="note">Sequence ordered set 的四个字符依次为 Sequence、00、00、01（Local Fault）或 Sequence、00、00、02（Remote Fault）。恢复时，RS 按故障状态机清除故障后恢复正常发送。依据 IEEE 802.3 第 46.3.4 条、表 46–5 和图 46–11。</p>
+  </section>
 </section>
 
 <article class="story">
@@ -5860,6 +5880,45 @@ globalThis.PCS.openPtpPoint = function (xMII, tx) {
   details.textContent);
   if (!dialog.open) dialog.showModal();
 };
+</script>
+
+<script>
+(function () {
+  const byId = id => document.getElementById('pcs-fault-' + id);
+  const receiver = byId('rx'), reverseLink = byId('return'), steps = byId('steps');
+  const buttons = ['检测接收故障', 'PHY 上报 Local Fault', 'RS 生成 Remote Fault', '对端 RS 响应'].map((label, index) => {
+    const item = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn';
+    button.textContent = (index + 1) + ' · ' + label;
+    button.onclick = () => render(index);
+    item.append(button);
+    steps.append(item);
+    return button;
+  });
+  function render(index) {
+    const rx = receiver.value, peer = rx === 'B' ? 'A' : 'B';
+    const viable = reverseLink.checked;
+    const forward = rx === 'B' ? '→' : '←';
+    const reverse = rx === 'B' ? '←' : '→';
+    const details = [
+      rx + ' 的 PHY 检测到接收路径异常，例如 PCS 无法取得必需的对齐。故障方向为 ' + peer + ' → ' + rx + '。',
+      rx + ' 的 PHY 经本地 xMII 向 ' + rx + ' 的 RS 指示 Local Fault（01）。这是端口内部上报。',
+      rx + ' 的 RS 确认 Local Fault 后停止发送 MAC 数据，持续向 ' + peer + ' 发送 Remote Fault（02）。',
+      viable
+        ? peer + ' 的 RS 确认 Remote Fault 后停止发送 MAC 数据，持续发送 Idle。这表示 ' + peer + ' 的发送方向在对端发生了故障。'
+        : '反向路径也不可用，' + peer + ' 无法通过该路径收到这份 Remote Fault。它仍可能独立检测自己的接收故障。'
+    ];
+    byId('forward').textContent = forward + ' ' + (index === 3 && viable ? '发送 Idle（故障路径）' : '接收路径异常');
+    byId('reverse').textContent = reverse + ' ' + (index < 2 ? (viable ? '反向路径可用' : '反向路径异常')
+      : viable ? 'Remote Fault（02）' : 'Remote Fault 无法到达');
+    buttons.forEach((button, i) => button.setAttribute('aria-current', index === i ? 'step' : 'false'));
+    byId('detail').textContent = details[index];
+  }
+  receiver.onchange = reverseLink.onchange = () => render(0);
+  render(0);
+})();
 </script>
 <script src="visual-pcs-assets/pcs-module-demo.js"></script>
 <script src="visual-pcs-assets/pcs-800g-model.js"></script>
