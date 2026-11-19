@@ -57,6 +57,40 @@
   const blockSize = 257;
   const markerSize = 8 * blockSize;
   const markerOffset = 0;
+  const symbolsPerWord = 514;
+  const frameBits = 20 * symbolsPerWord;
+  const dataGroups = (frameBits - markerSize) / blockSize;
+
+  function characterLocations(offset) {
+    const block = Math.floor(offset / 8);
+    const flow = block % 2;
+    const group = Math.floor(block / 8);
+    const frame = Math.floor(group / dataGroups);
+    const start = markerSize + (group % dataGroups) * blockSize +
+      1 + (Math.floor(block / 2) % 4) * 64 + (offset % 8) * 8;
+    return range(8).map(bit => {
+      const position = start + bit;
+      const index = Math.floor(position / 20);
+      const word = Math.floor(position % 20 / 10);
+      const row = Math.floor(index / 8);
+      const lane = flow * 16 + (index % 8) * 2 + ((word + row) % 2);
+      return { frame, lane, row, word, index, bit: position % 10 };
+    });
+  }
+
+  function symbolSources(lane, row, frame = 0) {
+    const { flow, index, word } = symbolAt(lane, row);
+    if (index >= symbolsPerWord) return range(10).map(() => ({ kind: 'parity' }));
+    return range(10).map(bit => {
+      const position = 20 * index + 10 * word + bit - markerSize;
+      if (position < 0) return { kind: 'am' };
+      const group = frame * dataGroups + Math.floor(position / blockSize);
+      const payloadBit = position % blockSize - 1;
+      if (payloadBit < 0) return { kind: 'header' };
+      const block = group * 8 + 2 * Math.floor(payloadBit / 64) + flow;
+      return { kind: 'data', offset: block * 8 + Math.floor(payloadBit % 64 / 8), bit: payloadBit % 8 };
+    });
+  }
   const umOctets = [8, 9, 10, 12, 13, 14];
   // IEEE 802.3df Tables 172–2 and 172–3, with the common octets stored separately.
   const markerVariables = [
@@ -120,13 +154,14 @@
     return { bytes, encoded, transcoded, scrambled, recovered, reverse, decoded };
   }
 
-  function codewords(codec, input = 'Visual PCS 800G ', idle = false) {
+  function codewords(codec, input = 'Visual PCS 800G ', idle = false, frame = 0) {
     return range(2).map(flow => {
       // Teaching control-block representation for an all-Idle input.
       const idlePayload = byteBits(0x1e).concat(range(56).fill(0));
       const idleBlock = [0].concat(idlePayload, idlePayload, idlePayload, idlePayload);
-      const data = scramble(range(40).flatMap(group => idle ? idleBlock
-        : sample(flow, input, undefined, group).transcoded), flow);
+      const preceding = frame * dataGroups;
+      const data = scramble(range(preceding + dataGroups).flatMap(group => idle ? idleBlock
+        : sample(flow, input, undefined, group).transcoded), flow).slice(preceding * blockSize);
       // Place the IEEE lane markers in a shortened teaching frame with illustrative padding.
       const marker = range(markerSize).map(i => ((i + flow) % 5 < 2 ? 1 : 0));
       for (const local of range(16)) {
@@ -200,6 +235,6 @@
 
   root.PCS800Model = {
     deskewLimit, mapping, receiveMap, distribute, collect, alignment,
-    symbolAt, laneMarkers, codewords, receive, pam4Pair, sample, scramble, range, markerOffset, markerSize, messageBits
+    symbolAt, characterLocations, symbolSources, laneMarkers, codewords, receive, pam4Pair, sample, scramble, range, markerOffset, markerSize, messageBits
   };
 })(globalThis);

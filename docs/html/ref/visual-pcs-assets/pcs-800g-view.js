@@ -89,7 +89,7 @@
   let transportFailed = false;
   let linkGroup, theme = {};
   let labelHost, labelItems = [];
-  let followActive = false, followBlock = 0, followU = 0, followInfo = null;
+  let followActive = false, followBlock = 0, followChar = -1, followU = 0, followInfo = null;
   let followTags = [], followTagHost, followTagEls = [], followPaper = null;
   let mapSelectedBlock = 0, mapSelectedChar = -1;
   let lensBlock = 0, lensOpen = false, lensZoom = 1;
@@ -215,7 +215,7 @@
     updateFollowBar();
   }
 
-  function startFollow(block) {
+  function startFollow(block, character = -1) {
     followBlock = Math.max(0, Math.floor(Number(block) || 0));
     followU = 0;
     followActive = true;
@@ -228,7 +228,8 @@
     get('flow').value = -1;
     get('lane').value = -1;
     mapSelectedBlock = followBlock;
-    mapSelectedChar = -1;
+    followChar = character;
+    mapSelectedChar = character;
     markMapSelection();
     syncFollowUI();
     setPlaying(true);
@@ -462,10 +463,20 @@
         '<div class="g800-sym-row">' + symbols + '</div></div>';
   }
 
-  function viewLaneHtml(lane, stageIndex) {
+  function viewLaneHtml(lane, stageIndex, row = 0, frame = 0) {
     const flow = Math.floor(lane / 16);
-    const id = M.symbolAt(lane, 0);
-    const symbol = (words && words[flow] && words[flow][id.word]) ? words[flow][id.word][id.index] : 0;
+    const id = M.symbolAt(lane, row);
+    const frameWords = frame ? M.codewords(window.PCS, payload(), idleMode, frame) : words;
+    const symbol = frameWords[flow][id.word][id.index];
+    const sourceHtml = idleMode ? '<p>当前为 Scrambled Idle，符号没有 MAC 字符来源。</p>'
+      : '<p>以下是加扰前的源位位置，数字为 MAC 字节的绝对编号。</p><div class="g800-sym-row">' +
+        M.symbolSources(lane, row, frame).map((source, bit) => {
+          const text = payload();
+          const label = source.kind === 'data'
+            ? '#' + source.offset + ' “' + escHtml(text[source.offset % text.length]) + '” bit ' + source.bit
+            : { am: 'AM 组', header: '257b 头', parity: 'RS 校验' }[source.kind];
+          return '<span class="g800-sym">' + bit + ' → ' + label + '</span>';
+        }).join('') + '</div>';
     const bits = M.range(10).map(k => (symbol >> k) & 1);
     const physical = lanes[lane];
     const channelLanes = physical != null && tx[physical] ? tx[physical] : [];
@@ -474,7 +485,7 @@
     const locked = state ? state.locked[lane] : false;
     let pam = null;
     if (physical != null && tx[physical] && slot >= 0) {
-      pam = M.pam4Pair(words, tx, physical, 0, 0, Math.floor(slot / 2));
+      pam = M.pam4Pair(frameWords, tx, physical, row, 0, Math.floor(slot / 2));
     }
     const symbolHtml = bits.map((bit, i) =>
       '<span class="g800-bit' + (bit ? ' is-one' : '') + '" title="bit ' + i + '">' + bit + '</span>').join('');
@@ -503,7 +514,7 @@
         '<p class="g800-inspect-note">F' + flow + '-' + ['A', 'B'][id.word] + ' 符号 #' + id.index +
         ' · 0x' + symbol.toString(16).toUpperCase().padStart(3, '0') +
         ' · 位 0→9：' + bits.join('') + '（bit 0 先发送）。</p></div>' +
-      pamHtml + rxHtml;
+      sourceHtml + pamHtml + rxHtml;
   }
 
   function renderPayloadMap() {
@@ -610,6 +621,14 @@
       const receive = rx.indexOf(lane);
       return '<span class="g800-lane-chip">RX PMA ' + (receive < 0 ? '—' : receive) + '</span>';
     }).join('');
+    const txRows = idleMode ? '<p>Scrambled Idle 测试模式下没有业务字符映射。</p>'
+      : bi.bytes.map((byte, i) => {
+        const locations = M.characterLocations(start + i);
+        return '<p class="g800-inspect-note"><b>#' + (start + i) + ' “' +
+          escHtml(bi.ascii[i]) + '” · FEC 帧 #' + locations[0].frame + '</b> · ' +
+          locations.map(({ lane, row, bit }, k) =>
+            'b' + k + '→PCS ' + lane + '/行 ' + row + '/b' + bit).join(' · ') + '</p>';
+      }).join('');
     const b257Rows = b257RowsHtml(bi.group, bi.flow, bi.pos);
     body.innerHTML =
       '<div class="g800-lens-summary">' +
@@ -630,6 +649,7 @@
         '</div></div>' +
       '<div class="g800-lens-section"><h4>所在 257b 块 · 1 位头 + 4 × 64 位</h4>' +
         '<div class="g800-b257">' + b257Rows + '</div></div>' +
+      '<div class="g800-lens-section"><h4>每个 MAC 字符到 TX PCS 符号</h4>' + txRows + '</div>' +
       '<div class="g800-lens-section"><h4>32 PCS lane / PAM4 映射</h4>' +
         '<p class="g800-lens-summary">Flow ' + bi.flow + ' 的 257b 块分布到 16 条 PCS lane，再经 32:8 PMA 到 8 条 PAM4 通道。</p>' +
         '<div class="g800-lane-row">' + laneChips + '</div>' +
@@ -1226,12 +1246,12 @@
               openBlockLens(info.n);
               return;
             }
-            if (info.seg === 'lane') {
+            if (info.seg === 'lane' || (info.seg === 'follow' && info.lane != null)) {
               get('lane').value = info.lane;
               get('flow').value = info.lane < 16 ? 0 : 1;
               refresh();
               setStage(info.t != null ? stageAtPath(info.t) : stage);
-              showData('lane');
+              showData('lane', undefined, info.row, info.frame);
               return;
             }
             if (info.seg === 'flow' || info.seg === 'agg') {
@@ -1337,7 +1357,7 @@
       if (corruptAm && am && t > stageT(ST.demux)) c.set(theme.bad);
       if (fecError && t > stageT(10.4)) c.set(theme.bad);
       pushCube(pos, am ? 2.1 : 1.55, am ? 0.39 : 0.32, am ? 0.34 : 0.29,
-        c, { seg: 'lane', lane, flow, n: base - i, phase: 'lane', t });
+        c, { seg: 'lane', lane, flow, n: base - i, row: i, phase: 'lane', t });
     }
   }
 
@@ -1625,16 +1645,24 @@
         'F' + flow + ' 257b #' + followInfo.group + suffix);
     } else if (u < stageT(11)) {
       const avg = new T.Vector3();
-      followLaneList(flow).forEach(lane => {
-        const pos = curves[lane].getPointAt(u);
+      if (idleMode) return;
+      const first = followChar >= 0 ? followChar : followInfo.n * 8;
+      const size = followChar >= 0 ? 1 : 8;
+      const symbols = new Map();
+      M.range(size).flatMap(i => M.characterLocations(first + i)).forEach(location => {
+        symbols.set(location.lane + ':' + location.row, location);
+      });
+      const firstRow = symbols.values().next().value.row;
+      symbols.forEach(({ lane, row, frame }) => {
+        const pos = sampleLane(lane, u, new T.Vector3());
+        pos.x -= (row - firstRow) * 2.9;
         pushCube(pos, 2.8, 1.25, 1.1,
-          color, { seg: 'follow', lane, flow, n: followInfo.n }, true);
+          color, { seg: 'follow', lane, flow, row, frame, t: u }, true);
         avg.add(pos);
       });
-      avg.multiplyScalar(1 / 16);
-      followTag(avg, 'F' + flow + ' · 16 条 PCS lane' +
-        (u < stageT(9) ? ' · PAM4 0–7' : '') +
-        (bad ? ' · 失锁' : ''), color);
+      avg.multiplyScalar(1 / symbols.size);
+      followTag(avg, 'F' + flow + ' · ' + symbols.size + ' 个 PCS 符号' +
+        (size === 1 ? ' · MAC 字节 #' + first : '') + (bad ? ' · 失锁' : ''), color);
     } else if (u < stageT(14)) {
       marker(new T.Vector3(x[0] + u * SPAN, flowRxY(flow, u), 0), 4.2, 1.8, 1.5,
         'RX F' + flow + ' 257b #' + followInfo.group + suffix);
@@ -1919,7 +1947,7 @@
     localLoop: '173.5.9', remoteLoop: '173.5.10', patternTx: '173.5.11', patternRx: '173.5.11'
   };
 
-  function showData(forceKind, blockOverride) {
+  function showData(forceKind, blockOverride, row, frame) {
     setPlaying(false);
     if (forceKind === 'ptpTx' || forceKind === 'ptpRx') {
       window.PCS.openPtpPoint('800GMII', forceKind === 'ptpTx');
@@ -1932,7 +1960,7 @@
     if (block % 2 !== flow) block = flow;
     const detail = operationDetail(forceKind, lane, flow);
     const kind = forceKind === 'lane'
-      ? (stage === 7 || stage === 8 ? 'pma' : stage === 9 || stage === 10 ? 'lock' : 'lane')
+      ? (row != null ? 'lane' : stage === 7 || stage === 8 ? 'pma' : stage === 9 || stage === 10 ? 'lock' : 'lane')
       : dataKindForStage(stage);
     const note = stageDataNote(stage);
     let body = '';
@@ -1941,7 +1969,7 @@
     else if (kind === 'b257') body = view257bHtml(block, note);
     else if (kind === 'scramble' || kind === 'descramble') body = viewScrambleHtml(block, kind === 'descramble');
     else if (kind === 'amfec') body = viewAmFecHtml(block);
-    else body = viewLaneHtml(lane, stage);
+    else body = viewLaneHtml(lane, stage, row, frame);
     if (idleMode && ['b66', 'bytes', 'b257', 'scramble', 'descramble'].includes(kind)) {
       body = '<p>当前为 Scrambled Idle 教学测试。可在 PCS lane 模块查看当前发送码字符号。</p>';
     }
@@ -2121,7 +2149,7 @@
   get('lens-follow').onclick = () => {
     const block = lensBlock;
     closeBlockLens();
-    startFollow(block);
+    startFollow(block, mapSelectedChar);
   };
   get('lens-zoom-in').onclick = () => setLensZoom(lensZoom + 0.12);
   get('lens-zoom-out').onclick = () => setLensZoom(lensZoom - 0.12);
