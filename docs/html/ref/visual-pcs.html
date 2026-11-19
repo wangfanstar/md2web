@@ -755,6 +755,14 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <span class="keys" aria-hidden="true">快捷键：P 暂停 · . 单步 · 0–7 选择通道 · Enter 查看 · Esc 关闭</span>
   </div>
 
+  <div class="g800-controls" aria-label="200G 演示模式">
+    <label for="pcs-signal-mode">演示模式</label>
+    <select id="pcs-signal-mode">
+      <option value="data">数据传输</option>
+      <option value="fault">Local / Remote Fault</option>
+      <option value="eee">EEE 低功耗（LPI）</option>
+    </select>
+  </div>
   <div class="viewport" id="viewport">
     <div class="legend" aria-label="图例">
       <span><i class="lg-cube"></i>PCS 通道中的数据单元</span>
@@ -777,6 +785,16 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <noscript><p class="noscript">通道实验需要 JavaScript 和 WebGL。</p></noscript>
   </div>
 
+  <section id="pcs-signal-controls" class="pcs-frame-route" hidden aria-label="信令演示控制">
+    <div class="g800-controls">
+      <button type="button" class="btn" data-signal-play>播放</button>
+      <button type="button" class="btn" data-signal-next>下一步</button>
+      <button type="button" class="btn" data-signal-reset>重置</button>
+    </div>
+    <ol class="pcs-fault-steps" data-signal-steps></ol>
+    <p data-signal-detail role="status"></p>
+    <p class="note" data-signal-source></p>
+  </section>
   <section class="lens" id="lens" aria-labelledby="lens-title">
     <div class="lens-bar">
       <h3 id="lens-title">位级视图</h3>
@@ -5923,6 +5941,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var dt = Math.min((now - (last || now)) / 1000, 0.1);
     last = now;
     if (document.getElementById('lab-200g').hidden) return;
+    if (P.renderSignalScene && P.renderSignalScene(now, visible && !document.hidden)) return;
     if (S.playing) {
       S.u += dt * VEL * S.speed;
       S.stepTo = null;
@@ -6027,7 +6046,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     new MutationObserver(themeChanged).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] });
     new IntersectionObserver(function (es) { visible = es[0].isIntersecting; }, { rootMargin: '120px' }).observe(vp);
     if (!G.failed) requestAnimationFrame(frame);
-    else setInterval(function () { if (document.getElementById('lab-200g').hidden) return; if (S.playing) { P.tick(); } P.processAms(); P.renderDiag(); P.drawScope(); P.viewTick(0.1); S.u += 0.25 * S.speed; }, 100);
+    else setInterval(function () { if (document.getElementById('lab-200g').hidden) return; if (P.renderSignalScene && P.renderSignalScene(performance.now(), !document.hidden)) return; if (S.playing) { P.tick(); } P.processAms(); P.renderDiag(); P.drawScope(); P.viewTick(0.1); S.u += 0.25 * S.speed; }, 100);
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', P.boot);
@@ -6186,6 +6205,7 @@ globalThis.PCS.openPtpPoint = function (xMII, tx) {
   </div>
 </dialog>
 <script src="visual-pcs-assets/pcs-ue-demo.js"></script>
+<script src="visual-pcs-assets/pcs-signal-scene.js"></script>
 <dialog class="opview" id="pcs-frame-boundary" aria-labelledby="pcs-frame-boundary-title">
   <div class="opv-inner">
     <header class="opv-head">

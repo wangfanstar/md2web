@@ -261,3 +261,13 @@
 .pcs-scene-options label { display: inline-flex; align-items: center; gap: .2rem; white-space: nowrap; cursor: pointer; }
 .pcs-scene-options input { accent-color: var(--focus); }
 .pcs-zoom-rail { display: flex; flex-wrap: wrap; gap: .4rem; margin-block: .6rem; }
+
+.pcs-signal-mode > :is(.toolbar, .lanepick, .pcs-zoom-rail, [data-pcs-route], #lens, #pipeline, #rail, #stage-detail, #mapping),
+.pcs-signaling > :is(.scene-labels, .legend, .follow-tags, .follow-bar, .inspector, .vp-help, .vp-click, .lab-hint) { display: none; }
+.pcs-signaling > canvas { pointer-events: none; }
+.pcs-signal-labels { position: absolute; inset: 0; z-index: 3; pointer-events: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-content: center; text-align: center; gap: .25rem; padding: .4rem; }
+.pcs-signal-labels[hidden] { display: none; }
+.pcs-signal-labels span, .pcs-signal-labels strong { color: var(--ink); background: var(--panel); border: 1px solid var(--rule); border-radius: .3rem; padding: .22rem .35rem; font-size: clamp(.65rem, 1.25vw, .9rem); }
+.pcs-signal-labels strong { border-color: var(--focus); grid-column: 1 / -1; }
+.pcs-signal-labels.is-projected { display: block; padding: 0; }
+.pcs-signal-labels.is-projected span, .pcs-signal-labels.is-projected strong { position: absolute; transform: translate(-50%, -50%); max-width: 23%; }
