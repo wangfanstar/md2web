@@ -271,3 +271,7 @@
 .pcs-signal-labels strong { border-color: var(--focus); grid-column: 1 / -1; }
 .pcs-signal-labels.is-projected { display: block; padding: 0; }
 .pcs-signal-labels.is-projected span, .pcs-signal-labels.is-projected strong { position: absolute; transform: translate(-50%, -50%); max-width: 23%; }
+
+.legend .pcs-idle-key[hidden] { display: none; }
+.pcs-idle-key i { inline-size: .6rem; block-size: .6rem; background: var(--good); }
+.pcs-idle-key.encoded i { background: var(--am); }

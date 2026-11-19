@@ -770,6 +770,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <span><i class="lg-ring"></i>AM 锁定</span>
       <span><i class="lg-sheath"></i>物理 SerDes 通道</span>
       <span><i class="lg-bad"></i>错误</span>
+      <span class="pcs-idle-key" hidden><i></i>xMII 0x07 Idle</span>
+      <span class="pcs-idle-key encoded" hidden><i></i>66b 0x1E Idle 块</span>
       <fieldset class="pcs-scene-options">
         <legend>显示叠加模块</legend>
         <label><input type="checkbox" data-pcs-overlay="llr"> LLR</label>
@@ -833,17 +835,17 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <li class="pcs-frame-route-dir">TX</li>
       <li><button type="button" class="btn" data-view="frameTx">1 · 前导码 / IPG</button></li>
       <li><button type="button" class="btn" data-view="b66">2 · 64B/66B 编码</button></li>
-      <li><button type="button" class="btn" data-view="idleTx">3 · Idle 调整</button></li>
+      <li><button type="button" class="btn" data-view="idleTx">3 · 66b Idle 块增删</button></li>
       <li><button type="button" class="btn" data-view="b257">4 · 256B/257B 转码</button></li>
     </ol>
     <ol aria-label="接收顺序">
       <li class="pcs-frame-route-dir">RX</li>
       <li><button type="button" class="btn" data-view="r257">1 · 257b 逆转码</button></li>
       <li><button type="button" class="btn" data-view="d66">2 · 64B/66B 解码</button></li>
-      <li><button type="button" class="btn" data-view="idleRx">3 · Idle 调整</button></li>
+      <li><button type="button" class="btn" data-view="idleRx">3 · 还原 / 补偿 Idle</button></li>
       <li><button type="button" class="btn" data-view="frameRx">4 · 去前导码 / 帧提取</button></li>
     </ol>
-    <p class="note">沿箭头阅读。Idle 调整属于 PCS 的编码／解码与速率匹配环节，图中单列以便查看。</p>
+    <p class="note">TX 先由 MAC / RS 在 200GMII 上产生 0x07 Idle，再编码成 66b 控制块。RX 在解码后还原 0x07 Idle，并按需补偿 AM 移除。图中将 PCS 速率匹配单列为教学步骤。</p>
   </section>
 
   <section class="pcs-frame-route" data-pcs-route="ue" aria-label="UE 1.1 链路控制演示" hidden>
@@ -1136,7 +1138,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   <h2 id="tx-title">发送：从 xMII 到 PCS lane</h2>
   <p>以下 200GBASE-R 流程按 IEEE 802.3 第 119 条展开。800G 与 1.6T 的分流位置和符号分配见本节对照。</p>
   <ol class="steps">
-    <li><b>64B/66B 编码</b>将来自 200GMII 的每 8 字节编码成一个 66 位块。在这里删除 Idle，为对齐标记腾出空间。</li>
+    <li><b>64B/66B 编码</b>将来自 200GMII 的每 8 字节及控制指示编码成一个 66 位块。全 Idle 传输形成 0x1E 控制块。PCS 速率匹配可按规则删减 Idle，为对齐标记腾出空间。</li>
     <li><b>转码</b>将四个 66 位块压缩打包成一个 256B/257B 块。数据内容相同。这一步是在重新打包 64B/66B 块。</li>
     <li><b>加扰</b> 257 位块。</li>
     <li><b>插入对齐标记</b>。每条 PCS 通道各有一个标记，成组插入。插入点在加扰之后，因此仍能从原始通道数据中识别标记。</li>
@@ -2602,7 +2604,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   // Boundaries sit at the middle of the box that does the change (content.js).
   var SEGS = [
     { x: [-2, 7], kind: 'mii', side: 'tx' },
-    { x: [7, 12.5], kind: 'b66', side: 'tx' },
+    { x: [7, 9.75], kind: 'b66', side: 'tx', idle: 'block' },
+    { x: [9.75, 12.5], kind: 'b66', side: 'tx' },
     { x: [12.5, 17.5], kind: 'b257', side: 'tx' },
     { x: [17.5, 21.5], kind: 'b257', side: 'tx', scr: true },
     { x: [21.5, 25.5], kind: 'b257', side: 'tx', scr: true, am: true },
@@ -2612,12 +2615,37 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     { x: [95.5, 99.5], kind: 'b257', side: 'rx', scr: true },
     { x: [99.5, 104], kind: 'b257', side: 'rx' },
     { x: [104, 109], kind: 'b66', side: 'rx' },
-    { x: [109, 118], kind: 'mii', side: 'rx' }
+    { x: [109, 112.05], kind: 'mii', side: 'rx' },
+    { x: [112.05, 118], kind: 'mii', side: 'rx', idle: 'character' }
   ];
   P.ENC_X = 28.75;   // middle of RS encode: parity appears here
   P.DEC_X = 89.25;   // middle of RS decode: parity is dropped here
   P.SEGS = SEGS;
   P.U257 = U257; P.UPAIR = UPAIR;
+
+  P.aggregateSegments = function () {
+    if (!P.showOverlay('ue') && !P.showOverlay('frame')) return SEGS;
+    var boxes = P.sceneBoxes();
+    var middle = function (view, fallback) {
+      var box = boxes.find(function (entry) { return entry.view === view; });
+      return box ? (box.x[0] + box.x[1]) / 2 : fallback;
+    };
+    var encode = middle('b66', 7), transcode = middle('b257', 12.5);
+    var txMatch = middle('idleTx', (encode + transcode) / 2);
+    var reverse = middle('r257', 104), decode = middle('d66', 109);
+    var rxMatch = middle('idleRx', (decode + 118) / 2);
+    return [
+      { x: [-2, encode], kind: 'mii', side: 'tx' },
+      { x: [encode, txMatch], kind: 'b66', side: 'tx', idle: 'block' },
+      { x: [txMatch, transcode], kind: 'b66', side: 'tx' },
+      { x: [transcode, 17.5], kind: 'b257', side: 'tx' }
+    ].concat(SEGS.slice(4, -4), [
+      { x: [99.5, reverse], kind: 'b257', side: 'rx' },
+      { x: [reverse, decode], kind: 'b66', side: 'rx' },
+      { x: [decode, rxMatch], kind: 'mii', side: 'rx' },
+      { x: [rxMatch, 118], kind: 'mii', side: 'rx', idle: 'character' }
+    ]);
+  };
   // Codeword cube c spans this fraction of its pair's track.
   var ROW_POS = P.ROW_CUBES.map(function (r) { return [r[0] / P.CW_N, r[1] / P.CW_N]; });
 
@@ -2632,7 +2660,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   function drawAggregate() {
     var S = P.state, last = S.lastTick, uncFrac = last && last.codewords ? last.uncorrectable / last.codewords : 0;
     var sel = S.selected < 0, lag = P.rxLag();
-    SEGS.forEach(function (sg) {
+    P.aggregateSegments().forEach(function (sg) {
       var rxDead = sg.side === 'rx' && !S.align;
       var U = sg.side === 'rx' ? S.u - lag : S.u;
       if (sg.kind === 'mii' || sg.kind === 'b66') {
@@ -2640,12 +2668,15 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         for (var t = lo; t <= hi; t++) {
           var pos = U - t * U66, sl = P.slot66(t), state = '';
           var mii = sg.kind === 'mii';
-          // Idles hold the room the AM group will need. The TX MAC sends them;
-          // rate matching deletes them before 64B/66B encode, so a gap travels on.
+          // The lab reserves AM slots for Idle adjustment. Show the xMII
+          // characters, their encoded TX block, and RX compensation separately.
           if (sl.idle) {
-            if (!(mii && sg.side === 'tx')) continue;
-            put(pos, 0, 0, U66 * 0.7, 0.22, 0.42, dim(c.copy(G.col.rule), sel, 0.45),
-              { fam: 'b66', seg: 'mii', t: t, x: pos, state: '' });
+            var idle = sg.idle || (mii && sg.side === 'tx' ? 'character' : '');
+            if (!idle || rxDead) continue;
+            var encoded = idle === 'block';
+            put(pos, 0, 0, U66 * 0.84, encoded ? 0.55 : 0.3, encoded ? 1.12 : 0.65,
+              dim(c.copy(encoded ? G.col.am : G.col.good), sel, 0.45),
+              { fam: 'b66', seg: sg.kind, t: t, x: pos, state: '' });
             continue;
           }
           c.copy(mii ? G.col.muted : G.col.ink);
@@ -2922,7 +2953,9 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     if (m.fam === 'b66') {
       var sl = P.slot66(m.t);
       if (sl.idle) {
-        out.kind = 'idle'; out.title = 'Idle';
+        out.kind = 'idle';
+        out.encoded = m.seg === 'b66';
+        out.title = out.encoded ? '66b Idle 控制块 · 0x1E' : '200GMII Idle · 0x07 × 8';
         return out;
       }
       out.kind = m.seg === 'mii' ? 'mii' : 'b66';
@@ -3314,11 +3347,17 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       h += '<p class="ins-ascii">' + text(d.start, 8) + '</p><div class="cells">' +
         (d.kind === 'b66' ? '<span class="cell hdr"><b>01</b><i>sync</i></span>' : '') + cells(d.start, 8) + '</div>';
       h += '<p class="ins-note">' + (d.kind === 'mii'
-        ? '8 data bytes per transfer. Control characters (preamble, idles, terminate) are left out of this model.'
+        ? '本数据块演示 8 个数据字节。Idle 控制传输以独立的数据块显示。'
         : 'Same 8 bytes plus a 2-bit sync header. 01 means the block is all data.') + '</p>';
     } else if (d.kind === 'idle') {
-      h += '<p class="ins-note">Idle characters between frames. Rate matching deletes enough of them to leave room for the 1028-bit AM group, ' +
-        'so the data rate does not change when markers are added.</p>';
+      h += d.encoded
+        ? '<div class="cells"><span class="cell hdr"><b>10</b><i>Sync</i></span><span class="cell"><b>1E</b><i>Type</i></span>' +
+          '<span class="cell"><b>00 × 8</b><i>7 位 /I/ 码</i></span></div>' +
+          '<p class="ins-note">八个 xMII Idle 编码成一个 66b 全控制块。对应 AM 的空档在 TX 速率匹配处删减。</p>'
+        : '<div class="cells">' + '<span class="cell"><b>07</b><i>C = 1</i></span>'.repeat(8) + '</div>' +
+          '<p class="ins-note">' + (d.side === 'TX'
+            ? 'MAC / RS 在编码前通过 200GMII 送出这组帧间 Idle。'
+            : '64B/66B 解码在 200GMII 上还原 0x07。该 3D 样例在 RX 速率匹配之后显示补偿 AM 移除的 Idle。') + '</p>';
     } else if (d.kind === 'b257') {
       // The 1-bit header spans all four payloads; each payload is one row, so they line up.
       h += '<p class="ins-ascii">' + text(d.start, 32) + '</p><div class="cells b257"><span class="cell hdr"><b>1</b><i>hdr</i></span>' +
@@ -5984,6 +6023,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       document.querySelectorAll('[data-pcs-route]').forEach(function (section) {
         section.hidden = !P.showOverlay(section.dataset.pcsRoute);
       });
+      vp.querySelectorAll('.pcs-idle-key').forEach(function (key) { key.hidden = !P.showOverlay('frame'); });
       [['ueLlr', 'llr'], ['ueCbfc', 'cbfc']].forEach(function (entry) {
         document.querySelectorAll('button[data-view="' + entry[0] + '"], button[data-view="' + entry[0] + 'Rx"]').forEach(function (button) {
           button.hidden = !P.showOverlay(entry[1]);
@@ -6213,7 +6253,7 @@ globalThis.PCS.openPtpPoint = function (xMII, tx) {
       <form method="dialog"><button type="submit" class="ins-x" aria-label="关闭">×</button></form>
     </header>
     <div id="pcs-frame-boundary-body"></div>
-    <p class="note">IEEE 802.3 第 3、4、117、119 条。此处是独立的帧边界示例，主 3D 数据块仍用于追踪纯数据字符。</p>
+    <p class="note">IEEE 802.3 第 3、4、117、119 条。此处是独立的帧边界示例。主 3D 还用缩短的 AM 周期展示 Idle 的编码、删减与补偿。</p>
   </div>
 </dialog>
 <script>
@@ -6226,12 +6266,12 @@ globalThis.PCS.openPtpPoint = function (xMII, tx) {
     },
     idleTx: {
       title: 'TX PCS · 调整 Idle',
-      cards: ['/T/ → 19 个 /I/ → /S/', '示例删减一组 8 个 /I/', '/T/ → 11 个 /I/ → /S/'],
+      cards: ['200GMII：8 × 0x07，TXC = 0xFF', '64B/66B：同步头 10，类型 0x1E', '速率匹配按需删减一组 Idle'],
       action: '需要为 AM 插入腾出容量时，PCS 可按规则删减 Idle。跨时钟域的速率补偿还可按规则增减 Idle。'
     },
     idleRx: {
       title: 'RX PCS · 移除 AM 后调整 Idle',
-      cards: ['/T/ → 11 个 /I/ → /S/', '示例补入一组 8 个 /I/', '/T/ → 19 个 /I/ → /S/'],
+      cards: ['64B/66B：全 Idle 控制块 0x1E', '解码：8 × 0x07，RXC = 0xFF', '200GMII：按需补偿 Idle 后交给 RS / MAC'],
       action: 'RX PCS 移除 AM 后可用 Idle 补偿，也可按规则对时钟速率差增减 Idle。PCS 保留 /S/、前导码余部、SFD 和 /T/ 所表达的帧边界。'
     },
     frameRx: {
