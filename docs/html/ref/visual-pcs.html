@@ -1984,7 +1984,11 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     { x: [98, 101], name: '解扰', stage: 9 },
     { x: [102, 106], name: '逆转码', stage: 9, view: 'r257' },
     { x: [107, 111], name: '64B/66B 解码', stage: 9, view: 'd66' },
-    { x: [112, 116], name: 'RX 1588 · 200GMII', stage: 9, view: 'ptpRx' }
+    { x: [112, 116], name: 'RX 1588 · 200GMII', stage: 9, view: 'ptpRx' },
+    { x: [0, 6], name: 'TX 前导码 / IPG', stage: 1, view: 'frameTx', raised: true },
+    { x: [8, 15], name: 'TX Idle 调整', stage: 2, view: 'idleTx', raised: true },
+    { x: [101, 108], name: 'RX Idle 调整', stage: 9, view: 'idleRx', raised: true },
+    { x: [110, 116], name: 'RX 帧提取', stage: 9, view: 'frameRx', raised: true }
   ];
 
   P.STAGES = [
@@ -2182,11 +2186,11 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var grp = G.boxGroup = new T.Group();
     G.boxes = [];
     P.BOXES.forEach(function (b) {
-      var w = b.x[1] - b.x[0], h = b.lane ? LANE_H : AGG_H;
+      var w = b.x[1] - b.x[0], h = b.raised ? 2.5 : b.lane ? LANE_H : AGG_H;
       var geo = new T.BoxGeometry(w, h, DEPTH);
       var mat = new T.MeshBasicMaterial({ color: G.col.box, transparent: true, opacity: b.lane ? 0.32 : 0.5, depthWrite: false });
       var mesh = new T.Mesh(geo, mat);
-      mesh.position.set((b.x[0] + b.x[1]) / 2, 0, 0);
+      mesh.position.set((b.x[0] + b.x[1]) / 2, b.raised ? 4 : 0, 0);
       mesh.renderOrder = 2;
       var edges = new T.LineSegments(new T.EdgesGeometry(geo),
         new T.LineBasicMaterial({ color: G.col.edge, transparent: true, opacity: 0.9 }));
@@ -2610,9 +2614,9 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var S = P.state, link = S.link, X = P.X, L = [], sel = S.selected;
     var top = 4 * P.LANE_SP + 0.4;
     P.BOXES.forEach(function (b, i) {
-      var y = b.lane ? top + 0.3 : 1.6;
+      var y = b.raised ? 5.55 : b.lane ? top + 0.3 : 1.6;
       L.push({ id: 'box' + i, html: b.view ? '<span data-view="' + b.view + '" title="How ' + b.name + ' works">' + (b.short || b.name) + '</span>' : b.short || b.name,
-               cls: 'lbl-box' + (b.view ? ' op' : ''), pos: [(b.x[0] + b.x[1]) / 2, y, 0], pri: b.lane ? 3 : 2 });
+               cls: 'lbl-box' + (b.view ? ' op' : ''), pos: [(b.x[0] + b.x[1]) / 2, y, 0], pri: b.raised ? 5 : b.lane ? 3 : 2 });
     });
     P.STAGES.forEach(function (st) {
       L.push({ id: 'st' + st.n, html: '<b>' + st.n + '</b>', cls: 'lbl-stage' + (S.stage === st.n ? ' on' : ''),
@@ -2879,7 +2883,9 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     return hit && hit.instanceId != null && hit.instanceId < P.packetCount() ? hit.instanceId : nearest(sx, sy, bx ? 5 : 16);
   }
   function pickAt(sx, sy) {
-    var bx = boxAt(sx, sy), i = blockAt(sx, sy, bx);
+    var bx = boxAt(sx, sy);
+    if (bx && bx.def.raised) { P.closeInspector(); P.openView(bx.def.view); return; }
+    var i = blockAt(sx, sy, bx);
     if (i >= 0) { open(P.packetMeta(i)); return; }
     if (bx) { P.closeInspector(); P.openView(bx.def.view); return; }
     P.closeInspector();
@@ -4934,6 +4940,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 
   // Open view m on the unit that is in its box right now.
   P.openView = function (m) {
+    if (P.openFrameBoundary(m)) return;
     if (m === 'ptpTx' || m === 'ptpRx') {
       P.openPtpPoint('200GMII', m === 'ptpTx');
       return;
@@ -5921,6 +5928,58 @@ globalThis.PCS.openPtpPoint = function (xMII, tx) {
 })();
 </script>
 <script src="visual-pcs-assets/pcs-module-demo.js"></script>
+<dialog class="opview" id="pcs-frame-boundary" aria-labelledby="pcs-frame-boundary-title">
+  <div class="opv-inner">
+    <header class="opv-head">
+      <h3 id="pcs-frame-boundary-title"></h3>
+      <form method="dialog"><button type="submit" class="ins-x" aria-label="关闭">×</button></form>
+    </header>
+    <div id="pcs-frame-boundary-body"></div>
+    <p class="note">IEEE 802.3 第 3、4、117、119 条。此处是独立的帧边界示例，主 3D 数据块仍用于追踪纯数据字符。</p>
+  </div>
+</dialog>
+<script>
+(function (P) {
+  const steps = {
+    frameTx: {
+      title: 'TX MAC / RS · 生成前导码和 IPG',
+      cards: ['上一帧 FCS 与下一帧', '产生帧间隔及 7×55 + D5', '200GMII：/T/、/I/、/S/、6×55、D5'],
+      action: 'MAC 生成前导码和 SFD。RS 用 /S/ 替代首个前导码八位组，将 /S/ 对齐到 200GMII 的 lane 0。RS 用 Idle 填充帧间空档。'
+    },
+    idleTx: {
+      title: 'TX PCS · 调整 Idle',
+      cards: ['/T/ → 19 个 /I/ → /S/', '示例删减一组 8 个 /I/', '/T/ → 11 个 /I/ → /S/'],
+      action: '需要为 AM 插入腾出容量时，PCS 可按规则删减 Idle。跨时钟域的速率补偿还可按规则增减 Idle。'
+    },
+    idleRx: {
+      title: 'RX PCS · 移除 AM 后调整 Idle',
+      cards: ['/T/ → 11 个 /I/ → /S/', '示例补入一组 8 个 /I/', '/T/ → 19 个 /I/ → /S/'],
+      action: 'RX PCS 移除 AM 后可用 Idle 补偿，也可按规则对时钟速率差增减 Idle。PCS 保留 /S/、前导码余部、SFD 和 /T/ 所表达的帧边界。'
+    },
+    frameRx: {
+      title: 'RX RS / MAC · 识别并提取帧',
+      cards: ['200GMII：/S/、6×55、D5、帧、/T/', 'RS 解释控制字符，MAC 识别 SFD', '从目的地址开始接收 MAC 帧'],
+      action: '接收端消费 /S/、前导码和 SFD 来识别开头，并用 /T/ 判定结束。帧间的 /I/ 保持为空闲，前导码、SFD 和 IPG 都位于 MAC 帧之外。'
+    }
+  };
+  P.openFrameBoundary = function (key) {
+    if (!Object.prototype.hasOwnProperty.call(steps, key)) return false;
+    const step = steps[key];
+    const dialog = document.getElementById('pcs-frame-boundary');
+    const body = document.getElementById('pcs-frame-boundary-body');
+    document.getElementById('pcs-frame-boundary-title').textContent = step.title;
+    body.innerHTML = '<h4>200GMII 帧边界</h4>' +
+      '<div class="g800-sym-row"><span class="g800-sym">上一帧 FCS</span><span class="g800-sym">/T/</span>' +
+      '<span class="g800-sym">/I/ … /I/</span><span class="g800-sym">/S/ · lane 0</span>' +
+      '<span class="g800-sym">55 × 6</span><span class="g800-sym">D5 · SFD</span>' +
+      '<span class="g800-sym">下一帧目的地址 …</span></div>' +
+      '<p>IPG 是相邻帧之间的时间。按 xMII 字符看，它从上一帧的 /T/ 起算，包含其后到下一帧 /S/ 之前的 Idle。MAC 的 interPacketGap 参数为 96 bit times。采用 DIC 时，单次间隔可随对齐而变化。</p>';
+    P.mountModuleDemo(dialog, body, step.cards, step.action);
+    if (!dialog.open) dialog.showModal();
+    return true;
+  };
+})(globalThis.PCS);
+</script>
 <script src="visual-pcs-assets/pcs-800g-model.js"></script>
 <script src="visual-pcs-assets/pcs-1600g-view.js"></script>
 <script src="visual-pcs-assets/pcs-800g-view.js"></script>
