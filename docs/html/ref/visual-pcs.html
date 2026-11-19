@@ -783,7 +783,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <li><button type="button" class="btn" data-view="r257">1 · 257b 逆转码</button></li>
       <li><button type="button" class="btn" data-view="d66">2 · 64B/66B 解码</button></li>
       <li><button type="button" class="btn" data-view="idleRx">3 · Idle 调整</button></li>
-      <li><button type="button" class="btn" data-view="frameRx">4 · MAC 帧提取</button></li>
+      <li><button type="button" class="btn" data-view="frameRx">4 · 去前导码 / 帧提取</button></li>
     </ol>
     <p class="note">沿箭头阅读。Idle 调整属于 PCS 的编码／解码与速率匹配环节，图中单列以便查看。</p>
   </section>
@@ -2006,7 +2006,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     { x: [0, 5], name: 'TX 前导码 / IPG', short: 'TX 1 · 前导码', stage: 1, view: 'frameTx', raised: true },
     { x: [9.1, 10.4], name: 'TX Idle 调整', short: 'TX 3 · Idle', stage: 2, view: 'idleTx', raised: true },
     { x: [111.1, 113], name: 'RX Idle 调整', short: 'RX 3 · Idle', stage: 9, view: 'idleRx', raised: true },
-    { x: [113.5, 117], name: 'RX 帧提取', short: 'RX 4 · 帧提取', stage: 9, view: 'frameRx', raised: true }
+    { x: [113.5, 117], name: 'RX 帧提取', short: 'RX 4 · 去前导码', stage: 9, view: 'frameRx', raised: true }
   ];
 
   P.STAGES = [
@@ -5976,7 +5976,7 @@ globalThis.PCS.openPtpPoint = function (xMII, tx) {
     },
     frameRx: {
       title: 'RX RS / MAC · 识别并提取帧',
-      cards: ['200GMII：/S/、6×55、D5、帧、/T/', 'RS 解释控制字符，MAC 识别 SFD', '从目的地址开始接收 MAC 帧'],
+      cards: ['200GMII 收到帧起始', '消费 /S/、六个 55 和 D5', '首个有效帧字节：DA[0]'],
       action: '接收端消费 /S/、前导码和 SFD 来识别开头，并用 /T/ 判定结束。帧间的 /I/ 保持为空闲，前导码、SFD 和 IPG 都位于 MAC 帧之外。'
     }
   };
@@ -5992,7 +5992,38 @@ globalThis.PCS.openPtpPoint = function (xMII, tx) {
       '<span class="g800-sym">55 × 6</span><span class="g800-sym">D5 · SFD</span>' +
       '<span class="g800-sym">下一帧目的地址 …</span></div>' +
       '<p>IPG 是相邻帧之间的时间。按 xMII 字符看，它从上一帧的 /T/ 起算，包含其后到下一帧 /S/ 之前的 Idle。MAC 的 interPacketGap 参数为 96 bit times。采用 DIC 时，单次间隔可随对齐而变化。</p>';
-    P.mountModuleDemo(dialog, body, step.cards, step.action);
+    let onStep;
+    if (key === 'frameRx') {
+      body.innerHTML = `
+        <section class="pcs-rx-strip" aria-label="接收前导码逐字节演示">
+          <h4>200GMII 输入</h4>
+          <div class="pcs-rx-bytes">
+            <span class="pcs-rx-consumed">/S/<small>Start</small></span>
+            ${Array.from({ length: 6 }, (_, i) =>
+              '<span class="pcs-rx-consumed">55<small>前导 ' + (i + 1) + '</small></span>').join('')}
+            <span class="pcs-rx-consumed">D5<small>SFD</small></span>
+            <span class="pcs-rx-first">DA[0]<small>目的地址</small></span>
+            <span>DA[1]</span><span>…</span>
+          </div>
+          <p class="pcs-rx-state" aria-live="polite"></p>
+          <div class="pcs-rx-output">
+            <h4>MAC 帧输出</h4>
+            <div class="pcs-rx-bytes"><span class="pcs-rx-first">DA[0]<small>第 1 字节</small></span>
+              <span>DA[1]</span><span>…</span><span>FCS</span></div>
+          </div>
+          <p class="note">原始前导码有 7 个 55。发送 RS 已用 /S/ 替代第一个，所以接收侧 200GMII 显示的是 /S/、六个 55 和 D5。</p>
+        </section>`;
+      const strip = body.querySelector('.pcs-rx-strip');
+      const messages = ['收到 /S/、前导码和 SFD，随后是目的地址。',
+        '接收端消费这八个位置。D5 标出帧数据的起点，下一字节是 DA[0]。',
+        '交付的 MAC 帧从 DA[0] 开始，前导码和 SFD 已退出帧输出。'];
+      onStep = index => {
+        strip.dataset.step = index;
+        strip.querySelector('.pcs-rx-state').textContent = messages[index];
+        strip.querySelector('.pcs-rx-output').setAttribute('aria-hidden', String(index !== 2));
+      };
+    }
+    P.mountModuleDemo(dialog, body, step.cards, step.action, onStep);
     if (!dialog.open) dialog.showModal();
     return true;
   };

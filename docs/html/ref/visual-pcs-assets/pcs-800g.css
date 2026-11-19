@@ -218,3 +218,13 @@
 .pcs-frame-route-dir { min-width: 2rem; font-weight: 700; }
 .pcs-frame-route li:nth-child(n+3)::before { content: '→'; color: var(--muted); }
 .pcs-frame-route p { margin-bottom: 0; }
+
+.pcs-rx-bytes { display: flex; flex-wrap: wrap; gap: .35rem; }
+.pcs-rx-bytes span { display: grid; align-content: start; min-width: 2.55rem; padding: .3rem; text-align: center; border: 1px solid var(--rule); border-radius: .3rem; font-family: var(--f-mono); }
+.pcs-rx-bytes small { font-family: var(--f-sans); }
+.pcs-rx-consumed { background: color-mix(in srgb, var(--am) 20%, var(--panel)); transition: opacity .3s, transform .3s; }
+.pcs-rx-strip[data-step="1"] .pcs-rx-consumed { text-decoration: line-through; opacity: .55; }
+.pcs-rx-strip[data-step="2"] .pcs-rx-consumed { opacity: 0; transform: translateY(-.3rem); visibility: hidden; }
+.pcs-rx-strip .pcs-rx-first { border-color: var(--focus); }
+.pcs-rx-output[aria-hidden="true"] { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) { .pcs-rx-consumed { transition: none; } }

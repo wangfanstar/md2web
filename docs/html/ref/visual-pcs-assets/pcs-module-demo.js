@@ -6,7 +6,7 @@
     if (active.has(dialog)) active.get(dialog)();
   };
 
-  P.mountModuleDemo = function (dialog, host, cards, explanation) {
+  P.mountModuleDemo = function (dialog, host, cards, explanation, onStep) {
     P.stopModuleDemo(dialog);
     const demo = document.createElement('section');
     demo.className = 'pcs-module-demo';
@@ -36,6 +36,7 @@
 
     function render() {
       list.forEach((item, i) => item.setAttribute('aria-current', i === index ? 'step' : 'false'));
+      if (onStep) onStep(index);
       status.textContent = (index + 1) + ' / 3 · ' +
         (index === 1 ? explanation : (index === 0 ? '查看输入。' : '查看输出，下面是当前实验样例。'));
       play.textContent = timer !== null ? '暂停' : index === 2 ? '重新播放' : '播放';
