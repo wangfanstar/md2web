@@ -417,8 +417,11 @@
         '<p>解扰输出</p><div class="g800-b257-bits">' + bitRowFromBits(output, 1, 64) + '</div>';
     }
     const bi = blockInfo(block);
-    const plain = block257Bits(bi);
-    const scrambled = M.scramble(plain, bi.flow);
+    const firstBit = bi.group * 257;
+    const prefix = M.range(bi.group + 1).flatMap(group =>
+      block257Bits({ group, flow: bi.flow }));
+    const plain = prefix.slice(firstBit);
+    const scrambled = M.scramble(prefix, bi.flow).slice(firstBit);
     const focus = 1 + 64 * bi.pos;
     return '<div class="g800-inspect-summary">' +
         '<span><b>Flow</b> ' + bi.flow + '</span>' +
@@ -1302,7 +1305,8 @@
       const t = front - i * STEP_T;
       if (t < from) break;
       if (t > to) continue;
-      const am = i % 5 === 0;
+      const am = i < M.markerSize / 257 && info === 'flow' &&
+        (phase === 'tx' ? t >= stageT(4.67) : t < stageT(11.38));
       const px = x[0] + t * SPAN;
       const pos = cubePosition.set(px, typeof y === 'function' ? y(t) : y, z);
       const c = am ? cubeColor.set(theme.am).lerp(color, 0.22) : color;
@@ -1324,7 +1328,7 @@
       if (t < stageT(ST.lanes)) break;
       if (t > stageT(ST.fec)) continue;
       if (loss && t > stageT(ST.mux)) continue;
-      const am = i % 5 === 0;
+      const am = i < M.laneMarkers[lane].length / 10;
       if (!state.aligned && t > stageT(ST.align) && !(corruptAm && am)) continue;
       const pos = sampleLane(lane, t, cubePosition);
       const c = cubeColor.copy(color);
@@ -1873,7 +1877,7 @@
         : '173.5.11 · 可选。已同步示例中检测到 ' + pmaTestSample() + '，与参考样本逐位一致。';
       case 'txRate': return '为补偿 AM 插入，TX PCS 可删除 Idle 控制字符或序列有序集。为补偿 800GMII 与 PMA 服务接口的时钟域差异，还可按规则删除上述内容或插入 Idle 控制字符。插删规则见 119.2.3.5 和 119.2.3.8。';
       case 'rxRate': return 'RX PCS 可插入 Idle 控制字符以补偿 AM 移除。为补偿 PMA 服务接口与 800GMII 的时钟域差异，可按规则删除 Idle 控制字符或序列有序集，也可插入 Idle 控制字符。插删规则见 119.2.3.5 和 119.2.3.8。';
-      case 'amInsert': return '按图 172–3，Flow 0 在含 66b 块 k 的 257b 块之前插入 AM 组，Flow 1 则在含 k+1 的块之前插入。AM 编码见表 172–2、172–3。本演示缩短插入间隔并采用合成 AM。发送侧插入边界：' +
+      case 'amInsert': return '按图 172–3，Flow 0 在含 66b 块 k 的 257b 块之前插入 AM 组，Flow 1 则在含 k+1 的块之前插入。AM 编码见表 172–2、172–3。本演示使用表中的 lane 标记，插入间隔已缩短，组填充为示意。发送侧插入边界：' +
         boundary(M.messageBits(words[flow]));
       case 'fecSplit':
       case 'rsEncode': return '每 10 位交替分给 A/B。A 前四符号：' + symbols(words[flow][0]) +

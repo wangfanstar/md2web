@@ -58,16 +58,55 @@
   const markerSize = 8 * blockSize;
   const markerOffset = 0;
   const umOctets = [8, 9, 10, 12, 13, 14];
-  const markerFor = (lane, bit) => bit >= 64 ? (lane >> (bit % 5)) & 1 : (bit % 7 < 3 ? 1 : 0);
+  // IEEE 802.3df Tables 172–2 and 172–3, with the common octets stored separately.
+  const markerVariables = [
+    'B6 D9 FE 71 F3 26 01 8E 0C',
+    '04 67 A5 DE 7E 98 5A 21 81',
+    '46 FE C1 F3 56 01 3E 0C A9',
+    '5A 84 79 80 D0 7B 86 7F 2F',
+    'E1 19 D5 51 F2 E6 2A AE 0D',
+    'F2 4E ED 4F D1 B1 12 B0 2E',
+    '3D EE BD 9C A1 11 42 63 5E',
+    '22 32 29 76 5B CD D6 89 A4',
+    '60 9F 1E 73 75 60 E1 8C 8A',
+    '6B A2 8E C4 3C 5D 71 3B C3',
+    'FA 04 6A EB D8 FB 95 14 27',
+    '6C 71 DD 66 38 8E 22 99 C7',
+    '18 5B 5D F6 95 A4 A2 09 6A',
+    '14 CC CE 97 C3 33 31 68 3C',
+    'D0 B1 35 FB A6 4E CA 04 59',
+    'B4 56 59 BA 79 A9 A6 45 86',
+    'B6 D9 01 8E 0C 26 FE 71 F3',
+    '04 67 5A 21 81 98 A5 DE 7E',
+    '46 FE 3E 0C A9 01 C1 F3 56',
+    '5A 84 86 7F 2F 7B 79 80 D0',
+    'E1 19 2A AE 0D E6 D5 51 F2',
+    'F2 4E 12 B0 2E B1 ED 4F D1',
+    '3D EE 42 63 5E 11 BD 9C A1',
+    '22 32 D6 89 A4 CD 29 76 5B',
+    '60 9F E1 8C 8A 60 1E 73 75',
+    '6B A2 71 3B C3 5D 8E C4 3C',
+    'FA 04 95 14 27 FB 6A EB D8',
+    '6C 71 22 99 C7 8E DD 66 38',
+    '18 5B A2 09 6A A4 5D F6 95',
+    '14 CC 31 68 3C 33 CE 97 C3',
+    'D0 B1 CA 04 59 4E 35 FB A6',
+    'B4 56 A6 45 86 A9 59 BA 79'
+  ];
+  const laneMarkers = markerVariables.map(row => {
+    const [up0, ...tail] = row.split(' ').map(octet => parseInt(octet, 16));
+    return [0x9A, 0x4A, 0x26, up0, 0x65, 0xB5, 0xD9, ...tail].flatMap(byteBits);
+  });
+  const markerFor = (lane, bit) => laneMarkers[lane][bit];
   const umFor = lane => umOctets.flatMap(octet =>
     range(8).map(bit => markerFor(lane, 8 * octet + bit))).join('');
   const markerIds = new Map(range(32).map(lane => [umFor(lane), lane]));
   const messageBits = pair => range(514).flatMap(i =>
     pair.flatMap(word => range(10).map(bit => (word[i] >> bit) & 1)));
 
-  function sample(flow, input, received) {
+  function sample(flow, input, received, group = 0) {
     const bytes = range(4).map((_, i) => range(8).map(j => {
-      const offset = (i * 2 + flow) * 8 + j;
+      const offset = (group * 8 + i * 2 + flow) * 8 + j;
       return input.charCodeAt(offset % input.length) & 127;
     }));
     const payloads = bytes.map(block => block.flatMap(byteBits));
@@ -85,10 +124,10 @@
     return range(2).map(flow => {
       // Teaching control-block representation for an all-Idle input.
       const idlePayload = byteBits(0x1e).concat(range(56).fill(0));
-      const block = idle ? [0].concat(idlePayload, idlePayload, idlePayload, idlePayload)
-        : sample(flow, input).transcoded;
-      const data = scramble(range(40).flatMap(() => block), flow);
-      // A shortened teaching interval and synthetic marker bits.
+      const idleBlock = [0].concat(idlePayload, idlePayload, idlePayload, idlePayload);
+      const data = scramble(range(40).flatMap(group => idle ? idleBlock
+        : sample(flow, input, undefined, group).transcoded), flow);
+      // Place the IEEE lane markers in a shortened teaching frame with illustrative padding.
       const marker = range(markerSize).map(i => ((i + flow) % 5 < 2 ? 1 : 0));
       for (const local of range(16)) {
         const lane = 16 * flow + local;
@@ -161,6 +200,6 @@
 
   root.PCS800Model = {
     deskewLimit, mapping, receiveMap, distribute, collect, alignment,
-    symbolAt, codewords, receive, pam4Pair, sample, scramble, range, markerOffset, markerSize, messageBits
+    symbolAt, laneMarkers, codewords, receive, pam4Pair, sample, scramble, range, markerOffset, markerSize, messageBits
   };
 })(globalThis);

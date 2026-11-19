@@ -80,7 +80,7 @@
     return octets.flatMap(value => range(8).map(bit => (value >> bit) & 1));
   }
   const amSuffixes = [
-    'D9 FE 8E 0C 26 01 71 F3', '04 67 A5 21 81 98 5A DE 7E',
+    'B6 D9 FE 8E 0C 26 01 71 F3', '04 67 A5 21 81 98 5A DE 7E',
     '46 FE C1 0C A9 01 3E F3 56', '5A 84 79 7F 2F 7B 86 80 D0',
     'E1 19 D5 AE 0D E6 2A 51 F2', 'F2 4E ED B0 2E B1 12 4F D1',
     '3D EE BD 63 5E 11 42 9C A1', '22 32 29 89 A4 CD D6 76 5B',
@@ -89,8 +89,10 @@
     '18 5B 5D 09 6A A4 A2 F6 95', '14 CC CE 68 3C 33 31 97 C3',
     'D0 B1 35 04 59 4E CA FB A6', 'B4 56 59 45 86 A9 A6 BA 79'
   ];
-  const markers = amSuffixes.map((suffix, lane) => lane === 0 ? octetBits(AM_LANE0)
-    : octetBits(AM_LANE0.slice(0, 6).concat(suffix.split(' ').map(octet => parseInt(octet, 16)))));
+  const markers = amSuffixes.map(suffix => {
+    const [up0, ...tail] = suffix.split(' ').map(octet => parseInt(octet, 16));
+    return octetBits([...AM_LANE0.slice(0, 3), up0, ...AM_LANE0.slice(4, 7), ...tail]);
+  });
   let receivedAmStatus = null;
   function amBits(flow) {
     let state = 0x1ff;
@@ -839,14 +841,15 @@
     meta[count] = info;
     count++;
   }
-  function drawSegment(from, to, y, z, color, flow, phase) {
+  function drawSegment(from, to, y, z, color, flow, phase, amBoundary) {
     const front = (stage + progress) / STEP;
     const base = Math.floor(stageT(stage) / STEP_T);
     for (let i = 0; i < STREAM; i++) {
       const t = front - i * STEP_T;
       if (t < from) break;
       if (t > to) continue;
-      const am = i % 5 === 0;
+      const am = i < 4 && amBoundary !== undefined &&
+        (amBoundary === 4 ? t >= stageT(amBoundary) : t < stageT(amBoundary));
       const px = x[0] + t * SPAN;
       const py = typeof y === 'function' ? y(t) : y;
       const c = am ? cubeColor.set(theme.am).lerp(color, 0.22) : color;
@@ -866,7 +869,7 @@
         if (t < stageT(6)) break;
         if (t > stageT(11)) continue;
         const pos = sampleLane(lane, (t - stageT(6)) / (stageT(11) - stageT(6)), cubePosition);
-        const symbol = (i * 3) % 136;
+        const symbol = i % 136;
         const am = symbol < 12;
         const c = cubeColor.set(CODE_COLORS[symbol % 4]);
         if (!on) c.lerp(paper, 0.72);
@@ -886,10 +889,10 @@
     drawSegment(0, stageT(3), 0, 0, agg, 0, 'agg');
     for (let flow = 0; flow < 2; flow++) {
       const color = new T.Color(flow ? FLOW1 : FLOW0);
-      drawSegment(stageT(3), stageT(6), t => flowTxY(flow, t), 0, color, flow, 'flow');
+      drawSegment(stageT(3), stageT(6), t => flowTxY(flow, t), 0, color, flow, 'flow', 4);
       if (decoded[flow]) {
         drawSegment(stageT(11), stageT(13), t => flowRxY(flow, t), 0,
-          new T.Color(flow ? FLOW1 : FLOW0), flow, 'flow');
+          new T.Color(flow ? FLOW1 : FLOW0), flow, 'flow', 12);
       }
     }
     drawLanes();
@@ -1023,11 +1026,11 @@
       '<div class="g800-b257">' + b257Html(flow, block, -1) + '</div></div>' +
       (note ? '<p class="g800-inspect-note">' + note + '</p>' : '');
   }
-  function amFieldRowsHtml() {
+  function amFieldRowsHtml(octets) {
     let html = '';
     let octet = 0;
     AM_FIELDS.forEach(field => {
-      const bits = octetBits(AM_LANE0.slice(octet, octet + field.octets));
+      const bits = octetBits(octets.slice(octet, octet + field.octets));
       octet += field.octets;
       html += '<div class="g800-b257-line">' +
         '<span class="g800-b257-label"><b>' + field.name + '</b>bit ' + field.from + '–' +
@@ -1036,13 +1039,15 @@
     });
     return html;
   }
-  function amOctetsHtml() {
-    return AM_LANE0.map((value, i) =>
+  function amOctetsHtml(octets) {
+    return octets.map((value, i) =>
       '<span class="g800-sym" title="' + AM_OCTET_NAMES[i] + '">' + AM_OCTET_NAMES[i] +
       '=0x' + byteHex(value) + '</span>').join('');
   }
   function viewAM(flow, block) {
     const lane = Math.max(0, Number(get('lane').value));
+    const octets = AM_OCTET_NAMES.map((_, i) =>
+      markers[lane].slice(8 * i, 8 * i + 8).reduce((value, bit, k) => value | (bit << k), 0));
     return '<div class="g800-inspect-summary"><span><b>Flow</b> ' + flow +
       '</span><span><b>AM 组</b> 1,028 位</span>' +
       '<span><b>组成</b> 16×120 + 133 pad + 3 状态 = 2,056 位</span>' +
@@ -1054,10 +1059,10 @@
       '<span class="g800-sym">状态字段 3 位</span>' +
       '<span class="g800-sym">合计 2,056 位 → A/B 1,028 + C/D 1,028</span></div></div>' +
       '<div class="g800-inspect-section"><h4>am_x&lt;119:0&gt; 字段（图 175-3，15 octets，每 octet LSB 先发）</h4>' +
-      '<div class="g800-b257">' + amFieldRowsHtml() + '</div>' +
-      '<div class="g800-sym-row">' + amOctetsHtml() + '</div>' +
+      '<div class="g800-b257">' + amFieldRowsHtml(octets) + '</div>' +
+      '<div class="g800-sym-row">' + amOctetsHtml(octets) + '</div>' +
       '<p class="g800-inspect-note">当前选中 PCS lane ' + lane +
-      '；各 lane 的 CM/UM/UP 取值见 Table 175–2，此处用 lane 0 的实测 octets 展示字段布局与比特顺序。UM0–UM5 承载 lane 号，接收端据此重排；rx_am_sf&lt;2:0&gt; = am_rx&lt;1027:1025&gt;（仅 Flow 1）。</p></div>' +
+      '；各 lane 的 CM/UM/UP 取值见 Table 175–2，此处展示所选 lane 的字段与发送位序。UM0–UM5 承载 lane 号，接收端据此重排；rx_am_sf&lt;2:0&gt; = am_rx&lt;1027:1025&gt;（仅 Flow 1）。</p></div>' +
       '<div class="g800-inspect-section"><h4>紧随 AM 的 257b 数据块</h4>' +
       '<div class="g800-b257">' + b257Html(flow, block, -1) + '</div></div>' +
       '<p class="g800-inspect-note">AM 在加扰后插入，不参与加扰；每 Flow 每 327,680 个 257b 块插入一次。带 AM 的组 = 1,028 位 AM + 36 个加扰数据块。三维场景按表 175-2 构造标记，按图 175-4 映射，状态字段演示值为 000。</p>';
