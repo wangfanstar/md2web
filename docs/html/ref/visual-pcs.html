@@ -737,7 +737,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     </div>
     <div class="tgroup" aria-label="视图">
       <button type="button" id="btn-overview" class="btn" title="显示完整链路">链路全景</button>
-      <button type="button" id="btn-explore" class="btn" aria-pressed="false" title="通过拖动和双指缩放调整 3D 视角">拖动浏览</button>
+      <button type="button" id="btn-explore" class="btn" aria-pressed="false" title="开启触屏拖动、双指缩放及鼠标右键旋转">拖动浏览</button>
     </div>
   </div>
 
@@ -773,7 +773,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <p class="vp-click" id="vp-click">点击数据块查看内容 · 点击处理模块查看步骤说明</p>
     <div class="follow-bar" id="follow-bar" hidden><span>正在追踪 <b></b></span><span id="follow-where"></span>
       <button type="button" class="btn" id="follow-stop">停止追踪</button></div>
-    <p class="vp-help" id="vp-help">拖动平移 · 右键拖动旋转 · Ctrl + 滚轮缩放</p>
+    <p class="vp-help" id="vp-help">按住左键平移 · 右键拖动旋转 · Ctrl + 滚轮仅用于缩放</p>
     <noscript><p class="noscript">通道实验需要 JavaScript 和 WebGL。</p></noscript>
   </div>
 
@@ -2989,7 +2989,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     host.addEventListener('pointerdown', function (e) {
       var label = e.target.closest('[data-view]');
       if (e.button !== 0 || (!label && e.target !== el)) return;
-      if (!label && (!G.explore || e.pointerType === 'touch' || e.ctrlKey || e.metaKey || e.shiftKey)) return;
+      if (!label && e.pointerType === 'touch') return;
       drag = { id: e.pointerId, x: e.clientX, y: e.clientY, view: label && label.dataset.view, moved: false };
       host.setPointerCapture(e.pointerId);
       e.stopPropagation();
@@ -3000,7 +3000,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       if (!drag.moved && Math.hypot(dx, e.clientY - drag.y) <= 5) return;
       drag.moved = true;
       drag.x = e.clientX;
-      if (G.explore) P.panSceneDrag(dx);
+      if (e.pointerType !== 'touch' || G.explore) P.panSceneDrag(dx);
       e.stopPropagation();
     });
     host.addEventListener('pointerup', function (e) {
@@ -5388,8 +5388,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       if (what === 'explore') {
         $('btn-explore').setAttribute('aria-pressed', String(P.g.explore));
         $('vp-help').textContent = P.g.explore
-          ? (matchMedia('(pointer: coarse)').matches ? '拖动平移 · 双指缩放及旋转' : '拖动平移 · 右键拖动旋转 · Ctrl + 滚轮缩放')
-          : 'Camera locked so the page scrolls · use the stage rail, or turn on Drag to explore';
+          ? (matchMedia('(pointer: coarse)').matches ? '拖动平移 · 双指缩放及旋转' : '按住左键平移 · 右键拖动旋转 · Ctrl + 滚轮仅用于缩放')
+          : '鼠标左键可直接平移 · 触屏可开启「拖动浏览」后平移';
       }
     });
 
