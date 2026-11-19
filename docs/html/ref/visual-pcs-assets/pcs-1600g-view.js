@@ -47,6 +47,7 @@
   let lastPopup = null;
   let stateHost = null;
   let testMode = false;
+  let followChar = -1;
   const MAX_INST = 2600, STEP_T = 1 / 72, STREAM = 72;
 
   // ------------------------------------------------------------------ data
@@ -62,6 +63,33 @@
   }
   const blocks = [0, 1].map(flow => range(36).map(block => flowBlockBits(flow, block)));
   const dataBits = blocks.map(list => list.flat());
+  const AM_FLOW_BITS = 1028;
+
+  function characterLocations(offset) {
+    const block = Math.floor(offset / 32);
+    const flow = block % 2;
+    const start = AM_FLOW_BITS + Math.floor(block / 2) * 257 + 1 + offset % 32 * 8;
+    return range(8).map(bit => {
+      const position = start + bit;
+      const index = Math.floor(position / 20);
+      const word = 2 * flow + Math.floor(position % 20 / 10);
+      return { lane: index % 16, symbol: 4 * Math.floor(index / 16) + word, bit: position % 10 };
+    });
+  }
+
+  function symbolSources(lane, symbol) {
+    const word = symbol % 4;
+    const index = 16 * Math.floor(symbol / 4) + lane;
+    return range(10).map(bit => {
+      if (index >= 514) return { label: 'RS 校验' };
+      const position = 20 * index + 10 * (word % 2) + bit - AM_FLOW_BITS;
+      if (position < 0) return { label: 'AM 组' };
+      const local = position % 257 - 1;
+      if (local < 0) return { label: '257b 头' };
+      const block = 2 * Math.floor(position / 257) + Math.floor(word / 2);
+      return { offset: 32 * block + Math.floor(local / 8), bit: local % 8 };
+    });
+  }
   // 图 175-3 的 am_x<119:0> 字段布局；octets 取表 175-2 中 PCS lane 0 的实测值。
   const AM_FIELDS = [
     { name: 'CM0–CM2', from: 0, bits: 24, octets: 3, note: '码字标记低位' },
@@ -882,6 +910,28 @@
       }
     }
   }
+  function drawCharacterTrace(t) {
+    if (followChar < 0 || testMode) return;
+    const flow = Math.floor(followChar / 32) % 2;
+    const color = new T.Color(theme.am);
+    if (t >= stageT(6) && t <= stageT(11)) {
+      const seen = new Set();
+      characterLocations(followChar).forEach(({ lane, symbol }) => {
+        const key = lane + ':' + symbol;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const pos = sampleLane(lane, (t - stageT(6)) / (stageT(11) - stageT(6)), cubePosition);
+        pos.x -= 1.8 * (symbol % 4);
+        pushCube(pos, 2.6, 1.05, 0.9, color, { seg: 'lane', lane, flow, n: symbol, t, trace: true });
+      });
+    } else {
+      const y = t < stageT(3) || t >= stageT(13) ? 0
+        : t < stageT(6) ? flowTxY(flow, t) : flowRxY(flow, t);
+      pushCube(cubePosition.set(x[0] + t * SPAN, y, 0), 3.1, 1.25, 1.0,
+        color, { seg: 'character', flow, n: followChar, t, trace: true });
+    }
+  }
+
   function draw() {
     if (!active || !renderer) return;
     const front = (stage + progress) / STEP;
@@ -900,6 +950,7 @@
     drawSegment(stageT(13), 1, 0, 0,
       decoded[0] && decoded[1] ? agg : new T.Color(theme.bad), 0, 'agg');
 
+    drawCharacterTrace(front);
     inst.count = count;
     inst.instanceMatrix.needsUpdate = true;
     if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
@@ -1502,17 +1553,53 @@
   decode();
   select(stage);
 
+  const charPicker = get('follow-char');
+  Array.from(PAYLOAD).forEach((character, offset) =>
+    charPicker.add(new Option('#' + offset + ' · ' + JSON.stringify(character), offset)));
+
+  function syncTracking() {
+    get('follow-pause').hidden = followChar < 0;
+    get('follow-pause').textContent = playing ? '暂停追踪' : '继续追踪';
+    get('follow-stop').hidden = followChar < 0;
+    get('follow-start').disabled = testMode;
+    const offset = Number(charPicker.value);
+    get('follow-map').textContent = testMode ? 'Scrambled Idle 模式没有 MAC 字符。'
+      : '当前字节 #' + offset + ' · 66b 块 #' + Math.floor(offset / 8) +
+        ' · 257b 块 #' + Math.floor(offset / 32) + ' · ' +
+        characterLocations(offset).map(({ lane, symbol, bit }, k) =>
+          'b' + k + ' → PCS ' + lane + '/符号 ' + symbol + '/b' + bit).join(' · ');
+  }
+  charPicker.onchange = () => {
+    if (followChar >= 0) followChar = Number(charPicker.value);
+    syncTracking();
+    draw();
+  };
+  get('follow-start').onclick = () => {
+    pause();
+    followChar = Number(charPicker.value);
+    select(0, true);
+    resume();
+  };
+  get('follow-pause').onclick = () => playing ? pause() : resume();
+  get('follow-stop').onclick = () => {
+    followChar = -1;
+    pause();
+    draw();
+  };
+  syncTracking();
+
   function pause() {
     playing = false;
     cancelAnimationFrame(frame);
     started = null;
     get('play').textContent = '播放';
     get('play').setAttribute('aria-pressed', 'false');
+    syncTracking();
   }
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   function tick(now) {
     if (!playing) return;
-    if (started === null) started = now;
+    if (started === null) started = now - progress * 850;
     const p = (now - started) / 850;
     if (p >= 1) {
       select((stage + 1) % steps.length);
@@ -1527,17 +1614,19 @@
     }
     frame = requestAnimationFrame(tick);
   }
-  get('play').onclick = () => {
-    if (playing) { pause(); return; }
+  function resume() {
     if (stage === STEP) select(0);
     playing = true;
     started = null;
     get('play').textContent = '暂停';
     get('play').setAttribute('aria-pressed', 'true');
+    syncTracking();
     frame = requestAnimationFrame(tick);
-  };
+  }
+  get('play').onclick = () => playing ? pause() : resume();
   get('step').onclick = () => { pause(); select((stage + 1) % steps.length, true); };
   get('reset').onclick = () => {
+    followChar = -1;
     pause();
     get('lane').value = -1;
     get('errors').value = '0';
@@ -1546,6 +1635,7 @@
     get('loss').checked = false;
     get('test-pattern').setAttribute('aria-pressed', 'false');
     testMode = false;
+    syncTracking();
     buildTransmit();
     selectedFlow = 0;
     decode();
@@ -1562,6 +1652,8 @@
   get('test-pattern').onclick = () => {
     pause();
     testMode = !testMode;
+    if (testMode) followChar = -1;
+    syncTracking();
     buildTransmit();
     decode();
     select(stage);
@@ -1705,11 +1797,12 @@
           (event.clientX - rect.left) / rect.width * 2 - 1,
           1 - (event.clientY - rect.top) / rect.height * 2), camera);
         const module = ray.intersectObjects(moduleMeshes, false)[0];
-        if (module) {
+        const packet = ray.intersectObject(inst)[0];
+        const hit = packet && meta[packet.instanceId];
+        if (module && !(hit && hit.trace)) {
           openModule(module.object.userData);
           return;
         }
-        const packet = ray.intersectObject(inst)[0];
         if (packet && packet.instanceId != null) {
           const info = meta[packet.instanceId];
           if (info) {
@@ -1718,7 +1811,22 @@
             decode();
             pause();
             select(stageAtPath(info.t), true);
-            showPopup(stage, selectedFlow, Number(get('lane').value));
+            if (info.seg === 'lane') {
+              get('popup-title').textContent = 'PCS lane ' + info.lane + ' · 符号 ' + info.n;
+              get('popup-note').textContent = '175.2.4.7–9 · 加扰前的 MAC 源位与实际发送的 10 位符号';
+              const bits = laneSymbols[info.lane][info.n];
+              get('popup-data').innerHTML = '<p>TX · ' + range(10).map(bit => (bits >> bit) & 1).join('') +
+                '（bit 0 先发）</p><div class="g800-sym-row">' +
+                (testMode ? '<span>Scrambled Idle 模式没有 MAC 字符。</span>' :
+                  symbolSources(info.lane, info.n).map((source, bit) =>
+                    '<span class="g800-sym">b' + bit + ' → ' + (source.label ||
+                      '#' + source.offset + ' “' + escHtml(PAYLOAD[source.offset % PAYLOAD.length]) +
+                      '” b' + source.bit) + '</span>').join('')) + '</div>';
+              lastPopup = null;
+              if (!get('popup').open) get('popup').showModal();
+            } else if (info.seg === 'character') {
+              charPicker.focus();
+            } else showPopup(stage, selectedFlow, Number(get('lane').value));
             return;
           }
         }

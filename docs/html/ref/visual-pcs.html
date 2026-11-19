@@ -881,6 +881,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <div class="follow-bar g800-follow-bar" id="g800-follow-bar" hidden>
         <span>正在追踪 <b id="g800-follow-label"></b></span>
         <span id="g800-follow-where"></span>
+        <button type="button" class="btn" id="g800-follow-pause" hidden>暂停追踪</button>
         <button type="button" class="btn" id="g800-follow-stop">停止追踪</button>
       </div>
       <span class="g800-help" id="g800-help">拖动平移 · 右键拖动旋转 · 滚轮缩放 · 双击放大当前阶段 · 点击数据块看格式 · 点击模块看详情</span>
@@ -976,6 +977,14 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <div class="g800-stage g1600-scene" id="g1600-scene" aria-label="1.6TBASE-R 收发三维通道"></div>
     <p class="fine">上排为 Flow 0（A/B），下排为 Flow 1（C/D）。通道段显示 16 条 106.25 Gb/s PCS lane 与 8 条 212.5 Gb/s（106.25 GBd）PAM4 lane。拖动平移，右键拖动旋转，滚轮朝光标缩放；双击放大当前阶段，或点「聚焦阶段」只保留当前阶段标签。右上角状态面板显示 PCS 与 PMA 状态变量，点击可查看判定依据。</p>
     <h3 class="rail-title" id="g1600-pipeline">链路处理阶段</h3>
+    <div class="g800-controls">
+      <label for="g1600-follow-char">MAC 字符</label>
+      <select id="g1600-follow-char"></select>
+      <button type="button" class="btn" id="g1600-follow-start">追踪动画</button>
+      <button type="button" class="btn" id="g1600-follow-pause" hidden>暂停追踪</button>
+      <button type="button" class="btn" id="g1600-follow-stop" hidden>停止追踪</button>
+      <p id="g1600-follow-map" class="note"></p>
+    </div>
     <nav class="g800-stages" id="g1600-stages" aria-labelledby="g1600-pipeline"></nav>
     <div class="g800-stage-progress"><progress id="g1600-progress" aria-label="1.6T 链路阶段进度"></progress><span id="g1600-count"></span></div>
     <div class="g800-detail" aria-live="polite"><strong id="g1600-title"></strong><p id="g1600-note"></p><p id="g1600-data"></p></div>

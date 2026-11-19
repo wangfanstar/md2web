@@ -211,6 +211,9 @@
       start.setAttribute('aria-pressed', String(followActive));
       start.textContent = followActive ? '重新追踪' : '追踪动画';
     }
+    const pause = get('follow-pause');
+    pause.hidden = !followActive;
+    pause.textContent = playing ? '暂停追踪' : '继续追踪';
     if (followTagHost) followTagHost.hidden = !followActive;
     updateFollowBar();
   }
@@ -1728,6 +1731,7 @@
 
   function setPlaying(on) {
     playing = on;
+    syncFollowUI();
     get('play').textContent = on ? '暂停' : '播放';
     get('play').setAttribute('aria-pressed', String(on));
     if (!on && pending) {
@@ -2136,6 +2140,7 @@
   get('camera').onclick = () => { setFocusMode(false); };
   get('open-data').onclick = () => showData();
   get('follow-start').onclick = () => startFollow(+get('follow-block').value || 0);
+  get('follow-pause').onclick = () => setPlaying(!playing);
   get('follow-stop').onclick = stopFollow;
   get('follow-block').addEventListener('keydown', event => {
     if (event.key !== 'Enter') return;
