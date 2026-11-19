@@ -2292,7 +2292,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     c.target.x += dx; G.camera.position.x += dx;
   };
 
-  P.panLabelDrag = function (pixels) {
+  P.panSceneDrag = function (pixels) {
     var c = G.controls, cam = G.camera;
     var distance = cam.position.distanceTo(c.target);
     var dx = -pixels * 2 * distance * Math.tan(cam.fov * Math.PI / 360) / G.h;
@@ -2747,37 +2747,6 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     G.labelHost = document.createElement('div');
     G.labelHost.className = 'scene-labels';
     G.labelHost.setAttribute('aria-hidden', 'true');
-    var drag = null, suppressClick = false;
-    G.labelHost.addEventListener('pointerdown', function (e) {
-      var label = e.target.closest('[data-view]');
-      if (!label || e.button !== 0 || !G.explore) return;
-      suppressClick = false;
-      drag = { id: e.pointerId, x: e.clientX, moved: false };
-      label.setPointerCapture(e.pointerId);
-      e.stopPropagation();
-    });
-    G.labelHost.addEventListener('pointermove', function (e) {
-      if (!drag || drag.id !== e.pointerId) return;
-      var delta = e.clientX - drag.x;
-      if (!drag.moved && Math.abs(delta) < 5) return;
-      drag.moved = true;
-      drag.x = e.clientX;
-      P.panLabelDrag(delta);
-      e.stopPropagation();
-    });
-    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(function (event) {
-      G.labelHost.addEventListener(event, function (e) {
-        if (!drag || drag.id !== e.pointerId) return;
-        suppressClick = drag.moved;
-        drag = null;
-        e.stopPropagation();
-      });
-    });
-    G.labelHost.addEventListener('click', function (e) {
-      var t = e.target.closest('[data-view]');
-      if (t && !suppressClick) P.openView(t.dataset.view);
-      suppressClick = false;
-    });
     host.appendChild(G.labelHost);
   };
 
@@ -3010,15 +2979,54 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     outline.visible = false;
     G.scene.add(outline);
 
-    var el = G.renderer.domElement, down = null;
-    el.addEventListener('pointerdown', function (e) { down = { x: e.clientX, y: e.clientY, b: e.button }; });
-    el.addEventListener('pointerup', function (e) {
-      if (!down || down.b !== 0) return;
-      var moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
-      down = null;
-      if (moved > 5) return;
+    var el = G.renderer.domElement, down = null, drag = null;
+    function sceneClick(e) {
       var r = el.getBoundingClientRect();
       pickAt(e.clientX - r.left, e.clientY - r.top);
+    }
+    // Use one stable capture target for mouse pans, including starts on labels.
+    // Leave touch gestures that start on the canvas to OrbitControls.
+    host.addEventListener('pointerdown', function (e) {
+      var label = e.target.closest('[data-view]');
+      if (e.button !== 0 || (!label && e.target !== el)) return;
+      if (!label && (!G.explore || e.pointerType === 'touch' || e.ctrlKey || e.metaKey || e.shiftKey)) return;
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, view: label && label.dataset.view, moved: false };
+      host.setPointerCapture(e.pointerId);
+      e.stopPropagation();
+    }, true);
+    host.addEventListener('pointermove', function (e) {
+      if (!drag || drag.id !== e.pointerId) return;
+      var dx = e.clientX - drag.x;
+      if (!drag.moved && Math.hypot(dx, e.clientY - drag.y) <= 5) return;
+      drag.moved = true;
+      drag.x = e.clientX;
+      if (G.explore) P.panSceneDrag(dx);
+      e.stopPropagation();
+    });
+    host.addEventListener('pointerup', function (e) {
+      if (!drag || drag.id !== e.pointerId) return;
+      var gesture = drag;
+      drag = null;
+      e.stopPropagation();
+      if (gesture.moved || Math.hypot(e.clientX - gesture.x, e.clientY - gesture.y) > 5) return;
+      if (gesture.view) { P.closeInspector(); P.openView(gesture.view); }
+      else sceneClick(e);
+    }, true);
+    ['pointercancel', 'lostpointercapture'].forEach(function (event) {
+      host.addEventListener(event, function (e) {
+        if (drag && drag.id === e.pointerId) drag = null;
+        if (down && down.id === e.pointerId) down = null;
+      });
+    });
+
+    el.addEventListener('pointerdown', function (e) {
+      if (e.button === 0) down = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    });
+    el.addEventListener('pointerup', function (e) {
+      if (!down || down.id !== e.pointerId) return;
+      var moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+      down = null;
+      if (moved <= 5) sceneClick(e);
     });
     el.addEventListener('pointermove', function (e) {
       if (down) return;
