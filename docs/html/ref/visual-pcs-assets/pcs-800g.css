@@ -246,3 +246,10 @@
 @media (prefers-reduced-motion: reduce) {
   .pcs-ue-token, .pcs-ue-insert strong { transition: none; }
 }
+
+.pcs-ue-layout { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: .45rem; align-items: end; text-align: center; }
+.pcs-ue-side { display: grid; justify-items: center; gap: .3rem; border: 1px solid var(--rule); border-radius: .35rem; padding: .4rem; }
+.pcs-ue-side > div { display: flex; flex-wrap: wrap; justify-content: center; gap: .3rem; }
+.pcs-ue-side .btn { white-space: normal; }
+.pcs-ue-medium { display: grid; gap: .3rem; padding-block: .4rem; color: var(--muted); }
+@media (max-width: 440px) { .pcs-ue-layout { grid-template-columns: 1fr 1fr; } .pcs-ue-medium { grid-row: 2; grid-column: 1 / -1; } }

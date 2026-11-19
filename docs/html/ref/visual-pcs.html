@@ -789,12 +789,26 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   </section>
 
   <section class="pcs-frame-route" aria-label="UE 1.1 链路控制演示">
-    <div class="g800-controls">
-      <button type="button" class="btn" data-view="ueLlr">LLR · ACK / NACK 与重放</button>
-      <button type="button" class="btn" data-view="ueCbfc">CBFC · VC 信用回报</button>
-      <button type="button" class="btn" data-view="ueCtl">CtlOS · 位流与编码</button>
+    <div class="pcs-ue-layout">
+      <div class="pcs-ue-side">
+        <b>端口 A · 正向发送</b>
+        <div><button type="button" class="btn" data-view="ueLlr">A · LLR</button>
+          <button type="button" class="btn" data-view="ueCbfc">A · CBFC</button></div>
+        <span>↕ MAC Control / MAC</span>
+        <button type="button" class="btn" data-view="ueCtl">200GMII · CtlOS 插入 / 提取</button>
+        <span>↕ PCS 编码 / 解码</span>
+      </div>
+      <div class="pcs-ue-medium"><span>数据帧 →</span><span>← CtlOS 回传</span></div>
+      <div class="pcs-ue-side">
+        <b>端口 B · 正向接收</b>
+        <div><button type="button" class="btn" data-view="ueLlrRx">B · LLR</button>
+          <button type="button" class="btn" data-view="ueCbfcRx">B · CBFC</button></div>
+        <span>↕ MAC Control / MAC</span>
+        <button type="button" class="btn" data-view="ueCtlRx">200GMII · CtlOS 插入 / 提取</button>
+        <span>↕ PCS 编码 / 解码</span>
+      </div>
     </div>
-    <p class="note">数据帧从 A 到 B，ACK、NACK 与 CF_Update 从 B 回到 A。三个入口打开同一个可切换场景的 UE 双端演示。</p>
+    <p class="note">从 A 到 B 看正向帧路径：LLR / CBFC 所在的 MAC 客户端侧 → MAC / RS → 200GMII → PCS → 链路 → 对端 PCS → 200GMII → MAC / RS。ACK、NACK 和 CF_Update 沿 B 到 A 的反向路径返回。CtlOS 在发送侧插入、接收侧提取，再交给相应的控制模块。</p>
   </section>
 
   <section class="lens" id="lens" aria-labelledby="lens-title">
@@ -2057,9 +2071,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     { x: [9.1, 10.4], name: 'TX Idle 调整', short: 'TX 3 · Idle', stage: 2, view: 'idleTx', raised: true },
     { x: [111.1, 113], name: 'RX Idle 调整', short: 'RX 3 · Idle', stage: 9, view: 'idleRx', raised: true },
     { x: [113.5, 117], name: 'RX 帧提取', short: 'RX 4 · 去前导码', stage: 9, view: 'frameRx', raised: true },
-    { x: [1, 7], name: 'UE LLR', stage: 1, view: 'ueLlr', raised: true, heightOffset: 8 },
-    { x: [8, 14], name: 'UE CBFC', stage: 1, view: 'ueCbfc', raised: true, heightOffset: 8 },
-    { x: [16, 22], name: 'UE CtlOS', stage: 2, view: 'ueCtl', raised: true, heightOffset: 8 }
+    { x: [0, 4], name: 'A · LLR', stage: 1, view: 'ueLlr', raised: true, heightOffset: 9, ueAnchor: 'frameTx' },
+    { x: [4.5, 8.5], name: 'A · CBFC', stage: 1, view: 'ueCbfc', raised: true, heightOffset: 9, ueAnchor: 'frameTx' },
+    { x: [7, 11], name: 'A · CtlOS', stage: 2, view: 'ueCtl', raised: true, heightOffset: 5.5, ueAnchor: 'b66' },
+    { x: [108, 112], name: 'B · CBFC', stage: 9, view: 'ueCbfcRx', raised: true, heightOffset: 9, ueAnchor: 'frameRx' },
+    { x: [112.5, 116.5], name: 'B · LLR', stage: 9, view: 'ueLlrRx', raised: true, heightOffset: 9, ueAnchor: 'frameRx' },
+    { x: [105.5, 109.5], name: 'B · CtlOS', stage: 9, view: 'ueCtlRx', raised: true, heightOffset: 5.5, ueAnchor: 'd66' }
   ];
 
   P.STAGES = [
@@ -2268,6 +2285,16 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       mesh.add(edges);
       grp.add(mesh);
       G.boxes.push({ def: b, mesh: mesh, edges: edges, h: h });
+    });
+    G.boxes.forEach(function (box) {
+      if (!box.def.ueAnchor) return;
+      var anchor = G.boxes.find(function (candidate) { return candidate.def.view === box.def.ueAnchor; });
+      var from = box.mesh.position.clone(), to = anchor.mesh.position.clone();
+      from.y -= box.h / 2;
+      to.y += anchor.h / 2;
+      from.z = to.z = DEPTH / 2 + 0.15;
+      var cable = new T.BufferGeometry().setFromPoints([from, to]);
+      grp.add(new T.Line(cable, new T.LineBasicMaterial({ color: G.col.ink, transparent: true, opacity: 0.68 })));
     });
     // Ground grid and the TX | link | RX dividers.
     var gy = -LANE_H / 2 - 1.2;

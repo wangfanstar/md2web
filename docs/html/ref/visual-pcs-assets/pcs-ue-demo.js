@@ -77,9 +77,14 @@
 
   picker.onchange = showScenario;
   P.openUeDemo = function (view) {
-    const defaults = { ueLlr: 'nack', ueCbfc: 'credit', ueCtl: 'ack' };
+    const defaults = {
+      ueLlr: 'nack', ueCbfc: 'credit', ueCtl: 'ack',
+      ueLlrRx: 'nack', ueCbfcRx: 'credit', ueCtlRx: 'ack'
+    };
     if (!Object.prototype.hasOwnProperty.call(defaults, view)) return false;
     if (P.state.playing) P.setPlaying(false);
+    const side = view.endsWith('Rx') ? 'B' : 'A';
+    document.getElementById('pcs-ue-title').textContent = 'UE 1.1 · 端口 ' + side + ' · LLR / CBFC / CtlOS';
     picker.value = defaults[view];
     showScenario();
     if (!dialog.open) dialog.showModal();
