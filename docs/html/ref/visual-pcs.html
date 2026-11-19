@@ -976,7 +976,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <div class="g800-table" tabindex="0" role="region" aria-label="800G PMA 映射表">
       <table class="cmp"><thead><tr><th scope="col">物理通道</th><th scope="col">TX 时隙（PCS lane）</th><th scope="col">RX PMA 输出（实际 PCS lane）</th><th scope="col">AM 锁定</th></tr></thead><tbody id="g800-rows"></tbody></table>
     </div>
-    <p class="fine">本实验采用 IEEE 802.3df-2024 第 172 条 PCS 与第 173 条 32:8 PMA 拓扑。字符视图演示纯数据块。FEC 示例使用合成 AM 和缩短的插入间隔，AM 锁定与 CDR 以教学事件呈现。<a href="#scale">查看 800G 收发通路及对应条款</a></p>
+    <p class="fine">本实验采用 IEEE 802.3df-2024 第 172 条 PCS 与第 173 条 32:8 PMA 拓扑。字符视图演示纯数据块。FEC 示例使用标准 lane AM 编码、示意填充和缩短的插入间隔，AM 锁定与 CDR 以教学事件呈现。<a href="#scale">查看 800G 收发通路及对应条款</a></p>
   </section>
   <section role="tabpanel" id="lab-1600g" aria-labelledby="tab-1600g" hidden tabindex="0">
     <div class="g800-controls">
@@ -1062,14 +1062,22 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   </div>
   <aside class="margin">
     <h3>Retimer 位于哪里？</h3>
-    <p>Retimer（重定时器）或 Gearbox 是一个 PMA。它恢复每条 SerDes 通道，将其解复用为 PCS 通道速率的数据流，再复用输出，输出通道数可以不同。它直接转发比特，无需解码或识别 PCS 通道编号。链路正常运行时，映射必须固定，通道时延偏差也必须在预算内。</p>
+    <p>Retimer（重定时器）或 Gearbox 可实现 PMA 功能。复用方式由接口决定。比特复用 PMA 可在无需识别 PCS lane 编号的情况下转发位流。1.6T 实验所用的符号复用 PMA 还要利用 AM 建立四元组边界。</p>
   </aside>
+  <h3>800G 与 1.6T 的通道数</h3>
+  <div class="tablewrap"><table class="cmp">
+    <thead><tr><th scope="col">实验拓扑</th><th scope="col">PCS 逻辑通道</th><th scope="col">PMA 与物理通道</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">800GBASE-R</th><td>32 条 × 26.5625 Gb/s，Flow 0 与 Flow 1 各占 16 条</td><td>32:8 PMA，8 条 PAM4 × 106.25 Gb/s（53.125 GBd）</td></tr>
+      <tr><th scope="row">1.6TBASE-R</th><td>16 条 × 106.25 Gb/s。每条 lane 都承载来自两个 Flow 的 A/B/C/D 符号</td><td>16:8 SM-PMA，8 条 PAM4 × 212.5 Gb/s（106.25 GBd）</td></tr>
+    </tbody>
+  </table></div>
 </section>
 
 <section id="tx" aria-labelledby="tx-title">
   <p class="eyebrow">第 2 部分</p>
-  <h2 id="tx-title">发送：一路数据流分成八条通道</h2>
-  <p>发送时，PCS 一直处理单路聚合数据流，直到最后一步才分成多条通道。IEEE 802.3 第 119 条规定了处理顺序。调试时需要留意这一点，因为它决定了各阶段能看到什么数据。</p>
+  <h2 id="tx-title">发送：从 xMII 到 PCS lane</h2>
+  <p>以下 200GBASE-R 流程按 IEEE 802.3 第 119 条展开。800G 与 1.6T 的分流位置和符号分配见本节对照。</p>
   <ol class="steps">
     <li><b>64B/66B 编码</b>将来自 200GMII 的每 8 字节编码成一个 66 位块。在这里删除 Idle，为对齐标记腾出空间。</li>
     <li><b>转码</b>将四个 66 位块压缩打包成一个 256B/257B 块。数据内容相同。这一步是在重新打包 64B/66B 块。</li>
@@ -1089,6 +1097,11 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <figcaption>符号分配（IEEE 802.3 119.2.4.8）。码字 A 和 B 的符号随通道和时间交替排列。通道 0 承载 A0、B4、A8……，通道 1 承载 B0、A4、B8……。每个码字跨越全部 8 条 PCS 通道。一条物理通道上的突发错误会分散到两个码字中。</figcaption>
   </figure>
   <button type="button" class="btn showme" data-stage="3">在实验中查看第 3 阶段</button>
+  <h3>800G 与 1.6T 在哪里分流？</h3>
+  <ul>
+    <li><b>800GBASE-R</b> 先让偶数和奇数 66b 块分别进入 Flow 0 和 Flow 1，再在各流内做 256B/257B 转码。首轮分别组合 66b #0、#2、#4、#6 和 #1、#3、#5、#7。两流独立加扰并生成各自的 A/B 码字，再分配到各自的 16 条 lane。依据 172.2.4.1–172.2.4.9。</li>
+    <li><b>1.6TBASE-R</b> 先把连续四个 66b 块转成一个 257b 块，再把 257b 块按奇偶交替分流。首轮两流分别得到由 66b #0–#3 与 #4–#7 组成的块。Flow 0 生成 A/B，Flow 1 生成 C/D，四个码字交织到同一组 16 条 lane。依据 P802.3dj/D2.0 175.2.4.1–175.2.4.9。</li>
+  </ul>
 </section>
 
 <section id="am" aria-labelledby="am-title">
@@ -1101,11 +1114,19 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   </figure>
   <p>200GBASE-R 每 81,920 个 257 位块重复一次 AM 组，恰好是 2,048 对码字，相当于每条 PCS 通道上约 2.6 Mbit 或 99 µs。为了便于观察，实验在每对码字中都插入一组 AM。接收端在 FEC 解码前从原始通道数据检测 AM，因此允许标记有少量比特错误。</p>
   <p>一组 AM 的 960 个标记位以 10 位为单位预先交织。经过 FEC 前分配和符号分配后，每条 PCS 通道的前 12 个符号恰好组成自己的 120 位标记。可以在实验中的位级视图查看这个过程。</p>
+  <h3>对齐标记组和插入周期</h3>
+  <div class="tablewrap"><table class="cmp">
+    <thead><tr><th scope="col">速率</th><th scope="col">AM 组</th><th scope="col">标准间隔与定位</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">800GBASE-R</th><td>每 Flow 2,056 位。32 条 PCS lane 的 120 位标记由两套编码区分</td><td>每 Flow 163,840 个 257b 块。两组标记对应同一个原始 66b 分流边界，分别放在含 k 与 k+1 的块之前。见 172.2.4.6、图 172–3 及表 172–2、172–3。</td></tr>
+      <tr><th scope="row">1.6TBASE-R</th><td>16 × 120 位标记、133 位 PRBS9 填充、3 位状态，共 2,056 位。每 Flow 分得 1,028 位</td><td>每 Flow 327,680 个 257b 块。带 AM 的组中，每 Flow 的 AM 后接 36 个加扰块。见 175.2.4.6、表 175–2 及图 175–4、175–5。</td></tr>
+    </tbody>
+  </table></div>
 </section>
 
 <section id="mux" aria-labelledby="mux-title">
   <p class="eyebrow">第 4 部分</p>
-  <h2 id="mux-title">PMA 比特复用</h2>
+  <h2 id="mux-title">PMA 复用：比特与符号四元组</h2>
   <p>SerDes 通道比 PCS 通道少时，PMA 将 PCS 通道<b>逐比特</b>交织。4 条 SerDes 通道时，每条承载 2 条 PCS 通道。2 条时，每条承载 4 条。PMA 选择共享同一 SerDes 通道的 PCS 通道，并在链路正常运行期间保持这个映射。</p>
   <figure>
     <div class="figwrap" id="fig-mux"></div>
@@ -1113,6 +1134,11 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   </figure>
   <p>一条 PAM4 SerDes 通道承载两条 PCS 通道。比特交替排列，每个 PAM4 符号各取两条通道的一个比特。</p>
   <button type="button" class="btn showme" data-stage="5">在实验中查看比特复用</button>
+  <h3>800G 与 1.6T 的复用粒度</h3>
+  <ul>
+    <li><b>800G 32:8 PMA</b> 每条输出 lane 从两个 Flow 各选两条 PCS lane，每轮按 F0、F0、F1、F1 的顺序各取一位。RX 恢复出 32 路位流，时隙身份由 PCS 的 AM 确认。见 173.5.2.1–173.5.2.2。</li>
+    <li><b>1.6T 16:8 SM-PMA</b> 先定位 40 位四元组边界，再把两条 PCS lane 的四元组交替放到一条输出 lane。每个四元组由 A/B/C/D 的四个 10 位符号组成。RX 按四元组边界做 1:2 解复用，并确认 AM 锁定与 PCS lane 身份。见 176.4.2、176.4.3。</li>
+  </ul>
 </section>
 
 <section id="rx" aria-labelledby="rx-title">
@@ -1131,6 +1157,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   </figure>
   <p>由于每个码字都分布在全部 8 条通道上，时延对齐和重排必须先于 FEC 解码。缺少任何一条 PCS 通道都会使码字无法重组。因此一条 SerDes 通道故障就可能导致整条链路中断。</p>
   <button type="button" class="btn showme" data-stage="8">在实验中查看 RX 对齐</button>
+  <h3>800G 与 1.6T 在哪里合流？</h3>
+  <p>两种速率的 PCS 接收最大 Skew 均为 152 ns。对齐、识别和重排完成后，先重建 RS 码字并纠错，再移除 AM、解扰。</p>
+  <ul>
+    <li><b>800G</b> 在每条 Flow 内先逆转码为 66b 块，再按 F0、F1 交替收集，最后执行 64B/66B 解码。见 172.2.5。</li>
+    <li><b>1.6T</b> 先按 F0、F1 交替收集 257b 块，再执行逆转码和 64B/66B 解码。见 175.2.5。两种速率的 RX PCS 都可按规则补入 Idle 来补偿 AM 移除。</li>
+  </ul>
 </section>
 
 <section id="debug" aria-labelledby="debug-title">
@@ -1158,6 +1190,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <p>IEEE 802.3 定义了对齐状态、逐通道 AM 锁定、通道映射、已纠错和不可纠正码字计数，以及逐通道 FEC 符号错误计数和对应的管理变量。寄存器地址、计数器位宽、读后清零行为、时延偏差读数、错误直方图和 BER 估计则依具体器件而定。实验的诊断面板分别展示这两类指标。</p>
   </aside>
   <button type="button" class="btn showme" data-stage="9" data-fault="noise">在实验中模拟通道噪声</button>
+  <h3>800G 和 1.6T 的故障定位</h3>
+  <ul>
+    <li><b>800G</b> 用 PMA 时隙表把未锁定的 PCS lane 对应到物理 PAM4 lane。完成对齐后，比较两条 Flow 的 FEC 指标。Clause 172 分别定义两流的 <code>hi_ser</code> 与可选的 <code>FEC_degraded_SER</code>，汇总状态采用逻辑 OR。</li>
+    <li><b>1.6T</b> 先区分 SM-PMA 的四元组解复用锁定和 PCS 的 <code>align_status</code>，再比对 A/B/C/D 的纠错和不可纠正计数。启用 FEC bypass indication 时，<code>hi_ser</code> 的监测窗口跨四个 FEC 解码器统计 8,192 个码字。见 175.2.5.3、175.2.6、176.4.4。</li>
+    <li><b>Local Fault / Remote Fault</b> 结合两端 RS 的状态判断方向。接收端 PHY 上报 Local Fault 后，本端 RS 可沿反向链路发送 Remote Fault。用 3D 实验下方的双端流程图核对方向和反向链路状态。</li>
+  </ul>
 </section>
 
 <section id="scale" aria-labelledby="scale-title">
@@ -1182,12 +1220,15 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     </table>
   </div>
   <p>对于连接 800GBASE-CR8 或 800GBASE-KR8 PMD 服务接口，或属于 800GAUI-8 C2C 链路的 PMA，第 173.5.7.2 条要求每条发送 lane 支持 1/(1+D) mod 4 预编码。接收 lane 的预编码解码能力可选。各方向接口逐 lane 独立启用，主动画展示旁路情况。</p>
+  <h3>1.6TBASE-R 收发通路</h3>
+  <p>本页按 IEEE P802.3dj/D2.0 草案建模。第 174 条定义 1.6TMII，第 175 条定义 1.6TBASE-R PCS，第 176 条定义符号复用 PMA。实验选择 16:8 SM-PMA，便于跟踪一个 MAC 字符如何经过两个 Flow 与四个 RS 码字的符号交织，最终落到 PCS lane。<a href="#lab-1600g">打开 1.6TBASE-R 三维通道实验</a></p>
 </section>
 
 <section id="refs" aria-labelledby="refs-title" class="refs">
   <h2 id="refs-title">参考资料</h2>
   <ul>
     <li>IEEE Std 802.3df-2024，第 170 条（800GMII）、第 172 条（800GBASE-R PCS）、第 173 条（PMA）。<a href="../../pdf/8023df-2024.pdf">本地 PDF</a></li>
+    <li>IEEE P802.3dj/D2.0（未批准草案），第 174 条（1.6TMII）、第 175 条（1.6TBASE-R PCS）、第 176 条（SM-PMA）。<a href="../../pdf/8023dj_D2p0.pdf">本地 PDF</a></li>
     <li>IEEE 802.3 标准第 119 条（200GBASE-R 和 400GBASE-R PCS）、第 120 条（PMA）、第 116 条（架构与时延偏差预算）、第 45 条（管理）。<a href="https://standards.ieee.org/ieee/802.3/10422/">IEEE 802.3-2022</a></li>
     <li><a href="https://ethernetalliance.org/blog/2018/03/28/a-deep-dive-into-the-802-3bs-200gbase-r-and-400gbase-r-pcspma/">深入解读 802.3bs 的 200GBASE-R 和 400GBASE-R PCS/PMA</a>，Ethernet Alliance</li>
     <li><a href="https://www.ieee802.org/3/bs/public/16_03/butter_3bs_02_0316.pdf">对齐标记的映射和插入</a>，IEEE P802.3bs 工作组</li>
