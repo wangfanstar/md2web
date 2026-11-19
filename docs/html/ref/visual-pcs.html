@@ -832,8 +832,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <div class="pcs-ue-layout">
       <div class="pcs-ue-side">
         <b>端口 A · 正向发送</b>
-        <div><button type="button" class="btn" data-view="ueLlr">A · LLR</button>
-          <button type="button" class="btn" data-view="ueCbfc">A · CBFC</button></div>
+        <div><button type="button" class="btn" data-view="ueCbfc">A · CBFC</button>
+          <button type="button" class="btn" data-view="ueLlr">A · LLR</button></div>
         <span>↕ MAC Control / MAC</span>
         <button type="button" class="btn" data-view="ueCtl">200GMII · CtlOS 插入 / 提取</button>
         <span>↕ PCS 编码 / 解码</span>
@@ -848,7 +848,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         <span>↕ PCS 编码 / 解码</span>
       </div>
     </div>
-    <p class="note">从 A 到 B 看正向帧路径：LLR / CBFC 所在的 MAC 客户端侧 → MAC / RS → 200GMII → PCS → 链路 → 对端 PCS → 200GMII → MAC / RS。ACK、NACK 和 CF_Update 沿 B 到 A 的反向路径返回。CtlOS 在发送侧插入、接收侧提取，再交给相应的控制模块。</p>
+    <p class="note">正向无损帧路径为 A · CBFC → LLR → MAC / PCS → 链路 → B · PCS / MAC → LLR → CBFC。两种功能同时启用时，CBFC 无损帧须为 LLR-eligible。ACK、NACK 和 CF_Update 由 B 经 CtlOS 回到 A，并分派给对应模块。</p>
   </section>
 
 
@@ -2093,11 +2093,11 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     { x: [9.1, 10.4], name: 'TX Idle 调整', short: 'TX 3 · Idle', stage: 2, view: 'idleTx', overlay: 'frame' },
     { x: [111.1, 113], name: 'RX Idle 调整', short: 'RX 3 · Idle', stage: 9, view: 'idleRx', overlay: 'frame' },
     { x: [113.5, 117], name: 'RX 帧提取', short: 'RX 4 · 去前导码', stage: 9, view: 'frameRx', overlay: 'frame' },
-    { x: [0, 4], name: 'A · LLR', stage: 1, view: 'ueLlr', overlay: 'llr' },
-    { x: [4.5, 8.5], name: 'A · CBFC', stage: 1, view: 'ueCbfc', overlay: 'cbfc' },
+    { x: [4.5, 8.5], name: 'A · LLR', stage: 1, view: 'ueLlr', overlay: 'llr' },
+    { x: [0, 4], name: 'A · CBFC', stage: 1, view: 'ueCbfc', overlay: 'cbfc' },
     { x: [7, 11], name: 'A · CtlOS', stage: 2, view: 'ueCtl', overlay: 'ue' },
-    { x: [108, 112], name: 'B · CBFC', stage: 9, view: 'ueCbfcRx', overlay: 'cbfc' },
-    { x: [112.5, 116.5], name: 'B · LLR', stage: 9, view: 'ueLlrRx', overlay: 'llr' },
+    { x: [112.5, 116.5], name: 'B · CBFC', stage: 9, view: 'ueCbfcRx', overlay: 'cbfc' },
+    { x: [108, 112], name: 'B · LLR', stage: 9, view: 'ueLlrRx', overlay: 'llr' },
     { x: [105.5, 109.5], name: 'B · CtlOS', stage: 9, view: 'ueCtlRx', overlay: 'ue' }
   ];
 
@@ -2113,8 +2113,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   P.sceneBoxes = function () {
     var visible = P.BOXES.filter(function (box) { return P.showOverlay(box.overlay); });
     var ranges = [
-      { from: 0, to: 15.5, order: ['ueLlr', 'ueCbfc', 'frameTx', 'ptpTx', 'ueCtl', 'b66', 'idleTx', 'b257'] },
-      { from: 101.5, to: 117, order: ['r257', 'd66', 'idleRx', 'ueCtlRx', 'ptpRx', 'frameRx', 'ueCbfcRx', 'ueLlrRx'] }
+      { from: 0, to: 15.5, order: ['ueCbfc', 'ueLlr', 'frameTx', 'ptpTx', 'ueCtl', 'b66', 'idleTx', 'b257'] },
+      { from: 101.5, to: 117, order: ['r257', 'd66', 'idleRx', 'ueCtlRx', 'ptpRx', 'frameRx', 'ueLlrRx', 'ueCbfcRx'] }
     ];
     ranges.forEach(function (range) {
       var boxes = range.order.map(function (view) {

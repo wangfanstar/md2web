@@ -8,23 +8,23 @@
     ack: {
       name: 'LLR_ACK',
       bytes: [0x5c, 0x01, 0, 0, 0x96, 0, 0, 0],
-      tx: 'A 发送序号 9，暂存在重放缓冲区。',
-      detection: 'B 按序接收并校验通过，准备确认序号 9。',
+      tx: 'A 的 CBFC 允许新帧发送后，LLR 分配序号 9，并保存到重放缓冲区。',
+      detection: 'B 的 LLR 按序接收且校验通过，向上交给 CBFC，并准备确认序号 9。',
       arrival: 'A 收到 ACK(9)，释放已确认的重放缓冲。'
     },
     nack: {
       name: 'LLR_NACK',
       bytes: [0x5c, 0x02, 0, 0, 0x96, 0, 0, 0],
-      tx: 'A 发送序号 10，暂存在重放缓冲区。',
-      detection: 'B 发现序号 10 的帧 FCS 错误。NACK 携带最近成功接收的序号 9。',
+      tx: 'A 的 CBFC 对序号 10 的帧首次发送计入信用消耗，LLR 保存该帧供重放。',
+      detection: 'B 的 LLR 检出序号 10 的帧 FCS 错误并丢弃，CBFC 不增加接收信用消耗计数 R_VC_CC。NACK 携带最近成功接收的序号 9。',
       arrival: 'A 完成正在发送的帧，然后从首个未确认的序号 10 开始重放。两种功能同时启用时，重放不重复扣减发送信用。'
     },
     credit: {
       name: 'CF_Update',
       bytes: [0x5c, 0x10, 0x20, 0x07, 0xb6, 0x5b, 0x77, 0xb0],
-      tx: 'A 按发送信用限制 VC 4 和 VC 11 的新帧。',
-      detection: 'B 释放接收缓冲，回报 VC 4 和 VC 11 的累计 Credit Freed 计数 123 与 14203。',
-      arrival: 'A 更新对应 VC 的信用状态，额度允许时继续发送。CF_Update 回报累计计数，CC_Update 则是独立的 MAC 帧。'
+      tx: 'A 的 CBFC 先比较当前已用信用加本帧所需信用与信用上限，满足后才放行新帧给 LLR。',
+      detection: 'B 的 LLR 接收有效帧后交给 CBFC。CBFC 在释放接收缓冲后，回报 VC 4 和 VC 11 的累计 Credit Freed 计数 123 与 14203。',
+      arrival: 'A 更新对应 VC 的信用状态，额度允许时继续发送。CF_Update 可在 LLR 丢弃窗口内独立处理。CC_Update 是独立的 MAC 帧，两种功能同时启用时应标为 LLR-eligible。'
     }
   };
 
@@ -45,7 +45,7 @@
     body.innerHTML = `
       <section class="pcs-ue-demo" aria-label="双端链路控制数据流">
         <div class="pcs-ue-endpoints"><b>端口 A · 数据发送方</b><b>端口 B · 数据接收方</b></div>
-        <div class="pcs-ue-forward" aria-label="正向数据流"><span>MAC 数据帧 →</span></div>
+        <div class="pcs-ue-forward" aria-label="正向数据流"><span>A：CBFC → LLR → 链路 → LLR → CBFC：B</span></div>
         <div class="pcs-ue-return" aria-label="反向 CtlOS 流">
           <span class="pcs-ue-token">← ${name}</span>
         </div>
