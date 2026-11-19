@@ -803,6 +803,7 @@
       pause();
       get('popup-title').textContent = 'PCS / PMA 状态机';
       get('popup-note').textContent = '175.2.6、176.4.4 · 变量随 lane 选择、失锁、偏差与错误注入变化';
+      window.PCS.stopModuleDemo(get('popup'));
       get('popup-data').innerHTML = viewStates();
       lastPopup = { index: stage, flow: selectedFlow, lane: Number(get('lane').value), title: null, view: 'states' };
       if (!get('popup').open) get('popup').showModal();
@@ -1389,6 +1390,51 @@
     if (index === 9 || index === 10) return 'rx';
     return 'bytes';
   }
+  const moduleFlowSteps = [
+    ['MAC 数据与控制', '1.6TMII 传输', '8 字节及控制指示'],
+    ['8 字节纯数据', '添加 2 位同步头', '66b 数据块'],
+    ['连续 66b #0、#1、#2、#3', '合并四块载荷', '257b #0：1 位头 + 256 位数据'],
+    ['连续 257b #0、#1、#2、#3', '按 257b 块奇偶分流', 'F0：#0、#2；F1：#1、#3'],
+    ['每流的 257b 块', '加扰并插入 AM', '1,028 位 AM + 36 个加扰块'],
+    ['每流 10,280 位', '10 位分配并添加 RS 校验', 'Flow 0：A/B；Flow 1：C/D'],
+    ['A/B/C/D 的 10 位符号', '按 A、B、C、D 交织', '16 条 PCS lane'],
+    ['两条 PCS lane', '按 40 位四元组交替复用', '一条 SM-PMA 输出 lane'],
+    ['每两个发送位', '映射 PAM4 电平', '四个电平之一'],
+    ['串行 40 位四元组', '按四元组边界交替分发', '两条 PCS lane'],
+    ['不同到达时刻的 PCS lane', 'AM 锁定、Deskew、UM 重排', '16 条按编号排列的 PCS lane'],
+    ['重排后的 PCS 符号', '重组并分别纠错 A/B/C/D', 'RS 消息符号或解码失败'],
+    ['AM + 加扰块', '去掉 AM 并解扰数据', '恢复的 257b 块'],
+    ['F0：#0、#2；F1：#1、#3', '交替收集两个 Flow', '257b #0、#1、#2、#3'],
+    ['恢复的 257b 块', '逆转码再解码', '1.6TMII 数据与控制']
+  ];
+  const operationFlowSteps = {
+    'TX 速率匹配': ['66b 块与 Idle', '按规则调整 Idle', 'TX 转码输入'],
+    'RX 速率匹配': ['解码后的数据与 Idle', '按规则补偿速率差', '1.6TMII 接收流'],
+    '加扰': ['原始 257b 位流', '独立应用 x⁵⁸ + x³⁹ + 1', '加扰 257b 位流'],
+    'AM 映射/插入': ['加扰的 257b 块', '在首块前加入每流 1,028 位 AM', 'AM + 36 个加扰块'],
+    'FEC 前分配': ['每流 10,280 位', '每 10 位交替分配', '两个各 514 符号的消息'],
+    'RS 编码': ['每码字 514 个消息符号', '生成 30 个校验符号', '每码字 544 个符号'],
+    'TX AM 锁定': ['带标记的 PCS lane', '检测 AM 边界', '锁定结果'],
+    '40 位对齐': ['PCS lane 的 10 位符号', '以 AM 确定四元组边界', 'A/B/C/D 四元组'],
+    '预编码/逆预编码': ['电平序列', '按前一状态变换', '预编码或恢复的电平'],
+    'PAM4 解码': ['PAM4 电平', 'Gray 解映射', '恢复的两位'],
+    '四元组锁定': ['串行输入四元组', '识别 AM 与四元组边界', '锁定后的四元组'],
+    'PCSL AM 锁定': ['解复用后的 PCS lane', '检查对齐标记', '逐 lane 锁定结果'],
+    'PCS AM/Deskew': ['有偏差的 PCS lane', '锁定 AM 并缓冲补偿', '对齐后的 PCS lane'],
+    '按 UM 重排': ['已对齐的 PCS lane', '从 UM 识别 lane ID', '按 ID 排序的 lane'],
+    '去交织': ['各 lane 的 A/B/C/D 符号', '按码字收集符号', 'A/B/C/D 码字'],
+    'RS 解码': ['四个 RS 码字', '逐码字检测并尝试纠错', '消息符号或解码失败'],
+    'FEC 后交织': ['码字消息符号', '每流交替拼接 10 位符号', '每流含 AM 的位流'],
+    'AM 移除': ['每流 AM + 加扰数据', '跳过 1,028 位 AM', '36 个加扰块'],
+    '解扰': ['加扰 257b 位流', '按接收位状态解扰', '恢复的 257b 块'],
+    '逆转码': ['一个 257b 块', '恢复四个同步头', '四个 66b 块'],
+    '64B/66B 解码': ['66b 块', '解码同步头和载荷', '8 字节及控制指示'],
+    '图样发生器': ['测试图样状态', '产生测试位流', '发送测试图样'],
+    '图样检测器': ['接收测试位流', '与参考图样比较', '检测结果'],
+    '本地环回': ['MAC 侧 TX', '本地 PMA 环回', 'MAC 侧 RX'],
+    '远端环回': ['介质侧 RX', '远端 PMA 环回', '介质侧 TX']
+  };
+
   function showPopup(index, flow, lane, title) {
     if (title && title.includes('1588')) {
       window.PCS.openPtpPoint('1.6TMII', index === 0);
@@ -1458,6 +1504,9 @@
       get('popup-note').textContent = 'PMA 测试与环回支路';
     }
     get('popup-data').innerHTML = body;
+    const operation = operationFlowSteps[title];
+    const explanation = operation ? operation[0] + ' → ' + operation[1] + ' → ' + operation[2] : steps[index][2];
+    window.PCS.mountModuleDemo(get('popup'), get('popup-data'), operation || moduleFlowSteps[index], explanation);
     const toggle = get('pma-sample-toggle');
     if (toggle) {
       const kind = title === '预编码/逆预编码' ? 'precoding' : 'pattern';
@@ -1662,6 +1711,7 @@
     get('test-pattern').setAttribute('aria-pressed', testMode ? 'true' : 'false');
     get('popup-title').textContent = 'Scrambled Idle 测试模式';
     get('popup-note').textContent = '175.2.4.11 · tx_test_mode = ' + (testMode ? '1' : '0');
+    window.PCS.stopModuleDemo(get('popup'));
     get('popup-data').innerHTML = viewTestPattern();
     lastPopup = { index: stage, flow: selectedFlow, lane: Number(get('lane').value), title: null };
     if (!get('popup').open) get('popup').showModal();
@@ -1817,6 +1867,7 @@
               get('popup-title').textContent = 'PCS lane ' + info.lane + ' · 符号 ' + info.n;
               get('popup-note').textContent = '175.2.4.7–9 · 加扰前的 MAC 源位与实际发送的 10 位符号';
               const bits = laneSymbols[info.lane][info.n];
+              window.PCS.stopModuleDemo(get('popup'));
               get('popup-data').innerHTML = '<p>TX · ' + range(10).map(bit => (bits >> bit) & 1).join('') +
                 '（bit 0 先发）</p><div class="g800-sym-row">' +
                 (testMode ? '<span>Scrambled Idle 模式没有 MAC 字符。</span>' :

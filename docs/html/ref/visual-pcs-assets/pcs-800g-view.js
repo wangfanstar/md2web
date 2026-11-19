@@ -1949,6 +1949,49 @@
     localLoop: '173.5.9', remoteLoop: '173.5.10', patternTx: '173.5.11', patternRx: '173.5.11'
   };
 
+  const moduleFlowSteps = [
+    ['MAC / RS', '800GMII 传输', '8 字节及控制指示'],
+    ['8 数据字节', '添加 2 位同步头', '66b 数据块'],
+    ['66b #0、#1、#2、#3', '偶数 / 奇数分流', 'F0：#0、#2；F1：#1、#3'],
+    ['同一 Flow 的四个 66b 块', '256B/257B 转码', '1 位头 + 256 位数据'],
+    ['原始 257b 位流', '独立应用 x⁵⁸ + x³⁹ + 1', '加扰位流'],
+    ['每流的 AM 与加扰数据', '10 位交替分配并编码', '每流 RS 码字 A / B'],
+    ['两个 Flow 的码字', '按 10 位符号分配', 'F0：lane 0–15；F1：lane 16–31'],
+    ['2 条 F0 lane + 2 条 F1 lane', '每条输入 lane 取 1 位', '每条输出 lane 的 4 个位时隙'],
+    ['连续两个发送位', 'PAM4 Gray 映射', '四个电平之一'],
+    ['每条 PMA 输入的串行位流', '按位分到四个输出', '32 条待识别的 PCS lane'],
+    ['含 AM 的 PCS lane', '锁定、识别并补偿偏差', '按 lane ID 重排'],
+    ['重排后的 10 位符号', '去交织、纠错和移除 AM', '加扰数据流'],
+    ['加扰 257b 位流', '按接收位状态解扰', '原始 257b 块'],
+    ['每流一个 257b 块', '恢复四个同步头', '每流四个 66b 块'],
+    ['F0：#0、#2；F1：#1、#3', '交替读取两个 Flow', '66b #0、#1、#2、#3'],
+    ['66b 块', '解码同步头和载荷', '8 字节及控制指示'],
+    ['恢复的 800GMII 传输', 'RS / MAC 接收', 'MAC 数据']
+  ];
+  const operationFlowSteps = {
+    idle: ['持续输入 Idle', '控制块转码、加扰和 FEC', 'Scrambled Idle 测试码流'],
+    txRate: ['TX 数据与 Idle', '调整 Idle 或序列有序集', '速率匹配后的 TX 流'],
+    rxRate: ['RX 数据与 Idle', '按规则补偿速率差', '800GMII 接收流'],
+    fecSplit: ['AM + 加扰数据', '每 10 位交替取样', 'A / B 各 514 个消息符号'],
+    rsEncode: ['每码字 514 个消息符号', '生成 30 个校验符号', '每码字 544 个符号'],
+    deinterleave: ['已对齐 PCS lane', '按符号索引重组', '每流 A / B 码字'],
+    rsDecode: ['每码字 544 个符号', '检测并尝试纠错', '514 个消息符号或解码失败'],
+    fecJoin: ['A / B 的消息符号', '交替拼接每个 10 位符号', '含 AM 的加扰流'],
+    amRemove: ['AM + 加扰数据', '跳过 2,056 位 AM 组', '加扰位流'],
+    reorder: ['已锁定的 RX lane', '依据 UM 识别逻辑 lane', '按 PCS lane ID 排列'],
+    precode: ['PAM4 电平序列', '按前一状态预编码', '预编码电平'],
+    inverse: ['预编码接收电平', '按前一状态逆预编码', '恢复的 PAM4 电平'],
+    driver: ['TX 电平', '驱动适用的电接口', '线路信号'],
+    signal: ['输入和输出状态', '汇总 PMA / PMD 状态', 'SIGNAL_OK'],
+    patternTx: ['PRBS31 状态', '生成测试码型', '发送测试位流'],
+    patternRx: ['接收测试位流', '与参考码型逐位比较', '同步和错误结果'],
+    localLoop: ['MAC 侧 TX', '本地 PMA 环回', 'MAC 侧 RX'],
+    remoteLoop: ['介质侧 RX', '远端 PMA 环回', '介质侧 TX'],
+    cdr: ['输入 PAM4 波形', '恢复时钟并采样', '接收电平判决'],
+    gray: ['接收 PAM4 电平', 'Gray 解映射', '恢复的两位'],
+    demux: ['串行接收位', '分配到四个输出时隙', '待识别的 PCS lane']
+  };
+
   let stopAmDemo = () => {};
   get('popup').addEventListener('close', () => stopAmDemo());
 
@@ -2026,6 +2069,7 @@
 
   function showData(forceKind, blockOverride, row, frame) {
     stopAmDemo();
+    window.PCS.stopModuleDemo(get('popup'));
     setPlaying(false);
     if (forceKind === 'ptpTx' || forceKind === 'ptpRx') {
       window.PCS.openPtpPoint('800GMII', forceKind === 'ptpTx');
@@ -2071,6 +2115,10 @@
     get('popup-body').innerHTML = (detail
       ? '<p class="g800-inspect-note">' + escHtml(detail) + '</p>' : body) +
       '<p class="g800-inspect-note">IEEE Std 802.3df-2024 · ' + clause + '</p>';
+    if (row == null) {
+      window.PCS.mountModuleDemo(get('popup'), get('popup-body'),
+        operationFlowSteps[forceKind] || moduleFlowSteps[stage], detail || stages[stage][1]);
+    }
     get('popup-bits').textContent = '';
     if (!get('popup').open) get('popup').showModal();
   }

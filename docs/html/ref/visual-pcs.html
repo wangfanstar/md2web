@@ -5851,9 +5851,17 @@ globalThis.PCS.openPtpPoint = function (xMII, tx) {
     ? '换算到介质相关接口（MDI）时，xMII 捕获时间加上 PHY 发送路径时延，计入适用的动态时延修正。'
     : '换算到介质相关接口（MDI）时，xMII 捕获时间减去 PHY 接收路径时延，计入适用的动态时延修正。';
   const dialog = document.getElementById('ptp-point');
+  const details = document.getElementById('ptp-point-direction');
+  const oldDemo = dialog.querySelector('.pcs-module-demo');
+  if (oldDemo) oldDemo.remove();
+  globalThis.PCS.mountModuleDemo(dialog, {
+    prepend: demo => details.before(demo)
+  }, [xMII + ' 上的帧', '检测 DDMP 并捕获时间', tx ? 'TX 捕获时间 + PHY 时延' : 'RX 捕获时间 − PHY 时延'],
+  details.textContent);
   if (!dialog.open) dialog.showModal();
 };
 </script>
+<script src="visual-pcs-assets/pcs-module-demo.js"></script>
 <script src="visual-pcs-assets/pcs-800g-model.js"></script>
 <script src="visual-pcs-assets/pcs-1600g-view.js"></script>
 <script src="visual-pcs-assets/pcs-800g-view.js"></script>

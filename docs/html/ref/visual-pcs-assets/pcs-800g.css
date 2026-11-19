@@ -193,3 +193,12 @@
 @media (prefers-reduced-motion: reduce) {
   .g800-am-demo-track > span { transition: none !important; }
 }
+
+.pcs-module-demo { padding: .65rem; margin-bottom: .65rem; border: 1px solid var(--rule); border-radius: .4rem; }
+.pcs-module-demo-track { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .4rem; padding: 0; margin: 0; list-style: none; }
+.pcs-module-demo-track li { display: grid; align-content: start; gap: .2rem; min-block-size: 4rem; overflow-wrap: anywhere; padding: .4rem; border: 1px solid var(--rule); border-radius: .3rem; transition: background .25s, transform .25s; }
+.pcs-module-demo-track li[aria-current="step"] { background: color-mix(in srgb, var(--am) 23%, var(--panel)); border-color: var(--focus); transform: translateY(-2px); }
+.pcs-module-demo-status { min-block-size: 3em; }
+@media (prefers-reduced-motion: reduce) {
+  .pcs-module-demo-track li { transition: none; transform: none; }
+}
