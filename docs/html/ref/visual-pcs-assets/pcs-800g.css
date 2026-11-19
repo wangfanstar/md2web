@@ -12,6 +12,9 @@
 .g800-legend .g800-lg-flow1 i { background: #d97139; }
 .g800-legend .lg-follow { width: 10px; height: 10px; background: var(--am); box-shadow: 0 0 0 2px var(--panel), 0 0 0 3px var(--am); }
 .g800-controls input[type="number"] { width: 5.2rem; background: var(--panel); color: var(--ink); border: 1px solid var(--rule); border-radius: .25rem; padding: .25rem; font-family: var(--f-mono); }
+.pcs-follow-actions { display: inline-flex; gap: .5rem; white-space: nowrap; }
+.pcs-follow-actions .btn { min-inline-size: 6em; }
+#g1600-follow-map { flex-basis: 100%; }
 .g800-follow-bar { top: auto; bottom: 52px; }
 .g800-follow-bar #g800-follow-where { font-family: var(--f-mono); font-size: .72rem; color: var(--muted); }
 .g800-follow-tags { z-index: 4; }

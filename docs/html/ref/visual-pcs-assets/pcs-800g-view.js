@@ -212,8 +212,8 @@
       start.textContent = followActive ? '重新追踪' : '追踪动画';
     }
     const pause = get('follow-pause');
-    pause.hidden = !followActive;
-    pause.textContent = playing ? '暂停追踪' : '继续追踪';
+    pause.disabled = !followActive;
+    pause.textContent = !followActive || playing ? '暂停追踪' : '继续追踪';
     if (followTagHost) followTagHost.hidden = !followActive;
     updateFollowBar();
   }

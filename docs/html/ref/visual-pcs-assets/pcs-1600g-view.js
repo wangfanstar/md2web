@@ -1558,10 +1558,12 @@
     charPicker.add(new Option('#' + offset + ' · ' + JSON.stringify(character), offset)));
 
   function syncTracking() {
-    get('follow-pause').hidden = followChar < 0;
-    get('follow-pause').textContent = playing ? '暂停追踪' : '继续追踪';
-    get('follow-stop').hidden = followChar < 0;
+    const tracking = followChar >= 0;
+    get('follow-pause').disabled = !tracking;
+    get('follow-pause').textContent = !tracking || playing ? '暂停追踪' : '继续追踪';
+    get('follow-stop').disabled = !tracking;
     get('follow-start').disabled = testMode;
+    get('follow-start').textContent = tracking ? '重新追踪' : '追踪动画';
     const offset = Number(charPicker.value);
     get('follow-map').textContent = testMode ? 'Scrambled Idle 模式没有 MAC 字符。'
       : '当前字节 #' + offset + ' · 66b 块 #' + Math.floor(offset / 8) +
