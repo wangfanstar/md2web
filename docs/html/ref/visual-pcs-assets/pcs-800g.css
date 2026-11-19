@@ -211,3 +211,10 @@
 #pcs-fault-reverse { border-color: var(--focus); }
 .pcs-fault-steps { display: flex; flex-wrap: wrap; gap: .4rem; padding: 0; list-style: none; }
 .pcs-fault-steps [aria-current="step"] { border-color: var(--focus); background: color-mix(in srgb, var(--am) 24%, var(--panel)); }
+
+.pcs-frame-route { margin-block: .7rem; padding: .5rem .65rem; border: 1px solid var(--rule); border-radius: .4rem; }
+.pcs-frame-route ol { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem; padding: 0; margin: .3rem 0; list-style: none; }
+.pcs-frame-route li { display: inline-flex; align-items: center; gap: .35rem; }
+.pcs-frame-route-dir { min-width: 2rem; font-weight: 700; }
+.pcs-frame-route li:nth-child(n+3)::before { content: '→'; color: var(--muted); }
+.pcs-frame-route p { margin-bottom: 0; }

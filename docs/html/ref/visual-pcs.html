@@ -770,6 +770,24 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <noscript><p class="noscript">通道实验需要 JavaScript 和 WebGL。</p></noscript>
   </div>
 
+  <section class="pcs-frame-route" aria-label="200G 帧边界处理顺序">
+    <ol aria-label="发送顺序">
+      <li class="pcs-frame-route-dir">TX</li>
+      <li><button type="button" class="btn" data-view="frameTx">1 · 前导码 / IPG</button></li>
+      <li><button type="button" class="btn" data-view="b66">2 · 64B/66B 编码</button></li>
+      <li><button type="button" class="btn" data-view="idleTx">3 · Idle 调整</button></li>
+      <li><button type="button" class="btn" data-view="b257">4 · 256B/257B 转码</button></li>
+    </ol>
+    <ol aria-label="接收顺序">
+      <li class="pcs-frame-route-dir">RX</li>
+      <li><button type="button" class="btn" data-view="r257">1 · 257b 逆转码</button></li>
+      <li><button type="button" class="btn" data-view="d66">2 · 64B/66B 解码</button></li>
+      <li><button type="button" class="btn" data-view="idleRx">3 · Idle 调整</button></li>
+      <li><button type="button" class="btn" data-view="frameRx">4 · MAC 帧提取</button></li>
+    </ol>
+    <p class="note">沿箭头阅读。Idle 调整属于 PCS 的编码／解码与速率匹配环节，图中单列以便查看。</p>
+  </section>
+
   <section class="lens" id="lens" aria-labelledby="lens-title">
     <div class="lens-bar">
       <h3 id="lens-title">位级视图</h3>
@@ -1965,8 +1983,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   // Sub-blocks drawn in the scene. lane: true spans the 8-lane stack.
   P.BOXES = [
     { x: [0, 4], name: 'TX 1588 · 200GMII', stage: 1, view: 'ptpTx' },
-    { x: [5, 9], name: '64B/66B 编码', stage: 2, view: 'b66' },
-    { x: [10.5, 14.5], name: '256B/257B 转码', stage: 2, view: 'b257' },
+    { x: [5, 9], name: '64B/66B 编码', short: 'TX 2 · 64B/66B', stage: 2, view: 'b66' },
+    { x: [10.5, 14.5], name: '256B/257B 转码', short: 'TX 4 · 转码', stage: 2, view: 'b257' },
     { x: [16, 19], name: '加扰', stage: 3 },
     { x: [20, 23], name: '插入 AM', stage: 3, view: 'am' },
     { x: [24.5, 26.5], name: 'FEC 前分配', stage: 3, short: 'FEC 前分配', view: 'prefec' },
@@ -1982,13 +2000,13 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     { x: [91.5, 93.5], name: 'FEC 后交织', stage: 9, short: 'Post-FEC', view: 'postfec' },
     { x: [94, 97], name: '移除 AM', stage: 9, view: 'amr' },
     { x: [98, 101], name: '解扰', stage: 9 },
-    { x: [102, 106], name: '逆转码', stage: 9, view: 'r257' },
-    { x: [107, 111], name: '64B/66B 解码', stage: 9, view: 'd66' },
+    { x: [102, 106], name: '逆转码', short: 'RX 1 · 逆转码', stage: 9, view: 'r257' },
+    { x: [107, 111], name: '64B/66B 解码', short: 'RX 2 · 64B/66B', stage: 9, view: 'd66' },
     { x: [112, 116], name: 'RX 1588 · 200GMII', stage: 9, view: 'ptpRx' },
-    { x: [0, 6], name: 'TX 前导码 / IPG', stage: 1, view: 'frameTx', raised: true },
-    { x: [8, 15], name: 'TX Idle 调整', stage: 2, view: 'idleTx', raised: true },
-    { x: [101, 108], name: 'RX Idle 调整', stage: 9, view: 'idleRx', raised: true },
-    { x: [110, 116], name: 'RX 帧提取', stage: 9, view: 'frameRx', raised: true }
+    { x: [0, 5], name: 'TX 前导码 / IPG', short: 'TX 1 · 前导码', stage: 1, view: 'frameTx', raised: true },
+    { x: [9.1, 10.4], name: 'TX Idle 调整', short: 'TX 3 · Idle', stage: 2, view: 'idleTx', raised: true },
+    { x: [111.1, 113], name: 'RX Idle 调整', short: 'RX 3 · Idle', stage: 9, view: 'idleRx', raised: true },
+    { x: [113.5, 117], name: 'RX 帧提取', short: 'RX 4 · 帧提取', stage: 9, view: 'frameRx', raised: true }
   ];
 
   P.STAGES = [
