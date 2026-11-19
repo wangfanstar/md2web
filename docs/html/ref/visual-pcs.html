@@ -761,6 +761,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <span><i class="lg-ring"></i>AM 锁定</span>
       <span><i class="lg-sheath"></i>物理 SerDes 通道</span>
       <span><i class="lg-bad"></i>错误</span>
+      <fieldset class="pcs-scene-options">
+        <legend>显示叠加模块</legend>
+        <label><input type="checkbox" data-pcs-overlay="llr"> LLR</label>
+        <label><input type="checkbox" data-pcs-overlay="cbfc"> CBFC</label>
+        <label><input type="checkbox" data-pcs-overlay="frame"> IPG / Preamble</label>
+      </fieldset>
     </div>
     <p id="lab-hint" class="lab-hint" hidden></p>
     <p class="vp-click" id="vp-click">点击数据块查看内容 · 点击处理模块查看步骤说明</p>
@@ -769,47 +775,6 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <p class="vp-help" id="vp-help">拖动平移 · 右键拖动旋转 · Ctrl + 滚轮缩放</p>
     <noscript><p class="noscript">通道实验需要 JavaScript 和 WebGL。</p></noscript>
   </div>
-
-  <section class="pcs-frame-route" aria-label="200G 帧边界处理顺序">
-    <ol aria-label="发送顺序">
-      <li class="pcs-frame-route-dir">TX</li>
-      <li><button type="button" class="btn" data-view="frameTx">1 · 前导码 / IPG</button></li>
-      <li><button type="button" class="btn" data-view="b66">2 · 64B/66B 编码</button></li>
-      <li><button type="button" class="btn" data-view="idleTx">3 · Idle 调整</button></li>
-      <li><button type="button" class="btn" data-view="b257">4 · 256B/257B 转码</button></li>
-    </ol>
-    <ol aria-label="接收顺序">
-      <li class="pcs-frame-route-dir">RX</li>
-      <li><button type="button" class="btn" data-view="r257">1 · 257b 逆转码</button></li>
-      <li><button type="button" class="btn" data-view="d66">2 · 64B/66B 解码</button></li>
-      <li><button type="button" class="btn" data-view="idleRx">3 · Idle 调整</button></li>
-      <li><button type="button" class="btn" data-view="frameRx">4 · 去前导码 / 帧提取</button></li>
-    </ol>
-    <p class="note">沿箭头阅读。Idle 调整属于 PCS 的编码／解码与速率匹配环节，图中单列以便查看。</p>
-  </section>
-
-  <section class="pcs-frame-route" aria-label="UE 1.1 链路控制演示">
-    <div class="pcs-ue-layout">
-      <div class="pcs-ue-side">
-        <b>端口 A · 正向发送</b>
-        <div><button type="button" class="btn" data-view="ueLlr">A · LLR</button>
-          <button type="button" class="btn" data-view="ueCbfc">A · CBFC</button></div>
-        <span>↕ MAC Control / MAC</span>
-        <button type="button" class="btn" data-view="ueCtl">200GMII · CtlOS 插入 / 提取</button>
-        <span>↕ PCS 编码 / 解码</span>
-      </div>
-      <div class="pcs-ue-medium"><span>数据帧 →</span><span>← CtlOS 回传</span></div>
-      <div class="pcs-ue-side">
-        <b>端口 B · 正向接收</b>
-        <div><button type="button" class="btn" data-view="ueLlrRx">B · LLR</button>
-          <button type="button" class="btn" data-view="ueCbfcRx">B · CBFC</button></div>
-        <span>↕ MAC Control / MAC</span>
-        <button type="button" class="btn" data-view="ueCtlRx">200GMII · CtlOS 插入 / 提取</button>
-        <span>↕ PCS 编码 / 解码</span>
-      </div>
-    </div>
-    <p class="note">从 A 到 B 看正向帧路径：LLR / CBFC 所在的 MAC 客户端侧 → MAC / RS → 200GMII → PCS → 链路 → 对端 PCS → 200GMII → MAC / RS。ACK、NACK 和 CF_Update 沿 B 到 A 的反向路径返回。CtlOS 在发送侧插入、接收侧提取，再交给相应的控制模块。</p>
-  </section>
 
   <section class="lens" id="lens" aria-labelledby="lens-title">
     <div class="lens-bar">
@@ -836,6 +801,56 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <span class="lens-hint">左侧为输入，右侧为输出。也可点击 3D 视图中的处理模块。</span>
     </div>
   </section>
+
+  <nav class="pcs-zoom-rail" aria-label="200G 动画分段视图">
+    <button type="button" class="btn" data-pcs-camera="overview">全链路</button>
+    <button type="button" class="btn" data-pcs-camera="tx">TX · MAC / PCS</button>
+    <button type="button" class="btn" data-pcs-camera="link">PMA / SerDes</button>
+    <button type="button" class="btn" data-pcs-camera="rx">RX · PCS / MAC</button>
+  </nav>
+
+  <section class="pcs-frame-route" data-pcs-route="frame" aria-label="200G 帧边界处理顺序" hidden>
+    <ol aria-label="发送顺序">
+      <li class="pcs-frame-route-dir">TX</li>
+      <li><button type="button" class="btn" data-view="frameTx">1 · 前导码 / IPG</button></li>
+      <li><button type="button" class="btn" data-view="b66">2 · 64B/66B 编码</button></li>
+      <li><button type="button" class="btn" data-view="idleTx">3 · Idle 调整</button></li>
+      <li><button type="button" class="btn" data-view="b257">4 · 256B/257B 转码</button></li>
+    </ol>
+    <ol aria-label="接收顺序">
+      <li class="pcs-frame-route-dir">RX</li>
+      <li><button type="button" class="btn" data-view="r257">1 · 257b 逆转码</button></li>
+      <li><button type="button" class="btn" data-view="d66">2 · 64B/66B 解码</button></li>
+      <li><button type="button" class="btn" data-view="idleRx">3 · Idle 调整</button></li>
+      <li><button type="button" class="btn" data-view="frameRx">4 · 去前导码 / 帧提取</button></li>
+    </ol>
+    <p class="note">沿箭头阅读。Idle 调整属于 PCS 的编码／解码与速率匹配环节，图中单列以便查看。</p>
+  </section>
+
+  <section class="pcs-frame-route" data-pcs-route="ue" aria-label="UE 1.1 链路控制演示" hidden>
+    <div class="pcs-ue-layout">
+      <div class="pcs-ue-side">
+        <b>端口 A · 正向发送</b>
+        <div><button type="button" class="btn" data-view="ueLlr">A · LLR</button>
+          <button type="button" class="btn" data-view="ueCbfc">A · CBFC</button></div>
+        <span>↕ MAC Control / MAC</span>
+        <button type="button" class="btn" data-view="ueCtl">200GMII · CtlOS 插入 / 提取</button>
+        <span>↕ PCS 编码 / 解码</span>
+      </div>
+      <div class="pcs-ue-medium"><span>数据帧 →</span><span>← CtlOS 回传</span></div>
+      <div class="pcs-ue-side">
+        <b>端口 B · 正向接收</b>
+        <div><button type="button" class="btn" data-view="ueLlrRx">B · LLR</button>
+          <button type="button" class="btn" data-view="ueCbfcRx">B · CBFC</button></div>
+        <span>↕ MAC Control / MAC</span>
+        <button type="button" class="btn" data-view="ueCtlRx">200GMII · CtlOS 插入 / 提取</button>
+        <span>↕ PCS 编码 / 解码</span>
+      </div>
+    </div>
+    <p class="note">从 A 到 B 看正向帧路径：LLR / CBFC 所在的 MAC 客户端侧 → MAC / RS → 200GMII → PCS → 链路 → 对端 PCS → 200GMII → MAC / RS。ACK、NACK 和 CF_Update 沿 B 到 A 的反向路径返回。CtlOS 在发送侧插入、接收侧提取，再交给相应的控制模块。</p>
+  </section>
+
+
 
   <dialog class="opview" id="opview" aria-labelledby="opv-title" aria-describedby="opv-note">
     <div class="opv-inner">
@@ -2045,6 +2060,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   'use strict';
 
   // Sub-blocks drawn in the scene. lane: true spans the 8-lane stack.
+  P.sceneOverlays = { llr: false, cbfc: false, frame: false };
+  P.showOverlay = function (group) {
+    if (!group) return true;
+    if (group === 'ue') return P.sceneOverlays.llr || P.sceneOverlays.cbfc;
+    return P.sceneOverlays[group];
+  };
   P.BOXES = [
     { x: [0, 4], name: 'TX 1588 · 200GMII', stage: 1, view: 'ptpTx' },
     { x: [5, 9], name: '64B/66B 编码', short: 'TX 2 · 64B/66B', stage: 2, view: 'b66' },
@@ -2067,16 +2088,16 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     { x: [102, 106], name: '逆转码', short: 'RX 1 · 逆转码', stage: 9, view: 'r257' },
     { x: [107, 111], name: '64B/66B 解码', short: 'RX 2 · 64B/66B', stage: 9, view: 'd66' },
     { x: [112, 116], name: 'RX 1588 · 200GMII', stage: 9, view: 'ptpRx' },
-    { x: [0, 5], name: 'TX 前导码 / IPG', short: 'TX 1 · 前导码', stage: 1, view: 'frameTx', raised: true },
-    { x: [9.1, 10.4], name: 'TX Idle 调整', short: 'TX 3 · Idle', stage: 2, view: 'idleTx', raised: true },
-    { x: [111.1, 113], name: 'RX Idle 调整', short: 'RX 3 · Idle', stage: 9, view: 'idleRx', raised: true },
-    { x: [113.5, 117], name: 'RX 帧提取', short: 'RX 4 · 去前导码', stage: 9, view: 'frameRx', raised: true },
-    { x: [0, 4], name: 'A · LLR', stage: 1, view: 'ueLlr', raised: true, heightOffset: 9, ueAnchor: 'frameTx' },
-    { x: [4.5, 8.5], name: 'A · CBFC', stage: 1, view: 'ueCbfc', raised: true, heightOffset: 9, ueAnchor: 'frameTx' },
-    { x: [7, 11], name: 'A · CtlOS', stage: 2, view: 'ueCtl', raised: true, heightOffset: 5.5, ueAnchor: 'b66' },
-    { x: [108, 112], name: 'B · CBFC', stage: 9, view: 'ueCbfcRx', raised: true, heightOffset: 9, ueAnchor: 'frameRx' },
-    { x: [112.5, 116.5], name: 'B · LLR', stage: 9, view: 'ueLlrRx', raised: true, heightOffset: 9, ueAnchor: 'frameRx' },
-    { x: [105.5, 109.5], name: 'B · CtlOS', stage: 9, view: 'ueCtlRx', raised: true, heightOffset: 5.5, ueAnchor: 'd66' }
+    { x: [0, 5], name: 'TX 前导码 / IPG', short: 'TX 1 · 前导码', stage: 1, view: 'frameTx', overlay: 'frame', raised: true },
+    { x: [9.1, 10.4], name: 'TX Idle 调整', short: 'TX 3 · Idle', stage: 2, view: 'idleTx', overlay: 'frame', raised: true },
+    { x: [111.1, 113], name: 'RX Idle 调整', short: 'RX 3 · Idle', stage: 9, view: 'idleRx', overlay: 'frame', raised: true },
+    { x: [113.5, 117], name: 'RX 帧提取', short: 'RX 4 · 去前导码', stage: 9, view: 'frameRx', overlay: 'frame', raised: true },
+    { x: [0, 4], name: 'A · LLR', stage: 1, view: 'ueLlr', overlay: 'llr', raised: true, heightOffset: 9, ueAnchor: 'ptpTx' },
+    { x: [4.5, 8.5], name: 'A · CBFC', stage: 1, view: 'ueCbfc', overlay: 'cbfc', raised: true, heightOffset: 9, ueAnchor: 'ptpTx' },
+    { x: [7, 11], name: 'A · CtlOS', stage: 2, view: 'ueCtl', overlay: 'ue', raised: true, heightOffset: 5.5, ueAnchor: 'b66' },
+    { x: [108, 112], name: 'B · CBFC', stage: 9, view: 'ueCbfcRx', overlay: 'cbfc', raised: true, heightOffset: 9, ueAnchor: 'ptpRx' },
+    { x: [112.5, 116.5], name: 'B · LLR', stage: 9, view: 'ueLlrRx', overlay: 'llr', raised: true, heightOffset: 9, ueAnchor: 'ptpRx' },
+    { x: [105.5, 109.5], name: 'B · CtlOS', stage: 9, view: 'ueCtlRx', overlay: 'ue', raised: true, heightOffset: 5.5, ueAnchor: 'd66' }
   ];
 
   P.STAGES = [
@@ -2274,6 +2295,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var grp = G.boxGroup = new T.Group();
     G.boxes = [];
     P.BOXES.forEach(function (b) {
+      if (!P.showOverlay(b.overlay)) return;
       var w = b.x[1] - b.x[0], h = b.raised ? 2.5 : b.lane ? LANE_H : AGG_H;
       var geo = new T.BoxGeometry(w, h, DEPTH);
       var mat = new T.MeshBasicMaterial({ color: G.col.box, transparent: true, opacity: b.lane ? 0.32 : 0.5, depthWrite: false });
@@ -2712,6 +2734,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var S = P.state, link = S.link, X = P.X, L = [], sel = S.selected;
     var top = 4 * P.LANE_SP + 0.4;
     P.BOXES.forEach(function (b, i) {
+      if (!P.showOverlay(b.overlay)) return;
       var y = b.raised ? (b.heightOffset || 4) + 1.55 : b.lane ? top + 0.3 : 1.6;
       L.push({ id: 'box' + i, html: b.view ? '<span data-view="' + b.view + '" title="How ' + b.name + ' works">' + (b.short || b.name) + '</span>' : b.short || b.name,
                cls: 'lbl-box' + (b.view ? ' op' : ''), pos: [(b.x[0] + b.x[1]) / 2, y, 0], pri: b.raised ? 5 : b.lane ? 3 : 2 });
@@ -2786,7 +2809,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 
   function stageAt(x) {
     var best = null;
-    P.BOXES.forEach(function (b) { if (!best && x >= b.x[0] - 0.75 && x <= b.x[1] + 0.75) best = b; });
+    P.BOXES.forEach(function (b) { if (!best && P.showOverlay(b.overlay) && x >= b.x[0] - 0.75 && x <= b.x[1] + 0.75) best = b; });
     if (best) return best.name;
     var X = P.X;
     if (x > X.chan[0] && x < X.chan[1]) return 'Physical SerDes lane';
@@ -5857,6 +5880,43 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     P.initScope();
     P.initStory();
     P.initViews();
+    function syncOverlays() {
+      document.querySelectorAll('[data-pcs-route]').forEach(function (section) {
+        section.hidden = !P.showOverlay(section.dataset.pcsRoute);
+      });
+      [['ueLlr', 'llr'], ['ueCbfc', 'cbfc']].forEach(function (entry) {
+        document.querySelectorAll('button[data-view="' + entry[0] + '"], button[data-view="' + entry[0] + 'Rx"]').forEach(function (button) {
+          button.hidden = !P.showOverlay(entry[1]);
+        });
+      });
+    }
+    var sceneOptions = vp.querySelector('.pcs-scene-options');
+    ['pointerdown', 'pointerup', 'click', 'keydown'].forEach(function (event) {
+      sceneOptions.addEventListener(event, function (e) { e.stopPropagation(); });
+    });
+    document.querySelectorAll('[data-pcs-overlay]').forEach(function (choice) {
+      // Browsers may restore form values after reload. Start with the base PCS view.
+      choice.checked = false;
+      choice.onchange = function () {
+        P.sceneOverlays[choice.dataset.pcsOverlay] = choice.checked;
+        syncOverlays();
+        if (G.failed) return;
+        P.buildBoxes();
+        P.buildLabels();
+        if (choice.checked) P.flyTo(P.framePose(-2, 118, 0.35));
+      };
+    });
+    syncOverlays();
+    var cameraRanges = { overview: [-2, 118], tx: [-2, 33], link: [32, 85], rx: [83, 118] };
+    document.querySelectorAll('[data-pcs-camera]').forEach(function (button) {
+      button.onclick = function () {
+        if (G.failed) return;
+        var range = cameraRanges[button.dataset.pcsCamera];
+        S.stage = null;
+        P.emit('stage');
+        P.flyTo(P.framePose(range[0], range[1], 0.45));
+      };
+    });
     P.on(onEvent);
     try {
       P.initScene(vp);
