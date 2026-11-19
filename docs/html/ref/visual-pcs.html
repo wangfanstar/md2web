@@ -1127,7 +1127,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 <section id="mux" aria-labelledby="mux-title">
   <p class="eyebrow">第 4 部分</p>
   <h2 id="mux-title">PMA 复用：比特与符号四元组</h2>
-  <p>SerDes 通道比 PCS 通道少时，PMA 将 PCS 通道<b>逐比特</b>交织。4 条 SerDes 通道时，每条承载 2 条 PCS 通道。2 条时，每条承载 4 条。PMA 选择共享同一 SerDes 通道的 PCS 通道，并在链路正常运行期间保持这个映射。</p>
+  <p>以图中的 200G 比特复用配置为例，SerDes 通道比 PCS 通道少时，PMA 将 PCS 通道<b>逐比特</b>交织。4 条 SerDes 通道时，每条承载 2 条 PCS 通道。2 条时，每条承载 4 条。PMA 选择共享同一 SerDes 通道的 PCS 通道，并在链路正常运行期间保持这个映射。</p>
   <figure>
     <div class="figwrap" id="fig-mux"></div>
     <figcaption>一条 SerDes 通道的时延偏差会影响它承载的所有 PCS 通道，因此这些通道会一起迟到。一个错误的 PAM4 符号也可能同时影响两条 PCS 通道，这解释了为什么某些 PCS 通道的错误计数会成组上升。</figcaption>
@@ -1144,7 +1144,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 <section id="rx" aria-labelledby="rx-title">
   <p class="eyebrow">第 5 部分</p>
   <h2 id="rx-title">接收：锁定、对齐、重排，再解码</h2>
-  <p>RX PMA 恢复并解复用每条 SerDes 通道。由于它无法区分 PCS 通道，且解复用的起始比特相位不固定，RX PCS 会收到顺序和相对时延都未知的 8 路数据流。处理步骤如下。</p>
+  <p>以图中的 200G 配置为例，RX PMA 恢复并解复用每条 SerDes 通道。由于它无法区分 PCS 通道，且解复用的起始比特相位不固定，RX PCS 会收到顺序和相对时延都未知的 8 路数据流。处理步骤如下。</p>
   <ol class="steps">
     <li><b>锁定</b>：在每条 PMA 通道上查找按预期间隔重复的公共 AM 图样，从专有字节读出通道编号。</li>
     <li><b>时延对齐（Deskew）</b>：缓存先到的通道，直到所有 AM 对齐。802.3 为 PCS 接收输入分配约 180 ns 的时延偏差预算。</li>
@@ -1187,7 +1187,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   </div>
   <aside class="margin">
     <h3>标准定义的指标与厂商测量值</h3>
-    <p>IEEE 802.3 定义了对齐状态、逐通道 AM 锁定、通道映射、已纠错和不可纠正码字计数，以及逐通道 FEC 符号错误计数和对应的管理变量。寄存器地址、计数器位宽、读后清零行为、时延偏差读数、错误直方图和 BER 估计则依具体器件而定。实验的诊断面板分别展示这两类指标。</p>
+    <p>IEEE 802.3 定义了对齐状态、逐通道 AM 锁定、通道映射、已纠错和不可纠正码字计数，以及逐通道 FEC 符号错误计数和对应的管理变量。采用 Clause 45 MDIO 时，按相应 PCS/PMA 条款的管理对象表查标准寄存器。器件额外提供的时延偏差读数、错误直方图和 BER 估计应查芯片手册。实验的诊断面板分别展示这两类指标。</p>
   </aside>
   <button type="button" class="btn showme" data-stage="9" data-fault="noise">在实验中模拟通道噪声</button>
   <h3>800G 和 1.6T 的故障定位</h3>
@@ -1221,7 +1221,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   </div>
   <p>对于连接 800GBASE-CR8 或 800GBASE-KR8 PMD 服务接口，或属于 800GAUI-8 C2C 链路的 PMA，第 173.5.7.2 条要求每条发送 lane 支持 1/(1+D) mod 4 预编码。接收 lane 的预编码解码能力可选。各方向接口逐 lane 独立启用，主动画展示旁路情况。</p>
   <h3>1.6TBASE-R 收发通路</h3>
-  <p>本页按 IEEE P802.3dj/D2.0 草案建模。第 174 条定义 1.6TMII，第 175 条定义 1.6TBASE-R PCS，第 176 条定义符号复用 PMA。实验选择 16:8 SM-PMA，便于跟踪一个 MAC 字符如何经过两个 Flow 与四个 RS 码字的符号交织，最终落到 PCS lane。<a href="#lab-1600g">打开 1.6TBASE-R 三维通道实验</a></p>
+  <p>本页按 IEEE P802.3dj/D2.0 草案建模。第 174 条定义 1.6TMII，第 175 条定义 1.6TBASE-R PCS，第 176 条定义符号复用 PMA。实验选择 16:8 SM-PMA，便于跟踪一个 MAC 字符如何进入所属 Flow，并在四码字交织后的 PCS lane 上定位。<a href="#lab-1600g">打开 1.6TBASE-R 三维通道实验</a></p>
 </section>
 
 <section id="refs" aria-labelledby="refs-title" class="refs">
