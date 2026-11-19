@@ -34,7 +34,7 @@
 
   let stage = 13, progress = 0, active = false, playing = false, frame = 0, started = null;
   let renderer, scene, camera, controls, inst, meta = [], count = 0;
-  let modules = [], moduleMeshes = [], curves = [], tracks = [], tubes = [], rings = [], sheaths = [];
+  let modules = [], moduleMeshes = [], tracks = [], tubes = [], rings = [], sheaths = [];
   let linkGroup, labelHost, labelItems = [], theme = {};
   let cameraTouched = false, zoomAnchor = null, zoomAnchorAt = 0;
   let webglFailed = false;
@@ -261,7 +261,8 @@
       camera.position.copy(controls.target).add(offset);
     }
   }
-  function resetCamera() {
+  function resetCamera(closeUp = false) {
+    laneView = closeUp;
     if (!camera) return;
     camTween = null;
     cameraTouched = false;
@@ -269,9 +270,12 @@
     zoomAnchorAt = 0;
     const host = get('scene');
     const aspect = Math.max(0.8, (host.clientWidth || 16) / (host.clientHeight || 9));
-    const dist = frameNeed(aspect);
-    camera.position.set(dist * 0.05, dist * 0.21, dist * 0.975);
-    controls.target.set(0, 0, 0);
+    const center = closeUp ? (x[5] + x[11]) / 2 : 0;
+    const tanHalf = Math.tan(camera.fov * Math.PI / 360);
+    const dist = closeUp ? Math.max((x[11] - x[5] + 20) / (2 * tanHalf * aspect), 35 / tanHalf)
+      : frameNeed(aspect);
+    camera.position.set(center + dist * 0.05, dist * 0.21, dist * 0.975);
+    controls.target.set(center, 0, 0);
     controls.update();
     draw();
   }
@@ -508,17 +512,11 @@
     });
     scene.remove(group);
   }
-  function samplePath(curve, from, to, n) {
-    const pts = [];
-    for (let i = 0; i <= n; i++) pts.push(curve.getPointAt(from + (to - from) * i / n));
-    return pts;
-  }
   function lanePoint(lane, index) {
-    const y = [0, 0, 0, 0, 0, 0, laneY(lane), pmaY(Math.floor(lane / 2)),
-      pmaY(Math.floor(lane / 2)), rxY(lane), laneY(lane), 0, 0, 0, 0][index];
+    const y = [0, 0, 0, 0, 0, 0, laneY(lane), pmaY(Math.floor(lane / 2)) + (lane % 2 - 0.5) * 0.56,
+      pmaY(Math.floor(lane / 2)) + (lane % 2 - 0.5) * 0.56, rxY(lane), laneY(lane), 0, 0, 0, 0][index];
     let z = 0;
     if (index === 6 || index === 10) z = (lane % 4 - 1.5) * 0.32;
-    else if (index === 7 || index === 8) z = (lane % 2 - 0.5) * 0.55;
     else if (index === 9) z = (rxSlot(lane) % 4 - 1.5) * 0.36;
     return new T.Vector3(x[index], y, z);
   }
@@ -526,7 +524,7 @@
     disposeGroup(linkGroup);
     linkGroup = new T.Group();
     scene.add(linkGroup);
-    curves = []; tracks = []; tubes = []; rings = []; sheaths = [];
+    tracks = []; tubes = []; rings = []; sheaths = [];
     const selected = Number(get('lane').value);
 
     [0, 1].forEach(flow => {
@@ -548,17 +546,15 @@
     range(16).forEach(lane => {
       const curve = new T.CatmullRomCurve3(
         range(6).map(i => lanePoint(lane, i + 6)), false, 'centripetal', 0.35);
-      curves[lane] = curve;
-      const line = new T.Line(new T.BufferGeometry().setFromPoints(
-        samplePath(curve, stageT(6), stageT(11), 120)),
-      new T.LineBasicMaterial({
-        color: new T.Color(CODE_COLORS[lane % 4]), transparent: true, opacity: 0.34
+      laneSamples[lane] = curve.getSpacedPoints(curveSamples);
+      const line = new T.Mesh(new T.TubeGeometry(curve, 100, 0.055, 5, false),
+      new T.MeshBasicMaterial({
+        color: new T.Color(CODE_COLORS[lane % 4]), transparent: true, depthWrite: false, opacity: 0.55
       }));
       line.frustumCulled = false;
       linkGroup.add(line);
       tracks[lane] = line;
-      const tubeCurve = new T.CatmullRomCurve3(samplePath(curve, stageT(6), stageT(11), 80));
-      const tube = new T.Mesh(new T.TubeGeometry(tubeCurve, 100, 0.07, 6, false),
+      const tube = new T.Mesh(new T.TubeGeometry(curve, 100, 0.07, 6, false),
         new T.MeshBasicMaterial({
           color: new T.Color(CODE_COLORS[lane % 4]), transparent: true, opacity: 0.9
         }));
@@ -584,6 +580,7 @@
           color: new T.Color(theme.ink), transparent: true, opacity: 0.07, depthWrite: false
         }));
       linkGroup.add(tube);
+      tube.renderOrder = 1;
       sheaths[s] = tube;
     });
   }
@@ -812,57 +809,77 @@
   }
 
   // ------------------------------------------------------------- draw data
+  const curveSamples = 512;
+  let laneSamples = [];
+  let laneView = false;
+  let dampingFrame = 0;
+  const cubeMatrix = new T.Matrix4();
+  const cubeRotation = new T.Quaternion();
+  const cubeScale = new T.Vector3();
+  const cubePosition = new T.Vector3();
+  const cubeColor = new T.Color();
+
+  function sampleLane(lane, t, target) {
+    const f = Math.max(0, Math.min(1, t)) * curveSamples;
+    const i = Math.floor(f);
+    const samples = laneSamples[lane];
+    return target.lerpVectors(samples[i], samples[Math.min(i + 1, curveSamples)], f - i);
+  }
+
+  function settleCamera() {
+    dampingFrame = 0;
+    if (active && controls.update()) dampingFrame = requestAnimationFrame(settleCamera);
+  }
+
   function pushCube(position, sx, sy, sz, color, info) {
     if (count >= MAX_INST) return;
-    const matrix = new T.Matrix4();
-    matrix.compose(position, new T.Quaternion(), new T.Vector3(sx, sy, sz));
-    inst.setMatrixAt(count, matrix);
+    cubeMatrix.compose(position, cubeRotation, cubeScale.set(sx, sy, sz));
+    inst.setMatrixAt(count, cubeMatrix);
     inst.setColorAt(count, color);
     meta[count] = info;
     count++;
   }
   function drawSegment(from, to, y, z, color, flow, phase) {
     const front = (stage + progress) / STEP;
-    const base = Math.floor(front / STEP_T);
+    const base = Math.floor(stageT(stage) / STEP_T);
     for (let i = 0; i < STREAM; i++) {
       const t = front - i * STEP_T;
       if (t < from) break;
       if (t > to) continue;
-      const am = (base - i) % 5 === 0;
+      const am = i % 5 === 0;
       const px = x[0] + t * SPAN;
       const py = typeof y === 'function' ? y(t) : y;
-      const c = am ? new T.Color(theme.am).lerp(color, 0.22) : color.clone();
-      pushCube(new T.Vector3(px, py, z), am ? 2.2 : 1.75, am ? 1.0 : 0.5,
+      const c = am ? cubeColor.set(theme.am).lerp(color, 0.22) : color;
+      pushCube(cubePosition.set(px, py, z), am ? 2.2 : 1.75, am ? 1.0 : 0.5,
         am ? 0.9 : 0.55, c, { seg: phase, flow, n: base - i, t });
     }
   }
   function drawLanes() {
     const front = (stage + progress) / STEP;
     const selected = Number(get('lane').value);
+    const paper = new T.Color(theme.paper);
+    const amColor = new T.Color(theme.am);
     for (let lane = 0; lane < 16; lane++) {
-      const base = Math.floor(front / STEP_T);
       const on = selected < 0 || selected === lane;
       for (let i = 0; i < STREAM; i++) {
         const t = front - i * STEP_T;
         if (t < stageT(6)) break;
         if (t > stageT(11)) continue;
-        const pos = curves[lane].getPointAt(Math.max(0, Math.min(1, t)));
-        const symbol = Math.floor((t - stageT(6)) / (stageT(11) - stageT(6)) * 136);
-        const am = symbol > 0 && symbol % 32 === 0;
-        let c = new T.Color(CODE_COLORS[((symbol % 4) + 4) % 4]);
-        if (!on) c.lerp(new T.Color(theme.paper), 0.72);
-        if (am) c = new T.Color(theme.am).lerp(c, 0.2);
+        const pos = sampleLane(lane, (t - stageT(6)) / (stageT(11) - stageT(6)), cubePosition);
+        const symbol = (i * 3) % 136;
+        const am = symbol < 12;
+        const c = cubeColor.set(CODE_COLORS[symbol % 4]);
+        if (!on) c.lerp(paper, 0.72);
+        if (am) c.lerp(amColor, 0.8);
         const bad = Number(get('errors').value) > 15 && lane === selected && t > stageT(10);
-        if (bad) c = new T.Color(theme.bad);
-        pushCube(pos, am ? 2.0 : 1.4, am ? 0.9 : 0.42, am ? 0.82 : 0.48,
+        if (bad) c.set(theme.bad);
+        pushCube(pos, am ? 2.0 : 1.4, am ? 0.44 : 0.34, am ? 0.39 : 0.31,
           c, { seg: 'lane', lane, flow: -1, n: symbol, t });
       }
     }
   }
   function draw() {
     if (!active || !renderer) return;
-    const hostBg = getComputedStyle(get('scene')).backgroundColor;
-    if (scene.background.getStyle() !== hostBg) scene.background.set(hostBg);
     const front = (stage + progress) / STEP;
     count = 0;
     const agg = new T.Color(theme.ink).lerp(new T.Color(theme.bg), 0.2);
@@ -899,7 +916,7 @@
         material.emissive.setHex(glow);
         material.emissiveIntensity = 0.55;
         material.opacity = boxOpacity * (dim ? 0.3 : 1);
-        material.depthWrite = boxOpacity > 0.82 && !dim;
+        material.depthWrite = false;
       }
       const edge = box.children[0];
       if (edge && edge.material) {
@@ -908,7 +925,7 @@
       }
     });
     tracks.forEach((line, lane) => {
-      line.material.opacity = selected < 0 ? 0.4 : selected === lane ? 0.7 : 0.18;
+      line.material.opacity = selected < 0 ? 0.55 : selected === lane ? 0.7 : 0.18;
     });
     tubes.forEach((tube, lane) => { tube.visible = selected >= 0 && lane === selected; });
     rings.forEach((ring, lane) => {
@@ -1559,6 +1576,8 @@
       '<h4>远端环回（可选）</h4><p>介质侧 RX → PMA → 介质侧 TX。正常 RX 继续向 MAC 交付。</p>';
     if (!get('popup').open) get('popup').showModal();
   };
+  get('camera').onclick = () => resetCamera();
+  get('lane-camera').onclick = () => resetCamera(true);
   document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
 
   // ---------------------------------------------------------------- scene setup
@@ -1597,11 +1616,15 @@
         zoomAnchor = null;
         zoomAnchorAt = 0;
       });
+      controls.addEventListener('end', () => {
+        if (!dampingFrame) dampingFrame = requestAnimationFrame(settleCamera);
+      });
       controls.addEventListener('change', () => draw());
       renderer.domElement.addEventListener('wheel', wheelZoom, { passive: false, capture: true });
 
       inst = new T.InstancedMesh(new T.BoxGeometry(1, 1, 1),
         new T.MeshBasicMaterial({ color: 0xffffff }), MAX_INST);
+      inst.renderOrder = 2;
       inst.instanceMatrix.setUsage(T.DynamicDrawUsage);
       inst.setColorAt(0, new T.Color());
       inst.frustumCulled = false;
@@ -1652,7 +1675,7 @@
       new ResizeObserver(resize).observe(host);
       window.addEventListener('resize', resize);
       resize();
-      resetCamera();
+      resetCamera(true);
       if (document.fonts && document.fonts.ready) {
         document.fonts.ready.then(() => {
           labelItems.forEach(item => { item.w = 0; });
@@ -1711,7 +1734,7 @@
     const host = get('scene');
     camera.aspect = host.clientWidth / host.clientHeight;
     camera.updateProjectionMatrix();
-    if (!cameraTouched) fitCameraMin();
+    if (!cameraTouched && !laneView) fitCameraMin();
     renderer.setSize(host.clientWidth, host.clientHeight, false);
     draw();
     updateLabels();

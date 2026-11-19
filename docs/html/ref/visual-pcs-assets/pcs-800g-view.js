@@ -89,7 +89,6 @@
   let transportFailed = false;
   let linkGroup, theme = {};
   let labelHost, labelItems = [];
-  let lastHostBackground = '';
   let followActive = false, followBlock = 0, followU = 0, followInfo = null;
   let followTags = [], followTagHost, followTagEls = [], followPaper = null;
   let mapSelectedBlock = 0, mapSelectedChar = -1;
@@ -690,15 +689,15 @@
     const physical = lanes[lane] == null ? 0 : lanes[lane];
     const row = lane % 16;
     const receiveSlot = Math.max(0, rx.indexOf(lane));
-    const spread = flow ? -(6.3 + row * 0.34) : (6.3 + row * 0.34);
-    const physicalY = (3.5 - physical) * 2.55;
+    const spread = flow ? -(5.4 + row * 0.60) : (5.4 + row * 0.60);
+    const slot = tx[physical]?.indexOf(lane) ?? 0;
+    const physicalY = (3.5 - physical) * 2.55 + (slot - 1.5) * 0.42;
     const rxSpread = (15.5 - receiveSlot) * 0.84;
     const branch = flow ? -FLOW_Y : FLOW_Y;
     const y = [0, 0, branch, branch, branch, branch, spread, physicalY, physicalY,
       rxSpread, spread, branch, branch, branch, 0, 0, 0][index];
     let z = 0;
     if (index === 6) z = (row % 4 - 1.5) * 0.4 + (flow ? 0.12 : -0.12);
-    else if (index === 7 || index === 8) z = (row % 2 - 0.5) * 0.62 + (flow ? 0.28 : -0.28);
     else if (index === 9) z = (receiveSlot % 4 - 1.5) * 0.42;
     else if (index >= 10) z = (lane % 4 - 1.5) * 0.36;
     const delayed = physical === fault.physical && index === ST.demux ? fault.skew * 0.042 : 0;
@@ -790,7 +789,8 @@
     draw();
   }
 
-  function resetCamera() {
+  function resetCamera(closeUp = false) {
+    laneView = closeUp;
     if (!camera) return;
     camTween = null;
     cameraTouched = false;
@@ -798,9 +798,12 @@
     zoomAnchorAt = 0;
     const host = get('scene');
     const aspect = Math.max(0.8, (host.clientWidth || 16) / (host.clientHeight || 9));
-    const dist = frameNeed(aspect);
-    camera.position.set(dist * 0.05, dist * 0.21, dist * 0.975);
-    controls.target.set(0, 0, 0);
+    const center = closeUp ? (x[5] + x[11]) / 2 : 0;
+    const tanHalf = Math.tan(camera.fov * Math.PI / 360);
+    const dist = closeUp ? Math.max((x[11] - x[5] + 20) / (2 * tanHalf * aspect), 35 / tanHalf)
+      : frameNeed(aspect);
+    camera.position.set(center + dist * 0.05, dist * 0.21, dist * 0.975);
+    controls.target.set(center, 0, 0);
     controls.update();
     draw();
   }
@@ -1017,18 +1020,18 @@
       const curve = new T.CatmullRomCurve3(
         stages.map((_, i) => route(lane, i)), false, 'centripetal', 0.35);
       curves[lane] = curve;
-      const line = new T.Line(new T.BufferGeometry().setFromPoints(
-        samplePath(curve, stageT(ST.lanes), stageT(ST.fec), 100)),
-      new T.LineBasicMaterial({
-        color: flowColor(lane), transparent: true, opacity: tracked < 0 || tracked === lane ? 0.42 : 0.09
+      laneSamples[lane] = curve.getSpacedPoints(curveSamples);
+      const laneCurve = new T.CatmullRomCurve3(
+        samplePath(curve, stageT(ST.lanes), stageT(ST.fec), 80));
+      const line = new T.Mesh(new T.TubeGeometry(laneCurve, 100, 0.055, 5, false),
+      new T.MeshBasicMaterial({
+        color: flowColor(lane), transparent: true, depthWrite: false, opacity: tracked < 0 || tracked === lane ? 0.62 : 0.12
       }));
       line.frustumCulled = false;
       linkGroup.add(line);
       tracks[lane] = line;
 
       if (lane === tracked) {
-        const laneCurve = new T.CatmullRomCurve3(
-          samplePath(curve, stageT(ST.lanes), stageT(ST.fec), 80));
         highlight = new T.Mesh(
           new T.TubeGeometry(laneCurve, 120, 0.075, 6, false),
           new T.MeshBasicMaterial({ color: flowColor(lane), transparent: true, opacity: 0.9 }));
@@ -1076,6 +1079,7 @@
         new T.TubeGeometry(curve, 1, 0.78, 14, false),
         new T.MeshBasicMaterial({ color: theme.ink, transparent: true, opacity: 0.07, depthWrite: false }));
       linkGroup.add(tube);
+      tube.renderOrder = 1;
       sheaths[s] = tube;
     }
 
@@ -1123,6 +1127,9 @@
         zoomAnchor = null;
         zoomAnchorAt = 0;
       });
+      controls.addEventListener('end', () => {
+        if (!dampingFrame) dampingFrame = requestAnimationFrame(settleCamera);
+      });
       controls.addEventListener('change', draw);
       canvas.addEventListener('wheel', wheelZoom, { passive: false, capture: true });
       renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
@@ -1130,6 +1137,7 @@
 
       inst = new T.InstancedMesh(new T.BoxGeometry(1, 1, 1),
         new T.MeshBasicMaterial({ color: 0xffffff }), 1600);
+      inst.renderOrder = 2;
       inst.instanceMatrix.setUsage(T.DynamicDrawUsage);
       inst.setColorAt(0, new T.Color());
       inst.frustumCulled = false;
@@ -1181,7 +1189,7 @@
         if (!active || !host.clientWidth || !host.clientHeight) return;
         camera.aspect = host.clientWidth / host.clientHeight;
         camera.updateProjectionMatrix();
-        if (!cameraTouched) fitCameraMin();
+        if (!cameraTouched && !laneView) fitCameraMin();
         renderer.setSize(host.clientWidth, host.clientHeight, false);
         draw();
         updateLabels();
@@ -1189,7 +1197,7 @@
       new ResizeObserver(resize).observe(host);
       window.addEventListener('resize', resize);
       resize();
-      resetCamera();
+      resetCamera(true);
       if (document.fonts && document.fonts.ready) {
         document.fonts.ready.then(() => {
           labelItems.forEach(item => { item.w = 0; });
@@ -1250,16 +1258,38 @@
     }
   }
 
+  const curveSamples = 512;
+  let laneSamples = [];
+  let laneView = false;
+  let dampingFrame = 0;
+  const cubeMatrix = new T.Matrix4();
+  const cubeRotation = new T.Quaternion();
+  const cubeScale = new T.Vector3();
+  const cubePosition = new T.Vector3();
+  const cubeColor = new T.Color();
+  const followColor = new T.Color();
+
+  function sampleLane(lane, t, target) {
+    const f = Math.max(0, Math.min(1, t)) * curveSamples;
+    const i = Math.floor(f);
+    const samples = laneSamples[lane];
+    return target.lerpVectors(samples[i], samples[Math.min(i + 1, curveSamples)], f - i);
+  }
+
+  function settleCamera() {
+    dampingFrame = 0;
+    if (active && controls.update()) dampingFrame = requestAnimationFrame(settleCamera);
+  }
+
   function pushCube(position, sx, sy, sz, color, info, marker) {
     if (count >= 1600) return;
     let shown = color;
     if (followActive && !marker) {
       if (!followPaper) followPaper = new T.Color(theme.paper);
-      shown = color.clone().lerp(followPaper, 0.72);
+      shown = followColor.copy(color).lerp(followPaper, 0.72);
     }
-    const matrix = new T.Matrix4();
-    matrix.compose(position, new T.Quaternion(), new T.Vector3(sx, sy, sz));
-    inst.setMatrixAt(count, matrix);
+    cubeMatrix.compose(position, cubeRotation, cubeScale.set(sx, sy, sz));
+    inst.setMatrixAt(count, cubeMatrix);
     inst.setColorAt(count, shown);
     meta[count] = info;
     count++;
@@ -1267,22 +1297,22 @@
 
   function drawStreamSegment(from, to, y, z, color, info, flow, phase) {
     const front = motion.matches ? stageT(stage) : stageT(stage) + progress / (stages.length - 1);
-    const base = Math.floor(front / STEP_T);
+    const base = Math.floor(stageT(stage) / STEP_T);
     for (let i = 0; i < STREAM; i++) {
       const t = front - i * STEP_T;
       if (t < from) break;
       if (t > to) continue;
-      const am = (base - i) % 5 === 0;
+      const am = i % 5 === 0;
       const px = x[0] + t * SPAN;
-      const pos = new T.Vector3(px, typeof y === 'function' ? y(t) : y, z);
-      const c = am ? new T.Color(theme.am).lerp(color, 0.22) : color.clone();
+      const pos = cubePosition.set(px, typeof y === 'function' ? y(t) : y, z);
+      const c = am ? cubeColor.set(theme.am).lerp(color, 0.22) : color;
       pushCube(pos, am ? 2.2 : 1.75, am ? 1.0 : 0.5, am ? 0.9 : 0.55,
         c, { seg: info, flow, n: base - i, phase, t });
     }
   }
 
   function drawLaneStream(lane, flow, color, front) {
-    const base = Math.floor(front / STEP_T);
+    const base = Math.floor(stageT(stage) / STEP_T);
     const tracked = value('lane');
     const on = tracked < 0 || tracked === lane;
     const physical = lanes[lane];
@@ -1294,14 +1324,15 @@
       if (t < stageT(ST.lanes)) break;
       if (t > stageT(ST.fec)) continue;
       if (loss && t > stageT(ST.mux)) continue;
-      const am = (base - i) % 5 === 0;
+      const am = i % 5 === 0;
       if (!state.aligned && t > stageT(ST.align) && !(corruptAm && am)) continue;
-      const pos = curves[lane].getPointAt(Math.max(0, Math.min(1, t)));
-      let c = on ? color.clone() : color.clone().lerp(new T.Color(theme.paper), 0.8);
-      if (am) c = new T.Color(theme.am).lerp(color, 0.2);
-      if (corruptAm && am && t > stageT(ST.demux)) c = new T.Color(theme.bad);
-      if (fecError && t > stageT(10.4)) c = new T.Color(theme.bad);
-      pushCube(pos, am ? 2.1 : 1.55, am ? 0.95 : 0.44, am ? 0.85 : 0.5,
+      const pos = sampleLane(lane, t, cubePosition);
+      const c = cubeColor.copy(color);
+      if (!on) c.lerp(followPaper, 0.8);
+      if (am) c.set(theme.am).lerp(color, 0.2);
+      if (corruptAm && am && t > stageT(ST.demux)) c.set(theme.bad);
+      if (fecError && t > stageT(10.4)) c.set(theme.bad);
+      pushCube(pos, am ? 2.1 : 1.55, am ? 0.39 : 0.32, am ? 0.34 : 0.29,
         c, { seg: 'lane', lane, flow, n: base - i, phase: 'lane', t });
     }
   }
@@ -1311,14 +1342,6 @@
       : stage + (motion.matches ? 0 : progress);
     get('progress').value = Math.min(position, stages.length - 1);
     if (!active || !renderer || !state) return;
-    const hostBackground = getComputedStyle(get('scene')).backgroundColor;
-    if (hostBackground !== lastHostBackground) {
-      lastHostBackground = hostBackground;
-      readTheme();
-      recolorModules();
-      rebuildTracks();
-    }
-    if (scene.background.getStyle() !== hostBackground) scene.background.set(hostBackground);
     followPaper = new T.Color(theme.paper);
     if (followActive) followTags = [];
     const filter = value('flow'), tracked = value('lane');
@@ -1407,7 +1430,7 @@
         material.emissive.setHex(index === stage ? 0x26719a : 0x000000);
         material.emissiveIntensity = 0.55;
         material.opacity = boxOpacity * (dim ? 0.3 : 1);
-        material.depthWrite = boxOpacity > 0.82 && !dim;
+        material.depthWrite = false;
       }
       const edge = box.children[0];
       if (edge && edge.material) {
@@ -2155,6 +2178,10 @@
       (key === 'lane' && get('am').checked));
   });
   get('skew').oninput = () => refresh();
+  get('lane-camera').onclick = () => {
+    if (focusMode) setFocusMode(false);
+    resetCamera(true);
+  };
   document.addEventListener('visibilitychange', () => { if (document.hidden) setPlaying(false); });
 
   function themeChanged() {
