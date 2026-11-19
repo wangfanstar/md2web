@@ -43,7 +43,7 @@
   };
 
   let mode = 'data', index = 0, playing = false, start = null;
-  let scene, camera, nodes, token, faultToken;
+  let scene, camera, nodes, token, faultToken, formatMarkers = [], formatSample;
   // Fault responses use the existing 200G drawing. The right-to-left route
   // represents the reverse link and its corresponding TX/RX PCS functions.
   const faultPositions = [[57, 108], [109, 116], [116, 7], [7, 0], [0, 9]];
@@ -51,7 +51,7 @@
     null,
     { value: '01', title: 'B · PHY → RS（200GMII RX）', note: '本地 xMII 上报，触发本端 RS 的故障状态机。' },
     { value: '02', title: 'B · RS → TX PCS（200GMII TX）', type: '4B',
-      note: '64B/66B → 256B/257B → 加扰 → AM / RS-FEC → PCS lane / PMA。反向箭头表示 B → A；线上位流已重新编码。' },
+      note: '64B/66B → 256B/257B → 加扰 → AM / RS-FEC → PCS lane / PMA。反向箭头表示 B → A；线上位流已重新编码。点击各模块上方的数据块，可沿图中的逻辑 TX → RX 顺序对照反向链路的格式。' },
     { value: '02', title: 'A · RX PCS → RS（200GMII RX）', type: '4B',
       note: 'RX PMA → AM 锁定与重排 → RS-FEC → AM 移除 → 解扰 → 逆转码 → 64B/66B 解码。恢复 /Q/ 并将 RXC[0] 置 1。' },
     { value: '07', title: 'A · RS → TX PCS（200GMII TX）', type: '1E', idle: true,
@@ -64,8 +64,12 @@
       bytesPanel.textContent = '故障检测阶段尚未生成有序集。下一步查看 PHY 输出的 Local Fault。';
       return;
     }
+    bytesPanel.innerHTML = faultOctets(sample);
+  }
+
+  function faultOctets(sample) {
     const bytes = sample.idle ? Array(8).fill('07') : ['9C', '00', '00', sample.value, '00', '00', '00', '00'];
-    bytesPanel.innerHTML = '<h4>' + sample.title + '</h4><div class="pcs-rx-bytes">' + bytes.map((byte, lane) =>
+    return '<h4>' + sample.title + '</h4><div class="pcs-rx-bytes">' + bytes.map((byte, lane) =>
       '<span>' + byte + '<small>Lane ' + lane + ' · C=' + Number(sample.idle || lane === 0) + '</small></span>').join('') + '</div>' +
       '<p>' + (sample.idle ? '控制掩码 0xFF' : '控制掩码 0x01 · 9C = /Q/ · Lane 4–7 为零数据') +
       (sample.type ? ' · 66b 同步头 10 · Block Type 0x' + sample.type + (sample.idle
@@ -73,12 +77,118 @@
         : ' · D1/D2/D3 = 00/00/02 · O-code 0x0 · 余位为零') : '') +
       '</p><p class="note">' + sample.note + '</p>';
   }
-  function openFaultFormat() {
+  const formats = {
+    lfMii: ['Local Fault 本地上报', '200GMII', ''],
+    b66: ['66b 编码', '66b', '同步头和 64 位控制载荷'],
+    idleTx: ['TX 速率匹配', '66b', '样例保留故障有序集。只有满足规则的控制字符或有序集才可用于速率补偿。'],
+    b257: ['256B/257B 转码', '257b', '四个同类控制块组合。首位及四个块类别位为 00000，首个块类型省去第二个半字节。'],
+    scr: ['加扰', '加扰 257b', 'x⁵⁸ + x³⁹ + 1，使用固定教学初态。'],
+    am: ['AM 插入', 'AM + 加扰块', '示例在码字对开头插入 1,028 位 AM。填充沿用 200G 主动画的教学值。'],
+    prefec: ['FEC 前分配', 'A / B 消息', '连续 10 位依次分到 A、B，每条消息含 514 个符号。'],
+    rs: ['RS 编码', 'A / B 码字', '每个码字有 514 个消息符号和 30 个校验符号。'],
+    dist: ['符号分配', 'PCS lane', '按 PCS 的符号分配规则，将 A/B 码字符号分到 8 条 PCS lane。'],
+    mux: ['TX PMA', '物理位流', '按当前 PMA 映射把多条 PCS lane 逐位复用。'],
+    demux: ['RX PMA', 'PCS lane', '从物理位流恢复候选 PCS lane，AM 用于确定通道身份。'],
+    lock: ['AM 锁定', 'PCS lane', '以 AM 的公共字段取得锁定。'],
+    deskew: ['Deskew', 'PCS lane', '对齐各 lane 的 AM 边界。'],
+    reorder: ['通道重排', 'PCS lane', '用 AM 的唯一字段确定 lane 编号。'],
+    deint: ['去交织', 'A / B 码字', '按 lane 和符号索引重建码字。'],
+    rsdec: ['RS 解码', 'A / B 消息', '本样例在可用方向无额外误码。解码输出 514 个消息符号。'],
+    postfec: ['FEC 后交织', 'AM + 加扰块', '将 A/B 的 10 位消息符号交替还原成串行位流。'],
+    amr: ['移除 AM', '加扰 257b', '移除 1,028 位 AM 组，保留后续加扰 257b 块。'],
+    descr: ['解扰', '257b', '用连续接收的加扰位恢复转码块。'],
+    r257: ['257b 逆转码', '66b', '恢复原来的四个控制块。'],
+    d66: ['64B/66B 解码', '200GMII', '恢复 xMII 的八个字节与控制掩码。'],
+    idleRx: ['RX 速率匹配', '200GMII', '按规则补偿 AM 移除；故障状态由 RS 识别。']
+  };
+
+  function bitArray(value, width) {
+    return Array.from({ length: width }, (_, i) => (value >> i) & 1);
+  }
+
+  function buildFaultSample(idle) {
+    const type = idle ? 0x1e : 0x4b;
+    const payload = [type, 0, 0, idle ? 0 : 2, 0, 0, 0, 0].flatMap(value => bitArray(value, 8));
+    const xcoded = [0, 0, 0, 0, 0].concat(payload.slice(0, 4), payload.slice(8), payload, payload, payload);
+    const scrambled = window.PCS800Model.scramble(Array.from({length: 36}, () => xcoded).flat(), 0);
+    const am = Array.from({length: P.AM_BITS}, (_, i) => P.pairBit(0, i).v);
+    const stream = am.concat(scrambled);
+    const messages = [0, 1].map(w => Array.from({length: 514}, (_, i) =>
+      stream.slice(20 * i + 10 * w, 20 * i + 10 * w + 10).reduce((v, bit, k) => v | (bit << k), 0)));
+    const words = messages.map(message => message.concat(P.rsParity(message)));
+    return { type, payload, xcoded, scrambled, am, messages, words };
+  }
+
+  function formatMarkup(key) {
+    const [, kind, note] = formats[key];
+    const f = formatSample;
+    const bitText = bits => bits.join('').match(/.{1,8}/g).join(' ');
+    const wordText = values => values.map(n => n.toString(16).toUpperCase().padStart(3, '0')).join(' ');
+    let value;
+    if (kind === '66b') value = '10 | ' + bitText(f.payload);
+    else if (kind === '257b') value = bitText(f.xcoded);
+    else if (kind === '加扰 257b') value = bitText(f.scrambled.slice(0, 257));
+    else if (kind === 'AM + 加扰块') value = 'AM[0…39] ' + bitText(f.am.slice(0, 40)) +
+      ' | 加扰块[0…63] ' + bitText(f.scrambled.slice(0, 64));
+    else if (kind.endsWith('消息') || kind.endsWith('码字')) {
+      const words = kind.endsWith('消息') ? f.messages : f.words;
+      value = words.map((word, i) => ['A', 'B'][i] + '[0…7] ' + wordText(word.slice(0, 8)) +
+        (kind.endsWith('码字') ? ' | 校验[0…3] ' + wordText(word.slice(514, 518)) : '')).join('\n');
+    } else if (kind === 'PCS lane' || kind === '物理位流') {
+      const lanes = kind === 'PCS lane' ? [0] : P.lanesOnSerdes(P.state.link, 0);
+      const ids = lanes.map(lane => typeof lane === 'number' ? lane : lane.pcs);
+      const symbols = ids.map(lane => {
+        const id = P.laneSymbolId(lane, 12);
+        return bitArray(f.words[id.w][id.i], 10);
+      });
+      value = kind === 'PCS lane' ? 'PCS lane 0 · 符号 12 · ' + bitText(symbols[0])
+        : 'SerDes 0 · PCS ' + ids.join(' / ') + ' · ' +
+          bitText(Array.from({length: 10}, (_, i) => symbols.map(bits => bits[i])).flat());
+    } else if (key === 'lfMii') return bytesPanel.innerHTML;
+    else return faultOctets({
+      value: '02', idle: f.type === 0x1e,
+      title: f.type === 0x1e ? 'Idle · 200GMII 解码格式（参考）' : 'A · RX PCS → RS（Remote Fault）',
+      note: note + ' 以下显示 PCS 交付给 RS 的逻辑接口格式。'
+    });
+    return '<p>' + note + '</p><p class="note">位串按发送顺序，10 位符号值以十六进制显示。</p>' +
+      '<pre class="pcs-fault-bits">' + value + '</pre>';
+  }
+
+  function syncFormatMarkers() {
+    const G = P.g;
+    if (!G.scene) return;
+    formatMarkers.forEach(marker => {
+      G.scene.remove(marker);
+      marker.geometry.dispose();
+      marker.material.dispose();
+    });
+    formatMarkers = [];
+    if (mode !== 'fault' || index === 0) return;
+    if (index >= 2) formatSample = buildFaultSample(index === 4);
+    G.boxes.forEach(box => {
+      const key = index === 1 ? (box.def.name === 'B · RS' ? 'lfMii' : '')
+        : box.def.view || ({ '加扰': 'scr', '解扰': 'descr' })[box.def.name];
+      if (!formats[key] || (index === 4 && box.mesh.position.x > P.sceneX(57))) return;
+      const kind = formats[key][1];
+      const wide = kind.includes('257') || kind.includes('AM');
+      const color = kind.includes('A / B') ? G.col.cwA : kind === 'PCS lane' ? G.col.lanes[1] : G.col.am;
+      const marker = new T.Mesh(new T.BoxGeometry(wide ? 1.85 : 1.2, 0.64, 0.85),
+        new T.MeshBasicMaterial({ color }));
+      marker.position.copy(box.mesh.position);
+      marker.position.y += box.h / 2 + 0.55;
+      marker.userData.format = key;
+      G.scene.add(marker);
+      marker.updateMatrixWorld(true);
+      formatMarkers.push(marker);
+    });
+  }
+
+  function openFaultFormat(key) {
     if (mode !== 'fault') return;
     playing = false;
     renderStep();
-    formatHeading.textContent = scenarios.fault.steps[index][1] + ' · 数据格式';
-    formatBody.replaceChildren(...Array.from(bytesPanel.childNodes, node => node.cloneNode(true)));
+    formatHeading.textContent = (key ? formats[key][0] : scenarios.fault.steps[index][1]) + ' · 数据格式';
+    formatBody.innerHTML = key ? formatMarkup(key) : bytesPanel.innerHTML;
     if (!formatDialog.open) formatDialog.showModal();
   }
 
@@ -117,6 +227,7 @@
     index = next;
     start = null;
     renderStep();
+    syncFormatMarkers();
   }
 
   picker.onchange = function () {
@@ -136,6 +247,7 @@
       P.buildLabels();
       if (mode !== 'eee') P.flyTo(P.framePose(-2, 118, 0.35), 0);
     }
+    if (mode !== 'fault') syncFormatMarkers();
     if (mode === 'data') return;
     P.setPlaying(false);
     if (P.closeInspector) P.closeInspector();
@@ -150,7 +262,7 @@
     if (mode === 'fault') {
       badge.type = 'button';
       badge.title = '查看信号数据格式';
-      badge.onclick = openFaultFormat;
+      badge.onclick = () => openFaultFormat();
     }
     labels.append(badge);
     stages.replaceChildren(...scenario.steps.map(([title], i) => {
@@ -185,11 +297,12 @@
     if (mode !== 'fault' || !faultToken || !faultToken.visible || !G.w || !G.h) return false;
     pointer.set(2 * sx / G.w - 1, 1 - 2 * sy / G.h);
     ray.setFromCamera(pointer, G.camera);
-    return ray.intersectObject(faultToken, false).length > 0;
+    return ray.intersectObjects([faultToken, ...formatMarkers], false)[0]?.object || null;
   };
   P.pickFaultSignal = function (sx, sy) {
-    if (!P.hitFaultSignal(sx, sy)) return false;
-    openFaultFormat();
+    const hit = P.hitFaultSignal(sx, sy);
+    if (!hit) return false;
+    openFaultFormat(hit.userData.format);
     return true;
   };
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
