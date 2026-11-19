@@ -279,3 +279,8 @@
 .pcs-idle-key.gap i { inline-size: .95rem; block-size: .23rem; background: var(--rule); border: 1px dashed var(--muted); }
 .pcs-idle-key.group i { inline-size: .95rem; background: var(--am); }
 .pcs-idle-key.restored i { background: var(--lane-1); }
+
+.pcs-fault-scene .pcs-signal-labels { display: block; padding: 0; overflow: hidden; }
+.pcs-fault-scene .pcs-signal-labels strong { position: absolute; left: 50%; top: 47%; transform: translate(-50%, -50%); border-color: var(--bad); white-space: nowrap; }
+.pcs-fault-scene > :is(.follow-tags, .follow-bar) { display: none; }
+[data-signal-bytes] { padding: .5rem; border: 1px solid var(--rule); border-radius: .35rem; }

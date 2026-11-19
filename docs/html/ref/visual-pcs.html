@@ -798,6 +798,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     </div>
     <ol class="pcs-fault-steps" data-signal-steps></ol>
     <p data-signal-detail role="status"></p>
+    <div data-signal-bytes hidden></div>
     <p class="note" data-signal-source></p>
   </section>
   <section class="lens" id="lens" aria-labelledby="lens-title">
@@ -2086,7 +2087,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   // Sub-blocks drawn in the scene. lane: true spans the 8-lane stack.
   P.sceneOverlays = { llr: false, cbfc: false, frame: false };
   P.showOverlay = function (group) {
-    if (!group) return true;
+    if (!group || (P.isFaultScene && P.isFaultScene())) return true;
     if (group === 'ue') return P.sceneOverlays.llr || P.sceneOverlays.cbfc;
     return P.sceneOverlays[group];
   };
@@ -3141,6 +3142,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   // A block wins over the box around it; the box opens its step view. Inside
   // such a box the near-miss radius for blocks shrinks, or the box could never be hit.
   function blockAt(sx, sy, bx) {
+    if (P.isFaultScene && P.isFaultScene()) return -1;
     ndc.set(sx / G.w * 2 - 1, -(sy / G.h) * 2 + 1);
     ray.setFromCamera(ndc, G.camera);
     var hit = ray.intersectObject(G.inst, false)[0];
@@ -5996,7 +5998,10 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var dt = Math.min((now - (last || now)) / 1000, 0.1);
     last = now;
     if (document.getElementById('lab-200g').hidden) return;
-    if (P.renderSignalScene && P.renderSignalScene(now, visible && !document.hidden)) return;
+    if (P.renderSignalScene && P.renderSignalScene(now, visible && !document.hidden)) {
+      if (P.isFaultScene()) P.viewTick(dt);
+      return;
+    }
     if (S.playing) {
       S.u += dt * VEL * S.speed;
       S.stepTo = null;
@@ -6035,9 +6040,13 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     P.initScope();
     P.initStory();
     P.initViews();
-    function syncOverlays() {
+    P.syncSceneOverlays = function () {
       document.querySelectorAll('[data-pcs-route]').forEach(function (section) {
         section.hidden = !P.showOverlay(section.dataset.pcsRoute);
+      });
+      vp.querySelectorAll('[data-pcs-overlay]').forEach(function (choice) {
+        choice.checked = P.showOverlay(choice.dataset.pcsOverlay);
+        choice.disabled = Boolean(P.isFaultScene && P.isFaultScene());
       });
       vp.querySelectorAll('.pcs-idle-key').forEach(function (key) { key.hidden = !P.showOverlay('frame'); });
       [['ueLlr', 'llr'], ['ueCbfc', 'cbfc']].forEach(function (entry) {
@@ -6055,7 +6064,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       choice.checked = false;
       choice.onchange = function () {
         P.sceneOverlays[choice.dataset.pcsOverlay] = choice.checked;
-        syncOverlays();
+        P.syncSceneOverlays();
         if (G.failed) return;
         P.buildBoxes();
         P.buildLabels();
@@ -6063,7 +6072,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         if (S.stage == null) P.flyTo(P.framePose(-2, 118, 0.35));
       };
     });
-    syncOverlays();
+    P.syncSceneOverlays();
     var cameraRanges = { overview: [-2, 118], tx: [-2, 33], link: [32, 85], rx: [83, 118] };
     document.querySelectorAll('[data-pcs-camera]').forEach(function (button) {
       button.onclick = function () {

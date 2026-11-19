@@ -6,6 +6,7 @@
   const viewport = document.getElementById('viewport');
   const play = controls.querySelector('[data-signal-play]');
   const stages = controls.querySelector('[data-signal-steps]');
+  const bytesPanel = controls.querySelector('[data-signal-bytes]');
   const labels = document.createElement('div');
   labels.className = 'pcs-signal-labels';
   labels.hidden = true;
@@ -14,12 +15,13 @@
   // Node indices follow A RS, A PHY, B PHY, B RS from left to right.
   const scenarios = {
     fault: {
-      reference: 'IEEE 802.3 · 46.3.4、表 46–5 和图 46–11。示例假设 A → B 故障，B → A 可用。LF/RF 的有序集分别为 Sequence、00、00、01 和 Sequence、00、00、02。',
+      reference: 'IEEE 802.3 · 46.3.4、表 46–5 和图 46–11。示例假设 A → B 故障，B → A 可用。200GMII 有序集与 PCS 块格式见 117、119.2.3 和图 82–5。',
       nodes: ['A · RS', 'A · PCS / PHY', 'B · PCS / PHY', 'B · RS'],
       steps: [
         ['检测故障', 'RX 故障', 1, 2, 'A → B 接收路径异常。B 的 PHY 检测失锁等故障。'],
         ['本地上报', 'Local Fault', 2, 3, 'B 的 PHY 经本地 200GMII 向 B 的 RS 上报 Local Fault。'],
-        ['生成并发回 RF', 'Remote Fault', 3, 0, 'B 的 RS 确认 LF 后停止发送 MAC 数据，持续生成 RF。B 的 PCS 编码并沿 B → A 发送，A 的 PCS 解码后经 200GMII 交给 A 的 RS。'],
+        ['生成并发回 RF', 'Remote Fault', 3, 0, 'B 的 RS 确认 LF 后停发 MAC 数据，产生 RF。反向 TX PCS 编码并经链路送至 A。'],
+        ['A 解码并确认 RF', 'RF 解码', 1, 0, 'A 的 RX PCS 恢复对齐并解码控制块，经本地 200GMII 将 Remote Fault 上报给 A 的 RS。'],
         ['对端响应', 'Idle', 0, 1, 'A 的 RS 确认 RF 后停止发送 MAC 数据并持续送 Idle。故障清除后，双方按 RS 状态机恢复。']
       ]
     },
@@ -38,7 +40,36 @@
   };
 
   let mode = 'data', index = 0, playing = false, start = null;
-  let scene, camera, nodes, token;
+  let scene, camera, nodes, token, faultToken;
+  // Fault responses use the existing 200G drawing. The right-to-left route
+  // represents the reverse link and its corresponding TX/RX PCS functions.
+  const faultPositions = [[57, 108], [109, 116], [116, 7], [7, 0], [0, 9]];
+  const faultBytes = [
+    null,
+    { value: '01', title: 'B · PHY → RS（200GMII RX）', note: '本地 xMII 上报，触发本端 RS 的故障状态机。' },
+    { value: '02', title: 'B · RS → TX PCS（200GMII TX）', type: '4B',
+      note: '64B/66B → 256B/257B → 加扰 → AM / RS-FEC → PCS lane / PMA。反向箭头表示 B → A；线上位流已重新编码。' },
+    { value: '02', title: 'A · RX PCS → RS（200GMII RX）', type: '4B',
+      note: 'RX PMA → AM 锁定与重排 → RS-FEC → AM 移除 → 解扰 → 逆转码 → 64B/66B 解码。恢复 /Q/ 并将 RXC[0] 置 1。' },
+    { value: '07', title: 'A · RS → TX PCS（200GMII TX）', type: '1E', idle: true,
+      note: 'RS 持续发送 Idle。八个 /I/ 形成全控制块。' }
+  ];
+
+  function renderFaultBytes() {
+    const sample = faultBytes[index];
+    if (!sample) {
+      bytesPanel.textContent = '故障检测阶段尚未生成有序集。下一步查看 PHY 输出的 Local Fault。';
+      return;
+    }
+    const bytes = sample.idle ? Array(8).fill('07') : ['9C', '00', '00', sample.value, '00', '00', '00', '00'];
+    bytesPanel.innerHTML = '<h4>' + sample.title + '</h4><div class="pcs-rx-bytes">' + bytes.map((byte, lane) =>
+      '<span>' + byte + '<small>Lane ' + lane + ' · C=' + Number(sample.idle || lane === 0) + '</small></span>').join('') + '</div>' +
+      '<p>' + (sample.idle ? '控制掩码 0xFF' : '控制掩码 0x01 · 9C = /Q/ · Lane 4–7 为零数据') +
+      (sample.type ? ' · 66b 同步头 10 · Block Type 0x' + sample.type + (sample.idle
+        ? ' · 8 × 7 位 Idle 码 0x00'
+        : ' · D1/D2/D3 = 00/00/02 · O-code 0x0 · 余位为零') : '') +
+      '</p><p class="note">' + sample.note + '</p>';
+  }
   const duration = 2050;
   const x = i => (i - 1.5) * 4;
 
@@ -67,6 +98,7 @@
     Array.from(stages.querySelectorAll('button')).forEach((button, i) =>
       button.setAttribute('aria-current', i === index ? 'step' : 'false'));
     play.textContent = playing ? '暂停' : '播放';
+    if (mode === 'fault') renderFaultBytes();
   }
 
   function select(next) {
@@ -78,14 +110,25 @@
   picker.onchange = function () {
     mode = picker.value;
     playing = false;
-    viewport.classList.toggle('pcs-signaling', mode !== 'data');
-    viewport.closest('#lab-200g').classList.toggle('pcs-signal-mode', mode !== 'data');
+    viewport.classList.toggle('pcs-signaling', mode === 'eee');
+    viewport.classList.toggle('pcs-fault-scene', mode === 'fault');
+    viewport.closest('#lab-200g').classList.toggle('pcs-signal-mode', mode === 'eee');
     labels.hidden = controls.hidden = mode === 'data';
+    bytesPanel.hidden = mode !== 'fault';
+    labels.classList.toggle('is-projected', mode === 'eee' && Boolean(scene));
+    if (P.g.inst) P.g.inst.visible = mode !== 'fault';
+    if (faultToken) faultToken.visible = mode === 'fault';
+    if (P.syncSceneOverlays) P.syncSceneOverlays();
+    if (!P.g.failed && P.g.camera) {
+      P.buildBoxes();
+      P.buildLabels();
+      if (mode !== 'eee') P.flyTo(P.framePose(-2, 118, 0.35), 0);
+    }
     if (mode === 'data') return;
     P.setPlaying(false);
     if (P.closeInspector) P.closeInspector();
     const scenario = scenarios[mode];
-    labels.replaceChildren(...scenario.nodes.map(name => {
+    labels.replaceChildren(...(mode === 'eee' ? scenario.nodes : []).map(name => {
       const label = document.createElement('span');
       label.textContent = name;
       return label;
@@ -118,6 +161,7 @@
   };
   controls.querySelector('[data-signal-reset]').onclick = () => { playing = false; select(0); };
 
+  P.isFaultScene = () => mode === 'fault';
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   let elapsed = 0;
   P.renderSignalScene = function (now, visible) {
@@ -134,9 +178,24 @@
     } else start = now - elapsed;
 
     if (!G.renderer || G.failed) return true;
+    const fraction = reduced.matches || (elapsed === 0 && !playing) ? 1 : Math.min(1, elapsed / (duration * 0.72));
+    if (mode === 'fault') {
+      if (!faultToken) {
+        faultToken = new T.Mesh(new T.SphereGeometry(1.15, 16, 12), new T.MeshBasicMaterial());
+        faultToken.position.y = 3.4;
+        G.scene.add(faultToken);
+      }
+      const [from, to] = faultPositions[index];
+      faultToken.position.x = P.sceneX(from + (to - from) * fraction);
+      faultToken.material.color.copy(G.col.bad);
+      P.updateCamera(now);
+      G.renderer.render(G.scene, G.camera);
+      P.updateLabels();
+      place(labels.lastElementChild, faultToken.position.clone().setY(5.2), G.camera);
+      return true;
+    }
     if (!scene) buildScene();
     const [, , from, to] = scenarios[mode].steps[index];
-    const fraction = reduced.matches || (elapsed === 0 && !playing) ? 1 : Math.min(1, elapsed / (duration * 0.72));
     camera.aspect = G.w / Math.max(1, G.h);
     const distance = Math.max(14, 24 / camera.aspect);
     camera.position.set(0, distance * 0.32, distance);
@@ -148,13 +207,13 @@
     token.material.color.copy(mode === 'fault' ? G.col.bad : G.col.good);
     G.renderer.render(scene, camera);
 
-    function place(element, point) {
-      point.project(camera);
-      element.style.left = (point.x * 50 + 50) + '%';
-      element.style.top = (50 - point.y * 50) + '%';
-    }
-    nodes.forEach((node, i) => place(labels.children[i], node.position.clone().setY(-1.35)));
-    place(labels.lastElementChild, token.position.clone().setY(1.85));
+    nodes.forEach((node, i) => place(labels.children[i], node.position.clone().setY(-1.35), camera));
+    place(labels.lastElementChild, token.position.clone().setY(1.85), camera);
     return true;
   };
+  function place(element, point, view) {
+    point.project(view);
+    element.style.left = (point.x * 50 + 50) + '%';
+    element.style.top = (50 - point.y * 50) + '%';
+  }
 })(globalThis.PCS, window.THREE);
