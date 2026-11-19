@@ -1931,7 +1931,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 
   // Sub-blocks drawn in the scene. lane: true spans the 8-lane stack.
   P.BOXES = [
-    { x: [0, 4], name: 'MAC / RS', stage: 1 },
+    { x: [0, 4], name: 'TX 1588 · 200GMII', stage: 1, view: 'ptpTx' },
     { x: [5, 9], name: '64B/66B 编码', stage: 2, view: 'b66' },
     { x: [10.5, 14.5], name: '256B/257B 转码', stage: 2, view: 'b257' },
     { x: [16, 19], name: '加扰', stage: 3 },
@@ -1951,7 +1951,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     { x: [98, 101], name: '解扰', stage: 9 },
     { x: [102, 106], name: '逆转码', stage: 9, view: 'r257' },
     { x: [107, 111], name: '64B/66B 解码', stage: 9, view: 'd66' },
-    { x: [112, 116], name: 'RS / MAC', stage: 9 }
+    { x: [112, 116], name: 'RX 1588 · 200GMII', stage: 9, view: 'ptpRx' }
   ];
 
   P.STAGES = [
@@ -4901,6 +4901,10 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 
   // Open view m on the unit that is in its box right now.
   P.openView = function (m) {
+    if (m === 'ptpTx' || m === 'ptpRx') {
+      P.openPtpPoint('200GMII', m === 'ptpTx');
+      return;
+    }
     if (!dlg || !VIEWS[m]) return;
     if (P.inspectorOpen && P.inspectorOpen()) P.closeInspector();
     if (S.playing) P.setPlaying(false);
@@ -5812,6 +5816,31 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 })();
 </script>
 
+<dialog class="opview" id="ptp-point" aria-labelledby="ptp-point-title">
+  <div class="opv-inner">
+    <header class="opv-head">
+      <h3 id="ptp-point-title"></h3>
+      <form method="dialog"><button type="submit" class="ins-x" aria-label="关闭">×</button></form>
+    </header>
+    <p id="ptp-point-direction"></p>
+    <p>TimeSync 在 xMII 检测数据时延测量点（DDMP）。DDMP 可配置为 SFD 的起始边界或 SFD 后第一个八位组的起始边界。后者是 802.3cx 推荐的选择。</p>
+    <p id="ptp-point-delay"></p>
+    <p class="note">IEEE Std 802.3cx-2023 · 90.4.3.1.1、90.5、90.7 及图 90–3。图中标注的是 xMII 测量参考点。</p>
+  </div>
+</dialog>
+<script>
+globalThis.PCS.openPtpPoint = function (xMII, tx) {
+  document.getElementById('ptp-point-title').textContent = (tx ? 'TX' : 'RX') + ' 1588 打戳点 · ' + xMII;
+  document.getElementById('ptp-point-direction').textContent = tx
+    ? '发送方向：MAC / RS → ' + xMII + ' → PHY，触发 TS_TX.indication。'
+    : '接收方向：PHY → ' + xMII + ' → RS / MAC，触发 TS_RX.indication。';
+  document.getElementById('ptp-point-delay').textContent = tx
+    ? '换算到介质相关接口（MDI）时，xMII 捕获时间加上 PHY 发送路径时延，计入适用的动态时延修正。'
+    : '换算到介质相关接口（MDI）时，xMII 捕获时间减去 PHY 接收路径时延，计入适用的动态时延修正。';
+  const dialog = document.getElementById('ptp-point');
+  if (!dialog.open) dialog.showModal();
+};
+</script>
 <script src="visual-pcs-assets/pcs-800g-model.js"></script>
 <script src="visual-pcs-assets/pcs-1600g-view.js"></script>
 <script src="visual-pcs-assets/pcs-800g-view.js"></script>

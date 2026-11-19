@@ -30,7 +30,7 @@
   // Box names shown in the scene. The flow stages are duplicated for Flow 0/1.
   const modules = [
     [1, 15, 5, 'Scrambled Idle', -1, 0, 'idle'],
-    [0, 0, 8, 'TX MAC'], [1, 0, 8, '64B/66B', -1, -0.25, 'encode'],
+    [0, 0, 8, 'TX 1588 · 800GMII', -1, 0, 'ptpTx'], [1, 0, 8, '64B/66B', -1, -0.25, 'encode'],
     [1, 0, 8, 'TX 速率匹配', -1, 0.25, 'txRate'], [2, 0, 24, '66b 分流'],
     [7, 0, 27, '32:8 PMA'], [8, 0, 27, '8× PAM4'],
     [7, 0, 27, 'PAM4 预编码（条件）', -1, 0.5, 'precode'],
@@ -47,7 +47,7 @@
     [10, 0, 27, 'AM / Deskew'],
     [10, 0, 27, '按 UM 重排', -1, 0.43, 'reorder'],
     [14, 0, 8, '66b 合流'], [15, 0, 8, '64B/66B 解码', -1, -0.25, 'decode'],
-    [15, 0, 8, 'RX 速率匹配', -1, 0.25, 'rxRate'], [16, 0, 8, 'RX MAC']
+    [15, 0, 8, 'RX 速率匹配', -1, 0.25, 'rxRate'], [16, 0, 8, 'RX 1588 · 800GMII', -1, 0, 'ptpRx']
   ];
   for (const flow of [0, 1]) {
     const y = flow === 0 ? 10.8 : -10.8;
@@ -1921,6 +1921,10 @@
 
   function showData(forceKind, blockOverride) {
     setPlaying(false);
+    if (forceKind === 'ptpTx' || forceKind === 'ptpRx') {
+      window.PCS.openPtpPoint('800GMII', forceKind === 'ptpTx');
+      return;
+    }
     const tracked = value('lane');
     const lane = tracked < 0 ? Math.max(0, value('flow')) * 16 : tracked;
     const flow = Math.floor(lane / 16);

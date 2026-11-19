@@ -456,7 +456,7 @@
   function buildModules() {
     const colors = moduleColors();
     const layout = [
-      [0, 0, 10, '1.6TMII', null], [1, 0, 10, '64B/66B', null],
+      [0, 0, 10, 'TX 1588 · 1.6TMII', null], [1, 0, 10, '64B/66B', null],
       [2, 0, 30, '257b 转码', null],
       [3, 0, 24, '257b 分流', null],
       [4, FLOW_Y, 9.5, '加扰/AM', 0], [4, -FLOW_Y, 9.5, '加扰/AM', 1],
@@ -468,6 +468,7 @@
       [12, FLOW_Y, 9.5, '解扰', 0], [12, -FLOW_Y, 9.5, '解扰', 1],
       [13, 0, 10, '257b 合流', null], [14, 0, 10, '逆转码/解码', null]
     ];
+    addModule(14, 0, 10, 'RX 1588 · 1.6TMII', colors.neutral, null, 9, true);
     layout.forEach(([index, y, height, title, flow]) => {
       const color = flow === 0 ? colors.flow0 : flow === 1 ? colors.flow1 : colors.neutral;
       const parts = {
@@ -669,7 +670,7 @@
       const item = list[list.length - 1];
       item.moduleStage = index;
       item.flow = flow;
-      item.minor = !(primaryKey[index] && primaryKey[index].key === key);
+      item.minor = !title.includes('1588') && !(primaryKey[index] && primaryKey[index].key === key);
     });
     steps.forEach((_, index) => {
       add('stage' + index, '<b>' + (index + 1) + '</b>',
@@ -1338,6 +1339,10 @@
     return 'bytes';
   }
   function showPopup(index, flow, lane, title) {
+    if (title && title.includes('1588')) {
+      window.PCS.openPtpPoint('1.6TMII', index === 0);
+      return;
+    }
     flow = flow === 1 ? 1 : 0;
     lane = Math.max(0, Math.min(15, Number(lane) || 0));
     const kind = stageKind(index);
