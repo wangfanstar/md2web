@@ -1909,8 +1909,6 @@
         : '173.5.11 · 可选。已同步示例中检测到 ' + pmaTestSample() + '，与参考样本逐位一致。';
       case 'txRate': return '为补偿 AM 插入，TX PCS 可删除 Idle 控制字符或序列有序集。为补偿 800GMII 与 PMA 服务接口的时钟域差异，还可按规则删除上述内容或插入 Idle 控制字符。插删规则见 119.2.3.5 和 119.2.3.8。';
       case 'rxRate': return 'RX PCS 可插入 Idle 控制字符以补偿 AM 移除。为补偿 PMA 服务接口与 800GMII 的时钟域差异，可按规则删除 Idle 控制字符或序列有序集，也可插入 Idle 控制字符。插删规则见 119.2.3.5 和 119.2.3.8。';
-      case 'amInsert': return '按图 172–3，Flow 0 在含 66b 块 k 的 257b 块之前插入 AM 组，Flow 1 则在含 k+1 的块之前插入。AM 编码见表 172–2、172–3。本演示使用表中的 lane 标记，插入间隔已缩短，组填充为示意。发送侧插入边界：' +
-        boundary(M.messageBits(words[flow]));
       case 'fecSplit':
       case 'rsEncode': return '每 10 位交替分给 A/B。A 前四符号：' + symbols(words[flow][0]) +
         '；B 前四符号：' + symbols(words[flow][1]) + '。各附加 30 个校验符号。';
@@ -1951,7 +1949,83 @@
     localLoop: '173.5.9', remoteLoop: '173.5.10', patternTx: '173.5.11', patternRx: '173.5.11'
   };
 
+  let stopAmDemo = () => {};
+  get('popup').addEventListener('close', () => stopAmDemo());
+
+  function mountAmDemo(flow) {
+    const host = get('popup-body');
+    host.innerHTML = `
+      <section class="g800-am-demo" aria-label="AM 插入动画">
+        <p>两个 Flow 都在同一个原始 66b 边界插入 AM。选中模块对应的 Flow 已高亮。</p>
+        ${[0, 1].map(id => `
+          <div class="g800-am-demo-flow${id === flow ? ' is-selected' : ''}">
+            <b>Flow ${id}${id === flow ? ' · 当前模块' : ''}</b>
+            <div class="g800-am-demo-track">
+              <span class="g800-am-demo-marker"><b>AM 组</b><small>2,056 位</small></span>
+              <span class="g800-am-demo-data"><b>257b 块 0</b><small>66b #${id}、#${id + 2}、#${id + 4}、#${id + 6}</small></span>
+              <span class="g800-am-demo-data"><b>257b 块 1</b><small>66b #${id + 8}、#${id + 10}、#${id + 12}、#${id + 14}</small></span>
+            </div>
+          </div>`).join('')}
+        <p class="g800-am-demo-status" role="status"></p>
+        <div class="pcs-follow-actions">
+          <button type="button" class="btn" data-am-play>播放</button>
+          <button type="button" class="btn" data-am-next>下一步</button>
+          <button type="button" class="btn" data-am-reset>重播</button>
+        </div>
+        <p class="g800-inspect-note">示例按教学帧的首个插入边界演示。AM 与数据卡片的宽度为示意。标准规定每个 Flow 每隔 163,840 个 257b 块插入一次。IEEE Std 802.3df-2024 · 172.2.4.6、图 172–3。</p>
+      </section>`;
+    const demo = host.querySelector('.g800-am-demo');
+    const play = demo.querySelector('[data-am-play]');
+    const status = demo.querySelector('[role="status"]');
+    const steps = [
+      '加扰完成。两个 Flow 的首个 257b 块已经就绪，此处用 66b 来源编号标记数据。',
+      '在首个 257b 块前插入 AM。Flow 0 的首块含 66b #0，Flow 1 的首块含 66b #1。原有数据块顺序保持不变。',
+      'AM 与其后的加扰数据一起送入 FEC 前分配。AM 在加扰之后插入。'
+    ];
+    let index = 0, timer = null;
+    function render() {
+      demo.dataset.step = index;
+      status.textContent = (index + 1) + ' / ' + steps.length + ' · ' + steps[index];
+      play.textContent = timer !== null ? '暂停' : index === 2 ? '重新播放' : '播放';
+      demo.querySelectorAll('.g800-am-demo-marker').forEach(marker => {
+        marker.setAttribute('aria-hidden', String(index === 0));
+      });
+    }
+    function pause() {
+      clearInterval(timer);
+      timer = null;
+      render();
+    }
+    function advance() {
+      index = Math.min(index + 1, 2);
+      if (index === 2) pause();
+      else render();
+    }
+    function start() {
+      timer = setInterval(advance, 1800);
+      render();
+    }
+    play.onclick = () => {
+      if (timer !== null) { pause(); return; }
+      if (index === 2) index = 0;
+      start();
+    };
+    demo.querySelector('[data-am-next]').onclick = () => {
+      pause();
+      if (index === 2) { index = 0; render(); }
+      else advance();
+    };
+    demo.querySelector('[data-am-reset]').onclick = () => {
+      pause();
+      index = 0;
+      start();
+    };
+    stopAmDemo = pause;
+    render();
+  }
+
   function showData(forceKind, blockOverride, row, frame) {
+    stopAmDemo();
     setPlaying(false);
     if (forceKind === 'ptpTx' || forceKind === 'ptpRx') {
       window.PCS.openPtpPoint('800GMII', forceKind === 'ptpTx');
@@ -1960,6 +2034,13 @@
     const tracked = value('lane');
     const lane = tracked < 0 ? Math.max(0, value('flow')) * 16 : tracked;
     const flow = Math.floor(lane / 16);
+    if (forceKind === 'amInsert') {
+      get('popup-title').textContent = 'AM 插入 · Flow ' + flow;
+      get('popup-mapping').textContent = '加扰 → AM 插入 → FEC 前分配';
+      mountAmDemo(flow);
+      if (!get('popup').open) get('popup').showModal();
+      return;
+    }
     let block = blockOverride != null ? blockOverride : (followActive ? followBlock : mapSelectedBlock);
     if (block % 2 !== flow) block = flow;
     const detail = operationDetail(forceKind, lane, flow);

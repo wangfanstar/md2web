@@ -178,3 +178,18 @@
   .g800-b257-line { grid-template-columns: 1fr; }
   .g800-lens-head { position: static; }
 }
+
+.g800-am-demo-flow { padding: .5rem; margin-block: .4rem; border: 1px solid var(--rule); border-radius: .4rem; }
+.g800-am-demo-flow.is-selected { border-color: var(--focus); }
+.g800-am-demo-track { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; margin-top: .35rem; }
+.g800-am-demo-track > span { display: grid; align-content: center; padding: .35rem; min-block-size: 3rem; border: 1px solid var(--rule); border-radius: .35rem; background: var(--panel); }
+.g800-am-demo-track small { overflow-wrap: anywhere; }
+.g800-am-demo-track .g800-am-demo-marker { background: color-mix(in srgb, var(--am) 28%, var(--panel)); border-color: var(--am); transition: opacity .35s; }
+.g800-am-demo-data { transition: transform .45s; }
+.g800-am-demo[data-step="0"] .g800-am-demo-marker { opacity: 0; }
+.g800-am-demo[data-step="0"] .g800-am-demo-data { transform: translateX(calc(-100% - .35rem)); }
+.g800-am-demo[data-step="2"] .g800-am-demo-track > span { border-color: var(--focus); }
+.g800-am-demo-status { min-block-size: 3em; }
+@media (prefers-reduced-motion: reduce) {
+  .g800-am-demo-track > span { transition: none !important; }
+}
