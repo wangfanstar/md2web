@@ -275,3 +275,7 @@
 .legend .pcs-idle-key[hidden] { display: none; }
 .pcs-idle-key i { inline-size: .6rem; block-size: .6rem; background: var(--good); }
 .pcs-idle-key.encoded i { background: var(--am); }
+
+.pcs-idle-key.gap i { inline-size: .95rem; block-size: .23rem; background: var(--rule); border: 1px dashed var(--muted); }
+.pcs-idle-key.group i { inline-size: .95rem; background: var(--am); }
+.pcs-idle-key.restored i { background: var(--lane-1); }
