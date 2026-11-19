@@ -216,6 +216,7 @@ input[type="text"]:focus-visible { outline: 2px solid var(--focus); outline-offs
 .lens-modes .btn { min-height: 30px; padding: 2px 10px; font-size: 0.8rem; }
 .lens-hint { font-family: var(--f-mono); font-size: 0.68rem; color: var(--muted); }
 .lbl-box.op { pointer-events: auto; cursor: pointer; }
+.pcs-exploring .lbl-box.op { touch-action: none; }
 .lbl-box.op span { text-decoration: underline dotted; text-underline-offset: 3px; }
 .lbl-box.op:hover span { text-decoration-style: solid; }
 
@@ -2100,6 +2101,14 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     { x: [105.5, 109.5], name: 'B · CtlOS', stage: 9, view: 'ueCtlRx', overlay: 'ue' }
   ];
 
+  // Stretch the straight end sections without changing the lane/FEC geometry.
+  P.sceneX = function (x) {
+    if (!P.showOverlay('ue') && !P.showOverlay('frame')) return x;
+    if (x < 15.5) return 15.5 + (x - 15.5) * 2.15;
+    if (x > 101.5) return 101.5 + (x - 101.5) * 2.15;
+    return x;
+  };
+
   // Fit the enabled modules into the straight MAC/PCS portions of the path.
   P.sceneBoxes = function () {
     var visible = P.BOXES.filter(function (box) { return P.showOverlay(box.overlay); });
@@ -2117,7 +2126,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         var start = range.from + pitch * i;
         var end = start + pitch;
         visible[visible.indexOf(box)] = Object.assign({}, box, {
-          x: [start + 0.1, end - 0.1],
+          x: [start + 0.24, end - 0.24],
           labelY: i % 2 === 0 ? 1.7 : 3.3,
           lineLabel: true
         });
@@ -2235,6 +2244,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     G.controls.enableZoom = on && window.matchMedia('(pointer: coarse)').matches;
     G.controls.touches = { ONE: T.TOUCH.PAN, TWO: T.TOUCH.DOLLY_ROTATE };
     G.renderer.domElement.style.touchAction = on ? 'none' : 'pan-y';
+    G.host.classList.toggle('pcs-exploring', on);
     P.emit && P.emit('explore');
   };
 
@@ -2256,6 +2266,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 
   // Camera pose that fits [x0, x1] horizontally and the lane stack vertically.
   P.framePose = function (x0, x1, tilt) {
+    x0 = P.sceneX(x0);
+    x1 = P.sceneX(x1);
     var cam = G.camera, span = x1 - x0, cx = (x0 + x1) / 2;
     var vf = cam.fov * Math.PI / 180, hf = 2 * Math.atan(Math.tan(vf / 2) * cam.aspect);
     var d = Math.max(span * 0.52 / Math.tan(hf / 2), 15 / Math.tan(vf / 2));
@@ -2275,9 +2287,18 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
               p0: cam.position.clone(), q0: c.target.clone(), p1: pose.pos, q1: pose.target };
   };
   P.panTo = function (cx) {
-    var c = G.controls, dx = cx - c.target.x;
+    var c = G.controls, dx = P.sceneX(cx) - c.target.x;
     tween = null;
     c.target.x += dx; G.camera.position.x += dx;
+  };
+
+  P.panLabelDrag = function (pixels) {
+    var c = G.controls, cam = G.camera;
+    var distance = cam.position.distanceTo(c.target);
+    var dx = -pixels * 2 * distance * Math.tan(cam.fov * Math.PI / 360) / G.h;
+    tween = null;
+    c.target.x += dx;
+    cam.position.x += dx;
   };
 
   P.updateCamera = function (now) {
@@ -2321,11 +2342,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var grp = G.boxGroup = new T.Group();
     G.boxes = [];
     P.sceneBoxes().forEach(function (b) {
-      var w = b.x[1] - b.x[0], h = b.lane ? LANE_H : AGG_H;
+      var left = P.sceneX(b.x[0]), right = P.sceneX(b.x[1]);
+      var w = right - left, h = b.lane ? LANE_H : AGG_H;
       var geo = new T.BoxGeometry(w, h, DEPTH);
       var mat = new T.MeshBasicMaterial({ color: G.col.box, transparent: true, opacity: b.lane ? 0.32 : 0.5, depthWrite: false });
       var mesh = new T.Mesh(geo, mat);
-      mesh.position.set((b.x[0] + b.x[1]) / 2, 0, 0);
+      mesh.position.set((left + right) / 2, 0, 0);
       mesh.renderOrder = 2;
       var edges = new T.LineSegments(new T.EdgesGeometry(geo),
         new T.LineBasicMaterial({ color: G.col.edge, transparent: true, opacity: 0.9 }));
@@ -2335,8 +2357,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     });
     if (G.boxes.some(function (box) { return box.def.lineLabel; })) {
       G.boxes.filter(function (box) { return box.def.lineLabel; }).forEach(function (box) {
-        var from = new T.Vector3(box.def.x[0] - 0.1, 0, 0);
-        var to = new T.Vector3(box.def.x[1] + 0.1, 0, 0);
+        var from = new T.Vector3(P.sceneX(box.def.x[0] - 0.24), 0, 0);
+        var to = new T.Vector3(P.sceneX(box.def.x[1] + 0.24), 0, 0);
         var path = new T.BufferGeometry().setFromPoints([from, to]);
         grp.add(new T.Line(path, new T.LineBasicMaterial({ color: G.col.edge })));
       });
@@ -2478,6 +2500,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         sy *= 1.35; sz *= 1.25; z += 0.25;
       } else col.lerp(G.col.paper, 0.78);
     }
+    sx = P.sceneX(x + sx / 2) - P.sceneX(x - sx / 2);
+    x = P.sceneX(x);
     v.set(x, y, z); sc.set(sx, sy, sz);
     m4.compose(v, q, sc);
     G.inst.setMatrixAt(count, m4);
@@ -2723,9 +2747,36 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     G.labelHost = document.createElement('div');
     G.labelHost.className = 'scene-labels';
     G.labelHost.setAttribute('aria-hidden', 'true');
+    var drag = null, suppressClick = false;
+    G.labelHost.addEventListener('pointerdown', function (e) {
+      var label = e.target.closest('[data-view]');
+      if (!label || e.button !== 0 || !G.explore) return;
+      suppressClick = false;
+      drag = { id: e.pointerId, x: e.clientX, moved: false };
+      label.setPointerCapture(e.pointerId);
+      e.stopPropagation();
+    });
+    G.labelHost.addEventListener('pointermove', function (e) {
+      if (!drag || drag.id !== e.pointerId) return;
+      var delta = e.clientX - drag.x;
+      if (!drag.moved && Math.abs(delta) < 5) return;
+      drag.moved = true;
+      drag.x = e.clientX;
+      P.panLabelDrag(delta);
+      e.stopPropagation();
+    });
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(function (event) {
+      G.labelHost.addEventListener(event, function (e) {
+        if (!drag || drag.id !== e.pointerId) return;
+        suppressClick = drag.moved;
+        drag = null;
+        e.stopPropagation();
+      });
+    });
     G.labelHost.addEventListener('click', function (e) {
       var t = e.target.closest('[data-view]');
-      if (t) P.openView(t.dataset.view);
+      if (t && !suppressClick) P.openView(t.dataset.view);
+      suppressClick = false;
     });
     host.appendChild(G.labelHost);
   };
@@ -2759,11 +2810,11 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     P.sceneBoxes().forEach(function (b, i) {
       var y = b.labelY || (b.lane ? top + 0.3 : 1.6);
       L.push({ id: 'box' + i, html: b.view ? '<span data-view="' + b.view + '" title="How ' + b.name + ' works">' + (b.short || b.name) + '</span>' : b.short || b.name,
-               cls: 'lbl-box' + (b.view ? ' op' : ''), pos: [(b.x[0] + b.x[1]) / 2, y, 0], pri: b.lineLabel ? 5 : b.lane ? 3 : 2 });
+               cls: 'lbl-box' + (b.view ? ' op' : ''), pos: [P.sceneX((b.x[0] + b.x[1]) / 2), y, 0], pri: b.lineLabel ? 5 : b.lane ? 3 : 2 });
     });
     P.STAGES.forEach(function (st) {
       L.push({ id: 'st' + st.n, html: '<b>' + st.n + '</b>', cls: 'lbl-stage' + (S.stage === st.n ? ' on' : ''),
-               pos: [(st.span[0] + st.span[1]) / 2, top + 2.2, 0], pri: 4 });
+               pos: [P.sceneX((st.span[0] + st.span[1]) / 2), top + 2.2, 0], pri: 4 });
     });
     link.lanes.forEach(function (l) {
       var p = l.pcs, on = sel < 0 || sel === p, cls = 'lbl-lane l' + p + (on ? '' : ' dim');
@@ -5925,7 +5976,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         if (G.failed) return;
         P.buildBoxes();
         P.buildLabels();
-        if (choice.checked && S.stage == null) P.flyTo(P.framePose(-2, 118, 0.35));
+        if (choice.checked && !G.explore) P.setExplore(true);
+        if (S.stage == null) P.flyTo(P.framePose(-2, 118, 0.35));
       };
     });
     syncOverlays();
