@@ -788,6 +788,15 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <p class="note">沿箭头阅读。Idle 调整属于 PCS 的编码／解码与速率匹配环节，图中单列以便查看。</p>
   </section>
 
+  <section class="pcs-frame-route" aria-label="UE 1.1 链路控制演示">
+    <div class="g800-controls">
+      <button type="button" class="btn" data-view="ueLlr">LLR · ACK / NACK 与重放</button>
+      <button type="button" class="btn" data-view="ueCbfc">CBFC · VC 信用回报</button>
+      <button type="button" class="btn" data-view="ueCtl">CtlOS · 位流与编码</button>
+    </div>
+    <p class="note">数据帧从 A 到 B，ACK、NACK 与 CF_Update 从 B 回到 A。三个入口打开同一个可切换场景的 UE 双端演示。</p>
+  </section>
+
   <section class="lens" id="lens" aria-labelledby="lens-title">
     <div class="lens-bar">
       <h3 id="lens-title">位级视图</h3>
@@ -2047,7 +2056,10 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     { x: [0, 5], name: 'TX 前导码 / IPG', short: 'TX 1 · 前导码', stage: 1, view: 'frameTx', raised: true },
     { x: [9.1, 10.4], name: 'TX Idle 调整', short: 'TX 3 · Idle', stage: 2, view: 'idleTx', raised: true },
     { x: [111.1, 113], name: 'RX Idle 调整', short: 'RX 3 · Idle', stage: 9, view: 'idleRx', raised: true },
-    { x: [113.5, 117], name: 'RX 帧提取', short: 'RX 4 · 去前导码', stage: 9, view: 'frameRx', raised: true }
+    { x: [113.5, 117], name: 'RX 帧提取', short: 'RX 4 · 去前导码', stage: 9, view: 'frameRx', raised: true },
+    { x: [1, 7], name: 'UE LLR', stage: 1, view: 'ueLlr', raised: true, heightOffset: 8 },
+    { x: [8, 14], name: 'UE CBFC', stage: 1, view: 'ueCbfc', raised: true, heightOffset: 8 },
+    { x: [16, 22], name: 'UE CtlOS', stage: 2, view: 'ueCtl', raised: true, heightOffset: 8 }
   ];
 
   P.STAGES = [
@@ -2249,7 +2261,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       var geo = new T.BoxGeometry(w, h, DEPTH);
       var mat = new T.MeshBasicMaterial({ color: G.col.box, transparent: true, opacity: b.lane ? 0.32 : 0.5, depthWrite: false });
       var mesh = new T.Mesh(geo, mat);
-      mesh.position.set((b.x[0] + b.x[1]) / 2, b.raised ? 4 : 0, 0);
+      mesh.position.set((b.x[0] + b.x[1]) / 2, b.raised ? (b.heightOffset || 4) : 0, 0);
       mesh.renderOrder = 2;
       var edges = new T.LineSegments(new T.EdgesGeometry(geo),
         new T.LineBasicMaterial({ color: G.col.edge, transparent: true, opacity: 0.9 }));
@@ -2673,7 +2685,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var S = P.state, link = S.link, X = P.X, L = [], sel = S.selected;
     var top = 4 * P.LANE_SP + 0.4;
     P.BOXES.forEach(function (b, i) {
-      var y = b.raised ? 5.55 : b.lane ? top + 0.3 : 1.6;
+      var y = b.raised ? (b.heightOffset || 4) + 1.55 : b.lane ? top + 0.3 : 1.6;
       L.push({ id: 'box' + i, html: b.view ? '<span data-view="' + b.view + '" title="How ' + b.name + ' works">' + (b.short || b.name) + '</span>' : b.short || b.name,
                cls: 'lbl-box' + (b.view ? ' op' : ''), pos: [(b.x[0] + b.x[1]) / 2, y, 0], pri: b.raised ? 5 : b.lane ? 3 : 2 });
     });
@@ -4999,7 +5011,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 
   // Open view m on the unit that is in its box right now.
   P.openView = function (m) {
-    if (P.openFrameBoundary(m)) return;
+    if (P.openFrameBoundary(m) || P.openUeDemo(m)) return;
     if (m === 'ptpTx' || m === 'ptpRx') {
       P.openPtpPoint('200GMII', m === 'ptpTx');
       return;
@@ -5987,6 +5999,24 @@ globalThis.PCS.openPtpPoint = function (xMII, tx) {
 })();
 </script>
 <script src="visual-pcs-assets/pcs-module-demo.js"></script>
+<dialog class="opview" id="pcs-ue-demo" aria-labelledby="pcs-ue-title">
+  <div class="opv-inner">
+    <header class="opv-head">
+      <h3 id="pcs-ue-title">UE 1.1 · LLR、CBFC 与 CtlOS</h3>
+      <form method="dialog"><button type="submit" class="ins-x" aria-label="关闭">×</button></form>
+    </header>
+    <div class="g800-controls">
+      <label>场景 <select id="pcs-ue-scenario">
+        <option value="ack">LLR · 正常接收并确认</option>
+        <option value="nack">LLR · 帧丢失并重放</option>
+        <option value="credit">CBFC · 释放缓冲并更新信用</option>
+      </select></label>
+    </div>
+    <div id="pcs-ue-body"></div>
+    <p class="note">200GBASE-R 场景假设两端已启用 UE 扩展。主 3D 位流继续用于 IEEE PCS 数据块教学，弹窗演示 UE 控制支路。依据 UE 1.1 §5.1.3、§5.1.6、§5.2.6、§5.2.9、§5.2.11。<a href="../../pdf/UE-Specification-1.1.pdf">本地规范</a></p>
+  </div>
+</dialog>
+<script src="visual-pcs-assets/pcs-ue-demo.js"></script>
 <dialog class="opview" id="pcs-frame-boundary" aria-labelledby="pcs-frame-boundary-title">
   <div class="opv-inner">
     <header class="opv-head">
