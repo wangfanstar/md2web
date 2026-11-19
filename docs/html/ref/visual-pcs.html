@@ -2087,7 +2087,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   // Sub-blocks drawn in the scene. lane: true spans the 8-lane stack.
   P.sceneOverlays = { llr: false, cbfc: false, frame: false };
   P.showOverlay = function (group) {
-    if (!group || (P.isFaultScene && P.isFaultScene())) return true;
+    if (!group) return true;
+    if (P.isFaultScene && P.isFaultScene()) return false;
     if (group === 'ue') return P.sceneOverlays.llr || P.sceneOverlays.cbfc;
     return P.sceneOverlays[group];
   };
@@ -2135,7 +2136,16 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 
   // Fit the enabled modules into the straight MAC/PCS portions of the path.
   P.sceneBoxes = function () {
-    var visible = P.BOXES.filter(function (box) { return P.showOverlay(box.overlay); });
+    var fault = P.isFaultScene && P.isFaultScene();
+    var visible = P.BOXES.filter(function (box) {
+      if (!fault) return P.showOverlay(box.overlay);
+      if (box.view === 'idleTx' || box.view === 'idleRx') return true;
+      return !box.overlay && box.view !== 'ptpTx' && box.view !== 'ptpRx';
+    });
+    if (fault) {
+      visible.push({ x: [0, 4], name: 'A · RS', stage: 1 },
+        { x: [113.5, 117], name: 'B · RS', stage: 9 });
+    }
     var ranges = [
       { from: 0, to: 15.5, order: ['ueCbfc', 'ueLlr', 'frameTx', 'ptpTx', 'ueCtl', 'b66', 'idleTx', 'b257'] },
       { from: 101.5, to: 117, order: ['r257', 'd66', 'idleRx', 'ueCtlRx', 'ptpRx', 'frameRx', 'ueLlrRx', 'ueCbfcRx'] }
@@ -6044,9 +6054,11 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       document.querySelectorAll('[data-pcs-route]').forEach(function (section) {
         section.hidden = !P.showOverlay(section.dataset.pcsRoute);
       });
+      var fault = Boolean(P.isFaultScene && P.isFaultScene());
+      vp.querySelector('.pcs-scene-options').hidden = fault;
       vp.querySelectorAll('[data-pcs-overlay]').forEach(function (choice) {
         choice.checked = P.showOverlay(choice.dataset.pcsOverlay);
-        choice.disabled = Boolean(P.isFaultScene && P.isFaultScene());
+        choice.disabled = fault;
       });
       vp.querySelectorAll('.pcs-idle-key').forEach(function (key) { key.hidden = !P.showOverlay('frame'); });
       [['ueLlr', 'llr'], ['ueCbfc', 'cbfc']].forEach(function (entry) {

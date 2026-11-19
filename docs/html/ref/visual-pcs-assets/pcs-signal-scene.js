@@ -15,7 +15,7 @@
   // Node indices follow A RS, A PHY, B PHY, B RS from left to right.
   const scenarios = {
     fault: {
-      reference: 'IEEE 802.3 · 46.3.4、表 46–5 和图 46–11。示例假设 A → B 故障，B → A 可用。200GMII 有序集与 PCS 块格式见 117、119.2.3 和图 82–5。',
+      reference: 'IEEE 802.3 · 46.3.4、表 46–5 和图 46–11。示例假设 A → B 故障，B → A 可用。LF 在本地 PHY 与 RS 之间上报，RF 由 RS 发往对端，均沿 IEEE RS / PCS 信令路径。200GMII 有序集与 PCS 块格式见 117、119.2.3 和图 82–5。',
       nodes: ['A · RS', 'A · PCS / PHY', 'B · PCS / PHY', 'B · RS'],
       steps: [
         ['检测故障', 'RX 故障', 1, 2, 'A → B 接收路径异常。B 的 PHY 检测失锁等故障。'],

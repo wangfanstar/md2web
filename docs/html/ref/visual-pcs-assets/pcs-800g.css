@@ -284,3 +284,5 @@
 .pcs-fault-scene .pcs-signal-labels strong { position: absolute; left: 50%; top: 47%; transform: translate(-50%, -50%); border-color: var(--bad); white-space: nowrap; }
 .pcs-fault-scene > :is(.follow-tags, .follow-bar) { display: none; }
 [data-signal-bytes] { padding: .5rem; border: 1px solid var(--rule); border-radius: .35rem; }
+
+.pcs-scene-options[hidden] { display: none; }
