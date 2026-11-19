@@ -799,6 +799,15 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <ol class="pcs-fault-steps" data-signal-steps></ol>
     <p data-signal-detail role="status"></p>
     <div data-signal-bytes hidden></div>
+    <dialog class="opview" id="pcs-fault-format" aria-labelledby="pcs-fault-format-title">
+      <div class="opv-inner">
+        <header class="opv-head">
+          <h3 id="pcs-fault-format-title"></h3>
+          <form method="dialog"><button type="submit" class="ins-x" aria-label="关闭">×</button></form>
+        </header>
+        <div id="pcs-fault-format-body"></div>
+      </div>
+    </dialog>
     <p class="note" data-signal-source></p>
   </section>
   <section class="lens" id="lens" aria-labelledby="lens-title">
@@ -3104,11 +3113,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     el.addEventListener('pointermove', function (e) {
       if (down) return;
       var r = el.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top;
-      var bx = boxAt(sx, sy), onBlock = blockAt(sx, sy, bx) >= 0;
+      var signal = P.hitFaultSignal && P.hitFaultSignal(sx, sy);
+      var bx = signal ? null : boxAt(sx, sy), onBlock = blockAt(sx, sy, bx) >= 0;
       if (onBlock && !(bx && bx.def.overlay)) bx = null;
       setHoverBox(bx);
-      el.style.cursor = onBlock || bx ? 'pointer' : '';
-      el.title = bx ? 'How ' + bx.def.name + ' works' : '';
+      el.style.cursor = signal || onBlock || bx ? 'pointer' : '';
+      el.title = signal ? '点击查看当前故障信号的数据格式' : bx ? 'How ' + bx.def.name + ' works' : '';
     });
     el.addEventListener('pointerleave', function () { setHoverBox(null); });
 
@@ -3159,6 +3169,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     return hit && hit.instanceId != null && hit.instanceId < P.packetCount() ? hit.instanceId : nearest(sx, sy, bx ? 5 : 16);
   }
   function pickAt(sx, sy) {
+    if (P.pickFaultSignal && P.pickFaultSignal(sx, sy)) return;
     var bx = boxAt(sx, sy);
     if (bx && bx.def.overlay) { P.closeInspector(); P.openView(bx.def.view); return; }
     var i = blockAt(sx, sy, bx);

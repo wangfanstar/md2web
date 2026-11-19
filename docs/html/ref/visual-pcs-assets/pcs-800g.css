@@ -286,3 +286,5 @@
 [data-signal-bytes] { padding: .5rem; border: 1px solid var(--rule); border-radius: .35rem; }
 
 .pcs-scene-options[hidden] { display: none; }
+
+.pcs-fault-scene [data-signal-token] { position: absolute; left: 50%; top: 47%; transform: translate(-50%, -50%); border: 1px solid var(--bad); border-radius: .3rem; background: var(--panel); color: var(--ink); padding: .22rem .35rem; font-size: .85rem; white-space: nowrap; pointer-events: auto; cursor: pointer; }

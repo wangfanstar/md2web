@@ -7,6 +7,9 @@
   const play = controls.querySelector('[data-signal-play]');
   const stages = controls.querySelector('[data-signal-steps]');
   const bytesPanel = controls.querySelector('[data-signal-bytes]');
+  const formatDialog = document.getElementById('pcs-fault-format');
+  const formatHeading = document.getElementById('pcs-fault-format-title');
+  const formatBody = document.getElementById('pcs-fault-format-body');
   const labels = document.createElement('div');
   labels.className = 'pcs-signal-labels';
   labels.hidden = true;
@@ -70,6 +73,15 @@
         : ' · D1/D2/D3 = 00/00/02 · O-code 0x0 · 余位为零') : '') +
       '</p><p class="note">' + sample.note + '</p>';
   }
+  function openFaultFormat() {
+    if (mode !== 'fault') return;
+    playing = false;
+    renderStep();
+    formatHeading.textContent = scenarios.fault.steps[index][1] + ' · 数据格式';
+    formatBody.replaceChildren(...Array.from(bytesPanel.childNodes, node => node.cloneNode(true)));
+    if (!formatDialog.open) formatDialog.showModal();
+  }
+
   const duration = 2050;
   const x = i => (i - 1.5) * 4;
 
@@ -133,8 +145,13 @@
       label.textContent = name;
       return label;
     }));
-    const badge = document.createElement('strong');
+    const badge = document.createElement(mode === 'fault' ? 'button' : 'strong');
     badge.dataset.signalToken = '';
+    if (mode === 'fault') {
+      badge.type = 'button';
+      badge.title = '查看信号数据格式';
+      badge.onclick = openFaultFormat;
+    }
     labels.append(badge);
     stages.replaceChildren(...scenario.steps.map(([title], i) => {
       const item = document.createElement('li');
@@ -162,6 +179,19 @@
   controls.querySelector('[data-signal-reset]').onclick = () => { playing = false; select(0); };
 
   P.isFaultScene = () => mode === 'fault';
+  const ray = new T.Raycaster(), pointer = new T.Vector2();
+  P.hitFaultSignal = function (sx, sy) {
+    const G = P.g;
+    if (mode !== 'fault' || !faultToken || !faultToken.visible || !G.w || !G.h) return false;
+    pointer.set(2 * sx / G.w - 1, 1 - 2 * sy / G.h);
+    ray.setFromCamera(pointer, G.camera);
+    return ray.intersectObject(faultToken, false).length > 0;
+  };
+  P.pickFaultSignal = function (sx, sy) {
+    if (!P.hitFaultSignal(sx, sy)) return false;
+    openFaultFormat();
+    return true;
+  };
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   let elapsed = 0;
   P.renderSignalScene = function (now, visible) {
