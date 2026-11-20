@@ -1106,7 +1106,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <select id="llr-scenario"><option value="negotiation">LLDP 协商</option><option value="unsupported">LLDP 协商 · 对端无 UE TLV</option><option value="init" selected>LLR 初始化</option><option value="replay">丢包与重放</option><option value="registers">寄存器仿真</option></select>
         <label>实验预设<select form="llr-register-form" id="llr-preset"><option value="nack">丢帧后收到 NACK</option><option value="timeout">反馈持续丢失</option><option value="pcs">PCS 持续失锁</option><option value="init">初始化与上层来帧</option></select></label>
         <label>仿真方向 <select form="llr-register-form" id="llr-register-direction"><option value="A">A → B</option><option value="B">B → A</option></select></label>
-      <button class="btn" form="llr-register-form" type="submit">应用并回到起点</button>
+      <button class="btn" form="llr-register-form" type="submit">从头查看</button>
       <button class="btn" form="llr-register-form" type="reset">恢复参数默认值</button>
     </div>
     <output id="llr-register-status" aria-live="polite"></output>
@@ -1148,7 +1148,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
             <fieldset id="llr-register-a"><legend>A 端 · 蓝色</legend></fieldset>
             <fieldset id="llr-register-b"><legend>B 端 · 橙色</legend></fieldset>
           </div>
-      <p class="note">发送端使用本端 TX 模式、窗口和定时器，接收端使用本端 RX 模式和 CtlOS 间隔。仿真使用两帧各 512 B，CtlOS 等待按 200 Gb/s 的目标间隔估算，动画按事件步进。CRC4 和增强 NACK 支持独立配置与显示，扩展位和重复发送波形当前采用基础格式。</p>
+      <p class="note">有效参数会实时更新仿真。发送端使用本端 TX 模式、窗口和定时器，接收端使用本端 RX 模式和 CtlOS 间隔。仿真使用两帧各 512 B，CtlOS 等待按 200 Gb/s 的目标间隔估算，动画按事件步进。CRC4 和增强 NACK 支持独立配置与显示，扩展位和重复发送波形当前采用基础格式。</p>
         </form>
         <div id="llr-stats-panel" hidden>
           <div class="g800-controls">

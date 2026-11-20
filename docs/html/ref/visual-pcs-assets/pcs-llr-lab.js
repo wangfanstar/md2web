@@ -148,15 +148,20 @@
   get('register-port').onchange = updatePorts;
   get('show-params').onclick = () => showStats(false);
   get('show-stats').onclick = () => showStats(true);
-  function markPending() {
-    get('register-status').textContent = '参数有修改，等待应用。';
+  let refreshTimer;
+  function refreshOnInput(event) {
+    if (event.target === get('register-port')) return;
+    clearTimeout(refreshTimer);
     updatePorts();
+    if (event.target.type === 'number') {
+      refreshTimer = setTimeout(() => applyRegisters(false), 180);
+    } else {
+      applyRegisters(false);
+    }
   }
-  form.oninput = event => {
-    if (event.target !== get('register-port')) markPending();
-  };
-  get('register-direction').onchange = markPending;
-  get('preset').onchange = markPending;
+  form.oninput = refreshOnInput;
+  get('register-direction').onchange = refreshOnInput;
+  get('preset').onchange = refreshOnInput;
   form.addEventListener('invalid', event => {
     const fieldset = event.target.closest('fieldset');
     if (!fieldset) return;
@@ -264,19 +269,37 @@
   }
 
   steps.registers = simulate();
+  function applyRegisters(restart) {
+    clearTimeout(refreshTimer);
+    const invalid = ['A', 'B'].map(endpoint => ({
+      endpoint, input: controls[endpoint].find(input => !input.validity.valid)
+    })).find(entry => entry.input);
+    const status = get('register-status');
+    if (invalid) {
+      status.textContent = invalid.endpoint + ' 端 · ' + invalid.input.name + ' · ' +
+        invalid.input.validationMessage + ' 仿真仍显示上次有效结果。';
+      return;
+    }
+    const previous = get('scenario').value === 'registers' && !restart ? index : 0;
+    const title = steps.registers[previous][0];
+    steps.registers = simulate();
+    const sameStep = steps.registers[previous]?.[0] === title
+      ? previous : steps.registers.findIndex(row => row[0] === title);
+    const next = restart ? 0 : sameStep >= 0 ? sameStep : Math.min(previous, steps.registers.length - 1);
+    get('scenario').value = 'registers';
+    status.textContent = '仿真已更新 · ' + (get('register-direction').value === 'A' ? 'A → B' : 'B → A') +
+      ' · ' + steps.registers.length + ' 个事件';
+    reset(next);
+  }
   form.onsubmit = event => {
     event.preventDefault();
-    steps.registers = simulate();
-    get('scenario').value = 'registers';
-    get('register-status').textContent = '已应用参数 · ' + (get('register-direction').value === 'A' ? 'A → B' : 'B → A') +
-      ' · ' + ['A', 'B'].map(endpoint => endpoint + ' 扩展开关 ' +
-        controls[endpoint].slice(-3).map(input => input.name + '=' + input.value).join(' / ')).join(' ｜ ') +
-      ' · ' + steps.registers.length + ' 个事件';
-    reset();
+    applyRegisters(true);
   };
   form.onreset = () => {
-    get('register-status').textContent = '默认参数已恢复，点击应用重新计算。';
-    queueMicrotask(updatePorts);
+    queueMicrotask(() => {
+      updatePorts();
+      applyRegisters(true);
+    });
   };
   const active = () => steps[get('scenario').value];
   const negotiating = () => ['negotiation', 'unsupported'].includes(get('scenario').value);
@@ -646,7 +669,7 @@
     draw();
     frame = requestAnimationFrame(tick);
   }
-  function reset() {
+  function reset(step = 0) {
     cancelAnimationFrame(frame);
     running = false;
     get('steps').replaceChildren(...active().map(([title], i) => {
@@ -658,13 +681,17 @@
       li.append(button);
       return li;
     }));
-    select(0);
+    select(step);
   }
   get('scenario').onchange = () => {
-    if (get('scenario').value === 'registers') updatePorts();
+    clearTimeout(refreshTimer);
+    if (get('scenario').value === 'registers') {
+      updatePorts();
+      applyRegisters(true);
+    }
     reset();
   };
-  get('reset').onclick = reset;
+  get('reset').onclick = () => reset();
   get('prev').onclick = () => { pause(); select(Math.max(0, index - 1)); };
   get('next').onclick = () => { pause(); select(Math.min(index + 1, active().length - 1)); };
   get('play').onclick = () => {
