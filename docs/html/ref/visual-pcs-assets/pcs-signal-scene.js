@@ -28,7 +28,12 @@
         ['本地上报', 'Local Fault', 2, 3, 'B 的 PHY 经本地 200GMII 向 B 的 RS 上报 Local Fault。'],
         ['生成并发回 RF', 'Remote Fault', 3, 0, 'B 的 RS 确认 LF 后停发 MAC 数据，产生 RF。反向 TX PCS 编码并经链路送至 A。'],
         ['A 解码并确认 RF', 'RF 解码', 1, 0, 'A 的 RX PCS 恢复对齐并解码控制块，经本地 200GMII 将 Remote Fault 上报给 A 的 RS。'],
-        ['对端响应', 'Idle', 0, 1, 'A 的 RS 确认 RF 后停止发送 MAC 数据并持续送 Idle。故障清除后，双方按 RS 状态机恢复。']
+        ['对端响应', 'Idle', 0, 1, 'A 的 RS 确认 RF 后停止发送 MAC 数据并持续送 Idle。'],
+        ['恢复接收路径', '链路恢复', 1, 2, 'A → B 的物理路径恢复。B 的 PHY 重新建立接收锁定，并完成 PCS 对齐与重排。此时 A 已在发送 Idle。'],
+        ['停止本地上报', 'LF 停止', 2, 3, 'B 的 PHY 恢复有效接收后，停止向本地 RS 上报 Local Fault。B 的 RS 根据状态机确认故障指示已消失。'],
+        ['停止回传 RF', 'B 发送 Idle', 3, 0, 'B 的 RS 清除 Local Fault，停止回传 Remote Fault，回到正常发送。这个步骤假设 B 暂无待发帧，因此沿 B → A 发送 Idle。'],
+        ['清除对端状态', 'RF 清除', 1, 0, 'A 收到不含 Remote Fault 的正常流，按 RS 状态机确认 RF 消失并将 link_fault 恢复为 OK。'],
+        ['恢复双向传输', '双向恢复', 0, 3, '两端 RS 均可恢复发送 MAC 帧。无待发帧时，RS 继续发送 Idle。']
       ]
     },
     eee: {
@@ -46,14 +51,17 @@
   };
 
   let mode = 'data', index = 0, playing = false, start = null;
-  let scene, camera, nodes, token, faultToken, formatMarkers = [], formatSample;
+  let scene, camera, nodes, token, faultToken, recoveryPeer, formatMarkers = [], formatSample;
   // Fault responses use the existing 200G drawing. The right-to-left route
   // represents the reverse link and its corresponding TX/RX PCS functions.
-  const faultPositions = [[57, 108], [109, 116], [116, 7], [7, 0], [0, 9]];
+  const faultPositions = [
+    [57, 108], [109, 116], [116, 7], [7, 0], [0, 9],
+    [57, 108], [109, 116], [116, 7], [7, 0], [0, 116]
+  ];
   const reverseOffset = 22;
   let reverseGroup, reverseSources;
   const reverseX = x => P.sceneX(0) + P.sceneX(116) - x;
-  const onReverse = () => index === 2 || index === 3;
+  const onReverse = () => [2, 3, 7, 8].includes(index);
 
   function syncReversePath() {
     const G = P.g;
@@ -86,13 +94,22 @@
     { value: '02', title: 'A · RX PCS → RS（200GMII RX）', type: '4B',
       note: 'RX PMA → AM 锁定与重排 → RS-FEC → AM 移除 → 解扰 → 逆转码 → 64B/66B 解码。恢复 /Q/ 并将 RXC[0] 置 1。' },
     { value: '07', title: 'A · RS → TX PCS（200GMII TX）', type: '1E', idle: true,
-      note: 'RS 持续发送 Idle。八个 /I/ 形成全控制块。' }
+      note: 'RS 持续发送 Idle。八个 /I/ 形成全控制块。' },
+    null,
+    null,
+    { value: '07', title: 'B · RS → TX PCS（恢复后 200GMII TX）', type: '1E', idle: true,
+      note: 'B 停止回传 RF。此例无待发帧，八个 /I/ 编码为 0x1E 后经反向 PCS 通路送出。' },
+    { value: '07', title: 'A · RX PCS → RS（恢复后 200GMII RX）', type: '1E', idle: true,
+      note: 'A 的 PCS 恢复本示例中的 0x07 Idle。RS 按故障状态机清除 Remote Fault。' },
+    null
   ];
 
   function renderFaultBytes() {
     const sample = faultBytes[index];
     if (!sample) {
-      bytesPanel.textContent = '故障检测阶段尚未生成有序集。下一步查看 PHY 输出的 Local Fault。';
+      bytesPanel.textContent = index === 0
+        ? '故障检测阶段尚未生成有序集。下一步查看 PHY 输出的 Local Fault。'
+        : '当前步骤展示锁定与故障状态的变化。';
       return;
     }
     bytesPanel.innerHTML = faultOctets(sample);
@@ -187,7 +204,7 @@
     } else if (key === 'lfMii') return bytesPanel.innerHTML;
     else return faultOctets({
       value: '02', idle: f.type === 0x1e,
-      title: f.type === 0x1e ? 'Idle · 200GMII 解码格式（参考）' : 'A · RX PCS → RS（Remote Fault）',
+      title: f.type === 0x1e ? 'A · RX PCS → RS（恢复后的 Idle）' : 'A · RX PCS → RS（Remote Fault）',
       note: note + ' 以下显示 PCS 交付给 RS 的逻辑接口格式。'
     });
     return '<p>' + note + '</p><p class="note">FEC：' + (fecBypass.checked ? 'Bypass' : '启用') +
@@ -204,8 +221,9 @@
       marker.material.dispose();
     });
     formatMarkers = [];
-    if (mode !== 'fault' || index === 0) return;
-    if (index >= 2) formatSample = buildFaultSample(index === 4);
+    const sample = faultBytes[index];
+    if (mode !== 'fault' || !sample) return;
+    if (index !== 1) formatSample = buildFaultSample(Boolean(sample.idle));
     G.boxes.forEach(box => {
       const key = index === 1 ? (box.def.name === 'B · RS' ? 'lfMii' : '')
         : box.def.view || ({ '加扰': 'scr', '解扰': 'descr' })[box.def.name];
@@ -288,6 +306,7 @@
     labels.classList.toggle('is-projected', mode === 'eee' && Boolean(scene));
     if (P.g.inst) P.g.inst.visible = mode !== 'fault';
     if (faultToken) faultToken.visible = mode === 'fault';
+    if (recoveryPeer) recoveryPeer.visible = false;
     if (P.syncSceneOverlays) P.syncSceneOverlays();
     if (!P.g.failed && P.g.camera) {
       P.buildBoxes();
@@ -388,13 +407,16 @@
       if (!faultToken) {
         faultToken = new T.Mesh(new T.SphereGeometry(1.15, 16, 12), new T.MeshBasicMaterial());
         faultToken.position.y = 3.4;
-        G.scene.add(faultToken);
+        recoveryPeer = faultToken.clone();
+        G.scene.add(faultToken, recoveryPeer);
       }
       syncReversePath();
       const [from, to] = faultPositions[index];
       faultToken.position.y = 3.4 - (onReverse() ? reverseOffset : 0);
       faultToken.position.x = P.sceneX(from + (to - from) * fraction);
-      faultToken.material.color.copy(G.col.bad);
+      faultToken.material.color.copy(index >= 5 ? G.col.good : G.col.bad);
+      recoveryPeer.visible = index === 9;
+      recoveryPeer.position.set(reverseX(faultToken.position.x), 3.4 - reverseOffset, 0);
       P.updateCamera(now);
       G.renderer.render(G.scene, G.camera);
       P.updateLabels();
