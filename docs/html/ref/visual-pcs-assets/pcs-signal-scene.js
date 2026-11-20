@@ -338,6 +338,7 @@
     viewport.classList.toggle('pcs-fault-scene', mode !== 'data');
     labels.hidden = controls.hidden = mode === 'data';
     bytesPanel.hidden = mode === 'data';
+    controls.querySelector('[data-eee-reference]').hidden = mode !== 'eee';
     bypass.hidden = mode !== 'fault';
     if (P.g.inst) P.g.inst.visible = mode === 'data';
     if (faultToken) faultToken.visible = mode !== 'data';
