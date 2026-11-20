@@ -779,8 +779,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         <legend>显示叠加模块</legend>
         <label><input type="checkbox" data-pcs-overlay="llr"> LLR</label>
         <label><input type="checkbox" data-pcs-overlay="cbfc"> CBFC</label>
-        <label><input type="checkbox" data-pcs-overlay="ipg"> IPG</label>
-        <label><input type="checkbox" data-pcs-overlay="preamble"> 前导码</label>
+        <label><input type="checkbox" data-pcs-overlay="ipg"><i class="pcs-module-ipg" aria-hidden="true"></i> IPG</label>
+        <label><input type="checkbox" data-pcs-overlay="preamble"><i class="pcs-module-preamble" aria-hidden="true"></i> 前导码</label>
       </fieldset>
     </div>
     <p id="lab-hint" class="lab-hint" hidden></p>
@@ -2381,6 +2381,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     G.scene.remove(g);
   }
 
+  P.boxAccent = function (box) {
+    if (box.overlay === 'ipg') return G.col.good;
+    if (box.overlay === 'preamble') return G.col.lanes[7];
+    return null;
+  };
+
   P.buildBoxes = function () {
     if (G.boxGroup) disposeGroup(G.boxGroup);
     if (P.resetBoxHover) P.resetBoxHover();
@@ -2390,12 +2396,13 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       var left = P.sceneX(b.x[0]), right = P.sceneX(b.x[1]);
       var w = right - left, h = b.lane ? LANE_H : AGG_H;
       var geo = new T.BoxGeometry(w, h, DEPTH);
-      var mat = new T.MeshBasicMaterial({ color: G.col.box, transparent: true, opacity: b.lane ? 0.32 : 0.5, depthWrite: false });
+      var accent = P.boxAccent(b);
+      var mat = new T.MeshBasicMaterial({ color: accent || G.col.box, transparent: true, opacity: b.lane ? 0.32 : 0.5, depthWrite: false });
       var mesh = new T.Mesh(geo, mat);
       mesh.position.set((left + right) / 2, 0, 0);
       mesh.renderOrder = 2;
       var edges = new T.LineSegments(new T.EdgesGeometry(geo),
-        new T.LineBasicMaterial({ color: G.col.edge, transparent: true, opacity: 0.9 }));
+        new T.LineBasicMaterial({ color: accent || G.col.edge, transparent: true, opacity: 0.9 }));
       mesh.add(edges);
       grp.add(mesh);
       G.boxes.push({ def: b, mesh: mesh, edges: edges, h: h });
@@ -2860,7 +2867,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     P.sceneBoxes().forEach(function (b, i) {
       var y = b.labelY || (b.lane ? top + 0.3 : 1.6);
       L.push({ id: 'box' + i, html: b.view ? '<span data-view="' + b.view + '" title="How ' + b.name + ' works">' + (b.short || b.name) + '</span>' : b.short || b.name,
-               cls: 'lbl-box' + (b.view ? ' op' : ''), pos: [P.sceneX((b.x[0] + b.x[1]) / 2), y, 0], pri: b.lineLabel ? 5 : b.lane ? 3 : 2 });
+               cls: 'lbl-box' + (b.view ? ' op' : '') + (P.boxAccent(b) ? ' pcs-module-' + b.overlay : ''), pos: [P.sceneX((b.x[0] + b.x[1]) / 2), y, 0], pri: b.lineLabel ? 5 : b.lane ? 3 : 2 });
     });
     P.STAGES.forEach(function (st) {
       L.push({ id: 'st' + st.n, html: '<b>' + st.n + '</b>', cls: 'lbl-stage' + (S.stage === st.n ? ' on' : ''),
@@ -3184,7 +3191,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   var hoverBox = null;
   function setHoverBox(b) {
     if (b === hoverBox) return;
-    if (hoverBox) hoverBox.edges.material.color.copy(G.col.edge);
+    if (hoverBox) hoverBox.edges.material.color.copy(P.boxAccent(hoverBox.def) || G.col.edge);
     hoverBox = b;
     if (b) b.edges.material.color.copy(G.col.ink);
   }

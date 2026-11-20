@@ -292,3 +292,8 @@
 .pcs-fault-bits { font-family: var(--f-mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--panel); border: 1px solid var(--rule); border-radius: .3rem; padding: .6rem; }
 
 .pcs-frame-route li[hidden] { display: none; }
+
+.pcs-module-ipg { --module-accent: var(--good); }
+.pcs-module-preamble { --module-accent: var(--lane-7); }
+.pcs-scene-options i { width: .7em; height: .7em; border-radius: 2px; background: var(--module-accent); }
+.lbl-box:is(.pcs-module-ipg, .pcs-module-preamble) { border-bottom: 2px solid var(--module-accent); }
