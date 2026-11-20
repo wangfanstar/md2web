@@ -36,11 +36,13 @@
       ]
     },
     eee: {
-      reference: 'IEEE 802.3 · 第 78 条、119.2.3.3 及适用 PHY 条款。示例假设两端已协商 EEE，展示一个方向及逻辑 LPI 状态。具体物理省电动作和唤醒时序取决于 PHY。',
+      reference: 'IEEE 802.3 · 第 78 条、表 82–1、119.2.3.3 及适用 PHY 条款。示例假设两端已协商 EEE，展示一个方向及逻辑 LPI 状态。具体物理省电动作和唤醒时序取决于 PHY。',
       steps: [
+        ['正常运行', 'Active', 0, 1, '正常收发 MAC 帧。帧间使用普通 Idle。'],
         ['请求 LPI', 'LPI 请求', 0, 1, 'A 暂无待发帧，MAC / RS 通过 200GMII 向本端 PHY 请求 Low Power Idle。'],
         ['进入 LPI', '进入 LPI', 1, 2, 'A 的 PCS / PHY 按适用 PHY 的 EEE 规则发送 LPI 信号。B 的 PHY 检测进入省电状态。'],
         ['接收端指示', 'LPI 指示', 2, 3, 'B 的 PHY 在 200GMII 侧指示接收 LPI。A → B 暂停用户数据，该方向维持 LPI。'],
+        ['省电维持', 'LPI 维持', 1, 2, 'Fast Wake 保持线路活动。支持 Deep Sleep 的 PHY 可进入 Quiet，并通过周期 Refresh 维持链路。'],
         ['请求唤醒', '撤销 LPI', 0, 1, 'A 有新帧待发，撤销 LPI 请求。先完成唤醒流程，再发送新帧。'],
         ['唤醒对端', 'Wake', 1, 2, 'A 的 PHY 执行唤醒；B 的 PHY 恢复正常接收所需的功能。'],
         ['恢复传输', '恢复正常', 2, 3, 'B 的 PHY 退出接收 LPI 指示。满足适用 PHY 的唤醒要求后，A → B 恢复正常帧传输。']
@@ -59,13 +61,53 @@
   const reverseOffset = 22;
   let reverseGroup, reverseSources;
   const reverseX = x => P.sceneX(0) + P.sceneX(116) - x;
-  const eeePositions = [[0, 7], [7, 108], [109, 116], [0, 7], [31, 85], [109, 116]];
+  const eeePositions = [[0, 116], [0, 7], [7, 108], [109, 116], [48, 70], [0, 7], [31, 85], [109, 116]];
+  const eeeSamples = [
+    { tx: '普通 Idle 07 × 8', pcs: '0x1E · 7 位码 00 × 8', phy: '正常数据 / Idle', octets: 'idle' },
+    { tx: 'LPI 06 × 8', pcs: '0x1E · 7 位码 06 × 8', phy: '请求进入 LPI', octets: 'lpi' },
+    { tx: 'LPI 06 × 8', pcs: '0x1E · 7 位码 06 × 8', phy: '发送 PHY LPI 信号', octets: 'lpi' },
+    { tx: 'LPI 06 × 8', pcs: '0x1E · 7 位码 06 × 8', phy: 'B 向本端 RS 指示 LPI', octets: 'lpi', rx: true },
+    { tx: 'LPI 06 × 8', pcs: '逻辑 /LI/ 保持', phy: 'Fast Wake 或 Quiet / Refresh', octets: 'lpi' },
+    { tx: '普通 Idle 07 × 8', pcs: '0x1E · 7 位码 00 × 8', phy: '撤销请求，等待唤醒', octets: 'idle' },
+    { tx: '普通 Idle 07 × 8', pcs: '0x1E · 7 位码 00 × 8', phy: 'Wake · PHY 专用信号', octets: 'wake' },
+    { tx: '数据 / Idle 07', pcs: '数据块 / Idle 控制块', phy: '恢复正常传输', octets: 'idle', rx: true }
+  ];
+  const eeeFields = [['tx', '200GMII 字节'], ['pcs', '66b / PCS 格式'], ['phy', 'PHY / 接收状态']];
+  const comparisonX = [21, 58, 95];
+  let comparisonGroup;
+
+  function syncEeeComparison() {
+    const G = P.g;
+    if (!G.scene) return;
+    if (!comparisonGroup && mode === 'eee') {
+      comparisonGroup = new T.Group();
+      comparisonGroup.name = 'EEE format comparison';
+      comparisonX.forEach(x => {
+        const mesh = new T.Mesh(new T.BoxGeometry(26, 3.2, 2), new T.MeshBasicMaterial());
+        mesh.position.set(x, -reverseOffset, 0);
+        comparisonGroup.add(mesh);
+      });
+      G.scene.add(comparisonGroup);
+    }
+    if (comparisonGroup) comparisonGroup.visible = mode === 'eee';
+  }
+
+  function updateEeeComparison() {
+    const current = eeeSamples[index], previous = eeeSamples[index - 1];
+    labels.querySelectorAll('.pcs-eee-compare-card').forEach((card, i) => {
+      const [key, title] = eeeFields[i];
+      const changed = Boolean(previous && previous[key] !== current[key]);
+      card.classList.toggle('is-changed', changed);
+      card.innerHTML = '<b>' + title + '</b><span>本步 ' + current[key] + '</span><small>' +
+        (previous ? (changed ? '上一步 ' + previous[key] : '与上一步相同') : '初始状态') + '</small>';
+    });
+  }
   const onReverse = () => mode === 'fault' && [2, 3, 7, 8].includes(index);
 
   function syncReversePath() {
     const G = P.g;
     if (!G.scene) return;
-    if (mode === 'data') {
+    if (mode !== 'fault') {
       if (reverseGroup) G.scene.remove(reverseGroup);
       reverseGroup = reverseSources = null;
       return;
@@ -105,15 +147,17 @@
 
   function renderFaultBytes() {
     if (mode === 'eee') {
-      if ([0, 1, 2].includes(index)) {
-        bytesPanel.innerHTML = faultOctets({ lpi: true, title: index === 2 ? 'B · 200GMII RX' : 'A · 200GMII TX',
-          note: '全 /LI/ 传输示例：66b 同步头 10、Block Type 0x1E，后接八个 7 位 0x06 控制码。IEEE 802.3 表 82–1、119.2.3.3。' });
-      } else if (index === 3 || index === 5) {
-        bytesPanel.innerHTML = faultOctets({ idle: true, type: '1E', title: index === 3 ? 'A · 退出 LPI 后的 200GMII TX' : 'B · 恢复后的 200GMII RX',
-          note: '示例展示恢复正常 Idle 时的逻辑接口格式。连续 0x07 Idle 编为 0x1E 全控制块。' });
+      const entry = eeeSamples[index];
+      if (entry.octets === 'wake') {
+        bytesPanel.textContent = 'Wake 是 PHY 层的唤醒过程。xMII 已退出 LPI，线路唤醒信号和时序按所选 PHY 的 EEE 条款。';
       } else {
-        bytesPanel.textContent = 'Wake 是 PHY 层的唤醒过程。线路信号和时序由所选 PHY 的 EEE 规则决定。';
+        const lpi = entry.octets === 'lpi';
+        bytesPanel.innerHTML = faultOctets({ lpi, idle: !lpi, type: lpi ? undefined : '1E',
+          title: entry.rx ? 'B · 200GMII RX' : 'A · 200GMII TX',
+          note: lpi ? '示例：同步头 10，块类型 0x1E，后接八个 7 位 0x06 控制码。'
+            : '普通 Idle 示例：八个 0x07 对应八个 7 位 0x00 控制码。' });
       }
+      updateEeeComparison();
       return;
     }
     const sample = faultBytes[index];
@@ -234,11 +278,10 @@
     formatMarkers = [];
     const sample = faultBytes[index];
     if (mode === 'data' || (mode === 'fault' && !sample)) return;
-    if (mode === 'eee' && index === 4) return;
+    if (mode === 'eee' && eeeSamples[index].octets === 'wake') return;
     if (mode === 'fault' && index !== 1) formatSample = buildFaultSample(Boolean(sample.idle));
     G.boxes.forEach(box => {
-      const key = mode === 'eee' ? (index <= 1 || index === 3 ? (box.def.view === 'b66' ? 'b66' : '')
-        : (box.def.view === 'd66' ? 'd66' : '')) : index === 1 ? (box.def.name === 'B · RS' ? 'lfMii' : '')
+      const key = mode === 'eee' ? (box.def.view === (eeeSamples[index].rx ? 'd66' : 'b66') ? box.def.view : '') : index === 1 ? (box.def.name === 'B · RS' ? 'lfMii' : '')
         : box.def.view || ({ '加扰': 'scr', '解扰': 'descr' })[box.def.name];
       if (!formats[key] || (index === 4 && box.mesh.position.x > P.sceneX(57))) return;
       const kind = formats[key][1];
@@ -306,7 +349,8 @@
       P.flyTo(P.framePose(-2, 118, 0.35), 0);
     }
     syncReversePath();
-    if (mode !== 'fault') syncFormatMarkers();
+    syncEeeComparison();
+    if (mode === 'data') syncFormatMarkers();
     if (mode === 'data') return;
     P.setPlaying(false);
     if (P.closeInspector) P.closeInspector();
@@ -319,13 +363,20 @@
     badge.onclick = () => openFaultFormat();
     const directions = mode === 'fault'
       ? ['A → B · 正向接收故障 / Idle', 'B → A · 反向 Remote Fault']
-      : ['A → B · LPI / 唤醒', 'B → A · 保持正常运行'];
+      : ['A → B · LPI / 唤醒', 'EEE 格式对照 · 高亮本步变化'];
     directions.forEach(text => {
       const direction = document.createElement('span');
       direction.className = 'pcs-fault-direction';
       direction.textContent = text;
       labels.append(direction);
     });
+    if (mode === 'eee') {
+      eeeFields.forEach(() => {
+        const card = document.createElement('div');
+        card.className = 'pcs-eee-compare-card';
+        labels.append(card);
+      });
+    }
     labels.append(badge);
     stages.replaceChildren(...scenario.steps.map(([title], i) => {
       const item = document.createElement('li');
@@ -359,6 +410,7 @@
   };
 
   P.isControlScene = () => mode !== 'data';
+  P.isFaultScene = () => mode === 'fault';
   const ray = new T.Raycaster(), pointer = new T.Vector2();
   P.hitFaultSignal = function (sx, sy) {
     const G = P.g;
@@ -404,10 +456,22 @@
     recoveryPeer.visible = mode === 'fault' && index === 9;
     recoveryPeer.position.set(reverseX(faultToken.position.x), 3.4 - reverseOffset, 0);
     P.updateCamera(now);
+    if (mode === 'eee') {
+      syncEeeComparison();
+      const current = eeeSamples[index], previous = eeeSamples[index - 1];
+      comparisonGroup.children.forEach((mesh, i) => {
+        const key = eeeFields[i][0];
+        mesh.material.color.copy(previous && previous[key] !== current[key] ? G.col.good : G.col.box);
+      });
+    }
     G.renderer.render(G.scene, G.camera);
     P.updateLabels();
     place(labels.children[0], new T.Vector3(P.sceneX(57), 8.5, 0), G.camera);
     place(labels.children[1], new T.Vector3(P.sceneX(57), 8.5 - reverseOffset, 0), G.camera);
+    if (mode === 'eee') {
+      comparisonX.forEach((x, i) =>
+        place(labels.children[i + 2], new T.Vector3(x, -reverseOffset + 1.5, 2), G.camera));
+    }
     place(labels.lastElementChild, faultToken.position.clone().add(new T.Vector3(0, 1.8, 0)), G.camera);
     return true;
   };

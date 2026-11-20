@@ -2884,7 +2884,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       var y = b.labelY || (b.lane ? top + 0.3 : 1.6);
       L.push({ id: 'box' + i, html: b.view ? '<span data-view="' + b.view + '" title="How ' + b.name + ' works">' + (b.short || b.name) + '</span>' : b.short || b.name,
                cls: 'lbl-box' + (b.view ? ' op' : '') + (P.boxAccent(b) ? ' pcs-module-' + P.boxAccentGroup(b) : ''), pos: [P.sceneX((b.x[0] + b.x[1]) / 2), y, 0], pri: b.lineLabel ? 5 : b.lane ? 3 : 2 });
-      if (P.isControlScene && P.isControlScene()) {
+      if (P.isFaultScene && P.isFaultScene()) {
         var forward = L[L.length - 1];
         var peer = b.name === 'A · RS' ? 'B · RS' : b.name === 'B · RS' ? 'A · RS' : forward.html;
         L.push(Object.assign({}, forward, { id: 'reverse-box' + i, html: peer, pos: P.faultReverseLabel(b, y) }));

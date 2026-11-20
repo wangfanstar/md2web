@@ -298,3 +298,8 @@
 .pcs-fault-bypass { min-inline-size: 0; margin: 0; padding: .25rem .5rem; border: 1px solid var(--rule); border-radius: .35rem; }
 .pcs-fault-bypass label { margin-inline-end: .65rem; }
 .pcs-fault-bypass .note { margin: .2rem 0 0; }
+
+.pcs-eee-compare-card { position: absolute; transform: translate(-50%, -50%); width: min(26%, 15rem); display: grid; gap: .18rem; padding: .28rem; border: 1px solid var(--rule); border-radius: .35rem; background: var(--panel); color: var(--ink); font-size: clamp(.65rem, 1.1vw, .9rem); overflow-wrap: anywhere; }
+.pcs-eee-compare-card span { border: 0; background: none; padding: 0; }
+.pcs-eee-compare-card small { color: var(--muted); }
+.pcs-eee-compare-card.is-changed { border-color: var(--good); box-shadow: inset 0 -2px var(--good); }
