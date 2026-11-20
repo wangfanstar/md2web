@@ -512,6 +512,9 @@
     const detail = get('packet-format');
     if (title.textContent !== name) title.textContent = name;
     if (detail.textContent !== format) detail.textContent = format;
+    const sequence = get('packet-seq');
+    const sequenceText = negotiating() ? '' : sequenceLabel(current());
+    if (sequence.textContent !== sequenceText) sequence.textContent = sequenceText;
     callout.style.setProperty('--llr-packet-x', (50 + 50 * point.x) + '%');
     callout.style.top = (50 - 50 * point.y) + '%';
     callout.classList.toggle('llr-packet-below', point.y > .62);
@@ -521,6 +524,36 @@
   const ctlBytes = (type, seq, data) =>
     [0x5c, type, seq >> 12, (seq >> 4) & 255, ((seq & 15) << 4) | 6, data >> 8, data & 255, 0];
   const preamble = seq => [0xfb, ((seq >> 16) << 4) | 7, (seq >> 8) & 255, seq & 255, 0x55, 0x55, 0x55, 0xd5];
+  const sequenceHex = seq => '0x' + hex(seq).padStart(5, '0');
+  const sequenceField = type => type >= 3 ? 'init_seq' : type ? 'ack_nack_seq' : 'frame_seq';
+  const sequenceLabel = ([, , , , type, seq]) => sequenceField(type) + '=' + sequenceHex(seq) + ' (' + seq + ')';
+
+  function wireData(type, seq, data) {
+    const bytes = type ? ctlBytes(type, seq, data) : preamble(seq);
+    const blockType = type ? 0x4b : 0x78;
+    const payload = bytes.map(value => bits(value)).slice(1);
+    if (type) payload[3] = bits(bytes[4] & 15, 4) + bits(bytes[4] >> 4, 4);
+    return { bytes, blockType, blockBits: ['10', bits(blockType), ...payload] };
+  }
+
+  function fieldDetails(type, seq, data) {
+    const field = sequenceField(type);
+    const locations = type
+      ? ['D2[7:0] = [19:12]', 'D3[7:0] = [11:4]', 'D4[7:4] = [3:0]']
+      : ['D1[7:4] = [19:16]', 'D2[7:0] = [15:8]', 'D3[7:0] = [7:0]'];
+    let text = '<p><code>' + field + '=' + sequenceHex(seq) + '</code> · ' + seq +
+      '（十进制） · 20 位 · ' + seq.toString(2).padStart(20, '0') + '</p>' +
+      '<p>' + locations.join(' ｜ ') + '</p>';
+    if (type >= 3) {
+      text += '<p>D5–D6 · <code>init_data=0x' + hex(data).padStart(4, '0') + '</code> ｜ D7=0x00</p>';
+    } else if (type) {
+      text += '<p>确认序号表示最近成功接收的帧。D5–D7 均为 0x00。</p>';
+    } else {
+      text += '<p>D1[3:0]=0x7 ｜ D4–D6=55 55 55 ｜ D7=0xD5（SFD）。显示范围为起始块。</p>';
+    }
+    return text;
+  }
+
   function isLostStep() {
     return Boolean(current()[10]?.lost) || (get('scenario').value === 'replay' && index === 0);
   }
@@ -531,14 +564,14 @@
       return ['LLDP Options TLV', '66b 块', '257b 块', 'RS(544,514)', '线路信号',
         '已恢复符号', '还原 66b', 'xMII 字节', '解析 LLDP'];
     }
-    const bytes = type ? ctlBytes(type, seq, data) : preamble(seq);
+    const { bytes, blockType } = wireData(type, seq, data);
     const start = bytes.slice(0, 4).map(hex).join(' ');
-    const block = type ? '10 · 0x4B' : '10 · 0x78';
+    const block = '10 · 0x' + hex(blockType);
     const lost = isLostStep();
     return [start + ' …', block, '4 × 66b → 257b', '514 + 30 符号',
       lost ? '帧在此丢失' : '线路信号',
       ...(lost ? ['未收到', '—', '—', '—']
-        : ['恢复 514 符号', block, start + ' …', (type ? 'CtlOS' : '帧') + ' · Seq ' + seq])];
+        : ['恢复 514 符号', block, start + ' …', sequenceField(type) + '=' + sequenceHex(seq)])];
   }
   const byteView = bytes => '<div class="pcs-rx-bytes">' + bytes.map((value, i) =>
     '<span>' + hex(value) + '<small>Lane ' + i + ' · C=' + Number(i === 0) + '</small></span>').join('') + '</div>';
@@ -578,20 +611,23 @@
       detail += '<p>LLDP 的 UE Link Negotiation Options TLV 随 MAC 帧传送。查看下方步骤说明中的 LLR-W 和 LLR-E。</p>' +
         '<p>' + current()[7] + '（A） ｜ ' + current()[8] + '（B）</p>';
     } else {
-      const bytes = type ? ctlBytes(type, seq, data) : preamble(seq);
-      const payload = type
-        ? [bits(type), bits(bytes[2]), bits(bytes[3]), bits(6, 4) + bits(bytes[4] >> 4, 4), ...bytes.slice(5).map(value => bits(value))]
-        : bytes.slice(1).map(value => bits(value));
-      const blockType = type ? 0x4b : 0x78;
+      const { bytes, blockType, blockBits } = wireData(type, seq, data);
+      detail += fieldDetails(type, seq, data);
+      if (isLostStep() && target?.stage > 10) {
+        detail += '<p>接收端未收到这一帧。</p>';
+        get('format-body').innerHTML = detail;
+        if (!formatDialog.open) formatDialog.showModal();
+        return;
+      }
       const showOctets = !target || target.format === 0;
       if (showOctets) detail += '<h4>' + (type ? 'xMII CtlOS 字节' : 'xMII 修改后的前导码') + '</h4>' + byteView(bytes);
       if (target?.format === 1 || (!target && get('view-mode').value !== 'endpoint')) {
         detail += '<h4>64B/66B 控制块</h4>' +
           '<p>同步头 10 · 块类型 0x' + hex(blockType) + (type ? ' · O-code 0x6' : ' · 20 位 frame_seq') + '</p>' +
-          '<pre class="pcs-fault-bits">' + ['10', bits(blockType), ...payload].join(' ') + '</pre>';
+          '<pre class="pcs-fault-bits">' + blockBits.join(' ') + '</pre>';
       }
       if (target && (target.format === 2 || target.format === 3 || target.format === 4 || target.format === 5)) {
-        const transcoded = transcodeSample([bits(blockType), ...payload]);
+        const transcoded = transcodeSample(blockBits.slice(1));
         if (target.format === 5) {
           const scrambled = window.PCS800Model.scramble(Array.from(transcoded, Number), 0).slice(0, 257).join('');
           detail += '<h4>加扰输出 · 257 位</h4><pre class="pcs-fault-bits">' +
@@ -606,8 +642,8 @@
           detail += '<h4>' + (target.format === 3 ? 'RS(544,514) 码字' : '进入 PCS lane 分配与 PMA 的码字') + '</h4>' +
             '<p>40 个 257b 块连续加扰，每 10 位交替分配到码字 0、1。每个码字含 514 个消息符号和 30 个校验符号。</p>' +
             '<pre class="pcs-fault-bits">' + words.map(({ message, parity }, i) =>
-              i + ' 消息[0…7] ' + symbols(message.slice(0, 8)) +
-              ' | 校验[0…7] ' + symbols(parity.slice(0, 8))).join(String.fromCharCode(10)) + '</pre>' +
+              i + ' 消息[0…513] ' + symbols(message) +
+              ' | 校验[0…29] ' + symbols(parity)).join(String.fromCharCode(10)) + '</pre>' +
             '<p class="note">样例使用固定加扰初态，演示 AM 组之间的一对码字，剩余块使用教学填充。PMA 后的线路位序取决于 lane 映射。</p>';
         }
       }
@@ -666,7 +702,7 @@
 
   function update() {
     const [title, signalName, reverse, note, type, seq, data, tx, rx, buffer] = current();
-    const bytes = type ? ctlBytes(type, seq, data) : [];
+    const bytes = type ? wireData(type, seq, data).bytes : [];
     const simulation = current()[10];
     get('format').disabled = Boolean(simulation && !simulation.wire);
     renderCounters(simulation);
@@ -682,8 +718,8 @@
       : '<p>' + (simulation?.sender || 'A') + ' · TX ' + tx + ' ｜ ' +
         (simulation?.receiver || 'B') + ' · RX ' + rx + ' ｜ ' + (simulation?.sender || 'A') + ' · 重放缓冲 ' + buffer + '</p>' +
       (type ? '<div class="pcs-rx-bytes">' + bytes.map((b, i) => '<span>' + hex(b) + '<small>D' + i + '</small></span>').join('') +
-        '</div><p class="note">xMII：Lane 0 为控制字符 0x5C，D1 为消息类型。PCS：同步头 10，块类型 0x4B，O-code 0x6。</p>'
-        : simulation && !simulation.wire ? '' : '<p class="note">LLR-eligible 数据帧的 20 位 frame_seq 位于修改后的前导码。此步序号为 ' + seq + '。</p>'));
+        '</div>' + fieldDetails(type, seq, data) + '<p class="note">xMII：Lane 0 为控制字符 0x5C，D1 为消息类型。PCS：同步头 10，块类型 0x4B，O-code 0x6。</p>'
+        : simulation && !simulation.wire ? '' : '<p class="note">LLR-eligible 数据帧的 20 位 frame_seq 位于修改后的前导码。此步序号为 ' + sequenceLabel(current()) + '。</p>'));
     const init = get('detail').querySelector('[data-llr-init]');
     if (init) init.onclick = () => { get('scenario').value = 'init'; reset(); };
     Array.from(get('steps').querySelectorAll('button')).forEach((button, i) =>
