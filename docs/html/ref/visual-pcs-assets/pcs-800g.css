@@ -329,3 +329,10 @@
 
 .llr-hop-label[hidden], .llr-stage-format:empty { display: none; }
 .llr-stage-format { display: block; font-family: var(--f-mono); font-weight: 600; }
+
+.llr-registers { border: 1px solid var(--rule); padding: .65rem; margin-block: .6rem; border-radius: .4rem; }
+.llr-registers summary { cursor: pointer; font-weight: 600; }
+.llr-registers form { margin-block: .65rem; }
+#llr-register-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: .5rem; margin-block: .65rem; }
+#llr-register-fields label { display: grid; gap: .2rem; padding: .4rem; background: var(--panel); border: 1px solid var(--rule); font-size: .85rem; }
+#llr-register-fields input, #llr-register-fields select { width: 100%; }

@@ -63,6 +63,136 @@
   const formatDialog = get('format-dialog');
   const duration = 1900, motion = matchMedia('(prefers-reduced-motion: reduce)');
   const hex = n => n.toString(16).toUpperCase().padStart(2, '0');
+  const registerFields = [
+    ['llr_mode_remote', 'A 发起 INIT', ['ON', 'OFF']],
+    ['llr_mode_local', 'B 接收 INIT', ['ON', 'OFF']],
+    ['outstanding_seq_max', '未确认序号跨度', 2, 0, 524288],
+    ['outstanding_data_max', '未确认数据量（B）', 2048, 0, 4294967295],
+    ['replay_timer_max', '重放超时（ns）', 800, 0, 65535],
+    ['replay_ct_max', '连续重放上限（255 为不限）', 2, 0, 255],
+    ['pcs_lost_status_timer_max', 'PCS 失锁超时（ns）', 1600, 0, 4294967295],
+    ['data_age_timer_max', '数据驻留上限（ns）', 4000, 0, 4294967295],
+    ['llr_init_behavior', 'INIT 期间上层来帧', ['BEST_EFFORT', 'BLOCK', 'DISCARD']],
+    ['llr_flush_behavior', 'FLUSH 期间上层来帧', ['DISCARD', 'BLOCK', 'BEST_EFFORT']],
+    ['re_init_on_discard', '清空后重新初始化', ['TRUE', 'FALSE']],
+    ['ctlos_target_spacing', 'CtlOS 目标间隔（B）', 2048, 400, 16384]
+  ];
+  const form = get('register-form');
+  const controls = registerFields.map(([name, caption, values, min, max]) => {
+    const label = document.createElement('label');
+    const title = document.createElement('code');
+    title.textContent = name;
+    const input = document.createElement(Array.isArray(values) ? 'select' : 'input');
+    if (Array.isArray(values)) {
+      values.forEach(value => input.add(new Option(value, value)));
+    } else {
+      Object.assign(input, { type: 'number', min, max, defaultValue: values, required: true });
+    }
+    input.name = name;
+    label.append(title, document.createTextNode(caption), input);
+    get('register-fields').append(label);
+    return input;
+  });
+  const policyText = {
+    BLOCK: '阻塞上层来帧', DISCARD: '丢弃上层来帧', BEST_EFFORT: '以普通非 LLR 帧发送'
+  };
+
+  function simulate() {
+    const config = Object.fromEntries(controls.map(input =>
+      [input.name, input.type === 'number' ? input.valueAsNumber : input.value]));
+    const preset = get('preset').value;
+    const timeline = [];
+    const state = (title, time, note, tx, buffer = '空', counter = '') =>
+      timeline.push([title, title, false, time + ' ns · ' + note, 0, 0, 0, tx, '—', buffer, { counter }]);
+    const signalStep = (row, time, counter) =>
+      timeline.push([...row.slice(0, 3), time + ' ns · ' + row[3], ...row.slice(4), { wire: true, counter, lost: row === steps.replay[0] }]);
+    const policy = mode => policyText[mode] + '（' + mode + '）。';
+    const init = time => {
+      state('进入 INIT', time, policy(config.llr_init_behavior), 'INIT', '空',
+        config.llr_init_behavior === 'DISCARD' ? 'A tx_discard' : '');
+      signalStep(steps.init[0], time, config.llr_mode_local === 'ON' ? 'A tx_init_ctl_os|B rx_init_ctl_os' : 'A tx_init_ctl_os');
+      if (config.llr_mode_local === 'OFF') {
+        state('等待 INIT_ECHO', time, 'B 的 llr_mode_local 为 OFF，示例停在等待回显。', 'INIT');
+        return false;
+      }
+      signalStep(steps.init[2], time + 40, 'B tx_init_echo_ctl_os|A rx_init_echo_ctl_os');
+      state('进入 ADVANCE', time + 80, 'A 收到有效回显。', 'ADVANCE');
+      return true;
+    };
+    if (config.llr_mode_remote === 'OFF') {
+      state('LLR_OFF', 0, 'A 的 llr_mode_remote 为 OFF，按普通以太网运行。', 'LLR_OFF');
+      return timeline;
+    }
+    if (preset === 'init' || config.llr_mode_local === 'OFF') {
+      init(0);
+      return timeline;
+    }
+    const capacity = Math.min(config.outstanding_seq_max, Math.floor(config.outstanding_data_max / 512));
+    if (capacity < 2) {
+      state('等待窗口可用', 0, capacity === 0 ? '窗口容不下一帧 512 B。' :
+        '窗口只容得下一帧。帧 11 等待，无法用跳号触发 NACK。', 'ADVANCE',
+        capacity === 0 ? '空' : '10');
+      if (!capacity) return timeline;
+    }
+    const age = config.data_age_timer_max;
+    const wait = config.replay_timer_max;
+    const feedback = 80 + Math.ceil(config.ctlos_target_spacing / 25);
+    const flush = (time, reason) => {
+      state('FLUSH', time, reason + '。清空重放缓冲；' + policy(config.llr_flush_behavior), 'FLUSH', '空',
+        config.llr_flush_behavior === 'DISCARD' ? 'A tx_discard' : '');
+      if (config.re_init_on_discard === 'TRUE') init(time + 1);
+    };
+    const pcsLost = preset === 'pcs';
+    if (pcsLost) {
+      state('PCS_status = FALSE', 0, '链路失锁，缓冲中仍有未确认帧。', 'ADVANCE', capacity === 1 ? '10' : '10、11');
+    } else {
+      signalStep(steps.replay[0], 0, 'A tx_ok');
+      if (capacity > 1) signalStep(steps.replay[1], 21, 'A tx_ok|B rx_ok|B rx_missing_seq');
+    }
+    const deadline = pcsLost ? Math.min(age, config.pcs_lost_status_timer_max) : age;
+    const canNack = !pcsLost && preset === 'nack' && capacity > 1;
+    const firstOpportunity = !pcsLost && capacity > 1 ? 21 : 0;
+    let time = Math.max(firstOpportunity, canNack ? Math.min(wait, feedback) : wait);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (time >= deadline) {
+        flush(deadline, pcsLost && deadline === config.pcs_lost_status_timer_max ? 'PCS 失锁定时器到期' : '数据驻留定时器到期');
+        return timeline;
+      }
+      const nack = attempt === 0 && canNack && feedback <= wait;
+      if (!nack && config.replay_ct_max !== 255 && attempt >= config.replay_ct_max) {
+        flush(time, '重放定时器到期且已达到连续重放上限');
+        return timeline;
+      }
+      if (nack) signalStep(steps.replay[2], time, 'B tx_nack_ctl_os|A rx_nack_ctl_os');
+      else state('重放定时器到期', time, '未及时收到反馈，启动重放。', 'REPLAY', capacity === 1 ? '10' : '10、11');
+      if (!pcsLost) {
+        signalStep(steps.replay[3], time, capacity === 1 ? 'A tx_replay' : '');
+        if (capacity > 1 && time + 21 < deadline) signalStep(steps.replay[4], time + 21, 'A tx_replay');
+      }
+      if (!pcsLost && preset === 'nack' && time + feedback < age) {
+        if (capacity > 1) signalStep(steps.replay[5], time + feedback, 'B tx_ack_ctl_os|A rx_ack_ctl_os');
+        else state('收到累计 ACK(10)', time + feedback, '释放帧 10，发送窗口重新可用。', 'ADVANCE', '空', 'A rx_ack_ctl_os');
+        return timeline;
+      }
+      time += Math.max(wait, 42);
+    }
+    if (deadline <= time) flush(deadline, pcsLost && deadline === config.pcs_lost_status_timer_max ? 'PCS 失锁定时器到期' : '数据驻留定时器到期');
+    else if (config.replay_ct_max === 3) flush(time, '重放定时器到期且已达到连续重放上限');
+    else state('仿真预览结束', time, '已显示前三轮重放机会。', 'ADVANCE', '未确认');
+    return timeline;
+  }
+
+  steps.registers = simulate();
+  form.onsubmit = event => {
+    event.preventDefault();
+    steps.registers = simulate();
+    get('scenario').value = 'registers';
+    get('register-status').textContent = '已应用参数 · ' + steps.registers.length + ' 个事件';
+    reset();
+  };
+  form.onreset = () => {
+    get('register-status').textContent = '默认参数已恢复，点击应用重新计算。';
+  };
   const active = () => steps[get('scenario').value];
   const negotiating = () => ['negotiation', 'unsupported'].includes(get('scenario').value);
   const current = () => active()[index];
@@ -122,7 +252,7 @@
       const r = canvas.getBoundingClientRect();
       pointer.set(2 * (event.clientX - r.left) / r.width - 1, 1 - 2 * (event.clientY - r.top) / r.height);
       ray.setFromCamera(pointer, camera);
-      return ray.intersectObjects([signal, ...modules.filter(entry => entry.mesh.visible).map(entry => entry.mesh)], false)[0]?.object;
+      return ray.intersectObjects([...(signal.visible ? [signal] : []), ...modules.filter(entry => entry.mesh.visible).map(entry => entry.mesh)], false)[0]?.object;
     }
     let panX = 0, panY = 0, zoom = 1, drag = null;
     function view() {
@@ -201,8 +331,10 @@
     if (!renderer || panel.hidden) return;
     const reverse = current()[2];
     const progress = motion.matches || (!running && elapsed === 0) ? 1 : Math.min(1, elapsed / (duration * .8));
+    const simulation = current()[10];
+    signal.visible = !simulation || Boolean(simulation.wire);
     signal.position.set((reverse ? 1 : -1) * extent * (1 - 2 * progress), reverse ? -10 : 10, 1.8);
-    if (get('scenario').value === 'replay' && index === 0) {
+    if (isLostStep()) {
       signal.position.x = Math.min(0, signal.position.x);
       signal.material.color.setHex(0xd65a51);
     } else signal.material.color.setHex(reverse ? 0xe2a41f : 0x22a579);
@@ -224,7 +356,7 @@
       const p = mesh.position.clone().project(camera);
       label.style.left = (p.x * 50 + 50) + '%';
       label.classList.toggle('llr-hop-below', (mainOnly ? slot : stage) % 2 === 1);
-      summary.textContent = mainOnly && enabled ? summaries[slot] : '';
+      summary.textContent = mainOnly && enabled && signal.visible ? summaries[slot] : '';
       label.style.top = (50 - p.y * 50) + '%';
     });
     get('scene').querySelectorAll('.llr-labels b').forEach((label, i) => {
@@ -240,6 +372,10 @@
   const ctlBytes = (type, seq, data) =>
     [0x5c, type, seq >> 12, (seq >> 4) & 255, ((seq & 15) << 4) | 6, data >> 8, data & 255, 0];
   const preamble = seq => [0xfb, ((seq >> 16) << 4) | 7, (seq >> 8) & 255, seq & 255, 0x55, 0x55, 0x55, 0xd5];
+  function isLostStep() {
+    return Boolean(current()[10]?.lost) || (get('scenario').value === 'replay' && index === 0);
+  }
+
   function stageSummaries() {
     const [, , , , type, seq, data] = current();
     if (negotiating()) {
@@ -249,7 +385,7 @@
     const bytes = type ? ctlBytes(type, seq, data) : preamble(seq);
     const start = bytes.slice(0, 4).map(hex).join(' ');
     const block = type ? '10 · 0x4B' : '10 · 0x78';
-    const lost = get('scenario').value === 'replay' && index === 0;
+    const lost = isLostStep();
     return [start + ' …', block, '4 × 66b → 257b', '514 + 30 符号',
       lost ? '帧在此丢失' : '线路信号',
       ...(lost ? ['未收到', '—', '—', '—']
@@ -285,7 +421,9 @@
     const path = reverse ? 'B → A' : 'A → B';
     let detail = '<p><b>当前方向 ' + path + '</b> · ' + note + '</p>';
     if (target) detail += '<p>' + target.description + '</p>';
-    if (target && target.reverse !== reverse) {
+    if (current()[10] && !current()[10].wire) {
+      detail += '<p>本步显示本地状态转换。</p>';
+    } else if (target && target.reverse !== reverse) {
       detail += '<p>该方向在本步没有演示信号。</p>';
     } else if (negotiating()) {
       detail += '<p>LLDP 的 UE Link Negotiation Options TLV 随 MAC 帧传送。查看下方步骤说明中的 LLR-W 和 LLR-E。</p>' +
@@ -333,6 +471,15 @@
   function update() {
     const [title, signalName, reverse, note, type, seq, data, tx, rx, buffer] = current();
     const bytes = type ? ctlBytes(type, seq, data) : [];
+    const simulation = current()[10];
+    get('format').disabled = Boolean(simulation && !simulation.wire);
+    const counts = new Map();
+    if (simulation) active().slice(0, index + 1).forEach(row => {
+      if (!row[10].counter) return;
+      row[10].counter.split('|').forEach(name => counts.set(name, (counts.get(name) || 0) + 1));
+    });
+    get('register-stats').textContent = simulation ? '截至当前步的计数快照 · ' +
+      (Array.from(counts, ([name, value]) => name + ' = ' + value).join(' ｜ ') || '0') : '';
     get('format').textContent = signalName + ' · 查看格式';
     get('detail').innerHTML = '<strong>' + signalName + ' · ' + (reverse ? 'B → A' : 'A → B') + '</strong><p>' + note + '</p>' +
       (negotiating() ? '<p>A · ' + tx + ' ｜ B · ' + rx + '</p><p>' + buffer + '</p>' +
@@ -342,7 +489,7 @@
       : '<p>A · TX ' + tx + ' ｜ B · RX ' + rx + ' ｜ A · 重放缓冲 ' + buffer + '</p>' +
       (type ? '<div class="pcs-rx-bytes">' + bytes.map((b, i) => '<span>' + hex(b) + '<small>D' + i + '</small></span>').join('') +
         '</div><p class="note">xMII：Lane 0 为控制字符 0x5C，D1 为消息类型。PCS：同步头 10，块类型 0x4B，O-code 0x6。</p>'
-        : '<p class="note">LLR-eligible 数据帧的 20 位 frame_seq 位于修改后的前导码。此步序号为 ' + seq + '。</p>'));
+        : simulation && !simulation.wire ? '' : '<p class="note">LLR-eligible 数据帧的 20 位 frame_seq 位于修改后的前导码。此步序号为 ' + seq + '。</p>'));
     const init = get('detail').querySelector('[data-llr-init]');
     if (init) init.onclick = () => { get('scenario').value = 'init'; reset(); };
     Array.from(get('steps').querySelectorAll('button')).forEach((button, i) =>
@@ -383,7 +530,10 @@
     }));
     select(0);
   }
-  get('scenario').onchange = reset;
+  get('scenario').onchange = () => {
+    if (get('scenario').value === 'registers') get('registers').open = true;
+    reset();
+  };
   get('reset').onclick = reset;
   get('next').onclick = () => { pause(); select(Math.min(index + 1, active().length - 1)); };
   get('play').onclick = () => {

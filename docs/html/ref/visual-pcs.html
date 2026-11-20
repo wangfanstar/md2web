@@ -1103,7 +1103,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   <section role="tabpanel" id="lab-llr" aria-labelledby="tab-llr" hidden tabindex="0">
     <div class="g800-controls">
       <label for="llr-scenario">场景</label>
-      <select id="llr-scenario"><option value="negotiation">LLDP 协商</option><option value="unsupported">LLDP 协商 · 对端无 UE TLV</option><option value="init" selected>LLR 初始化</option><option value="replay">丢包与重放</option></select>
+      <select id="llr-scenario"><option value="negotiation">LLDP 协商</option><option value="unsupported">LLDP 协商 · 对端无 UE TLV</option><option value="init" selected>LLR 初始化</option><option value="replay">丢包与重放</option><option value="registers">寄存器仿真</option></select>
       <button type="button" class="btn" id="llr-play">播放</button>
       <button type="button" class="btn" id="llr-next">下一步</button>
       <button type="button" class="btn" id="llr-reset">重置</button>
@@ -1116,6 +1116,18 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <button type="button" class="btn" id="llr-format">查看当前数据格式</button>
       <span class="g800-help">按住左键拖动平移 · 滚轮以鼠标位置为中心缩放 · 点击模块查看数据格式</span>
     </div>
+    <details id="llr-registers" class="llr-registers">
+      <summary>LLR 寄存器仿真 · 参数与统计</summary>
+      <form id="llr-register-form">
+        <label>实验预设<select id="llr-preset"><option value="nack">丢帧后收到 NACK</option><option value="timeout">反馈持续丢失</option><option value="pcs">PCS 持续失锁</option><option value="init">初始化与上层来帧</option></select></label>
+        <div id="llr-register-fields"></div>
+        <button class="btn" type="submit">应用并查看仿真</button>
+        <button class="btn" type="reset">恢复参数默认值</button>
+      </form>
+      <p class="note">以 A → B 为观察方向。模式字段代表 A 的 TX 许可和 B 的 RX 许可。仿真使用两帧各 512 B，CtlOS 等待按 200 Gb/s 的目标间隔估算，动画按事件步进。CRC4 与增强 NACK 取决于扩展规范。</p>
+      <output id="llr-register-status" aria-live="polite"></output>
+      <div id="llr-register-stats" class="fine"></div>
+    </details>
     <div id="llr-scene" class="g800-stage llr-scene" aria-label="LLR 双向收发 3D 通路">
       <div class="llr-labels">
         <div><b>A · TX LLR</b><b>A → B · 正向通路</b><b>B · RX LLR</b></div>
