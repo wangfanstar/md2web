@@ -811,30 +811,10 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     </dialog>
     <p class="note" data-signal-source></p>
   </section>
-  <section class="lens" id="lens" aria-labelledby="lens-title">
-    <div class="lens-bar">
-      <h3 id="lens-title">位级视图</h3>
-      <div class="lens-modes" role="group" aria-label="查看单个操作的位级过程">
-        <button type="button" class="btn" data-view="b66">64B/66B</button>
-        <button type="button" class="btn" data-view="b257">256B/257B</button>
-        <button type="button" class="btn" data-view="am">插入 AM</button>
-        <button type="button" class="btn" data-view="prefec">FEC 前分配</button>
-        <button type="button" class="btn" data-view="rs">RS(544,514)</button>
-        <button type="button" class="btn" data-view="dist">符号分配</button>
-        <button type="button" class="btn" data-view="mux">比特复用</button>
-        <button type="button" class="btn" data-view="demux">RX 解复用</button>
-        <button type="button" class="btn" data-view="lock">AM 锁定</button>
-        <button type="button" class="btn" data-view="deskew">时延对齐</button>
-        <button type="button" class="btn" data-view="reorder">通道重排</button>
-        <button type="button" class="btn" data-view="deint">解交织</button>
-        <button type="button" class="btn" data-view="rsdec">RS 解码</button>
-        <button type="button" class="btn" data-view="postfec">FEC 后交织</button>
-        <button type="button" class="btn" data-view="amr">移除 AM</button>
-        <button type="button" class="btn" data-view="r257">逆转码</button>
-        <button type="button" class="btn" data-view="d66">64B/66B 解码</button>
-      </div>
-      <span class="lens-hint">左侧为输入，右侧为输出。也可点击 3D 视图中的处理模块。</span>
-    </div>
+  <section class="lens pcs-unified-stages" id="lens" aria-labelledby="pipeline">
+    <h3 class="rail-title" id="pipeline">链路处理阶段与位级视图</h3>
+    <nav class="rail" id="rail" aria-labelledby="pipeline"></nav>
+    <article class="stage-detail" id="stage-detail" aria-live="polite"></article>
   </section>
 
   <nav class="pcs-zoom-rail" aria-label="200G 动画分段视图">
@@ -847,6 +827,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   <section class="pcs-frame-route" data-pcs-route="frame" aria-label="200G 帧边界处理顺序" hidden>
     <ol aria-label="发送顺序">
       <li class="pcs-frame-route-dir">TX</li>
+      <li data-pcs-route-item="ipg"><button type="button" class="btn" data-view="ipgTx">编码前 · IPG</button></li>
       <li data-pcs-route-item="preamble"><button type="button" class="btn" data-view="frameTx">1 · 前导码 / SFD</button></li>
       <li><button type="button" class="btn" data-view="b66">2 · 64B/66B 编码</button></li>
       <li data-pcs-route-item="ipg"><button type="button" class="btn" data-view="idleTx">3 · 66b Idle 块增删</button></li>
@@ -912,10 +893,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     </div>
   </dialog>
 
-  <h3 class="rail-title" id="pipeline">链路处理阶段</h3>
-  <nav class="rail" id="rail" aria-labelledby="pipeline"></nav>
 
-  <article class="stage-detail" id="stage-detail" aria-live="polite"></article>
 
   <div class="panels" id="mapping">
     <section class="panel" aria-labelledby="map-title">
@@ -2126,6 +2104,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     { x: [107, 111], name: '64B/66B 解码', short: 'RX 2 · 64B/66B', stage: 9, view: 'd66' },
     { x: [112, 116], name: 'RX 1588 · 200GMII', stage: 9, view: 'ptpRx' },
     { x: [0, 5], name: 'TX 前导码 / SFD', short: 'TX 1 · 前导码', stage: 1, view: 'frameTx', overlay: 'preamble' },
+    { x: [0, 2], name: 'TX IPG 生成 · 200GMII', short: 'TX · IPG', stage: 1, view: 'ipgTx', overlay: 'ipg' },
     { x: [9.1, 10.4], name: 'TX Idle 调整', short: 'TX 3 · Idle', stage: 2, view: 'idleTx', overlay: 'ipg' },
     { x: [111.1, 113], name: 'RX Idle 调整', short: 'RX 3 · Idle', stage: 9, view: 'idleRx', overlay: 'ipg' },
     { x: [113.5, 117], name: 'RX 帧提取', short: 'RX 4 · 去前导码', stage: 9, view: 'frameRx', overlay: 'preamble' },
@@ -2158,7 +2137,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         { x: [113.5, 117], name: 'B · RS', stage: 9 });
     }
     var ranges = [
-      { from: 0, to: 15.5, order: ['ueCbfc', 'ueLlr', 'frameTx', 'ptpTx', 'ueCtl', 'b66', 'idleTx', 'b257'] },
+      { from: 0, to: 15.5, order: ['ueCbfc', 'ueLlr', 'ipgTx', 'frameTx', 'ptpTx', 'ueCtl', 'b66', 'idleTx', 'b257'] },
       { from: 101.5, to: 117, order: ['r257', 'd66', 'idleRx', 'ueCtlRx', 'ptpRx', 'frameRx', 'ueLlrRx', 'ueCbfcRx'] }
     ];
     ranges.forEach(function (range) {
@@ -5431,7 +5410,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     d.innerHTML = '<div class="sd-head"><span class="sd-num">' + st.n + '</span><span class="sd-side ' + st.side.toLowerCase() + '">' +
       st.side + '</span><h3>' + st.title + '</h3></div><div class="sd-body">' + st.body +
       '<p class="sd-watch"><b>场景中：</b> ' + st.watch + '</p>' +
-      (st.lens ? '<p class="sd-lens">See it at bit scale: ' + st.lens.map(function (m) {
+      (st.lens ? '<p class="sd-lens">查看位级格式：' + st.lens.map(function (m) {
         return '<button type="button" class="linkbtn" data-open-lens="' + m + '">' + P.VIEWS[m].title + '</button>';
       }).join(' · ') + '</p>' : '') + '</div><div class="sd-nav">' +
       '<button type="button" class="btn" id="sd-prev"' + (n === 1 ? ' disabled' : '') + '>← 上一阶段</button>' +
@@ -6323,6 +6302,11 @@ globalThis.PCS.openPtpPoint = function (xMII, tx) {
       title: 'TX MAC / RS · 生成前导码和 IPG',
       cards: ['上一帧 FCS 与下一帧', '产生帧间隔及 7×55 + D5', '200GMII：/T/、/I/、/S/、6×55、D5'],
       action: 'MAC 生成前导码和 SFD。RS 用 /S/ 替代首个前导码八位组，将 /S/ 对齐到 200GMII 的 lane 0。RS 用 Idle 填充帧间空档。'
+    },
+    ipgTx: {
+      title: 'TX MAC / RS · 编码前生成 IPG',
+      cards: ['上一帧结束 /T/', '200GMII 填入 0x07 Idle，C = 1', '送往 64B/66B 编码器'],
+      action: 'MAC 提供帧间隔，RS 在 200GMII 上以 /I/ 填充。编码器随后将全 Idle 传输映射成 0x1E 控制块。PCS 速率匹配在路径上另有独立标记。'
     },
     idleTx: {
       title: 'TX PCS · 调整 Idle',
