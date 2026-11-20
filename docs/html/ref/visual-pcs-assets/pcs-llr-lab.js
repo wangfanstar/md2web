@@ -700,12 +700,33 @@
   get('counter-scope').onchange = () => renderCounters(current()[10]);
   get('counter-search').oninput = () => renderCounters(current()[10]);
 
+  function updateStateOverlays(tx, rx, simulation) {
+    const sender = simulation?.sender || 'A';
+    const receiver = simulation?.receiver || 'B';
+    const isNegotiation = negotiating();
+    for (const endpoint of ['A', 'B']) {
+      const prefix = 'state-' + endpoint.toLowerCase();
+      const local = isNegotiation ? (endpoint === 'A' ? tx : rx) : '';
+      const states = {
+        tx: isNegotiation ? local : endpoint === sender ? tx : '',
+        rx: !isNegotiation && endpoint === receiver ? rx : ''
+      };
+      for (const [path, state] of Object.entries(states)) {
+        const cell = get(prefix + '-' + path);
+        cell.textContent = state && state !== '—' ? state : '—';
+        cell.title = cell.textContent === '—' ? '本步无此方向的状态记录' : '';
+        cell.closest('span').classList.toggle('is-current', Boolean(state && state !== '—'));
+      }
+    }
+  }
+
   function update() {
     const [title, signalName, reverse, note, type, seq, data, tx, rx, buffer] = current();
     const bytes = type ? wireData(type, seq, data).bytes : [];
     const simulation = current()[10];
     get('format').disabled = Boolean(simulation && !simulation.wire);
     renderCounters(simulation);
+    updateStateOverlays(tx, rx, simulation);
     get('event').textContent = (index + 1) + ' / ' + active().length + ' · ' + (simulation ? note.split(' · ')[0] + ' · ' : '') + title;
     get('prev').disabled = index === 0;
     get('next').disabled = index === active().length - 1;
