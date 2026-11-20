@@ -55,7 +55,10 @@
     ['接收 xMII', 0, 'PCS 向 RS 交付还原的帧起始符和有序集。'],
     ['RX LLR / MAC', 0, '接收端处理 CtlOS、检查序号及 FCS，并向 MAC 交付通过检查的帧。']
   ];
-  const mainStages = [0, 2, 4, 7, 10, 13, 16, 17, 19];
+  const visibleStages = {
+    main: [0, 2, 4, 7, 10, 13, 16, 17, 19],
+    endpoint: [0, 19]
+  };
   const spacing = 5.6;
   const extent = (stages.length - 1) * spacing / 2;
   const endpointColors = { a: 0x357fc8, b: 0xb46529, link: 0x62748c };
@@ -389,7 +392,7 @@
     get('larger').onclick = () => scale(1.25);
     get('smaller').onclick = () => scale(.8);
     get('fit').onclick = () => { panX = panY = 0; zoom = 1; view(); };
-    get('main-only').onchange = get('fit').onclick;
+    get('view-mode').onchange = get('fit').onclick;
     host.addEventListener('wheel', event => {
       event.preventDefault();
       const rect = canvas.getBoundingClientRect();
@@ -446,16 +449,17 @@
       signal.position.x = reverse ? Math.max(0, signal.position.x) : Math.min(0, signal.position.x);
       signal.material.color.setHex(0xd65a51);
     } else signal.material.color.setHex(reverse ? 0xe2a41f : 0x22a579);
-    const mainOnly = get('main-only').checked;
-    const summaries = mainOnly ? stageSummaries() : null;
+    const viewMode = get('view-mode').value;
+    const selection = visibleStages[viewMode];
+    const summaries = selection ? stageSummaries() : null;
     modules.forEach(({ mesh, label, summary }) => {
       const { stage, x } = mesh.userData;
-      const slot = mainStages.indexOf(stage);
-      mesh.visible = !mainOnly || slot !== -1;
+      const slot = selection ? selection.indexOf(stage) : stage;
+      mesh.visible = slot !== -1;
       label.hidden = !mesh.visible;
       if (!mesh.visible) return;
-      mesh.position.x = mainOnly
-        ? extent * (2 * slot / (mainStages.length - 1) - 1) * (mesh.userData.reverse ? -1 : 1)
+      mesh.position.x = selection
+        ? extent * (2 * slot / (selection.length - 1) - 1) * (mesh.userData.reverse ? -1 : 1)
         : x;
       const enabled = mesh.userData.reverse === reverse;
       mesh.material.color.setHex(mesh.userData.color);
@@ -463,8 +467,9 @@
       label.classList.toggle('is-inactive', !enabled);
       const p = mesh.position.clone().project(camera);
       label.style.left = (p.x * 50 + 50) + '%';
-      label.classList.toggle('llr-hop-below', (mainOnly ? slot : stage) % 2 === 1);
-      summary.textContent = mainOnly && enabled && signal.visible ? summaries[slot] : '';
+      label.classList.toggle('llr-hop-below', slot % 2 === 1);
+      const summaryIndex = visibleStages.main.indexOf(stage);
+      summary.textContent = summaries && enabled && signal.visible ? summaries[summaryIndex] : '';
       label.style.top = (50 - p.y * 50) + '%';
     });
     get('scene').querySelectorAll('.llr-labels b').forEach((label, i) => {
@@ -544,7 +549,7 @@
       const blockType = type ? 0x4b : 0x78;
       const showOctets = !target || target.format === 0;
       if (showOctets) detail += '<h4>' + (type ? 'xMII CtlOS 字节' : 'xMII 修改后的前导码') + '</h4>' + byteView(bytes);
-      if (!target || target.format === 1) {
+      if (target?.format === 1 || (!target && get('view-mode').value !== 'endpoint')) {
         detail += '<h4>64B/66B 控制块</h4>' +
           '<p>同步头 10 · 块类型 0x' + hex(blockType) + (type ? ' · O-code 0x6' : ' · 20 位 frame_seq') + '</p>' +
           '<pre class="pcs-fault-bits">' + ['10', bits(blockType), ...payload].join(' ') + '</pre>';
