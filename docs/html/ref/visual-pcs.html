@@ -2105,7 +2105,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   P.sceneOverlays = { llr: false, cbfc: false, ipg: false, preamble: false };
   P.showOverlay = function (group) {
     if (!group) return true;
-    if (P.isFaultScene && P.isFaultScene()) return false;
+    if (P.isControlScene && P.isControlScene()) return false;
     if (group === 'ue') return P.sceneOverlays.llr || P.sceneOverlays.cbfc;
     if (group === 'frame') return P.sceneOverlays.ipg || P.sceneOverlays.preamble;
     return P.sceneOverlays[group];
@@ -2155,7 +2155,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 
   // Fit the enabled modules into the straight MAC/PCS portions of the path.
   P.sceneBoxes = function () {
-    var fault = P.isFaultScene && P.isFaultScene();
+    var fault = P.isControlScene && P.isControlScene();
     var visible = P.BOXES.filter(function (box) {
       if (!fault) return P.showOverlay(box.overlay);
       if (box.view === 'idleTx' || box.view === 'idleRx') return true;
@@ -2325,7 +2325,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     var vf = cam.fov * Math.PI / 180, hf = 2 * Math.atan(Math.tan(vf / 2) * cam.aspect);
     var d = Math.max(span * 0.52 / Math.tan(hf / 2), 15 / Math.tan(vf / 2));
     var t = tilt == null ? 1 : tilt;
-    var fault = P.isFaultScene && P.isFaultScene();
+    var fault = P.isControlScene && P.isControlScene();
     var y = fault ? -P.faultTrackOffset / 2 : -0.6;
     return {
       pos: new T.Vector3(cx + d * 0.16 * t, y + d * 0.22 * t, d * (1 - 0.03 * t)),
@@ -2884,7 +2884,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       var y = b.labelY || (b.lane ? top + 0.3 : 1.6);
       L.push({ id: 'box' + i, html: b.view ? '<span data-view="' + b.view + '" title="How ' + b.name + ' works">' + (b.short || b.name) + '</span>' : b.short || b.name,
                cls: 'lbl-box' + (b.view ? ' op' : '') + (P.boxAccent(b) ? ' pcs-module-' + P.boxAccentGroup(b) : ''), pos: [P.sceneX((b.x[0] + b.x[1]) / 2), y, 0], pri: b.lineLabel ? 5 : b.lane ? 3 : 2 });
-      if (P.isFaultScene && P.isFaultScene()) {
+      if (P.isControlScene && P.isControlScene()) {
         var forward = L[L.length - 1];
         var peer = b.name === 'A · RS' ? 'B · RS' : b.name === 'B · RS' ? 'A · RS' : forward.html;
         L.push(Object.assign({}, forward, { id: 'reverse-box' + i, html: peer, pos: P.faultReverseLabel(b, y) }));
@@ -3192,7 +3192,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   // A block wins over the box around it; the box opens its step view. Inside
   // such a box the near-miss radius for blocks shrinks, or the box could never be hit.
   function blockAt(sx, sy, bx) {
-    if (P.isFaultScene && P.isFaultScene()) return -1;
+    if (P.isControlScene && P.isControlScene()) return -1;
     ndc.set(sx / G.w * 2 - 1, -(sy / G.h) * 2 + 1);
     ray.setFromCamera(ndc, G.camera);
     var hit = ray.intersectObject(G.inst, false)[0];
@@ -6050,7 +6050,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     last = now;
     if (document.getElementById('lab-200g').hidden) return;
     if (P.renderSignalScene && P.renderSignalScene(now, visible && !document.hidden)) {
-      if (P.isFaultScene()) P.viewTick(dt);
+      if (P.isControlScene()) P.viewTick(dt);
       return;
     }
     if (S.playing) {
@@ -6098,7 +6098,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       document.querySelectorAll('[data-pcs-route-item]').forEach(function (item) {
         item.hidden = !P.showOverlay(item.dataset.pcsRouteItem);
       });
-      var fault = Boolean(P.isFaultScene && P.isFaultScene());
+      var fault = Boolean(P.isControlScene && P.isControlScene());
       vp.querySelector('.pcs-scene-options').hidden = fault;
       vp.querySelectorAll('[data-pcs-overlay]').forEach(function (choice) {
         choice.checked = P.showOverlay(choice.dataset.pcsOverlay);

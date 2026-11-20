@@ -22,7 +22,6 @@
   const scenarios = {
     fault: {
       reference: 'IEEE 802.3 · 46.3.4、表 46–5 和图 46–11。示例假设 A → B 故障，B → A 可用。LF 在本地 PHY 与 RS 之间上报，RF 由 RS 发往对端，均沿 IEEE RS / PCS 信令路径。200GMII 有序集与 PCS 块格式见 117、119.2.3 和图 82–5。',
-      nodes: ['A · RS', 'A · PCS / PHY', 'B · PCS / PHY', 'B · RS'],
       steps: [
         ['检测故障', 'RX 故障', 1, 2, 'A → B 接收路径异常。B 的 PHY 检测失锁等故障。'],
         ['本地上报', 'Local Fault', 2, 3, 'B 的 PHY 经本地 200GMII 向 B 的 RS 上报 Local Fault。'],
@@ -38,7 +37,6 @@
     },
     eee: {
       reference: 'IEEE 802.3 · 第 78 条、119.2.3.3 及适用 PHY 条款。示例假设两端已协商 EEE，展示一个方向及逻辑 LPI 状态。具体物理省电动作和唤醒时序取决于 PHY。',
-      nodes: ['A · MAC / RS', 'A · PCS / PHY', 'B · PCS / PHY', 'B · RS / MAC'],
       steps: [
         ['请求 LPI', 'LPI 请求', 0, 1, 'A 暂无待发帧，MAC / RS 通过 200GMII 向本端 PHY 请求 Low Power Idle。'],
         ['进入 LPI', '进入 LPI', 1, 2, 'A 的 PCS / PHY 按适用 PHY 的 EEE 规则发送 LPI 信号。B 的 PHY 检测进入省电状态。'],
@@ -51,7 +49,7 @@
   };
 
   let mode = 'data', index = 0, playing = false, start = null;
-  let scene, camera, nodes, token, faultToken, recoveryPeer, formatMarkers = [], formatSample;
+  let faultToken, recoveryPeer, formatMarkers = [], formatSample;
   // Fault responses use the existing 200G drawing. The right-to-left route
   // represents the reverse link and its corresponding TX/RX PCS functions.
   const faultPositions = [
@@ -61,12 +59,13 @@
   const reverseOffset = 22;
   let reverseGroup, reverseSources;
   const reverseX = x => P.sceneX(0) + P.sceneX(116) - x;
-  const onReverse = () => [2, 3, 7, 8].includes(index);
+  const eeePositions = [[0, 7], [7, 108], [109, 116], [0, 7], [31, 85], [109, 116]];
+  const onReverse = () => mode === 'fault' && [2, 3, 7, 8].includes(index);
 
   function syncReversePath() {
     const G = P.g;
     if (!G.scene) return;
-    if (mode !== 'fault') {
+    if (mode === 'data') {
       if (reverseGroup) G.scene.remove(reverseGroup);
       reverseGroup = reverseSources = null;
       return;
@@ -105,6 +104,18 @@
   ];
 
   function renderFaultBytes() {
+    if (mode === 'eee') {
+      if ([0, 1, 2].includes(index)) {
+        bytesPanel.innerHTML = faultOctets({ lpi: true, title: index === 2 ? 'B · 200GMII RX' : 'A · 200GMII TX',
+          note: '全 /LI/ 传输示例：66b 同步头 10、Block Type 0x1E，后接八个 7 位 0x06 控制码。IEEE 802.3 表 82–1、119.2.3.3。' });
+      } else if (index === 3 || index === 5) {
+        bytesPanel.innerHTML = faultOctets({ idle: true, type: '1E', title: index === 3 ? 'A · 退出 LPI 后的 200GMII TX' : 'B · 恢复后的 200GMII RX',
+          note: '示例展示恢复正常 Idle 时的逻辑接口格式。连续 0x07 Idle 编为 0x1E 全控制块。' });
+      } else {
+        bytesPanel.textContent = 'Wake 是 PHY 层的唤醒过程。线路信号和时序由所选 PHY 的 EEE 规则决定。';
+      }
+      return;
+    }
     const sample = faultBytes[index];
     if (!sample) {
       bytesPanel.textContent = index === 0
@@ -116,10 +127,10 @@
   }
 
   function faultOctets(sample) {
-    const bytes = sample.idle ? Array(8).fill('07') : ['9C', '00', '00', sample.value, '00', '00', '00', '00'];
+    const bytes = sample.lpi || sample.idle ? Array(8).fill(sample.lpi ? '06' : '07') : ['9C', '00', '00', sample.value, '00', '00', '00', '00'];
     return '<h4>' + sample.title + '</h4><div class="pcs-rx-bytes">' + bytes.map((byte, lane) =>
-      '<span>' + byte + '<small>Lane ' + lane + ' · C=' + Number(sample.idle || lane === 0) + '</small></span>').join('') + '</div>' +
-      '<p>' + (sample.idle ? '控制掩码 0xFF' : '控制掩码 0x01 · 9C = /Q/ · Lane 4–7 为零数据') +
+      '<span>' + byte + '<small>Lane ' + lane + ' · C=' + Number(sample.lpi || sample.idle || lane === 0) + '</small></span>').join('') + '</div>' +
+      '<p>' + (sample.lpi ? '控制掩码 0xFF · 06 = /LI/' : sample.idle ? '控制掩码 0xFF' : '控制掩码 0x01 · 9C = /Q/ · Lane 4–7 为零数据') +
       (sample.type ? ' · 66b 同步头 10 · Block Type 0x' + sample.type + (sample.idle
         ? ' · 8 × 7 位 Idle 码 0x00'
         : ' · D1/D2/D3 = 00/00/02 · O-code 0x0 · 余位为零') : '') +
@@ -222,10 +233,12 @@
     });
     formatMarkers = [];
     const sample = faultBytes[index];
-    if (mode !== 'fault' || !sample) return;
-    if (index !== 1) formatSample = buildFaultSample(Boolean(sample.idle));
+    if (mode === 'data' || (mode === 'fault' && !sample)) return;
+    if (mode === 'eee' && index === 4) return;
+    if (mode === 'fault' && index !== 1) formatSample = buildFaultSample(Boolean(sample.idle));
     G.boxes.forEach(box => {
-      const key = index === 1 ? (box.def.name === 'B · RS' ? 'lfMii' : '')
+      const key = mode === 'eee' ? (index <= 1 || index === 3 ? (box.def.view === 'b66' ? 'b66' : '')
+        : (box.def.view === 'd66' ? 'd66' : '')) : index === 1 ? (box.def.name === 'B · RS' ? 'lfMii' : '')
         : box.def.view || ({ '加扰': 'scr', '解扰': 'descr' })[box.def.name];
       if (!formats[key] || (index === 4 && box.mesh.position.x > P.sceneX(57))) return;
       const kind = formats[key][1];
@@ -249,34 +262,15 @@
   }
 
   function openFaultFormat(key) {
-    if (mode !== 'fault') return;
+    if (mode === 'data') return;
     playing = false;
     renderStep();
-    formatHeading.textContent = (key ? formats[key][0] : scenarios.fault.steps[index][1]) + ' · 数据格式';
-    formatBody.innerHTML = key ? formatMarkup(key) : bytesPanel.innerHTML;
+    formatHeading.textContent = (key ? formats[key][0] : scenarios[mode].steps[index][1]) + ' · 数据格式';
+    formatBody.innerHTML = key && mode === 'fault' ? formatMarkup(key) : bytesPanel.innerHTML;
     if (!formatDialog.open) formatDialog.showModal();
   }
 
   const duration = 2050;
-  const x = i => (i - 1.5) * 4;
-
-  function buildScene() {
-    labels.classList.add('is-projected');
-    scene = new T.Scene();
-    camera = new T.PerspectiveCamera(35, 1, 0.1, 160);
-    scene.add(new T.HemisphereLight(0xffffff, 0x8793ab, 2));
-    nodes = Array.from({ length: 4 }, (_, i) => {
-      const mesh = new T.Mesh(new T.BoxGeometry(2.45, 1.35, 1.2), new T.MeshStandardMaterial());
-      mesh.position.x = x(i);
-      scene.add(mesh);
-      return mesh;
-    });
-    const rail = new T.Mesh(new T.BoxGeometry(12, 0.075, 0.075), new T.MeshBasicMaterial({ color: 0x8090a8 }));
-    scene.add(rail);
-    token = new T.Mesh(new T.SphereGeometry(0.3, 16, 12), new T.MeshBasicMaterial());
-    token.position.y = 1.1;
-    scene.add(token);
-  }
 
   function renderStep() {
     const scenario = scenarios[mode], step = scenario.steps[index];
@@ -285,7 +279,7 @@
     Array.from(stages.querySelectorAll('button')).forEach((button, i) =>
       button.setAttribute('aria-current', i === index ? 'step' : 'false'));
     play.textContent = playing ? '暂停' : '播放';
-    if (mode === 'fault') renderFaultBytes();
+    renderFaultBytes();
   }
 
   function select(next) {
@@ -298,20 +292,18 @@
   picker.onchange = function () {
     mode = picker.value;
     playing = false;
-    viewport.classList.toggle('pcs-signaling', mode === 'eee');
-    viewport.classList.toggle('pcs-fault-scene', mode === 'fault');
-    viewport.closest('#lab-200g').classList.toggle('pcs-signal-mode', mode === 'eee');
+    viewport.classList.toggle('pcs-fault-scene', mode !== 'data');
     labels.hidden = controls.hidden = mode === 'data';
-    bytesPanel.hidden = bypass.hidden = mode !== 'fault';
-    labels.classList.toggle('is-projected', mode === 'eee' && Boolean(scene));
-    if (P.g.inst) P.g.inst.visible = mode !== 'fault';
-    if (faultToken) faultToken.visible = mode === 'fault';
+    bytesPanel.hidden = mode === 'data';
+    bypass.hidden = mode !== 'fault';
+    if (P.g.inst) P.g.inst.visible = mode === 'data';
+    if (faultToken) faultToken.visible = mode !== 'data';
     if (recoveryPeer) recoveryPeer.visible = false;
     if (P.syncSceneOverlays) P.syncSceneOverlays();
     if (!P.g.failed && P.g.camera) {
       P.buildBoxes();
       P.buildLabels();
-      if (mode !== 'eee') P.flyTo(P.framePose(-2, 118, 0.35), 0);
+      P.flyTo(P.framePose(-2, 118, 0.35), 0);
     }
     syncReversePath();
     if (mode !== 'fault') syncFormatMarkers();
@@ -319,26 +311,21 @@
     P.setPlaying(false);
     if (P.closeInspector) P.closeInspector();
     const scenario = scenarios[mode];
-    labels.replaceChildren(...(mode === 'eee' ? scenario.nodes : []).map(name => {
-      const label = document.createElement('span');
-      label.textContent = name;
-      return label;
-    }));
-    const badge = document.createElement(mode === 'fault' ? 'button' : 'strong');
+    labels.replaceChildren();
+    const badge = document.createElement('button');
     badge.dataset.signalToken = '';
-    if (mode === 'fault') {
-      badge.type = 'button';
-      badge.title = '查看信号数据格式';
-      badge.onclick = () => openFaultFormat();
-    }
-    if (mode === 'fault') {
-      ['A → B · 正向接收故障 / Idle', 'B → A · 反向 Remote Fault'].forEach(text => {
-        const direction = document.createElement('span');
-        direction.className = 'pcs-fault-direction';
-        direction.textContent = text;
-        labels.append(direction);
-      });
-    }
+    badge.type = 'button';
+    badge.title = '查看信号数据格式';
+    badge.onclick = () => openFaultFormat();
+    const directions = mode === 'fault'
+      ? ['A → B · 正向接收故障 / Idle', 'B → A · 反向 Remote Fault']
+      : ['A → B · LPI / 唤醒', 'B → A · 保持正常运行'];
+    directions.forEach(text => {
+      const direction = document.createElement('span');
+      direction.className = 'pcs-fault-direction';
+      direction.textContent = text;
+      labels.append(direction);
+    });
     labels.append(badge);
     stages.replaceChildren(...scenario.steps.map(([title], i) => {
       const item = document.createElement('li');
@@ -371,11 +358,11 @@
     syncFormatMarkers();
   };
 
-  P.isFaultScene = () => mode === 'fault';
+  P.isControlScene = () => mode !== 'data';
   const ray = new T.Raycaster(), pointer = new T.Vector2();
   P.hitFaultSignal = function (sx, sy) {
     const G = P.g;
-    if (mode !== 'fault' || !faultToken || !faultToken.visible || !G.w || !G.h) return false;
+    if (mode === 'data' || !faultToken || !faultToken.visible || !G.w || !G.h) return false;
     pointer.set(2 * sx / G.w - 1, 1 - 2 * sy / G.h);
     ray.setFromCamera(pointer, G.camera);
     return ray.intersectObjects([faultToken, ...formatMarkers], false)[0]?.object || null;
@@ -403,43 +390,25 @@
 
     if (!G.renderer || G.failed) return true;
     const fraction = reduced.matches || (elapsed === 0 && !playing) ? 1 : Math.min(1, elapsed / (duration * 0.72));
-    if (mode === 'fault') {
-      if (!faultToken) {
-        faultToken = new T.Mesh(new T.SphereGeometry(1.15, 16, 12), new T.MeshBasicMaterial());
-        faultToken.position.y = 3.4;
-        recoveryPeer = faultToken.clone();
-        G.scene.add(faultToken, recoveryPeer);
-      }
-      syncReversePath();
-      const [from, to] = faultPositions[index];
-      faultToken.position.y = 3.4 - (onReverse() ? reverseOffset : 0);
-      faultToken.position.x = P.sceneX(from + (to - from) * fraction);
-      faultToken.material.color.copy(index >= 5 ? G.col.good : G.col.bad);
-      recoveryPeer.visible = index === 9;
-      recoveryPeer.position.set(reverseX(faultToken.position.x), 3.4 - reverseOffset, 0);
-      P.updateCamera(now);
-      G.renderer.render(G.scene, G.camera);
-      P.updateLabels();
-      place(labels.children[0], new T.Vector3(P.sceneX(57), 8.5, 0), G.camera);
-      place(labels.children[1], new T.Vector3(P.sceneX(57), 8.5 - reverseOffset, 0), G.camera);
-      place(labels.lastElementChild, faultToken.position.clone().add(new T.Vector3(0, 1.8, 0)), G.camera);
-      return true;
+    if (!faultToken) {
+      faultToken = new T.Mesh(new T.SphereGeometry(1.15, 16, 12), new T.MeshBasicMaterial());
+      faultToken.position.y = 3.4;
+      recoveryPeer = faultToken.clone();
+      G.scene.add(faultToken, recoveryPeer);
     }
-    if (!scene) buildScene();
-    const [, , from, to] = scenarios[mode].steps[index];
-    camera.aspect = G.w / Math.max(1, G.h);
-    const distance = Math.max(14, 24 / camera.aspect);
-    camera.position.set(0, distance * 0.32, distance);
-    camera.lookAt(0, 0.3, 0);
-    camera.updateProjectionMatrix();
-    scene.background = G.col.paper;
-    nodes.forEach((node, i) => node.material.color.copy(i === Math.round(from + fraction * (to - from)) ? G.col.am : G.col.box));
-    token.position.x = x(from) + fraction * (x(to) - x(from));
-    token.material.color.copy(mode === 'fault' ? G.col.bad : G.col.good);
-    G.renderer.render(scene, camera);
-
-    nodes.forEach((node, i) => place(labels.children[i], node.position.clone().setY(-1.35), camera));
-    place(labels.lastElementChild, token.position.clone().setY(1.85), camera);
+    syncReversePath();
+    const [from, to] = (mode === 'fault' ? faultPositions : eeePositions)[index];
+    faultToken.position.y = 3.4 - (onReverse() ? reverseOffset : 0);
+    faultToken.position.x = P.sceneX(from + (to - from) * fraction);
+    faultToken.material.color.copy(mode === 'eee' || index >= 5 ? G.col.good : G.col.bad);
+    recoveryPeer.visible = mode === 'fault' && index === 9;
+    recoveryPeer.position.set(reverseX(faultToken.position.x), 3.4 - reverseOffset, 0);
+    P.updateCamera(now);
+    G.renderer.render(G.scene, G.camera);
+    P.updateLabels();
+    place(labels.children[0], new T.Vector3(P.sceneX(57), 8.5, 0), G.camera);
+    place(labels.children[1], new T.Vector3(P.sceneX(57), 8.5 - reverseOffset, 0), G.camera);
+    place(labels.lastElementChild, faultToken.position.clone().add(new T.Vector3(0, 1.8, 0)), G.camera);
     return true;
   };
   function place(element, point, view) {
