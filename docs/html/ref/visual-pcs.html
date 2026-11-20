@@ -813,6 +813,29 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   </section>
   <section class="lens pcs-unified-stages" id="lens" aria-labelledby="pipeline">
     <h3 class="rail-title" id="pipeline">链路处理阶段与位级视图</h3>
+    <div class="lens-bar">
+      <h3 id="lens-title">位级视图</h3>
+      <div class="lens-modes" role="group" aria-label="查看单个操作的位级过程">
+        <button type="button" class="btn" data-view="b66">64B/66B</button>
+        <button type="button" class="btn" data-view="b257">256B/257B</button>
+        <button type="button" class="btn" data-view="am">插入 AM</button>
+        <button type="button" class="btn" data-view="prefec">FEC 前分配</button>
+        <button type="button" class="btn" data-view="rs">RS(544,514)</button>
+        <button type="button" class="btn" data-view="dist">符号分配</button>
+        <button type="button" class="btn" data-view="mux">比特复用</button>
+        <button type="button" class="btn" data-view="demux">RX 解复用</button>
+        <button type="button" class="btn" data-view="lock">AM 锁定</button>
+        <button type="button" class="btn" data-view="deskew">时延对齐</button>
+        <button type="button" class="btn" data-view="reorder">通道重排</button>
+        <button type="button" class="btn" data-view="deint">解交织</button>
+        <button type="button" class="btn" data-view="rsdec">RS 解码</button>
+        <button type="button" class="btn" data-view="postfec">FEC 后交织</button>
+        <button type="button" class="btn" data-view="amr">移除 AM</button>
+        <button type="button" class="btn" data-view="r257">逆转码</button>
+        <button type="button" class="btn" data-view="d66">64B/66B 解码</button>
+      </div>
+      <span class="lens-hint">左侧为输入，右侧为输出。也可点击 3D 视图中的处理模块。</span>
+    </div>
     <nav class="rail" id="rail" aria-labelledby="pipeline"></nav>
     <article class="stage-detail" id="stage-detail" aria-live="polite"></article>
   </section>
