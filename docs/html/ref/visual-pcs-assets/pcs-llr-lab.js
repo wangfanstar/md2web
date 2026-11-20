@@ -32,8 +32,32 @@
   let index = 0, running = false, started = null, elapsed = 0, frame = 0;
   let renderer, scene, camera, signal;
   const modules = [];
-  const hopNames = ['发送 xMII', '64B/66B', '256B/257B', 'RS-FEC', 'PMA 链路', '接收 xMII'];
-  const hopColors = [0x58729a, 0x347baf, 0x7158b5, 0x0c806d, 0x58729a, 0x58729a];
+  // Each row is a complete transmit → receive path, mirrored for B → A.
+  const stages = [
+    ['MAC / TX LLR', 0, '发送端选择 LLR-eligible 帧、分配序号并保存重放副本，或生成 LLR CtlOS。'],
+    ['发送 xMII', 0, 'RS 向 PCS 提交数据、帧起始符或控制有序集。'],
+    ['64B/66B 编码', 1, '将 xMII 字节与控制位编码为 66 位块。'],
+    ['Idle 调整', 1, '在 66 位块流中调整空闲，为插入对齐标记留出带宽。'],
+    ['256B/257B 转码', 2, '把四个 66 位块组合为一个 257 位块。'],
+    ['加扰', 5, '对 257 位块连续加扰，供后续 AM 插入和 FEC 编码。'],
+    ['AM 插入', null, '按周期插入对齐标记，供远端识别、排序和对齐 PCS lane。'],
+    ['RS-FEC 编码', 3, '分配 10 位符号并生成 RS(544,514) 校验。'],
+    ['PCS lane 分配', 4, '将码字分配到 PCS lane，交给发送 PMA。'],
+    ['TX PMA', 4, '按接口映射将 PCS lane 复用到物理通道。'],
+    ['物理链路', null, '物理通道将信号送往远端。丢包场景中的帧 10 在此丢失。'],
+    ['RX PMA', null, '从接收信号恢复并解复用 PCS lane。'],
+    ['AM 锁定 / 对齐', null, '识别 AM 后完成 PCS lane 排序与去偏斜。'],
+    ['RS-FEC 解码', 3, '重组接收码字，检查并纠正可纠正的符号错误。'],
+    ['AM 删除', null, '在恢复的块流中移除对齐标记。'],
+    ['解扰', 2, '恢复转码后的 257 位块。'],
+    ['257B/256B 逆转码', 1, '从 257 位块恢复四个 66 位块。'],
+    ['64B/66B 解码', 0, '还原 xMII 字节和控制位。'],
+    ['接收 xMII', 0, 'PCS 向 RS 交付还原的帧起始符和有序集。'],
+    ['RX LLR / MAC', 0, '接收端处理 CtlOS、检查序号及 FCS，并向 MAC 交付通过检查的帧。']
+  ];
+  const spacing = 5.6;
+  const extent = (stages.length - 1) * spacing / 2;
+  const hopColors = [0x58729a, 0x347baf, 0x7158b5, 0x0c806d, 0x5269a0];
   const ray = new T.Raycaster(), pointer = new T.Vector2();
   const formatDialog = get('format-dialog');
   const duration = 1900, motion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -63,18 +87,18 @@
       scene.add(mesh);
       return mesh;
     }
-    for (const y of [-4.5, 4.5]) {
-      block(37, .17, .3, 0, y, 0x8694ad);
+    for (const y of [-10, 10]) {
+      block(2 * extent, .16, .3, 0, y, 0x8694ad);
       const reverse = y < 0;
-      [-18, -10.8, -3.6, 3.6, 10.8, 18].forEach((x, i) => {
-        const hop = reverse ? hopNames.length - 1 - i : i;
-        const mesh = block(hop === 3 ? 5.1 : 4.2, 1.45, 2.2, x, y, hopColors[hop]);
-        mesh.userData.hop = hop;
-        mesh.userData.reverse = reverse;
+      stages.forEach(([name, format, description], i) => {
+        const x = (i * spacing - extent) * (reverse ? -1 : 1);
+        const color = hopColors[format ?? 4];
+        const mesh = block(4.1, 1.45, 2.2, x, y, color);
+        mesh.userData = { name, format, description, reverse, color, lowerLabel: i % 2 === 1 };
         const label = document.createElement('button');
         label.type = 'button';
         label.className = 'btn llr-hop-label';
-        label.textContent = hopNames[mesh.userData.hop];
+        label.textContent = name;
         label.onclick = () => openFormat(mesh.userData);
         host.append(label);
         modules.push({ mesh, label });
@@ -92,10 +116,10 @@
     function view() {
       const aspect = host.clientWidth / host.clientHeight;
       if (!aspect) return;
-      const halfWidth = Math.max(24, 9 * aspect) / zoom;
+      const halfWidth = Math.max(extent + 6, 24 * aspect) / zoom;
       const halfHeight = halfWidth / aspect;
-      panX = Math.max(-19, Math.min(19, panX));
-      panY = Math.max(-7, Math.min(7, panY));
+      panX = Math.max(-extent, Math.min(extent, panX));
+      panY = Math.max(-24, Math.min(24, panY));
       camera.left = panX - halfWidth;
       camera.right = panX + halfWidth;
       camera.top = panY + halfHeight;
@@ -164,29 +188,27 @@
     if (!renderer || panel.hidden) return;
     const reverse = current()[2];
     const progress = motion.matches || (!running && elapsed === 0) ? 1 : Math.min(1, elapsed / (duration * .8));
-    signal.position.set((reverse ? 1 : -1) * (18 - 36 * progress), reverse ? -4.5 : 4.5, 1.8);
+    signal.position.set((reverse ? 1 : -1) * extent * (1 - 2 * progress), reverse ? -10 : 10, 1.8);
     if (get('scenario').value === 'replay' && index === 0) {
       signal.position.x = Math.min(0, signal.position.x);
       signal.material.color.setHex(0xd65a51);
     } else signal.material.color.setHex(reverse ? 0xe2a41f : 0x22a579);
     modules.forEach(({ mesh, label }) => {
       const enabled = mesh.userData.reverse === reverse;
-      mesh.material.color.setHex(enabled ? hopColors[mesh.userData.hop] : 0x485568);
+      mesh.material.color.setHex(enabled ? mesh.userData.color : 0x485568);
       label.classList.toggle('is-inactive', !enabled);
       const p = mesh.position.clone().project(camera);
       label.style.left = (p.x * 50 + 50) + '%';
+      label.classList.toggle('llr-hop-below', mesh.userData.lowerLabel);
       label.style.top = (50 - p.y * 50) + '%';
     });
     get('scene').querySelectorAll('.llr-labels b').forEach((label, i) => {
-      const point = new T.Vector3([-18, 0, 18][i % 3], i < 3 ? 7.8 : -1.2, 0).project(camera);
+      const point = new T.Vector3([-extent, 0, extent][i % 3], i < 3 ? 19 : -19, 0).project(camera);
       label.style.left = (50 + 50 * point.x) + '%';
       label.style.top = (50 - 50 * point.y) + '%';
     });
     renderer.render(scene, camera);
-    const point = signal.position.clone().project(camera);
-    const badge = get('format');
-    badge.style.left = (point.x * 50 + 50) + '%';
-    badge.style.top = (50 - point.y * 50) + '%';
+
   }
 
   const bits = (value, width = 8) => Array.from({ length: width }, (_, i) => (value >> i) & 1).join('');
@@ -218,10 +240,11 @@
   function openFormat(target) {
     pause();
     const [, signalName, reverse, note, type, seq, data] = current();
-    const hop = target ? hopNames[target.hop] : '当前信号';
+    const hop = target ? target.name : '当前信号';
     get('format-title').textContent = signalName + ' · ' + hop;
     const path = reverse ? 'B → A' : 'A → B';
     let detail = '<p><b>当前方向 ' + path + '</b> · ' + note + '</p>';
+    if (target) detail += '<p>' + target.description + '</p>';
     if (target && target.reverse !== reverse) {
       detail += '<p>该方向在本步没有演示信号。</p>';
     } else if (negotiating()) {
@@ -233,26 +256,30 @@
         ? [bits(type), bits(bytes[2]), bits(bytes[3]), bits(6, 4) + bits(bytes[4] >> 4, 4), ...bytes.slice(5).map(value => bits(value))]
         : bytes.slice(1).map(value => bits(value));
       const blockType = type ? 0x4b : 0x78;
-      const showOctets = !target || target.hop === 0 || target.hop === 5;
+      const showOctets = !target || target.format === 0;
       if (showOctets) detail += '<h4>' + (type ? 'xMII CtlOS 字节' : 'xMII 修改后的前导码') + '</h4>' + byteView(bytes);
-      if (!target || target.hop === 1) {
+      if (!target || target.format === 1) {
         detail += '<h4>64B/66B 控制块</h4>' +
           '<p>同步头 10 · 块类型 0x' + hex(blockType) + (type ? ' · O-code 0x6' : ' · 20 位 frame_seq') + '</p>' +
           '<pre class="pcs-fault-bits">' + ['10', bits(blockType), ...payload].join(' ') + '</pre>';
       }
-      if (target && (target.hop === 2 || target.hop === 3 || target.hop === 4)) {
+      if (target && (target.format === 2 || target.format === 3 || target.format === 4 || target.format === 5)) {
         const transcoded = transcodeSample([bits(blockType), ...payload]);
-        if (target.hop === 2) {
-          detail += '<h4>四个 66b 块 → 一个 257b 块</h4>' +
+        if (target.format === 5) {
+          const scrambled = window.PCS800Model.scramble(Array.from(transcoded, Number), 0).slice(0, 257).join('');
+          detail += '<h4>加扰输出 · 257 位</h4><pre class="pcs-fault-bits">' +
+            scrambled.match(/.{1,8}/g).join(' ') + '</pre>';
+        } else if (target.format === 2) {
+          detail += '<h4>257b 块参考样例</h4>' +
             '<p>样例取当前 LLR 控制块或起始块，再接三个填零的数据块。块分类按发送顺序为 <code>0 | 0111</code>，省略第一个控制块类型的第二个半字节。</p>' +
             '<pre class="pcs-fault-bits">' + transcoded.match(/.{1,8}/g).join(' ') + '</pre>';
         } else {
           const words = fecSample(transcoded);
           const symbols = values => values.map(value => '0x' + hex(value).padStart(3, '0')).join(' ');
-          detail += '<h4>' + (target.hop === 3 ? 'RS(544,514) 码字' : '进入 PCS lane 分配与 PMA 的码字') + '</h4>' +
-            '<p>40 个 257b 块连续加扰，每 10 位交替分配到 A、B。每个码字含 514 个消息符号和 30 个校验符号。</p>' +
+          detail += '<h4>' + (target.format === 3 ? 'RS(544,514) 码字' : '进入 PCS lane 分配与 PMA 的码字') + '</h4>' +
+            '<p>40 个 257b 块连续加扰，每 10 位交替分配到码字 0、1。每个码字含 514 个消息符号和 30 个校验符号。</p>' +
             '<pre class="pcs-fault-bits">' + words.map(({ message, parity }, i) =>
-              ['A', 'B'][i] + ' 消息[0…7] ' + symbols(message.slice(0, 8)) +
+              i + ' 消息[0…7] ' + symbols(message.slice(0, 8)) +
               ' | 校验[0…7] ' + symbols(parity.slice(0, 8))).join(String.fromCharCode(10)) + '</pre>' +
             '<p class="note">样例使用固定加扰初态，演示 AM 组之间的一对码字，剩余块使用教学填充。PMA 后的线路位序取决于 lane 映射。</p>';
         }
