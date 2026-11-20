@@ -3,6 +3,17 @@
   const get = id => document.getElementById('llr-' + id);
   const panel = document.getElementById('lab-llr');
   const steps = {
+    negotiation: [
+      ['A 通告意愿', 'LLDP · W=3 / E=0', false, 'A 发送 IEEE 802.1AB LLDP 帧，在 UE Link Negotiation Options TLV 中通告希望使用双向 LLR。', 0, 0, 0, 'W=3 / E=0', 'W=3 / E=0', 'A 尚未收到启用通告'],
+      ['B 启用并通告', 'LLDP · W=3 / E=1', true, 'B 收到 A 的 W=3，与本地 W=3 一致，于是设置本地 E=1，并将它发给 A。B 仍需看到 A 的 E=1。', 0, 0, 0, 'W=3 / E=0', 'W=3 / E=1', 'B 等待 A 的 E=1'],
+      ['A 启用并通告', 'LLDP · W=3 / E=1', false, 'A 收到 B 的 W=3 和 E=1，设置本地 E=1，并向 B 通告。B 收到后也确认对端已启用。', 0, 0, 0, 'W=3 / E=1', 'W=3 / E=1', '双方均已启用'],
+      ['转入 LLR 初始化', 'Operational', false, '本例双方均已看到对端启用，llr_mode_local 与 llr_mode_remote 均为 ON。可进入 LLR_INIT / INIT_ECHO 握手，再开始发送 LLR-eligible 帧。', 0, 0, 0, 'W=3 / E=1', 'W=3 / E=1', '双方均已确认']
+    ],
+    unsupported: [
+      ['A 通告意愿', 'LLDP · W=3 / E=0', false, 'A 通过 UE Options TLV 表达双向 LLR 意愿。', 0, 0, 0, 'W=3 / E=0', '无 UE Options TLV', '等待对端通告'],
+      ['B 回传普通 LLDP', 'LLDP · 无 UE TLV', true, 'A 收到对端 LLDP，但其中没有 UE Options TLV，因此保持 E=0。远端 W=0、1、2 时也应禁用 LLR。', 0, 0, 0, 'W=3 / E=0', '无 UE Options TLV', 'LLR 保持关闭'],
+      ['保持普通以太网', 'LLR 未启用', false, '自动协商分支维持普通以太网运行。规范允许通过管理配置覆盖协商，本示例按自动协商展示。', 0, 0, 0, 'W=3 / E=0', '无 UE Options TLV', '不进入 INIT']
+    ],
     init: [
       ['A 进入 INIT', 'INIT · seq 0x12345', false, 'A 以当前 tx_seq 作为 init_seq，发送 LLR_INIT。若未收到有效回显，仍在 INIT，并按规范间隔重发。', 3, 0x12345, 0x4de1, 'INIT', '等待 INIT', '空'],
       ['B 建立接收状态', 'INIT · 接收', false, 'B 收到 INIT，将 next_rx_seq 设为 0x12345 并置有效，安排发送 INIT_ECHO。', 3, 0x12345, 0x4de1, '等待回显', '期望 0x12345', '空'],
@@ -23,6 +34,7 @@
   const duration = 1900, motion = matchMedia('(prefers-reduced-motion: reduce)');
   const hex = n => n.toString(16).toUpperCase().padStart(2, '0');
   const active = () => steps[get('scenario').value];
+  const negotiating = () => ['negotiation', 'unsupported'].includes(get('scenario').value);
   const current = () => active()[index];
 
   function setup() {
@@ -71,10 +83,16 @@
     const [title, signalName, reverse, note, type, seq, data, tx, rx, buffer] = current();
     const bytes = type ? [0x5c, type, seq >> 12, (seq >> 4) & 255, ((seq & 15) << 4) | 6, data >> 8, data & 255, 0] : [];
     get('detail').innerHTML = '<strong>' + signalName + ' · ' + (reverse ? 'B → A' : 'A → B') + '</strong><p>' + note + '</p>' +
-      '<p>A · TX ' + tx + ' ｜ B · RX ' + rx + ' ｜ A · 重放缓冲 ' + buffer + '</p>' +
+      (negotiating() ? '<p>A · ' + tx + ' ｜ B · ' + rx + '</p><p>' + buffer + '</p>' +
+        '<p class="note">本图按 TLV 版本 0 展示。W=3 表示双向意愿，1 和 2 保留。UE 1.1 的 TLV 版本 1 使用两位 E，双向启用为 3，与版本 0 的 E=1 互通。</p>' +
+        (get('scenario').value === 'negotiation' && index === active().length - 1
+          ? '<button type="button" class="btn" data-llr-init>进入 LLR 初始化</button>' : '')
+      : '<p>A · TX ' + tx + ' ｜ B · RX ' + rx + ' ｜ A · 重放缓冲 ' + buffer + '</p>' +
       (type ? '<div class="pcs-rx-bytes">' + bytes.map((b, i) => '<span>' + hex(b) + '<small>D' + i + '</small></span>').join('') +
         '</div><p class="note">xMII：Lane 0 为控制字符 0x5C，D1 为消息类型。PCS：同步头 10，块类型 0x4B，O-code 0x6。</p>'
-        : '<p class="note">LLR-eligible 数据帧的 20 位 frame_seq 位于修改后的前导码。此步序号为 ' + seq + '。</p>');
+        : '<p class="note">LLR-eligible 数据帧的 20 位 frame_seq 位于修改后的前导码。此步序号为 ' + seq + '。</p>'));
+    const init = get('detail').querySelector('[data-llr-init]');
+    if (init) init.onclick = () => { get('scenario').value = 'init'; reset(); };
     Array.from(get('steps').querySelectorAll('button')).forEach((button, i) =>
       button.setAttribute('aria-current', i === index ? 'step' : 'false'));
     get('play').textContent = running ? '暂停' : index === active().length - 1 && elapsed >= duration ? '重播' : '播放';

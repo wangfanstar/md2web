@@ -1103,7 +1103,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   <section role="tabpanel" id="lab-llr" aria-labelledby="tab-llr" hidden tabindex="0">
     <div class="g800-controls">
       <label for="llr-scenario">场景</label>
-      <select id="llr-scenario"><option value="init">LLR 初始化</option><option value="replay">丢包与重放</option></select>
+      <select id="llr-scenario"><option value="negotiation">LLDP 协商</option><option value="unsupported">LLDP 协商 · 对端无 UE TLV</option><option value="init" selected>LLR 初始化</option><option value="replay">丢包与重放</option></select>
       <button type="button" class="btn" id="llr-play">播放</button>
       <button type="button" class="btn" id="llr-next">下一步</button>
       <button type="button" class="btn" id="llr-reset">重置</button>
@@ -1116,7 +1116,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     </div>
     <ol id="llr-steps" class="pcs-fault-steps" aria-label="LLR 处理步骤"></ol>
     <div id="llr-detail" class="g800-detail" aria-live="polite"></div>
-    <p class="note">示例从双方已协商 LLR 开始，跟踪 A 的 TX LLR 到 B 的 RX LLR。B 的反向数据发送可独立初始化。依据 UE 1.1 §5.1.3、§5.1.5–5.1.9、表 5–8。<a href="../../pdf/UE-Specification-1.1.pdf">本地规范</a></p>
+    <p class="note">LLDP 场景展示双方选项交换。初始化和重放场景跟踪 A 的 TX LLR 到 B 的 RX LLR。B 的反向数据发送可独立初始化。依据 UE 1.1 §5.1.3、§5.1.5–5.1.9、§5.3.2.1.6.1、表 5–8 和表 5–33。<a href="../../pdf/UE-Specification-1.1.pdf">本地规范</a></p>
   </section>
   <section class="panel pcs-link-fault" aria-labelledby="pcs-link-fault-title">
     <header><h3 id="pcs-link-fault-title">Local Fault / Remote Fault 产生流程</h3></header>
