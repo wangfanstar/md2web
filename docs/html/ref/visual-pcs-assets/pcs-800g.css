@@ -314,3 +314,8 @@
 
 .llr-hop-label { position: absolute; z-index: 2; transform: translate(-50%, -1.9rem); min-height: 24px; padding: .1rem .25rem; font-size: clamp(.58rem, 1vw, .8rem); white-space: nowrap; }
 .llr-hop-label.is-inactive { opacity: .68; }
+
+.llr-camera output { min-width: 4ch; text-align: center; font-variant-numeric: tabular-nums; }
+.llr-scene { overflow: hidden; background: radial-gradient(ellipse at center, var(--panel), var(--bg)); }
+.llr-scene canvas { touch-action: none; cursor: grab; }
+.llr-labels b { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; }

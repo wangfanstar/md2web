@@ -15,10 +15,10 @@
       ['保持普通以太网', 'LLR 未启用', false, '自动协商分支维持普通以太网运行。规范允许通过管理配置覆盖协商，本示例按自动协商展示。', 0, 0, 0, 'W=3 / E=0', '无 UE Options TLV', '不进入 INIT']
     ],
     init: [
-      ['A 进入 INIT', 'INIT · seq 0x12345', false, 'A 以当前 tx_seq 作为 init_seq，发送 LLR_INIT。若未收到有效回显，仍在 INIT，并按规范间隔重发。', 3, 0x12345, 0x4de1, 'INIT', '等待 INIT', '空'],
-      ['B 建立接收状态', 'INIT · 接收', false, 'B 收到 INIT，将 next_rx_seq 设为 0x12345 并置有效，安排发送 INIT_ECHO。', 3, 0x12345, 0x4de1, '等待回显', '期望 0x12345', '空'],
-      ['B 回显', 'INIT_ECHO · seq 0x12345', true, 'B 原样回传 init_seq 和 init_data。init_data 可由 A 用于测量往返时延。', 4, 0x12345, 0x4de1, '等待回显', '期望 0x12345', '空'],
-      ['A 进入 ADVANCE', '首帧 · seq 0x12345', false, 'A 核对回显序号与 tx_seq 相等后退出 INIT，开始发送并保留首个 LLR-eligible 帧的副本。', 0, 0x12345, 0, 'ADVANCE', '期望 0x12345', '0x12345']
+      ['A 进入 INIT', 'INIT · seq 0x00000', false, '首次启用后 tx_seq 为 0。A 以当前 tx_seq 作为 init_seq，发送 LLR_INIT。若未收到有效回显，仍在 INIT，并按规范间隔重发。', 3, 0x00000, 0x4de1, 'INIT', '等待 INIT', '空'],
+      ['B 建立接收状态', 'INIT · 接收', false, 'B 收到 INIT，将 next_rx_seq 设为 0x00000 并置有效，安排发送 INIT_ECHO。', 3, 0x00000, 0x4de1, '等待回显', '期望 0x00000', '空'],
+      ['B 回显', 'INIT_ECHO · seq 0x00000', true, 'B 原样回传 init_seq 和 init_data。init_data 可由 A 用于测量往返时延。', 4, 0x00000, 0x4de1, '等待回显', '期望 0x00000', '空'],
+      ['A 进入 ADVANCE', '首帧 · seq 0x00000', false, 'A 核对回显序号与 tx_seq 相等后退出 INIT，开始发送并保留首个 LLR-eligible 帧的副本。', 0, 0x00000, 0, 'ADVANCE', '期望 0x00000', '0x00000']
     ],
     replay: [
       ['保留未确认帧', '帧 10 丢失', false, 'B 已正确接收至帧 9。A 发送帧 10，副本留在重放缓冲。示例让帧 10 在链路上丢失。', 0, 10, 0, 'ADVANCE', '期望 10', '10'],
@@ -26,7 +26,7 @@
       ['B 发送 NACK', 'NACK · seq 9', true, 'B 在下一个合规 CtlOS 机会发送一次 NACK。载荷是最近成功序号 9，之后等待期望帧 10。', 2, 9, 0, '收到 NACK', 'NACK_SENT', '10、11'],
       ['重放帧 10', 'Replay · 10', false, 'A 完成当前正在发送的帧后进入 REPLAY，从首个未确认帧 10 开始重放。B 接收后期望 11。', 0, 10, 0, 'REPLAY', '期望 11', '10、11'],
       ['重放帧 11', 'Replay · 11', false, 'A 按顺序继续重放帧 11，B 接收后期望 12。副本等待累计确认后释放。', 0, 11, 0, 'REPLAY', '期望 12', '10、11'],
-      ['累计 ACK 与释放', 'ACK · seq 11', true, 'B 返回累计 ACK(11)，A 释放已确认帧 10 和 11 的副本，恢复新帧发送。', 1, 11, 0, 'ADVANCE', '期望 12', '空']
+      ['累计 ACK 与释放', 'ACK · seq 11', true, 'A 完成重放即返回 ADVANCE。B 返回累计 ACK(11)，A 收到后释放已确认帧 10 和 11 的副本。', 1, 11, 0, 'ADVANCE', '期望 12', '空']
     ]
   };
   let index = 0, running = false, started = null, elapsed = 0, frame = 0;
@@ -51,8 +51,11 @@
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     scene = new T.Scene();
     camera = new T.OrthographicCamera(-24, 24, 10, -10, 0.1, 150);
-    camera.position.set(0, 6, 50);
+    camera.position.set(2, 15, 50);
     camera.lookAt(0, 0, 0);
+    const key = new T.DirectionalLight(0xffffff, .95);
+    key.position.set(-8, 14, 10);
+    scene.add(key);
     scene.add(new T.HemisphereLight(0xffffff, 0x788aaf, 1.5));
     function block(width, height, depth, x, y, color) {
       const mesh = new T.Mesh(new T.BoxGeometry(width, height, depth), new T.MeshLambertMaterial({ color }));
@@ -85,17 +88,66 @@
       ray.setFromCamera(pointer, camera);
       return ray.intersectObjects([signal, ...modules.map(entry => entry.mesh)], false)[0]?.object;
     }
-    canvas.addEventListener('pointermove', event => {
-      canvas.style.cursor = hit(event) ? 'pointer' : '';
-    });
-    canvas.addEventListener('click', event => {
-      const mesh = hit(event);
+    let panX = 0, panY = 0, zoom = 1, drag = null;
+    function view() {
+      const aspect = host.clientWidth / host.clientHeight;
+      if (!aspect) return;
+      const halfWidth = Math.max(24, 9 * aspect) / zoom;
+      const halfHeight = halfWidth / aspect;
+      panX = Math.max(-19, Math.min(19, panX));
+      panY = Math.max(-7, Math.min(7, panY));
+      camera.left = panX - halfWidth;
+      camera.right = panX + halfWidth;
+      camera.top = panY + halfHeight;
+      camera.bottom = panY - halfHeight;
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld();
+      get('scale').textContent = Math.round(zoom * 100) + '%';
+      draw();
+    }
+    function scale(factor, x = 0, y = 0) {
+      const next = Math.max(.6, Math.min(4, zoom * factor));
+      panX += x * (camera.right - camera.left) * (1 - zoom / next);
+      panY += y * (camera.top - camera.bottom) * (1 - zoom / next);
+      zoom = next;
+      view();
+    }
+    get('larger').onclick = () => scale(1.25);
+    get('smaller').onclick = () => scale(.8);
+    get('fit').onclick = () => { panX = panY = 0; zoom = 1; view(); };
+    host.addEventListener('wheel', event => {
+      event.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      scale(Math.exp(-Math.sign(event.deltaY) * .12),
+        (event.clientX - rect.left) / rect.width - .5, .5 - (event.clientY - rect.top) / rect.height);
+    }, { passive: false });
+    canvas.onpointerdown = event => {
+      if (event.button || !event.isPrimary) return;
+      canvas.setPointerCapture(event.pointerId);
+      drag = { x: event.clientX, y: event.clientY, panX, panY, moved: false };
+    };
+    canvas.onpointermove = event => {
+      if (!drag || !event.isPrimary) { canvas.style.cursor = hit(event) ? 'pointer' : 'grab'; return; }
+      const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
+      if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+      drag.moved = true;
+      canvas.style.cursor = 'grabbing';
+      panX = drag.panX - dx * (camera.right - camera.left) / host.clientWidth;
+      panY = drag.panY + dy * (camera.top - camera.bottom) / host.clientHeight;
+      view();
+    };
+    canvas.onpointerup = event => {
+      if (!drag || !event.isPrimary) return;
+      const mesh = !drag.moved && hit(event);
+      drag = null;
+      canvas.style.cursor = 'grab';
       if (mesh) openFormat(mesh === signal ? null : mesh.userData);
-    });
+    };
+    canvas.onlostpointercapture = () => { drag = null; };
     new ResizeObserver(() => {
       if (!host.clientWidth) return;
       renderer.setSize(host.clientWidth, host.clientHeight, false);
-      draw();
+      view();
     }).observe(host);
   }
 
@@ -115,6 +167,11 @@
       const p = mesh.position.clone().project(camera);
       label.style.left = (p.x * 50 + 50) + '%';
       label.style.top = (50 - p.y * 50) + '%';
+    });
+    get('scene').querySelectorAll('.llr-labels b').forEach((label, i) => {
+      const point = new T.Vector3([-18, 0, 18][i % 3], i < 3 ? 7.8 : -1.2, 0).project(camera);
+      label.style.left = (50 + 50 * point.x) + '%';
+      label.style.top = (50 - 50 * point.y) + '%';
     });
     renderer.render(scene, camera);
     const point = signal.position.clone().project(camera);

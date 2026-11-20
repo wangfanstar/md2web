@@ -1108,6 +1108,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <button type="button" class="btn" id="llr-next">下一步</button>
       <button type="button" class="btn" id="llr-reset">重置</button>
     </div>
+    <div class="g800-controls llr-camera" role="group" aria-label="LLR 视图控制">
+      <button class="btn" type="button" id="llr-smaller" aria-label="缩小">−</button><output id="llr-scale">100%</output>
+      <button class="btn" type="button" id="llr-larger" aria-label="放大">＋</button>
+      <button class="btn" type="button" id="llr-fit">适应全图</button>
+      <span class="g800-help">拖动画布平移 · 滚轮缩放 · 点击模块查看数据格式</span>
+    </div>
     <div id="llr-scene" class="g800-stage llr-scene" aria-label="LLR 双向收发 3D 通路">
       <div class="llr-labels">
         <div><b>A · TX LLR</b><b>A → B · 正向通路</b><b>B · RX LLR</b></div>
@@ -1125,7 +1131,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     </dialog>
     <ol id="llr-steps" class="pcs-fault-steps" aria-label="LLR 处理步骤"></ol>
     <div id="llr-detail" class="g800-detail" aria-live="polite"></div>
-    <p class="note">LLDP 场景展示双方选项交换。初始化和重放场景跟踪 A 的 TX LLR 到 B 的 RX LLR。B 的反向数据发送可独立初始化。依据 UE 1.1 §5.1.3、§5.1.5–5.1.9、§5.3.2.1.6.1、表 5–8 和表 5–33。<a href="../../pdf/UE-Specification-1.1.pdf">本地规范</a></p>
+    <p class="note">LLDP 场景展示双方选项交换。初始化和重放场景跟踪 A 的 TX LLR 到 B 的 RX LLR。B 的反向数据发送可独立初始化。协商按 UEC v1.0 的 Options TLV 演示。<a href="https://ultraethernet.org/wp-content/uploads/sites/20/2025/06/UE-Specification-6.11.25.pdf">UEC v1.0 第 5 章</a>。另见 UE 1.1 §5.1.3、§5.1.5–5.1.9、§5.3.2.1.6.1、表 5–8 和表 5–33。<a href="../../pdf/UE-Specification-1.1.pdf">本地规范</a></p>
   </section>
   <section class="panel pcs-link-fault" aria-labelledby="pcs-link-fault-title">
     <header><h3 id="pcs-link-fault-title">Local Fault / Remote Fault 产生流程</h3></header>
@@ -6384,7 +6390,7 @@ globalThis.PCS.openPtpPoint = function (xMII, tx) {
       </select></label>
     </div>
     <div id="pcs-ue-body"></div>
-    <p class="note">200GBASE-R 场景假设两端已启用 UE 扩展。主 3D 位流继续用于 IEEE PCS 数据块教学，弹窗演示 UE 控制支路。依据 UE 1.1 §5.1.3、§5.1.6、§5.2.6、§5.2.9、§5.2.11。<a href="../../pdf/UE-Specification-1.1.pdf">本地规范</a></p>
+    <p class="note">200GBASE-R 场景假设两端已启用 UE 扩展。主 3D 位流继续用于 IEEE PCS 数据块教学，弹窗演示 UE 控制支路。协商按 UEC v1.0 的 Options TLV 演示。<a href="https://ultraethernet.org/wp-content/uploads/sites/20/2025/06/UE-Specification-6.11.25.pdf">UEC v1.0 第 5 章</a>。另见 UE 1.1 §5.1.3、§5.1.6、§5.2.6、§5.2.9、§5.2.11。<a href="../../pdf/UE-Specification-1.1.pdf">本地规范</a></p>
   </div>
 </dialog>
 <script src="visual-pcs-assets/pcs-ue-demo.js"></script>
