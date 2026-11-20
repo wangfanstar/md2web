@@ -7,7 +7,7 @@
   const play = controls.querySelector('[data-signal-play]');
   const stages = controls.querySelector('[data-signal-steps]');
   const bytesPanel = controls.querySelector('[data-signal-bytes]');
-  const bypass = controls.querySelector('[data-fault-bypass]');
+  const bypass = picker.parentElement.querySelector('[data-fault-bypass]');
   const fecBypass = bypass.querySelector('[data-bypass-fec]');
   const scrambleBypass = bypass.querySelector('[data-bypass-scramble]');
   const formatDialog = document.getElementById('pcs-fault-format');

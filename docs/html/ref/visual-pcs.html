@@ -762,6 +762,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <option value="fault">Local / Remote Fault</option>
       <option value="eee">EEE 低功耗（LPI）</option>
     </select>
+    <fieldset class="pcs-fault-bypass" data-fault-bypass hidden>
+      <legend>格式对照</legend>
+      <label><input type="checkbox" data-bypass-fec> FEC Bypass</label>
+      <label><input type="checkbox" data-bypass-scramble> 加解扰 Bypass</label>
+      <p class="note">旁路为教学观察点。FEC 旁路保留 AM 和 10 位分配，省略 RS 校验与纠错。两端使用相同设置。</p>
+    </fieldset>
   </div>
   <div class="viewport" id="viewport">
     <div class="legend" aria-label="图例">
@@ -797,12 +803,6 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <button type="button" class="btn" data-signal-next>下一步</button>
       <button type="button" class="btn" data-signal-reset>重置</button>
     </div>
-    <fieldset class="pcs-fault-bypass" data-fault-bypass hidden>
-      <legend>格式对照</legend>
-      <label><input type="checkbox" data-bypass-fec> FEC Bypass</label>
-      <label><input type="checkbox" data-bypass-scramble> 加解扰 Bypass</label>
-      <p class="note">旁路为教学观察点。FEC 旁路保留 AM 和 10 位分配，省略 RS 校验与纠错。两端使用相同设置。</p>
-    </fieldset>
     <ol class="pcs-fault-steps" data-signal-steps></ol>
     <p data-signal-detail role="status"></p>
     <div data-signal-bytes hidden></div>
