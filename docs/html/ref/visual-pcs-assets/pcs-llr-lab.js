@@ -55,6 +55,7 @@
     ['接收 xMII', 0, 'PCS 向 RS 交付还原的帧起始符和有序集。'],
     ['RX LLR / MAC', 0, '接收端处理 CtlOS、检查序号及 FCS，并向 MAC 交付通过检查的帧。']
   ];
+  const mainStages = [0, 2, 4, 7, 10, 13, 16, 17, 19];
   const spacing = 5.6;
   const extent = (stages.length - 1) * spacing / 2;
   const endpointColors = { a: 0x357fc8, b: 0xb46529, link: 0x62748c };
@@ -102,14 +103,17 @@
         const side = i === 10 ? 'link' : x < 0 ? 'a' : 'b';
         const color = endpointColors[side];
         const mesh = block(4.1, 1.45, 2.2, x, y, color);
-        mesh.userData = { name, format, description, reverse, color, lowerLabel: i % 2 === 1 };
+        mesh.userData = { name, format, description, reverse, color, stage: i, x };
         const label = document.createElement('button');
         label.type = 'button';
         label.className = 'btn llr-hop-label llr-endpoint-' + side;
         label.textContent = name;
+        const summary = document.createElement('small');
+        summary.className = 'llr-stage-format';
+        label.append(summary);
         label.onclick = () => openFormat(mesh.userData);
         host.append(label);
-        modules.push({ mesh, label });
+        modules.push({ mesh, label, summary });
       });
     }
     signal = block(2.8, 1, 1.5, 0, 0, 0x22a579);
@@ -118,7 +122,7 @@
       const r = canvas.getBoundingClientRect();
       pointer.set(2 * (event.clientX - r.left) / r.width - 1, 1 - 2 * (event.clientY - r.top) / r.height);
       ray.setFromCamera(pointer, camera);
-      return ray.intersectObjects([signal, ...modules.map(entry => entry.mesh)], false)[0]?.object;
+      return ray.intersectObjects([signal, ...modules.filter(entry => entry.mesh.visible).map(entry => entry.mesh)], false)[0]?.object;
     }
     let panX = 0, panY = 0, zoom = 1, drag = null;
     function view() {
@@ -147,6 +151,7 @@
     get('larger').onclick = () => scale(1.25);
     get('smaller').onclick = () => scale(.8);
     get('fit').onclick = () => { panX = panY = 0; zoom = 1; view(); };
+    get('main-only').onchange = get('fit').onclick;
     host.addEventListener('wheel', event => {
       event.preventDefault();
       const rect = canvas.getBoundingClientRect();
@@ -201,14 +206,25 @@
       signal.position.x = Math.min(0, signal.position.x);
       signal.material.color.setHex(0xd65a51);
     } else signal.material.color.setHex(reverse ? 0xe2a41f : 0x22a579);
-    modules.forEach(({ mesh, label }) => {
+    const mainOnly = get('main-only').checked;
+    const summaries = mainOnly ? stageSummaries() : null;
+    modules.forEach(({ mesh, label, summary }) => {
+      const { stage, x } = mesh.userData;
+      const slot = mainStages.indexOf(stage);
+      mesh.visible = !mainOnly || slot !== -1;
+      label.hidden = !mesh.visible;
+      if (!mesh.visible) return;
+      mesh.position.x = mainOnly
+        ? extent * (2 * slot / (mainStages.length - 1) - 1) * (mesh.userData.reverse ? -1 : 1)
+        : x;
       const enabled = mesh.userData.reverse === reverse;
       mesh.material.color.setHex(mesh.userData.color);
       mesh.material.color.multiplyScalar(enabled ? 1 : .55);
       label.classList.toggle('is-inactive', !enabled);
       const p = mesh.position.clone().project(camera);
       label.style.left = (p.x * 50 + 50) + '%';
-      label.classList.toggle('llr-hop-below', mesh.userData.lowerLabel);
+      label.classList.toggle('llr-hop-below', (mainOnly ? slot : stage) % 2 === 1);
+      summary.textContent = mainOnly && enabled ? summaries[slot] : '';
       label.style.top = (50 - p.y * 50) + '%';
     });
     get('scene').querySelectorAll('.llr-labels b').forEach((label, i) => {
@@ -224,6 +240,21 @@
   const ctlBytes = (type, seq, data) =>
     [0x5c, type, seq >> 12, (seq >> 4) & 255, ((seq & 15) << 4) | 6, data >> 8, data & 255, 0];
   const preamble = seq => [0xfb, ((seq >> 16) << 4) | 7, (seq >> 8) & 255, seq & 255, 0x55, 0x55, 0x55, 0xd5];
+  function stageSummaries() {
+    const [, , , , type, seq, data] = current();
+    if (negotiating()) {
+      return ['LLDP Options TLV', '66b 块', '257b 块', 'RS(544,514)', '线路信号',
+        '已恢复符号', '还原 66b', 'xMII 字节', '解析 LLDP'];
+    }
+    const bytes = type ? ctlBytes(type, seq, data) : preamble(seq);
+    const start = bytes.slice(0, 4).map(hex).join(' ');
+    const block = type ? '10 · 0x4B' : '10 · 0x78';
+    const lost = get('scenario').value === 'replay' && index === 0;
+    return [start + ' …', block, '4 × 66b → 257b', '514 + 30 符号',
+      lost ? '帧在此丢失' : '线路信号',
+      ...(lost ? ['未收到', '—', '—', '—']
+        : ['恢复 514 符号', block, start + ' …', (type ? 'CtlOS' : '帧') + ' · Seq ' + seq])];
+  }
   const byteView = bytes => '<div class="pcs-rx-bytes">' + bytes.map((value, i) =>
     '<span>' + hex(value) + '<small>Lane ' + i + ' · C=' + Number(i === 0) + '</small></span>').join('') + '</div>';
 
