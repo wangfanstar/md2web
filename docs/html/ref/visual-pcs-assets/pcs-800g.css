@@ -316,6 +316,7 @@
 .llr-hop-label.is-inactive { opacity: .68; }
 
 .llr-camera output { min-width: 4ch; text-align: center; font-variant-numeric: tabular-nums; }
-.llr-scene { overflow: hidden; background: radial-gradient(ellipse at center, var(--panel), var(--bg)); }
-.llr-scene canvas { touch-action: none; cursor: grab; }
+.llr-scene { overflow: hidden; touch-action: none; user-select: none; background: radial-gradient(ellipse at center, var(--panel), var(--bg)); }
+.llr-scene canvas { cursor: grab; }
+.llr-scene.is-panning, .llr-scene.is-panning * { cursor: grabbing; }
 .llr-labels b { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; }

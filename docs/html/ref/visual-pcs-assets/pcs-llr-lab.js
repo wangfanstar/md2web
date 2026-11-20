@@ -121,29 +121,38 @@
       scale(Math.exp(-Math.sign(event.deltaY) * .12),
         (event.clientX - rect.left) / rect.width - .5, .5 - (event.clientY - rect.top) / rect.height);
     }, { passive: false });
-    canvas.onpointerdown = event => {
+    host.onpointerdown = event => {
       if (event.button || !event.isPrimary) return;
-      canvas.setPointerCapture(event.pointerId);
-      drag = { x: event.clientX, y: event.clientY, panX, panY, moved: false };
+      drag = { id: event.pointerId, x: event.clientX, y: event.clientY, panX, panY, moved: false };
     };
-    canvas.onpointermove = event => {
-      if (!drag || !event.isPrimary) { canvas.style.cursor = hit(event) ? 'pointer' : 'grab'; return; }
+    host.onpointermove = event => {
+      if (!drag || event.pointerId !== drag.id || !(event.buttons & 1)) {
+        canvas.style.cursor = hit(event) ? 'pointer' : 'grab';
+        return;
+      }
       const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
-      if (!drag.moved && Math.hypot(dx, dy) < 4) return;
-      drag.moved = true;
-      canvas.style.cursor = 'grabbing';
+      if (!drag.moved) {
+        if (Math.hypot(dx, dy) < 4) return;
+        drag.moved = true;
+        host.setPointerCapture(event.pointerId);
+        host.classList.add('is-panning');
+      }
       panX = drag.panX - dx * (camera.right - camera.left) / host.clientWidth;
       panY = drag.panY + dy * (camera.top - camera.bottom) / host.clientHeight;
       view();
     };
-    canvas.onpointerup = event => {
-      if (!drag || !event.isPrimary) return;
-      const mesh = !drag.moved && hit(event);
+    function finishDrag(event) {
+      if (!drag || event.pointerId !== drag.id) return;
+      const mesh = event.type === 'pointerup' && !drag.moved && event.target === canvas && hit(event);
       drag = null;
-      canvas.style.cursor = 'grab';
+      host.classList.remove('is-panning');
       if (mesh) openFormat(mesh === signal ? null : mesh.userData);
-    };
-    canvas.onlostpointercapture = () => { drag = null; };
+    }
+    host.onpointerup = finishDrag;
+    host.onpointercancel = finishDrag;
+    host.addEventListener('lostpointercapture', event => {
+      if (event.target === host) finishDrag(event);
+    });
     new ResizeObserver(() => {
       if (!host.clientWidth) return;
       renderer.setSize(host.clientWidth, host.clientHeight, false);
