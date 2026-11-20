@@ -341,3 +341,19 @@
 #llr-register-a { border-top: 3px solid #357fc8 !important; }
 #llr-register-b { border-top: 3px solid #b46529 !important; }
 #llr-register-stats { overflow-x: auto; }
+
+.llr-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(290px, 34%); gap: .85rem; align-items: start; }
+.llr-visual, .llr-registers { min-width: 0; }
+.llr-registers { max-height: 70vh; overflow: auto; margin: 0; }
+.llr-registers [hidden] { display: none !important; }
+.llr-registers [aria-pressed="true"] { border-color: var(--ink); font-weight: 700; }
+#llr-register-fields { grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); }
+#llr-register-fields details { padding: .25rem 0; }
+#llr-register-fields code { overflow-wrap: anywhere; }
+.llr-counter-changed { background: color-mix(in srgb, #357fc8 14%, transparent); }
+.llr-playback { position: sticky; bottom: 0; z-index: 4; background: var(--panel); padding: .35rem; }
+#llr-register-status { display: block; overflow-wrap: anywhere; margin-bottom: .6rem; }
+@media (max-width: 1050px) {
+  .llr-workspace { grid-template-columns: minmax(0, 1fr); }
+  .llr-registers { max-height: none; }
+}

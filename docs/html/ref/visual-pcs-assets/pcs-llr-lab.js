@@ -81,7 +81,22 @@
     ['NACK_enhancement', '增强 NACK（扩展）', ['OFF', 'ON']]
   ];
   const form = get('register-form');
-  const controls = Object.fromEntries(['A', 'B'].map(endpoint => [endpoint, registerFields.map(([name, caption, values, min, max]) => {
+  const parameterGroups = [
+    ['运行模式', 0, 2], ['窗口与定时器', 2, 8], ['异常策略与信令', 8, 12], ['扩展', 12, 15]
+  ];
+  for (const endpoint of ['a', 'b']) {
+    const fieldset = get('register-' + endpoint);
+    parameterGroups.forEach(([title, start], i) => {
+      const section = document.createElement('details');
+      const summary = document.createElement('summary');
+      summary.textContent = title;
+      section.open = i < 2;
+      section.dataset.start = start;
+      section.append(summary);
+      fieldset.append(section);
+    });
+  }
+  const controls = Object.fromEntries(['A', 'B'].map(endpoint => [endpoint, registerFields.map(([name, caption, values, min, max], index) => {
     const label = document.createElement('label');
     const title = document.createElement('code');
     title.textContent = name;
@@ -93,7 +108,8 @@
     }
     input.name = name;
     label.append(title, document.createTextNode(caption), input);
-    get('register-' + endpoint.toLowerCase()).append(label);
+    const [, start] = parameterGroups.find(([, first, last]) => index >= first && index < last);
+    get('register-' + endpoint.toLowerCase()).querySelector('[data-start="' + start + '"]').append(label);
     return input;
   })]));
   const counterNames = (
@@ -111,6 +127,45 @@
     counterNames.map(name => '<tr><th scope="row"><code>' + name + '</code></th><td>—</td><td>—</td></tr>').join('') +
     '</tbody></table>';
   const statsRows = Array.from(stats.querySelectorAll('tbody tr'));
+  function updatePorts() {
+    const sender = get('register-direction').value;
+    const receiver = sender === 'A' ? 'B' : 'A';
+    const view = get('register-port').value;
+    const selected = view === 'auto' ? sender : view;
+    ['A', 'B'].forEach(endpoint => {
+      get('register-' + endpoint.toLowerCase()).hidden = selected !== 'both' && selected !== endpoint;
+    });
+    const value = name => controls[receiver].find(input => input.name === name).value;
+    get('peer-summary').textContent = '接收端 ' + receiver + ' · INIT 许可 ' + value('llr_mode_local') +
+      ' · CtlOS 间隔 ' + value('ctlos_target_spacing') + ' B';
+  }
+  function showStats(show) {
+    form.hidden = show;
+    get('stats-panel').hidden = !show;
+    get('show-params').setAttribute('aria-pressed', String(!show));
+    get('show-stats').setAttribute('aria-pressed', String(show));
+  }
+  get('register-port').onchange = updatePorts;
+  get('show-params').onclick = () => showStats(false);
+  get('show-stats').onclick = () => showStats(true);
+  function markPending() {
+    get('register-status').textContent = '参数有修改，等待应用。';
+    updatePorts();
+  }
+  form.oninput = event => {
+    if (event.target !== get('register-port')) markPending();
+  };
+  get('register-direction').onchange = markPending;
+  get('preset').onchange = markPending;
+  form.addEventListener('invalid', event => {
+    const fieldset = event.target.closest('fieldset');
+    if (!fieldset) return;
+    showStats(false);
+    get('register-port').value = fieldset.id.endsWith('-a') ? 'A' : 'B';
+    event.target.closest('details').open = true;
+    updatePorts();
+  }, true);
+  updatePorts();
   const policyText = {
     BLOCK: '阻塞上层来帧', DISCARD: '丢弃上层来帧', BEST_EFFORT: '以普通非 LLR 帧发送'
   };
@@ -221,6 +276,7 @@
   };
   form.onreset = () => {
     get('register-status').textContent = '默认参数已恢复，点击应用重新计算。';
+    queueMicrotask(updatePorts);
   };
   const active = () => steps[get('scenario').value];
   const negotiating = () => ['negotiation', 'unsupported'].includes(get('scenario').value);
@@ -497,23 +553,62 @@
   }
   get('format').onclick = () => openFormat();
 
+  function renderCounters(simulation) {
+    const counts = new Map();
+    const scope = get('counter-scope').value;
+    const search = get('counter-search').value.trim().toLowerCase();
+    if (simulation) active().slice(0, index + 1).forEach((step, i) => {
+      if (!step[10].counter) return;
+      step[10].counter.split('|').forEach(name => {
+        const entry = counts.get(name) || { count: 0, last: -1, delta: 0 };
+        entry.count++;
+        entry.last = i;
+        if (i === index) entry.delta++;
+        counts.set(name, entry);
+      });
+    });
+    statsRows.forEach((row, i) => {
+      const name = counterNames[i];
+      let changed = false;
+      ['A', 'B'].forEach((endpoint, column) => {
+        const cell = row.cells[column + 1];
+        const entry = counts.get(endpoint + ' ' + name);
+        cell.textContent = simulation && !unavailableCounters.has(name) ? entry?.count || 0 : '—';
+        if (!entry) return;
+        changed = changed || entry.delta > 0;
+        const link = document.createElement('button');
+        link.type = 'button';
+        link.className = 'linkbtn';
+        link.textContent = entry.delta ? ' (+' + entry.delta + ')' : ' ↗';
+        link.title = '跳到最近一次增量 · 第 ' + (entry.last + 1) + ' 步';
+        link.setAttribute('aria-label', endpoint + ' ' + name + ' · ' + link.title);
+        link.onclick = () => {
+          pause();
+          select(entry.last);
+          get('steps').querySelector('[aria-current="step"]').focus();
+        };
+        cell.append(link);
+      });
+      row.classList.toggle('llr-counter-changed', changed);
+      row.hidden = !name.includes(search) || (scope === 'changed' && !changed) ||
+        (['tx', 'rx'].includes(scope) && !name.startsWith(scope + '_'));
+    });
+    const empty = get('counter-empty');
+    empty.hidden = statsRows.some(row => !row.hidden);
+    empty.textContent = simulation ? '没有符合条件的计数器。' : '应用仿真参数后可查看计数变化。';
+  }
+  get('counter-scope').onchange = () => renderCounters(current()[10]);
+  get('counter-search').oninput = () => renderCounters(current()[10]);
+
   function update() {
     const [title, signalName, reverse, note, type, seq, data, tx, rx, buffer] = current();
     const bytes = type ? ctlBytes(type, seq, data) : [];
     const simulation = current()[10];
     get('format').disabled = Boolean(simulation && !simulation.wire);
-    const counts = new Map();
-    if (simulation) active().slice(0, index + 1).forEach(row => {
-      if (!row[10].counter) return;
-      row[10].counter.split('|').forEach(name => counts.set(name, (counts.get(name) || 0) + 1));
-    });
-    statsRows.forEach((row, i) => {
-      const name = counterNames[i];
-      ['A', 'B'].forEach((endpoint, column) => {
-        row.cells[column + 1].textContent = simulation && !unavailableCounters.has(name)
-          ? counts.get(endpoint + ' ' + name) || 0 : '—';
-      });
-    });
+    renderCounters(simulation);
+    get('event').textContent = (index + 1) + ' / ' + active().length + ' · ' + (simulation ? note.split(' · ')[0] + ' · ' : '') + title;
+    get('prev').disabled = index === 0;
+    get('next').disabled = index === active().length - 1;
     get('format').textContent = signalName + ' · 查看格式';
     get('detail').innerHTML = '<strong>' + signalName + ' · ' + (reverse ? 'B → A' : 'A → B') + '</strong><p>' + note + '</p>' +
       (negotiating() ? '<p>A · ' + tx + ' ｜ B · ' + rx + '</p><p>' + buffer + '</p>' +
@@ -566,10 +661,11 @@
     select(0);
   }
   get('scenario').onchange = () => {
-    if (get('scenario').value === 'registers') get('registers').open = true;
+    if (get('scenario').value === 'registers') updatePorts();
     reset();
   };
   get('reset').onclick = reset;
+  get('prev').onclick = () => { pause(); select(Math.max(0, index - 1)); };
   get('next').onclick = () => { pause(); select(Math.min(index + 1, active().length - 1)); };
   get('play').onclick = () => {
     if (running) { pause(); return; }

@@ -1104,10 +1104,14 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <div class="g800-controls">
       <label for="llr-scenario">场景</label>
       <select id="llr-scenario"><option value="negotiation">LLDP 协商</option><option value="unsupported">LLDP 协商 · 对端无 UE TLV</option><option value="init" selected>LLR 初始化</option><option value="replay">丢包与重放</option><option value="registers">寄存器仿真</option></select>
-      <button type="button" class="btn" id="llr-play">播放</button>
-      <button type="button" class="btn" id="llr-next">下一步</button>
-      <button type="button" class="btn" id="llr-reset">重置</button>
+        <label>实验预设<select form="llr-register-form" id="llr-preset"><option value="nack">丢帧后收到 NACK</option><option value="timeout">反馈持续丢失</option><option value="pcs">PCS 持续失锁</option><option value="init">初始化与上层来帧</option></select></label>
+        <label>仿真方向 <select form="llr-register-form" id="llr-register-direction"><option value="A">A → B</option><option value="B">B → A</option></select></label>
+      <button class="btn" form="llr-register-form" type="submit">应用并回到起点</button>
+      <button class="btn" form="llr-register-form" type="reset">恢复参数默认值</button>
     </div>
+    <output id="llr-register-status" aria-live="polite"></output>
+    <div class="llr-workspace">
+      <div class="llr-visual">
     <div class="g800-controls llr-camera" role="group" aria-label="LLR 视图控制">
       <button class="btn" type="button" id="llr-smaller" aria-label="缩小">−</button><output id="llr-scale">100%</output>
       <button class="btn" type="button" id="llr-larger" aria-label="放大">＋</button>
@@ -1116,27 +1120,45 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <button type="button" class="btn" id="llr-format">查看当前数据格式</button>
       <span class="g800-help">按住左键拖动平移 · 滚轮以鼠标位置为中心缩放 · 点击模块查看数据格式</span>
     </div>
-    <details id="llr-registers" class="llr-registers">
-      <summary>LLR 寄存器仿真 · 参数与统计</summary>
-      <form id="llr-register-form">
-        <label>实验预设<select id="llr-preset"><option value="nack">丢帧后收到 NACK</option><option value="timeout">反馈持续丢失</option><option value="pcs">PCS 持续失锁</option><option value="init">初始化与上层来帧</option></select></label>
-        <label>仿真方向 <select id="llr-register-direction"><option value="A">A → B</option><option value="B">B → A</option></select></label>
-        <div id="llr-register-fields">
-          <fieldset id="llr-register-a"><legend>A 端 · 蓝色</legend></fieldset>
-          <fieldset id="llr-register-b"><legend>B 端 · 橙色</legend></fieldset>
-        </div>
-        <button class="btn" type="submit">应用并查看仿真</button>
-        <button class="btn" type="reset">恢复参数默认值</button>
-      </form>
-      <p class="note">发送端使用本端 TX 模式、窗口和定时器，接收端使用本端 RX 模式和 CtlOS 间隔。仿真使用两帧各 512 B，CtlOS 等待按 200 Gb/s 的目标间隔估算，动画按事件步进。CRC4 和增强 NACK 支持独立配置与显示，扩展位和重复发送波形当前采用基础格式。</p>
-      <output id="llr-register-status" aria-live="polite"></output>
-      <details><summary>查看 A / B 统计寄存器</summary><div id="llr-register-stats" class="fine"></div></details>
-    </details>
     <div id="llr-scene" class="g800-stage llr-scene" aria-label="LLR 双向收发 3D 通路">
       <div class="llr-labels">
         <div><b>A · TX LLR</b><b>A → B · 正向通路</b><b>B · RX LLR</b></div>
         <div><b>A · RX LLR</b><b>B → A · 反向通路</b><b>B · TX LLR</b></div>
       </div>
+    </div>
+    <div class="g800-controls llr-playback" role="group" aria-label="LLR 播放控制">
+      <button type="button" class="btn" id="llr-prev">上一步</button>
+      <button type="button" class="btn" id="llr-play">播放</button>
+      <button type="button" class="btn" id="llr-next">下一步</button>
+      <button type="button" class="btn" id="llr-reset">重置</button>
+      <output id="llr-event"></output>
+    </div>
+    <ol id="llr-steps" class="pcs-fault-steps" aria-label="LLR 处理步骤"></ol>
+    <div id="llr-detail" class="g800-detail" aria-live="polite"></div>
+      </div>
+      <aside id="llr-registers" class="llr-registers" aria-label="LLR 实验面板">
+        <div class="g800-controls" role="group" aria-label="实验面板">
+          <button class="btn" type="button" id="llr-show-params" aria-pressed="true">参数</button>
+          <button class="btn" type="button" id="llr-show-stats" aria-pressed="false">统计</button>
+        </div>
+        <form id="llr-register-form">
+          <label>显示端口 <select id="llr-register-port"><option value="auto">当前发送端</option><option value="A">A 端</option><option value="B">B 端</option><option value="both">A / B 对照</option></select></label>
+          <p id="llr-peer-summary" class="fine"></p>
+          <div id="llr-register-fields">
+            <fieldset id="llr-register-a"><legend>A 端 · 蓝色</legend></fieldset>
+            <fieldset id="llr-register-b"><legend>B 端 · 橙色</legend></fieldset>
+          </div>
+      <p class="note">发送端使用本端 TX 模式、窗口和定时器，接收端使用本端 RX 模式和 CtlOS 间隔。仿真使用两帧各 512 B，CtlOS 等待按 200 Gb/s 的目标间隔估算，动画按事件步进。CRC4 和增强 NACK 支持独立配置与显示，扩展位和重复发送波形当前采用基础格式。</p>
+        </form>
+        <div id="llr-stats-panel" hidden>
+          <div class="g800-controls">
+            <label>范围 <select id="llr-counter-scope"><option value="changed">本步变化</option><option value="all">全部 22 项</option><option value="tx">TX</option><option value="rx">RX</option></select></label>
+            <label>搜索 <input type="search" id="llr-counter-search" placeholder="寄存器名称"></label>
+          </div>
+          <div id="llr-register-stats" class="fine"></div>
+          <p id="llr-counter-empty" class="fine" hidden></p>
+        </div>
+      </aside>
     </div>
     <dialog id="llr-format-dialog" class="opview" aria-labelledby="llr-format-title">
       <div class="opv-inner">
@@ -1146,8 +1168,6 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         <div id="llr-format-body"></div>
       </div>
     </dialog>
-    <ol id="llr-steps" class="pcs-fault-steps" aria-label="LLR 处理步骤"></ol>
-    <div id="llr-detail" class="g800-detail" aria-live="polite"></div>
     <p class="note">LLDP 场景展示双方选项交换。初始化和重放场景跟踪 A 的 TX LLR 到 B 的 RX LLR。B 的反向数据发送可独立初始化。协商按 UEC v1.0 的 Options TLV 演示。<a href="https://ultraethernet.org/wp-content/uploads/sites/20/2025/06/UE-Specification-6.11.25.pdf">UEC v1.0 第 5 章</a>。另见 UE 1.1 §5.1.3、§5.1.5–5.1.9、§5.3.2.1.6.1、表 5–8 和表 5–33。<a href="../../pdf/UE-Specification-1.1.pdf">本地规范</a></p>
   </section>
   <section class="panel pcs-link-fault" aria-labelledby="pcs-link-fault-title">
