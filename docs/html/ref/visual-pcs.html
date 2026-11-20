@@ -863,7 +863,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <li data-pcs-route-item="ipg"><button type="button" class="btn" data-view="idleRx">3 · 还原 / 补偿 Idle</button></li>
       <li data-pcs-route-item="preamble"><button type="button" class="btn" data-view="frameRx">4 · 去前导码 / 帧提取</button></li>
     </ol>
-    <p class="note">TX 先由 MAC / RS 在 200GMII 上产生 0x07 Idle，再编码成 66b 控制块。RX 在解码后还原 0x07 Idle，并按需补偿 AM 移除。图中将 PCS 速率匹配单列为教学步骤。</p>
+    <p class="note">TX 先由 MAC / RS 在 200GMII 上产生 0x07 Idle，再编码成 66b 控制块。RX 在解码后还原 0x07 Idle，并按需补偿 AM 移除。勾选 IPG 时，绿色模块标出速率匹配及相关的 AM 插入、移除。</p>
   </section>
 
   <section class="pcs-frame-route" data-pcs-route="ue" aria-label="UE 1.1 链路控制演示" hidden>
@@ -2109,7 +2109,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     { x: [5, 9], name: '64B/66B 编码', short: 'TX 2 · 64B/66B', stage: 2, view: 'b66' },
     { x: [10.5, 14.5], name: '256B/257B 转码', short: 'TX 4 · 转码', stage: 2, view: 'b257' },
     { x: [16, 19], name: '加扰', stage: 3 },
-    { x: [20, 23], name: '插入 AM', stage: 3, view: 'am' },
+    { x: [20, 23], name: '插入 AM', stage: 3, view: 'am', accentOverlay: 'ipg' },
     { x: [24.5, 26.5], name: 'FEC 前分配', stage: 3, short: 'FEC 前分配', view: 'prefec' },
     { x: [27, 30.5], name: 'RS(544,514) 编码', stage: 3, short: 'RS 编码', view: 'rs' },
     { x: [31, 32.5], name: '符号分配', stage: 3, lane: true, short: 'Symbol dist.', view: 'dist' },
@@ -2121,7 +2121,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     { x: [85.25, 86.75], name: '解交织', stage: 9, lane: true, short: 'De-intlv', view: 'deint' },
     { x: [87.5, 91], name: 'RS(544,514) 解码', stage: 9, short: 'RS 解码', fec: true, view: 'rsdec' },
     { x: [91.5, 93.5], name: 'FEC 后交织', stage: 9, short: 'Post-FEC', view: 'postfec' },
-    { x: [94, 97], name: '移除 AM', stage: 9, view: 'amr' },
+    { x: [94, 97], name: '移除 AM', stage: 9, view: 'amr', accentOverlay: 'ipg' },
     { x: [98, 101], name: '解扰', stage: 9 },
     { x: [102, 106], name: '逆转码', short: 'RX 1 · 逆转码', stage: 9, view: 'r257' },
     { x: [107, 111], name: '64B/66B 解码', short: 'RX 2 · 64B/66B', stage: 9, view: 'd66' },
@@ -2383,9 +2383,15 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     G.scene.remove(g);
   }
 
+  P.boxAccentGroup = function (box) {
+    if (box.accentOverlay && P.showOverlay(box.accentOverlay)) return box.accentOverlay;
+    return box.overlay;
+  };
+
   P.boxAccent = function (box) {
-    if (box.overlay === 'ipg') return G.col.good;
-    if (box.overlay === 'preamble') return G.col.lanes[7];
+    var group = P.boxAccentGroup(box);
+    if (group === 'ipg') return G.col.good;
+    if (group === 'preamble') return G.col.lanes[7];
     return null;
   };
 
@@ -2869,7 +2875,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     P.sceneBoxes().forEach(function (b, i) {
       var y = b.labelY || (b.lane ? top + 0.3 : 1.6);
       L.push({ id: 'box' + i, html: b.view ? '<span data-view="' + b.view + '" title="How ' + b.name + ' works">' + (b.short || b.name) + '</span>' : b.short || b.name,
-               cls: 'lbl-box' + (b.view ? ' op' : '') + (P.boxAccent(b) ? ' pcs-module-' + b.overlay : ''), pos: [P.sceneX((b.x[0] + b.x[1]) / 2), y, 0], pri: b.lineLabel ? 5 : b.lane ? 3 : 2 });
+               cls: 'lbl-box' + (b.view ? ' op' : '') + (P.boxAccent(b) ? ' pcs-module-' + P.boxAccentGroup(b) : ''), pos: [P.sceneX((b.x[0] + b.x[1]) / 2), y, 0], pri: b.lineLabel ? 5 : b.lane ? 3 : 2 });
     });
     P.STAGES.forEach(function (st) {
       L.push({ id: 'st' + st.n, html: '<b>' + st.n + '</b>', cls: 'lbl-stage' + (S.stage === st.n ? ' on' : ''),
