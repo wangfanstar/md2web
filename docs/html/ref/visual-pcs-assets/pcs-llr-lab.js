@@ -32,7 +32,8 @@
   let index = 0, running = false, started = null, elapsed = 0, frame = 0;
   let renderer, scene, camera, signal;
   const modules = [];
-  const hopNames = ['发送端 xMII', 'PCS 编码', '链路传输', '接收端 xMII'];
+  const hopNames = ['发送 xMII', '64B/66B', '256B/257B', 'RS-FEC', 'PMA 链路', '接收 xMII'];
+  const hopColors = [0x58729a, 0x347baf, 0x7158b5, 0x0c806d, 0x58729a, 0x58729a];
   const ray = new T.Raycaster(), pointer = new T.Vector2();
   const formatDialog = get('format-dialog');
   const duration = 1900, motion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -62,9 +63,10 @@
     for (const y of [-4.5, 4.5]) {
       block(37, .17, .3, 0, y, 0x8694ad);
       const reverse = y < 0;
-      [-18, -6, 6, 18].forEach((x, i) => {
-        const mesh = block(4.2, 1.45, 2.2, x, y, 0x58729a);
-        mesh.userData.hop = reverse ? 3 - i : i;
+      [-18, -10.8, -3.6, 3.6, 10.8, 18].forEach((x, i) => {
+        const hop = reverse ? hopNames.length - 1 - i : i;
+        const mesh = block(hop === 3 ? 5.1 : 4.2, 1.45, 2.2, x, y, hopColors[hop]);
+        mesh.userData.hop = hop;
         mesh.userData.reverse = reverse;
         const label = document.createElement('button');
         label.type = 'button';
@@ -108,7 +110,7 @@
     } else signal.material.color.setHex(reverse ? 0xe2a41f : 0x22a579);
     modules.forEach(({ mesh, label }) => {
       const enabled = mesh.userData.reverse === reverse;
-      mesh.material.color.setHex(enabled ? 0x587fa9 : 0x485568);
+      mesh.material.color.setHex(enabled ? hopColors[mesh.userData.hop] : 0x485568);
       label.classList.toggle('is-inactive', !enabled);
       const p = mesh.position.clone().project(camera);
       label.style.left = (p.x * 50 + 50) + '%';
@@ -128,6 +130,25 @@
   const byteView = bytes => '<div class="pcs-rx-bytes">' + bytes.map((value, i) =>
     '<span>' + hex(value) + '<small>Lane ' + i + ' · C=' + Number(i === 0) + '</small></span>').join('') + '</div>';
 
+  function transcodeSample(payload) {
+    // One LLR control/start block followed by three all-zero data blocks.
+    const first = payload.join('');
+    return '00111' + first.slice(0, 4) + first.slice(8) + '0'.repeat(192);
+  }
+
+  function fecSample(transcoded) {
+    // One complete pair between AM groups. Remaining blocks are data samples.
+    const dataBlock = '1' + '0'.repeat(256);
+    const input = Array.from(transcoded + dataBlock.repeat(39), Number);
+    const scrambled = window.PCS800Model.scramble(input, 0);
+    return [0, 1].map(w => {
+      const message = Array.from({ length: 514 }, (_, i) =>
+        scrambled.slice(20 * i + 10 * w, 20 * i + 10 * w + 10)
+          .reduce((word, bit, k) => word | (bit << k), 0));
+      return { message, parity: window.PCS.rsParity(message) };
+    });
+  }
+
   function openFormat(target) {
     pause();
     const [, signalName, reverse, note, type, seq, data] = current();
@@ -146,14 +167,30 @@
         ? [bits(type), bits(bytes[2]), bits(bytes[3]), bits(6, 4) + bits(bytes[4] >> 4, 4), ...bytes.slice(5).map(value => bits(value))]
         : bytes.slice(1).map(value => bits(value));
       const blockType = type ? 0x4b : 0x78;
-      const showOctets = !target || target.hop === 0 || target.hop === 3;
+      const showOctets = !target || target.hop === 0 || target.hop === 5;
       if (showOctets) detail += '<h4>' + (type ? 'xMII CtlOS 字节' : 'xMII 修改后的前导码') + '</h4>' + byteView(bytes);
-      if (!target || target.hop === 1 || target.hop === 2) {
-        detail += '<h4>64B/66B ' + (target && target.hop === 2 ? '编码观察点' : '控制块') + '</h4>' +
+      if (!target || target.hop === 1) {
+        detail += '<h4>64B/66B 控制块</h4>' +
           '<p>同步头 10 · 块类型 0x' + hex(blockType) + (type ? ' · O-code 0x6' : ' · 20 位 frame_seq') + '</p>' +
           '<pre class="pcs-fault-bits">' + ['10', bits(blockType), ...payload].join(' ') + '</pre>';
       }
-      if (target && target.hop === 2) detail += '<p class="note">这里显示 PCS 编码观察点。物理线路上的位流还取决于所用 PHY 的转码、加扰与 FEC。</p>';
+      if (target && (target.hop === 2 || target.hop === 3 || target.hop === 4)) {
+        const transcoded = transcodeSample([bits(blockType), ...payload]);
+        if (target.hop === 2) {
+          detail += '<h4>四个 66b 块 → 一个 257b 块</h4>' +
+            '<p>样例取当前 LLR 控制块或起始块，再接三个填零的数据块。块分类按发送顺序为 <code>0 | 0111</code>，省略第一个控制块类型的第二个半字节。</p>' +
+            '<pre class="pcs-fault-bits">' + transcoded.match(/.{1,8}/g).join(' ') + '</pre>';
+        } else {
+          const words = fecSample(transcoded);
+          const symbols = values => values.map(value => '0x' + hex(value).padStart(3, '0')).join(' ');
+          detail += '<h4>' + (target.hop === 3 ? 'RS(544,514) 码字' : '进入 PCS lane 分配与 PMA 的码字') + '</h4>' +
+            '<p>40 个 257b 块连续加扰，每 10 位交替分配到 A、B。每个码字含 514 个消息符号和 30 个校验符号。</p>' +
+            '<pre class="pcs-fault-bits">' + words.map(({ message, parity }, i) =>
+              ['A', 'B'][i] + ' 消息[0…7] ' + symbols(message.slice(0, 8)) +
+              ' | 校验[0…7] ' + symbols(parity.slice(0, 8))).join(String.fromCharCode(10)) + '</pre>' +
+            '<p class="note">样例使用固定加扰初态，演示 AM 组之间的一对码字，剩余块使用教学填充。PMA 后的线路位序取决于 lane 映射。</p>';
+        }
+      }
     }
     get('format-body').innerHTML = detail;
     if (!formatDialog.open) formatDialog.showModal();
