@@ -47,11 +47,39 @@
   // Fault responses use the existing 200G drawing. The right-to-left route
   // represents the reverse link and its corresponding TX/RX PCS functions.
   const faultPositions = [[57, 108], [109, 116], [116, 7], [7, 0], [0, 9]];
+  const reverseOffset = 22;
+  let reverseGroup, reverseSources;
+  const reverseX = x => P.sceneX(0) + P.sceneX(116) - x;
+  const onReverse = () => index === 2 || index === 3;
+
+  function syncReversePath() {
+    const G = P.g;
+    if (!G.scene) return;
+    if (mode !== 'fault') {
+      if (reverseGroup) G.scene.remove(reverseGroup);
+      reverseGroup = reverseSources = null;
+      return;
+    }
+    if (reverseSources && reverseSources[0] === G.boxGroup && reverseSources[1] === G.linkGroup) return;
+    if (reverseGroup) G.scene.remove(reverseGroup);
+    reverseSources = [G.boxGroup, G.linkGroup];
+    reverseGroup = new T.Group();
+    reverseGroup.name = 'Fault reverse path';
+    reverseSources.filter(Boolean).forEach(group => reverseGroup.add(group.clone(true)));
+    reverseGroup.position.set(reverseX(0), -reverseOffset, 0);
+    reverseGroup.scale.x = -1;
+    G.scene.add(reverseGroup);
+  }
+
+  P.faultReverseLabel = function (box, y) {
+    return [reverseX(P.sceneX((box.x[0] + box.x[1]) / 2)), y - reverseOffset, 0];
+  };
+  P.faultTrackOffset = reverseOffset;
   const faultBytes = [
     null,
     { value: '01', title: 'B · PHY → RS（200GMII RX）', note: '本地 xMII 上报，触发本端 RS 的故障状态机。' },
     { value: '02', title: 'B · RS → TX PCS（200GMII TX）', type: '4B',
-      note: '64B/66B → 256B/257B → 加扰 → AM / RS-FEC → PCS lane / PMA。反向箭头表示 B → A；线上位流已重新编码。点击各模块上方的数据块，可沿图中的逻辑 TX → RX 顺序对照反向链路的格式。' },
+      note: '沿下排 B → A 检查 64B/66B、转码、加扰、AM / RS-FEC 到 PCS lane / PMA。点击模块上方的数据块查看当前格式。' },
     { value: '02', title: 'A · RX PCS → RS（200GMII RX）', type: '4B',
       note: 'RX PMA → AM 锁定与重排 → RS-FEC → AM 移除 → 解扰 → 逆转码 → 64B/66B 解码。恢复 /Q/ 并将 RXC[0] 置 1。' },
     { value: '07', title: 'A · RS → TX PCS（200GMII TX）', type: '1E', idle: true,
@@ -176,6 +204,10 @@
         new T.MeshBasicMaterial({ color }));
       marker.position.copy(box.mesh.position);
       marker.position.y += box.h / 2 + 0.55;
+      if (onReverse()) {
+        marker.position.x = reverseX(marker.position.x);
+        marker.position.y -= reverseOffset;
+      }
       marker.userData.format = key;
       G.scene.add(marker);
       marker.updateMatrixWorld(true);
@@ -247,6 +279,7 @@
       P.buildLabels();
       if (mode !== 'eee') P.flyTo(P.framePose(-2, 118, 0.35), 0);
     }
+    syncReversePath();
     if (mode !== 'fault') syncFormatMarkers();
     if (mode === 'data') return;
     P.setPlaying(false);
@@ -263,6 +296,14 @@
       badge.type = 'button';
       badge.title = '查看信号数据格式';
       badge.onclick = () => openFaultFormat();
+    }
+    if (mode === 'fault') {
+      ['A → B · 正向接收故障 / Idle', 'B → A · 反向 Remote Fault'].forEach(text => {
+        const direction = document.createElement('span');
+        direction.className = 'pcs-fault-direction';
+        direction.textContent = text;
+        labels.append(direction);
+      });
     }
     labels.append(badge);
     stages.replaceChildren(...scenario.steps.map(([title], i) => {
@@ -328,13 +369,17 @@
         faultToken.position.y = 3.4;
         G.scene.add(faultToken);
       }
+      syncReversePath();
       const [from, to] = faultPositions[index];
+      faultToken.position.y = 3.4 - (onReverse() ? reverseOffset : 0);
       faultToken.position.x = P.sceneX(from + (to - from) * fraction);
       faultToken.material.color.copy(G.col.bad);
       P.updateCamera(now);
       G.renderer.render(G.scene, G.camera);
       P.updateLabels();
-      place(labels.lastElementChild, faultToken.position.clone().setY(5.2), G.camera);
+      place(labels.children[0], new T.Vector3(P.sceneX(57), 8.5, 0), G.camera);
+      place(labels.children[1], new T.Vector3(P.sceneX(57), 8.5 - reverseOffset, 0), G.camera);
+      place(labels.lastElementChild, faultToken.position.clone().add(new T.Vector3(0, 1.8, 0)), G.camera);
       return true;
     }
     if (!scene) buildScene();

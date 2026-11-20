@@ -297,3 +297,5 @@
 .pcs-module-preamble { --module-accent: var(--lane-7); }
 .pcs-scene-options i { width: .7em; height: .7em; border-radius: 2px; background: var(--module-accent); }
 .lbl-box:is(.pcs-module-ipg, .pcs-module-preamble) { border-bottom: 2px solid var(--module-accent); }
+
+.pcs-fault-scene .pcs-fault-direction { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; font-weight: 700; }
