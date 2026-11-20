@@ -57,7 +57,7 @@
   ];
   const spacing = 5.6;
   const extent = (stages.length - 1) * spacing / 2;
-  const hopColors = [0x58729a, 0x347baf, 0x7158b5, 0x0c806d, 0x5269a0];
+  const endpointColors = { a: 0x357fc8, b: 0xb46529, link: 0x62748c };
   const ray = new T.Raycaster(), pointer = new T.Vector2();
   const formatDialog = get('format-dialog');
   const duration = 1900, motion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -87,17 +87,25 @@
       scene.add(mesh);
       return mesh;
     }
+    for (const [side, sign] of [['a', -1], ['b', 1]]) {
+      const board = block(extent - 2, 31, .35, sign * (extent / 2 + 3.9), 0, endpointColors[side]);
+      board.position.z = -2;
+      board.material.transparent = true;
+      board.material.opacity = .19;
+      board.material.depthWrite = false;
+    }
     for (const y of [-10, 10]) {
       block(2 * extent, .16, .3, 0, y, 0x8694ad);
       const reverse = y < 0;
       stages.forEach(([name, format, description], i) => {
         const x = (i * spacing - extent) * (reverse ? -1 : 1);
-        const color = hopColors[format ?? 4];
+        const side = i === 10 ? 'link' : x < 0 ? 'a' : 'b';
+        const color = endpointColors[side];
         const mesh = block(4.1, 1.45, 2.2, x, y, color);
         mesh.userData = { name, format, description, reverse, color, lowerLabel: i % 2 === 1 };
         const label = document.createElement('button');
         label.type = 'button';
-        label.className = 'btn llr-hop-label';
+        label.className = 'btn llr-hop-label llr-endpoint-' + side;
         label.textContent = name;
         label.onclick = () => openFormat(mesh.userData);
         host.append(label);
@@ -195,7 +203,8 @@
     } else signal.material.color.setHex(reverse ? 0xe2a41f : 0x22a579);
     modules.forEach(({ mesh, label }) => {
       const enabled = mesh.userData.reverse === reverse;
-      mesh.material.color.setHex(enabled ? mesh.userData.color : 0x485568);
+      mesh.material.color.setHex(mesh.userData.color);
+      mesh.material.color.multiplyScalar(enabled ? 1 : .55);
       label.classList.toggle('is-inactive', !enabled);
       const p = mesh.position.clone().project(camera);
       label.style.left = (p.x * 50 + 50) + '%';
