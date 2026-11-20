@@ -31,6 +31,10 @@
   };
   let index = 0, running = false, started = null, elapsed = 0, frame = 0;
   let renderer, scene, camera, signal;
+  const modules = [];
+  const hopNames = ['发送端 xMII', 'PCS 编码', '链路传输', '接收端 xMII'];
+  const ray = new T.Raycaster(), pointer = new T.Vector2();
+  const formatDialog = get('format-dialog');
   const duration = 1900, motion = matchMedia('(prefers-reduced-motion: reduce)');
   const hex = n => n.toString(16).toUpperCase().padStart(2, '0');
   const active = () => steps[get('scenario').value];
@@ -57,9 +61,35 @@
     }
     for (const y of [-4.5, 4.5]) {
       block(37, .17, .3, 0, y, 0x8694ad);
-      for (const x of [-18, -6, 6, 18]) block(4.2, 1.45, 2.2, x, y, 0x58729a);
+      const reverse = y < 0;
+      [-18, -6, 6, 18].forEach((x, i) => {
+        const mesh = block(4.2, 1.45, 2.2, x, y, 0x58729a);
+        mesh.userData.hop = reverse ? 3 - i : i;
+        mesh.userData.reverse = reverse;
+        const label = document.createElement('button');
+        label.type = 'button';
+        label.className = 'btn llr-hop-label';
+        label.textContent = hopNames[mesh.userData.hop];
+        label.onclick = () => openFormat(mesh.userData);
+        host.append(label);
+        modules.push({ mesh, label });
+      });
     }
     signal = block(2.8, 1, 1.5, 0, 0, 0x22a579);
+    const canvas = renderer.domElement;
+    function hit(event) {
+      const r = canvas.getBoundingClientRect();
+      pointer.set(2 * (event.clientX - r.left) / r.width - 1, 1 - 2 * (event.clientY - r.top) / r.height);
+      ray.setFromCamera(pointer, camera);
+      return ray.intersectObjects([signal, ...modules.map(entry => entry.mesh)], false)[0]?.object;
+    }
+    canvas.addEventListener('pointermove', event => {
+      canvas.style.cursor = hit(event) ? 'pointer' : '';
+    });
+    canvas.addEventListener('click', event => {
+      const mesh = hit(event);
+      if (mesh) openFormat(mesh === signal ? null : mesh.userData);
+    });
     new ResizeObserver(() => {
       if (!host.clientWidth) return;
       renderer.setSize(host.clientWidth, host.clientHeight, false);
@@ -76,12 +106,64 @@
       signal.position.x = Math.min(0, signal.position.x);
       signal.material.color.setHex(0xd65a51);
     } else signal.material.color.setHex(reverse ? 0xe2a41f : 0x22a579);
+    modules.forEach(({ mesh, label }) => {
+      const enabled = mesh.userData.reverse === reverse;
+      mesh.material.color.setHex(enabled ? 0x587fa9 : 0x485568);
+      label.classList.toggle('is-inactive', !enabled);
+      const p = mesh.position.clone().project(camera);
+      label.style.left = (p.x * 50 + 50) + '%';
+      label.style.top = (50 - p.y * 50) + '%';
+    });
     renderer.render(scene, camera);
+    const point = signal.position.clone().project(camera);
+    const badge = get('format');
+    badge.style.left = (point.x * 50 + 50) + '%';
+    badge.style.top = (50 - point.y * 50) + '%';
   }
+
+  const bits = (value, width = 8) => Array.from({ length: width }, (_, i) => (value >> i) & 1).join('');
+  const ctlBytes = (type, seq, data) =>
+    [0x5c, type, seq >> 12, (seq >> 4) & 255, ((seq & 15) << 4) | 6, data >> 8, data & 255, 0];
+  const preamble = seq => [0xfb, ((seq >> 16) << 4) | 7, (seq >> 8) & 255, seq & 255, 0x55, 0x55, 0x55, 0xd5];
+  const byteView = bytes => '<div class="pcs-rx-bytes">' + bytes.map((value, i) =>
+    '<span>' + hex(value) + '<small>Lane ' + i + ' · C=' + Number(i === 0) + '</small></span>').join('') + '</div>';
+
+  function openFormat(target) {
+    pause();
+    const [, signalName, reverse, note, type, seq, data] = current();
+    const hop = target ? hopNames[target.hop] : '当前信号';
+    get('format-title').textContent = signalName + ' · ' + hop;
+    const path = reverse ? 'B → A' : 'A → B';
+    let detail = '<p><b>当前方向 ' + path + '</b> · ' + note + '</p>';
+    if (target && target.reverse !== reverse) {
+      detail += '<p>该方向在本步没有演示信号。</p>';
+    } else if (negotiating()) {
+      detail += '<p>LLDP 的 UE Link Negotiation Options TLV 随 MAC 帧传送。查看下方步骤说明中的 LLR-W 和 LLR-E。</p>' +
+        '<p>' + current()[7] + '（A） ｜ ' + current()[8] + '（B）</p>';
+    } else {
+      const bytes = type ? ctlBytes(type, seq, data) : preamble(seq);
+      const payload = type
+        ? [bits(type), bits(bytes[2]), bits(bytes[3]), bits(6, 4) + bits(bytes[4] >> 4, 4), ...bytes.slice(5).map(value => bits(value))]
+        : bytes.slice(1).map(value => bits(value));
+      const blockType = type ? 0x4b : 0x78;
+      const showOctets = !target || target.hop === 0 || target.hop === 3;
+      if (showOctets) detail += '<h4>' + (type ? 'xMII CtlOS 字节' : 'xMII 修改后的前导码') + '</h4>' + byteView(bytes);
+      if (!target || target.hop === 1 || target.hop === 2) {
+        detail += '<h4>64B/66B ' + (target && target.hop === 2 ? '编码观察点' : '控制块') + '</h4>' +
+          '<p>同步头 10 · 块类型 0x' + hex(blockType) + (type ? ' · O-code 0x6' : ' · 20 位 frame_seq') + '</p>' +
+          '<pre class="pcs-fault-bits">' + ['10', bits(blockType), ...payload].join(' ') + '</pre>';
+      }
+      if (target && target.hop === 2) detail += '<p class="note">这里显示 PCS 编码观察点。物理线路上的位流还取决于所用 PHY 的转码、加扰与 FEC。</p>';
+    }
+    get('format-body').innerHTML = detail;
+    if (!formatDialog.open) formatDialog.showModal();
+  }
+  get('format').onclick = () => openFormat();
 
   function update() {
     const [title, signalName, reverse, note, type, seq, data, tx, rx, buffer] = current();
-    const bytes = type ? [0x5c, type, seq >> 12, (seq >> 4) & 255, ((seq & 15) << 4) | 6, data >> 8, data & 255, 0] : [];
+    const bytes = type ? ctlBytes(type, seq, data) : [];
+    get('format').textContent = signalName + ' · 查看格式';
     get('detail').innerHTML = '<strong>' + signalName + ' · ' + (reverse ? 'B → A' : 'A → B') + '</strong><p>' + note + '</p>' +
       (negotiating() ? '<p>A · ' + tx + ' ｜ B · ' + rx + '</p><p>' + buffer + '</p>' +
         '<p class="note">本图按 TLV 版本 0 展示。W=3 表示双向意愿，1 和 2 保留。UE 1.1 的 TLV 版本 1 使用两位 E，双向启用为 3，与版本 0 的 E=1 互通。</p>' +
