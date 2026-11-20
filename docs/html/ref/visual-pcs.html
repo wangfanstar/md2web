@@ -1119,19 +1119,25 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <label for="llr-view-mode">视图</label>
       <select id="llr-view-mode">
         <option value="all">查看全部</option>
-        <option value="main" selected>查看主要收发</option>
-        <option value="endpoint">只看收发</option>
+        <option value="main">查看主要收发</option>
+        <option value="endpoint" selected>只看收发</option>
       </select>
       <button type="button" class="btn" id="llr-format">查看当前数据格式</button>
       <span class="g800-help">按住左键拖动平移 · 滚轮以鼠标位置为中心缩放 · 点击模块查看数据格式</span>
     </div>
     <div id="llr-scene" class="g800-stage llr-scene" aria-label="LLR 双向收发 3D 通路">
       <div class="llr-state-overlays" aria-label="两端 LLR 状态">
-        <div class="llr-state-card llr-state-a"><strong>A 端</strong>
-          <span>TX <b id="llr-state-a-tx"></b></span><span>RX <b id="llr-state-a-rx"></b></span>
+        <div class="llr-state-card llr-state-a llr-state-upper" aria-label="A 端 TX">
+          <span>A · TX <b id="llr-state-a-tx"></b></span>
         </div>
-        <div class="llr-state-card llr-state-b"><strong>B 端</strong>
-          <span>TX <b id="llr-state-b-tx"></b></span><span>RX <b id="llr-state-b-rx"></b></span>
+        <div class="llr-state-card llr-state-b llr-state-upper" aria-label="B 端 RX">
+          <span>B · RX <b id="llr-state-b-rx"></b></span>
+        </div>
+        <div class="llr-state-card llr-state-a llr-state-lower" aria-label="A 端 RX">
+          <span>A · RX <b id="llr-state-a-rx"></b></span>
+        </div>
+        <div class="llr-state-card llr-state-b llr-state-lower" aria-label="B 端 TX">
+          <span>B · TX <b id="llr-state-b-tx"></b></span>
         </div>
       </div>
       <div id="llr-packet-callout" class="llr-packet-callout" hidden>
