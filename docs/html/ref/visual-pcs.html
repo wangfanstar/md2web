@@ -779,7 +779,8 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         <legend>显示叠加模块</legend>
         <label><input type="checkbox" data-pcs-overlay="llr"> LLR</label>
         <label><input type="checkbox" data-pcs-overlay="cbfc"> CBFC</label>
-        <label><input type="checkbox" data-pcs-overlay="frame"> IPG / Preamble</label>
+        <label><input type="checkbox" data-pcs-overlay="ipg"> IPG</label>
+        <label><input type="checkbox" data-pcs-overlay="preamble"> 前导码</label>
       </fieldset>
     </div>
     <p id="lab-hint" class="lab-hint" hidden></p>
@@ -846,17 +847,17 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   <section class="pcs-frame-route" data-pcs-route="frame" aria-label="200G 帧边界处理顺序" hidden>
     <ol aria-label="发送顺序">
       <li class="pcs-frame-route-dir">TX</li>
-      <li><button type="button" class="btn" data-view="frameTx">1 · 前导码 / IPG</button></li>
+      <li data-pcs-route-item="preamble"><button type="button" class="btn" data-view="frameTx">1 · 前导码 / SFD</button></li>
       <li><button type="button" class="btn" data-view="b66">2 · 64B/66B 编码</button></li>
-      <li><button type="button" class="btn" data-view="idleTx">3 · 66b Idle 块增删</button></li>
+      <li data-pcs-route-item="ipg"><button type="button" class="btn" data-view="idleTx">3 · 66b Idle 块增删</button></li>
       <li><button type="button" class="btn" data-view="b257">4 · 256B/257B 转码</button></li>
     </ol>
     <ol aria-label="接收顺序">
       <li class="pcs-frame-route-dir">RX</li>
       <li><button type="button" class="btn" data-view="r257">1 · 257b 逆转码</button></li>
       <li><button type="button" class="btn" data-view="d66">2 · 64B/66B 解码</button></li>
-      <li><button type="button" class="btn" data-view="idleRx">3 · 还原 / 补偿 Idle</button></li>
-      <li><button type="button" class="btn" data-view="frameRx">4 · 去前导码 / 帧提取</button></li>
+      <li data-pcs-route-item="ipg"><button type="button" class="btn" data-view="idleRx">3 · 还原 / 补偿 Idle</button></li>
+      <li data-pcs-route-item="preamble"><button type="button" class="btn" data-view="frameRx">4 · 去前导码 / 帧提取</button></li>
     </ol>
     <p class="note">TX 先由 MAC / RS 在 200GMII 上产生 0x07 Idle，再编码成 66b 控制块。RX 在解码后还原 0x07 Idle，并按需补偿 AM 移除。图中将 PCS 速率匹配单列为教学步骤。</p>
   </section>
@@ -2094,11 +2095,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
   'use strict';
 
   // Sub-blocks drawn in the scene. lane: true spans the 8-lane stack.
-  P.sceneOverlays = { llr: false, cbfc: false, frame: false };
+  P.sceneOverlays = { llr: false, cbfc: false, ipg: false, preamble: false };
   P.showOverlay = function (group) {
     if (!group) return true;
     if (P.isFaultScene && P.isFaultScene()) return false;
     if (group === 'ue') return P.sceneOverlays.llr || P.sceneOverlays.cbfc;
+    if (group === 'frame') return P.sceneOverlays.ipg || P.sceneOverlays.preamble;
     return P.sceneOverlays[group];
   };
   P.BOXES = [
@@ -2123,10 +2125,10 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     { x: [102, 106], name: '逆转码', short: 'RX 1 · 逆转码', stage: 9, view: 'r257' },
     { x: [107, 111], name: '64B/66B 解码', short: 'RX 2 · 64B/66B', stage: 9, view: 'd66' },
     { x: [112, 116], name: 'RX 1588 · 200GMII', stage: 9, view: 'ptpRx' },
-    { x: [0, 5], name: 'TX 前导码 / IPG', short: 'TX 1 · 前导码', stage: 1, view: 'frameTx', overlay: 'frame' },
-    { x: [9.1, 10.4], name: 'TX Idle 调整', short: 'TX 3 · Idle', stage: 2, view: 'idleTx', overlay: 'frame' },
-    { x: [111.1, 113], name: 'RX Idle 调整', short: 'RX 3 · Idle', stage: 9, view: 'idleRx', overlay: 'frame' },
-    { x: [113.5, 117], name: 'RX 帧提取', short: 'RX 4 · 去前导码', stage: 9, view: 'frameRx', overlay: 'frame' },
+    { x: [0, 5], name: 'TX 前导码 / SFD', short: 'TX 1 · 前导码', stage: 1, view: 'frameTx', overlay: 'preamble' },
+    { x: [9.1, 10.4], name: 'TX Idle 调整', short: 'TX 3 · Idle', stage: 2, view: 'idleTx', overlay: 'ipg' },
+    { x: [111.1, 113], name: 'RX Idle 调整', short: 'RX 3 · Idle', stage: 9, view: 'idleRx', overlay: 'ipg' },
+    { x: [113.5, 117], name: 'RX 帧提取', short: 'RX 4 · 去前导码', stage: 9, view: 'frameRx', overlay: 'preamble' },
     { x: [4.5, 8.5], name: 'A · LLR', stage: 1, view: 'ueLlr', overlay: 'llr' },
     { x: [0, 4], name: 'A · CBFC', stage: 1, view: 'ueCbfc', overlay: 'cbfc' },
     { x: [7, 11], name: 'A · CtlOS', stage: 2, view: 'ueCtl', overlay: 'ue' },
@@ -2695,7 +2697,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
           // characters, their encoded TX block, and RX compensation separately.
           if (sl.idle) {
             var idle = sg.idle || (mii && sg.side === 'tx' ? 'character' : '');
-            if (!idle || rxDead) continue;
+            if (!idle || rxDead || !P.showOverlay('ipg')) continue;
             var encoded = idle === 'block';
             put(pos, 0, 0, U66 * 0.84, encoded ? 0.55 : 0.3, encoded ? 1.12 : 0.65,
               dim(c.copy(encoded ? G.col.am : sg.side === 'rx' ? G.col.lanes[1] : G.col.good), sel, 0.45),
@@ -2721,7 +2723,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
             var ax = pos2 - 1.5 * U257;
             if (ax < sg.x[0] || ax > sg.x[1]) continue;
             if (!sg.am) {
-              if (P.showOverlay('frame')) {
+              if (P.showOverlay('ipg')) {
                 put(ax, 0, 0, 4 * U257 - 0.08, 0.14, 0.68, dim(c.copy(G.col.rule), sel, 0.45),
                   { fam: 'amg', q: sl2.q, s: s, x: ax, state: 'idle-gap' });
               }
@@ -6065,13 +6067,16 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       document.querySelectorAll('[data-pcs-route]').forEach(function (section) {
         section.hidden = !P.showOverlay(section.dataset.pcsRoute);
       });
+      document.querySelectorAll('[data-pcs-route-item]').forEach(function (item) {
+        item.hidden = !P.showOverlay(item.dataset.pcsRouteItem);
+      });
       var fault = Boolean(P.isFaultScene && P.isFaultScene());
       vp.querySelector('.pcs-scene-options').hidden = fault;
       vp.querySelectorAll('[data-pcs-overlay]').forEach(function (choice) {
         choice.checked = P.showOverlay(choice.dataset.pcsOverlay);
         choice.disabled = fault;
       });
-      vp.querySelectorAll('.pcs-idle-key').forEach(function (key) { key.hidden = !P.showOverlay('frame'); });
+      vp.querySelectorAll('.pcs-idle-key').forEach(function (key) { key.hidden = !P.showOverlay('ipg'); });
       [['ueLlr', 'llr'], ['ueCbfc', 'cbfc']].forEach(function (entry) {
         document.querySelectorAll('button[data-view="' + entry[0] + '"], button[data-view="' + entry[0] + 'Rx"]').forEach(function (button) {
           button.hidden = !P.showOverlay(entry[1]);
