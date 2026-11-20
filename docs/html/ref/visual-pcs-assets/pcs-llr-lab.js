@@ -129,8 +129,8 @@
     'rx_expected_seq_good rx_expected_seq_poisoned rx_expected_seq_bad rx_missing_seq rx_duplicate_seq rx_replay'
   ).split(' ');
   const unavailableCounters = new Set([
-    'tx_poisoned', 'rx_ack_nack_seq_error', 'rx_poisoned', 'rx_bad', 'rx_expected_seq_poisoned',
-    'rx_expected_seq_bad', 'rx_duplicate_seq'
+    'tx_poisoned', 'rx_ack_nack_seq_error', 'rx_poisoned', 'rx_expected_seq_poisoned',
+    'rx_duplicate_seq'
   ]);
   const stats = get('register-stats');
   stats.innerHTML = '<table><caption>截至所选步骤的累计快照 · — 表示当前仿真未建模</caption>' +
@@ -200,8 +200,8 @@
     const timeline = [];
     const state = (title, time, note, tx, buffer = '空', counter = '') =>
       timeline.push([title, title, reverse, time + ' ns · ' + orient(note), 0, 0, 0, tx, '—', buffer, { sender, receiver, counter: orient(counter) }]);
-    const signalStep = (row, time, counter) =>
-      timeline.push([orient(row[0]), row[1], row[2] !== reverse, time + ' ns · ' + orient(row[3]), ...row.slice(4), { sender, receiver, wire: true, counter: orient(counter), lost: row === steps.replay[0] }]);
+    const signalStep = (row, time, counter, badFcs = false) =>
+      timeline.push([orient(row[0]), row[1], row[2] !== reverse, time + ' ns · ' + orient(row[3]), ...row.slice(4), { sender, receiver, wire: true, counter: orient(counter), lost: row === steps.replay[0], badFcs }]);
     const policy = mode => policyText[mode] + '（' + mode + '）。';
     const init = time => {
       state('进入 INIT', time, policy(config.llr_init_behavior), 'INIT', '空',
@@ -224,7 +224,7 @@
       return timeline;
     }
     const capacity = Math.min(config.outstanding_seq_max, Math.floor(config.outstanding_data_max / 512));
-    if (capacity < 2) {
+    if (capacity === 0 || (capacity < 2 && preset === 'nack')) {
       state('等待窗口可用', 0, capacity === 0 ? '窗口容不下一帧 512 B。' :
         '窗口只容得下一帧。帧 11 等待，无法用跳号触发 NACK。', 'ADVANCE',
         capacity === 0 ? '空' : '10');
@@ -238,16 +238,44 @@
         config.llr_flush_behavior === 'DISCARD' ? 'A tx_discard' : '');
       if (config.re_init_on_discard === 'TRUE') init(time + 1);
     };
+    const goodCounters = 'A tx_ok|B rx_ok|B rx_expected_seq_good';
+    const ackCounters = 'B tx_ack_ctl_os|A rx_ack_ctl_os';
+    const ack = (seq, note) => [
+      '累计 ACK 与释放', 'ACK · seq ' + seq, true, note,
+      1, seq, 0, 'ADVANCE', '期望 ' + (seq + 1), '空'
+    ];
+    if (preset === 'normal') {
+      const last = capacity > 1 && age > 21 ? 11 : 10;
+      signalStep(['正常发送帧 10', 'DATA · seq 10', false, 'B 收到期望的帧 10，FCS 校验通过，交付后期望帧 11。', 0, 10, 0, 'ADVANCE', '期望 11', '10'], 0, goodCounters);
+      if (last === 11) {
+        signalStep(['正常发送帧 11', 'DATA · seq 11', false, 'B 按序接收并交付帧 11。', 0, 11, 0, 'ADVANCE', '期望 12', '10、11'], 21, goodCounters);
+      }
+      if (feedback < age) {
+        signalStep(ack(last, 'B 确认已按序接收至帧 ' + last + '，A 释放已确认的重放缓冲。'), feedback, ackCounters);
+      } else {
+        flush(age, '累计 ACK 返回前，数据驻留定时器到期');
+      }
+      return timeline;
+    }
+    const badFcs = preset === 'bad-fcs';
+    const hasSecondFrame = capacity > 1 && age > 21;
     const pcsLost = preset === 'pcs';
     if (pcsLost) {
       state('PCS_status = FALSE', 0, '链路失锁，缓冲中仍有未确认帧。', 'ADVANCE', capacity === 1 ? '10' : '10、11');
     } else {
-      signalStep(steps.replay[0], 0, 'A tx_ok');
-      if (capacity > 1) signalStep(steps.replay[1], 21, 'A tx_ok|B rx_ok|B rx_missing_seq');
+      if (badFcs) {
+        signalStep(['帧 10 的 FCS 错误', 'DATA · seq 10 · Bad FCS', false,
+          'B 收到期望序号 10，但 FCS 校验失败，丢弃该帧并保持 next_rx_seq=10。',
+          0, 10, 0, 'ADVANCE', 'FCS 错误 · 期望 10', '10'],
+        0, 'A tx_ok|B rx_bad|B rx_expected_seq_bad', true);
+      } else {
+        signalStep(steps.replay[0], 0, 'A tx_ok');
+      }
+      if (hasSecondFrame) signalStep(steps.replay[1], 21, 'A tx_ok|B rx_ok|B rx_missing_seq');
     }
     const deadline = pcsLost ? Math.min(age, config.pcs_lost_status_timer_max) : age;
-    const canNack = !pcsLost && preset === 'nack' && capacity > 1;
-    const firstOpportunity = !pcsLost && capacity > 1 ? 21 : 0;
+    const canNack = !pcsLost && (badFcs || (preset === 'nack' && capacity > 1));
+    const firstOpportunity = !pcsLost && hasSecondFrame ? 21 : 0;
     let time = Math.max(firstOpportunity, canNack ? Math.min(wait, feedback) : wait);
     for (let attempt = 0; attempt < 3; attempt++) {
       if (time >= deadline) {
@@ -266,9 +294,9 @@
           (capacity === 1 ? '|A tx_replay' : ''));
         if (capacity > 1 && time + 21 < deadline) signalStep(steps.replay[4], time + 21, 'A tx_ok|A tx_replay|B rx_ok|B rx_expected_seq_good');
       }
-      if (!pcsLost && preset === 'nack' && time + feedback < age) {
+      if (!pcsLost && (preset === 'nack' || badFcs) && time + feedback < age) {
         if (capacity > 1) signalStep(steps.replay[5], time + feedback, 'B tx_ack_ctl_os|A rx_ack_ctl_os');
-        else state('收到累计 ACK(10)', time + feedback, '释放帧 10，发送窗口重新可用。', 'ADVANCE', '空', 'A rx_ack_ctl_os');
+        else signalStep(ack(10, '收到累计 ACK(10)，释放帧 10。'), time + feedback, ackCounters);
         return timeline;
       }
       time += Math.max(wait, 42);
@@ -508,6 +536,7 @@
       format = stages[stage][0] + ' · ' + preview;
     }
     if (isLostStep() && Math.abs(signal.position.x) < .01) format = '帧在链路中丢失';
+    if (current()[10]?.badFcs && travel >= 1) format = '接收处理 · FCS 错误，丢弃';
     const title = get('packet-name');
     const detail = get('packet-format');
     if (title.textContent !== name) title.textContent = name;
@@ -571,7 +600,7 @@
     return [start + ' …', block, '4 × 66b → 257b', '514 + 30 符号',
       lost ? '帧在此丢失' : '线路信号',
       ...(lost ? ['未收到', '—', '—', '—']
-        : ['恢复 514 符号', block, start + ' …', sequenceField(type) + '=' + sequenceHex(seq)])];
+        : ['恢复 514 符号', block, start + ' …', current()[10]?.badFcs ? 'FCS 错误 · 丢弃' : sequenceField(type) + '=' + sequenceHex(seq)])];
   }
   const byteView = bytes => '<div class="pcs-rx-bytes">' + bytes.map((value, i) =>
     '<span>' + hex(value) + '<small>Lane ' + i + ' · C=' + Number(i === 0) + '</small></span>').join('') + '</div>';
