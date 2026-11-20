@@ -7,6 +7,9 @@
   const play = controls.querySelector('[data-signal-play]');
   const stages = controls.querySelector('[data-signal-steps]');
   const bytesPanel = controls.querySelector('[data-signal-bytes]');
+  const bypass = controls.querySelector('[data-fault-bypass]');
+  const fecBypass = bypass.querySelector('[data-bypass-fec]');
+  const scrambleBypass = bypass.querySelector('[data-bypass-scramble]');
   const formatDialog = document.getElementById('pcs-fault-format');
   const formatHeading = document.getElementById('pcs-fault-format-title');
   const formatBody = document.getElementById('pcs-fault-format-body');
@@ -138,30 +141,39 @@
     const type = idle ? 0x1e : 0x4b;
     const payload = [type, 0, 0, idle ? 0 : 2, 0, 0, 0, 0].flatMap(value => bitArray(value, 8));
     const xcoded = [0, 0, 0, 0, 0].concat(payload.slice(0, 4), payload.slice(8), payload, payload, payload);
-    const scrambled = window.PCS800Model.scramble(Array.from({length: 36}, () => xcoded).flat(), 0);
+    const data = Array.from({length: 36}, () => xcoded).flat();
+    const scrambled = scrambleBypass.checked ? data : window.PCS800Model.scramble(data, 0);
     const am = Array.from({length: P.AM_BITS}, (_, i) => P.pairBit(0, i).v);
     const stream = am.concat(scrambled);
     const messages = [0, 1].map(w => Array.from({length: 514}, (_, i) =>
       stream.slice(20 * i + 10 * w, 20 * i + 10 * w + 10).reduce((v, bit, k) => v | (bit << k), 0)));
-    const words = messages.map(message => message.concat(P.rsParity(message)));
+    const words = fecBypass.checked ? messages : messages.map(message => message.concat(P.rsParity(message)));
     return { type, payload, xcoded, scrambled, am, messages, words };
   }
 
   function formatMarkup(key) {
-    const [, kind, note] = formats[key];
+    const [, kind, description] = formats[key];
+    let note = description;
     const f = formatSample;
     const bitText = bits => bits.join('').match(/.{1,8}/g).join(' ');
     const wordText = values => values.map(n => n.toString(16).toUpperCase().padStart(3, '0')).join(' ');
+    const rsStage = ['rs', 'deint', 'rsdec'].includes(key);
+    const scrambleStage = key === 'scr' || key === 'descr';
+    if (fecBypass.checked && rsStage) note = 'FEC Bypass：A/B 各保留 514 个消息符号，跳过 RS 校验生成和纠错。';
+    if (scrambleBypass.checked && scrambleStage) note = '加解扰 Bypass：输入和输出的 257b 位串相同。';
+    const dataLabel = scrambleBypass.checked ? '未加扰块' : '加扰块';
     let value;
     if (kind === '66b') value = '10 | ' + bitText(f.payload);
     else if (kind === '257b') value = bitText(f.xcoded);
     else if (kind === '加扰 257b') value = bitText(f.scrambled.slice(0, 257));
     else if (kind === 'AM + 加扰块') value = 'AM[0…39] ' + bitText(f.am.slice(0, 40)) +
-      ' | 加扰块[0…63] ' + bitText(f.scrambled.slice(0, 64));
+      ' | ' + dataLabel + '[0…63] ' + bitText(f.scrambled.slice(0, 64));
     else if (kind.endsWith('消息') || kind.endsWith('码字')) {
       const words = kind.endsWith('消息') ? f.messages : f.words;
-      value = words.map((word, i) => ['A', 'B'][i] + '[0…7] ' + wordText(word.slice(0, 8)) +
-        (kind.endsWith('码字') ? ' | 校验[0…3] ' + wordText(word.slice(514, 518)) : '')).join('\n');
+      value = words.map((word, i) => ['A', 'B'][i] + ' · ' + word.length + ' 个符号' +
+        ' | AM[0…3] ' + wordText(word.slice(0, 4)) +
+        ' | 数据[52…55] ' + wordText(word.slice(52, 56)) +
+        (word.length > 514 ? ' | 校验[0…3] ' + wordText(word.slice(514, 518)) : '')).join('\n');
     } else if (kind === 'PCS lane' || kind === '物理位流') {
       const lanes = kind === 'PCS lane' ? [0] : P.lanesOnSerdes(P.state.link, 0);
       const ids = lanes.map(lane => typeof lane === 'number' ? lane : lane.pcs);
@@ -178,7 +190,8 @@
       title: f.type === 0x1e ? 'Idle · 200GMII 解码格式（参考）' : 'A · RX PCS → RS（Remote Fault）',
       note: note + ' 以下显示 PCS 交付给 RS 的逻辑接口格式。'
     });
-    return '<p>' + note + '</p><p class="note">位串按发送顺序，10 位符号值以十六进制显示。</p>' +
+    return '<p>' + note + '</p><p class="note">FEC：' + (fecBypass.checked ? 'Bypass' : '启用') +
+      ' · 加解扰：' + (scrambleBypass.checked ? 'Bypass' : '启用') + '</p><p class="note">位串按发送顺序，10 位符号值以十六进制显示。</p>' +
       '<pre class="pcs-fault-bits">' + value + '</pre>';
   }
 
@@ -199,7 +212,9 @@
       if (!formats[key] || (index === 4 && box.mesh.position.x > P.sceneX(57))) return;
       const kind = formats[key][1];
       const wide = kind.includes('257') || kind.includes('AM');
-      const color = kind.includes('A / B') ? G.col.cwA : kind === 'PCS lane' ? G.col.lanes[1] : G.col.am;
+      const bypassed = (fecBypass.checked && ['rs', 'rsdec'].includes(key)) ||
+        (scrambleBypass.checked && ['scr', 'descr'].includes(key));
+      const color = bypassed ? G.col.muted : kind.includes('A / B') ? G.col.cwA : kind === 'PCS lane' ? G.col.lanes[1] : G.col.am;
       const marker = new T.Mesh(new T.BoxGeometry(wide ? 1.85 : 1.2, 0.64, 0.85),
         new T.MeshBasicMaterial({ color }));
       marker.position.copy(box.mesh.position);
@@ -269,7 +284,7 @@
     viewport.classList.toggle('pcs-fault-scene', mode === 'fault');
     viewport.closest('#lab-200g').classList.toggle('pcs-signal-mode', mode === 'eee');
     labels.hidden = controls.hidden = mode === 'data';
-    bytesPanel.hidden = mode !== 'fault';
+    bytesPanel.hidden = bypass.hidden = mode !== 'fault';
     labels.classList.toggle('is-projected', mode === 'eee' && Boolean(scene));
     if (P.g.inst) P.g.inst.visible = mode !== 'fault';
     if (faultToken) faultToken.visible = mode === 'fault';
@@ -330,6 +345,12 @@
     select((index + 1) % scenarios[mode].steps.length);
   };
   controls.querySelector('[data-signal-reset]').onclick = () => { playing = false; select(0); };
+
+  fecBypass.onchange = scrambleBypass.onchange = () => {
+    playing = false;
+    renderStep();
+    syncFormatMarkers();
+  };
 
   P.isFaultScene = () => mode === 'fault';
   const ray = new T.Raycaster(), pointer = new T.Vector2();
