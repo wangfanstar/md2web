@@ -29,7 +29,7 @@
       ['累计 ACK 与释放', 'ACK · seq 11', true, 'A 完成重放即返回 ADVANCE。B 返回累计 ACK(11)，A 收到后释放已确认帧 10 和 11 的副本。', 1, 11, 0, 'ADVANCE', '期望 12', '空']
     ]
   };
-  let index = 0, running = false, started = null, elapsed = 0, frame = 0;
+  let index = 0, running = false, lastFrameTime = null, elapsed = 0, frame = 0;
   let renderer, scene, camera, signal;
   const modules = [];
   // Each row is a complete transmit → receive path, mirrored for B → A.
@@ -695,14 +695,16 @@
   function pause() {
     running = false;
     cancelAnimationFrame(frame);
-    started = null;
+    lastFrameTime = null;
     update();
   }
-  function select(i) { index = i; elapsed = 0; started = null; update(); }
+  function select(i) { index = i; elapsed = 0; lastFrameTime = null; update(); }
   function tick(now) {
     if (!running || panel.hidden) return;
-    if (started === null) started = now - elapsed;
-    elapsed = now - started;
+    if (lastFrameTime !== null) {
+      elapsed += (now - lastFrameTime) * Number(get('speed').value);
+    }
+    lastFrameTime = now;
     if (elapsed >= duration) {
       if (index + 1 === active().length) { pause(); return; }
       select(index + 1);
