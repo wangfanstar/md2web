@@ -64,8 +64,8 @@
   const duration = 1900, motion = matchMedia('(prefers-reduced-motion: reduce)');
   const hex = n => n.toString(16).toUpperCase().padStart(2, '0');
   const registerFields = [
-    ['llr_mode_remote', 'A 发起 INIT', ['ON', 'OFF']],
-    ['llr_mode_local', 'B 接收 INIT', ['ON', 'OFF']],
+    ['llr_mode_remote', 'TX 发起 INIT 许可', ['ON', 'OFF']],
+    ['llr_mode_local', 'RX 接收 INIT 许可', ['ON', 'OFF']],
     ['outstanding_seq_max', '未确认序号跨度', 2, 0, 524288],
     ['outstanding_data_max', '未确认数据量（B）', 2048, 0, 4294967295],
     ['replay_timer_max', '重放超时（ns）', 800, 0, 65535],
@@ -75,10 +75,13 @@
     ['llr_init_behavior', 'INIT 期间上层来帧', ['BEST_EFFORT', 'BLOCK', 'DISCARD']],
     ['llr_flush_behavior', 'FLUSH 期间上层来帧', ['DISCARD', 'BLOCK', 'BEST_EFFORT']],
     ['re_init_on_discard', '清空后重新初始化', ['TRUE', 'FALSE']],
-    ['ctlos_target_spacing', 'CtlOS 目标间隔（B）', 2048, 400, 16384]
+    ['ctlos_target_spacing', 'CtlOS 目标间隔（B）', 2048, 400, 16384],
+    ['preamble_CRC_mode', '前导码 CRC4（扩展）', ['OFF', 'ON']],
+    ['CtlOS_CRC_mode', 'CtlOS CRC4（扩展）', ['OFF', 'ON']],
+    ['NACK_enhancement', '增强 NACK（扩展）', ['OFF', 'ON']]
   ];
   const form = get('register-form');
-  const controls = registerFields.map(([name, caption, values, min, max]) => {
+  const controls = Object.fromEntries(['A', 'B'].map(endpoint => [endpoint, registerFields.map(([name, caption, values, min, max]) => {
     const label = document.createElement('label');
     const title = document.createElement('code');
     title.textContent = name;
@@ -90,22 +93,44 @@
     }
     input.name = name;
     label.append(title, document.createTextNode(caption), input);
-    get('register-fields').append(label);
+    get('register-' + endpoint.toLowerCase()).append(label);
     return input;
-  });
+  })]));
+  const counterNames = (
+    'tx_init_ctl_os tx_init_echo_ctl_os tx_ack_ctl_os tx_nack_ctl_os tx_discard tx_ok tx_poisoned tx_replay ' +
+    'rx_init_ctl_os rx_init_echo_ctl_os rx_ack_ctl_os rx_nack_ctl_os rx_ack_nack_seq_error rx_ok rx_poisoned rx_bad ' +
+    'rx_expected_seq_good rx_expected_seq_poisoned rx_expected_seq_bad rx_missing_seq rx_duplicate_seq rx_replay'
+  ).split(' ');
+  const unavailableCounters = new Set([
+    'tx_poisoned', 'rx_ack_nack_seq_error', 'rx_poisoned', 'rx_bad', 'rx_expected_seq_poisoned',
+    'rx_expected_seq_bad', 'rx_duplicate_seq'
+  ]);
+  const stats = get('register-stats');
+  stats.innerHTML = '<table><caption>截至所选步骤的累计快照 · — 表示当前仿真未建模</caption>' +
+    '<thead><tr><th scope="col">统计寄存器</th><th scope="col">A 端</th><th scope="col">B 端</th></tr></thead><tbody>' +
+    counterNames.map(name => '<tr><th scope="row"><code>' + name + '</code></th><td>—</td><td>—</td></tr>').join('') +
+    '</tbody></table>';
+  const statsRows = Array.from(stats.querySelectorAll('tbody tr'));
   const policyText = {
     BLOCK: '阻塞上层来帧', DISCARD: '丢弃上层来帧', BEST_EFFORT: '以普通非 LLR 帧发送'
   };
 
   function simulate() {
-    const config = Object.fromEntries(controls.map(input =>
+    const sender = get('register-direction').value;
+    const receiver = sender === 'A' ? 'B' : 'A';
+    const settings = endpoint => Object.fromEntries(controls[endpoint].map(input =>
       [input.name, input.type === 'number' ? input.valueAsNumber : input.value]));
+    const tx = settings(sender);
+    const rx = settings(receiver);
+    const config = { ...tx, llr_mode_local: rx.llr_mode_local, ctlos_target_spacing: rx.ctlos_target_spacing };
+    const reverse = sender === 'B';
+    const orient = text => reverse ? text.replace(/\b[AB]\b/g, letter => letter === 'A' ? 'B' : 'A') : text;
     const preset = get('preset').value;
     const timeline = [];
     const state = (title, time, note, tx, buffer = '空', counter = '') =>
-      timeline.push([title, title, false, time + ' ns · ' + note, 0, 0, 0, tx, '—', buffer, { counter }]);
+      timeline.push([title, title, reverse, time + ' ns · ' + orient(note), 0, 0, 0, tx, '—', buffer, { sender, receiver, counter: orient(counter) }]);
     const signalStep = (row, time, counter) =>
-      timeline.push([...row.slice(0, 3), time + ' ns · ' + row[3], ...row.slice(4), { wire: true, counter, lost: row === steps.replay[0] }]);
+      timeline.push([orient(row[0]), row[1], row[2] !== reverse, time + ' ns · ' + orient(row[3]), ...row.slice(4), { sender, receiver, wire: true, counter: orient(counter), lost: row === steps.replay[0] }]);
     const policy = mode => policyText[mode] + '（' + mode + '）。';
     const init = time => {
       state('进入 INIT', time, policy(config.llr_init_behavior), 'INIT', '空',
@@ -166,8 +191,9 @@
       if (nack) signalStep(steps.replay[2], time, 'B tx_nack_ctl_os|A rx_nack_ctl_os');
       else state('重放定时器到期', time, '未及时收到反馈，启动重放。', 'REPLAY', capacity === 1 ? '10' : '10、11');
       if (!pcsLost) {
-        signalStep(steps.replay[3], time, capacity === 1 ? 'A tx_replay' : '');
-        if (capacity > 1 && time + 21 < deadline) signalStep(steps.replay[4], time + 21, 'A tx_replay');
+        signalStep(steps.replay[3], time, 'A tx_ok|B rx_ok|B rx_expected_seq_good|B rx_replay' +
+          (capacity === 1 ? '|A tx_replay' : ''));
+        if (capacity > 1 && time + 21 < deadline) signalStep(steps.replay[4], time + 21, 'A tx_ok|A tx_replay|B rx_ok|B rx_expected_seq_good');
       }
       if (!pcsLost && preset === 'nack' && time + feedback < age) {
         if (capacity > 1) signalStep(steps.replay[5], time + feedback, 'B tx_ack_ctl_os|A rx_ack_ctl_os');
@@ -187,7 +213,10 @@
     event.preventDefault();
     steps.registers = simulate();
     get('scenario').value = 'registers';
-    get('register-status').textContent = '已应用参数 · ' + steps.registers.length + ' 个事件';
+    get('register-status').textContent = '已应用参数 · ' + (get('register-direction').value === 'A' ? 'A → B' : 'B → A') +
+      ' · ' + ['A', 'B'].map(endpoint => endpoint + ' 扩展开关 ' +
+        controls[endpoint].slice(-3).map(input => input.name + '=' + input.value).join(' / ')).join(' ｜ ') +
+      ' · ' + steps.registers.length + ' 个事件';
     reset();
   };
   form.onreset = () => {
@@ -335,7 +364,7 @@
     signal.visible = !simulation || Boolean(simulation.wire);
     signal.position.set((reverse ? 1 : -1) * extent * (1 - 2 * progress), reverse ? -10 : 10, 1.8);
     if (isLostStep()) {
-      signal.position.x = Math.min(0, signal.position.x);
+      signal.position.x = reverse ? Math.max(0, signal.position.x) : Math.min(0, signal.position.x);
       signal.material.color.setHex(0xd65a51);
     } else signal.material.color.setHex(reverse ? 0xe2a41f : 0x22a579);
     const mainOnly = get('main-only').checked;
@@ -478,15 +507,21 @@
       if (!row[10].counter) return;
       row[10].counter.split('|').forEach(name => counts.set(name, (counts.get(name) || 0) + 1));
     });
-    get('register-stats').textContent = simulation ? '截至当前步的计数快照 · ' +
-      (Array.from(counts, ([name, value]) => name + ' = ' + value).join(' ｜ ') || '0') : '';
+    statsRows.forEach((row, i) => {
+      const name = counterNames[i];
+      ['A', 'B'].forEach((endpoint, column) => {
+        row.cells[column + 1].textContent = simulation && !unavailableCounters.has(name)
+          ? counts.get(endpoint + ' ' + name) || 0 : '—';
+      });
+    });
     get('format').textContent = signalName + ' · 查看格式';
     get('detail').innerHTML = '<strong>' + signalName + ' · ' + (reverse ? 'B → A' : 'A → B') + '</strong><p>' + note + '</p>' +
       (negotiating() ? '<p>A · ' + tx + ' ｜ B · ' + rx + '</p><p>' + buffer + '</p>' +
         '<p class="note">本图按 TLV 版本 0 展示。W=3 表示双向意愿，1 和 2 保留。UE 1.1 的 TLV 版本 1 使用两位 E，双向启用为 3，与版本 0 的 E=1 互通。</p>' +
         (get('scenario').value === 'negotiation' && index === active().length - 1
           ? '<button type="button" class="btn" data-llr-init>进入 LLR 初始化</button>' : '')
-      : '<p>A · TX ' + tx + ' ｜ B · RX ' + rx + ' ｜ A · 重放缓冲 ' + buffer + '</p>' +
+      : '<p>' + (simulation?.sender || 'A') + ' · TX ' + tx + ' ｜ ' +
+        (simulation?.receiver || 'B') + ' · RX ' + rx + ' ｜ ' + (simulation?.sender || 'A') + ' · 重放缓冲 ' + buffer + '</p>' +
       (type ? '<div class="pcs-rx-bytes">' + bytes.map((b, i) => '<span>' + hex(b) + '<small>D' + i + '</small></span>').join('') +
         '</div><p class="note">xMII：Lane 0 为控制字符 0x5C，D1 为消息类型。PCS：同步头 10，块类型 0x4B，O-code 0x6。</p>'
         : simulation && !simulation.wire ? '' : '<p class="note">LLR-eligible 数据帧的 20 位 frame_seq 位于修改后的前导码。此步序号为 ' + seq + '。</p>'));

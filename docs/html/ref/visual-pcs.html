@@ -1112,7 +1112,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <button class="btn" type="button" id="llr-smaller" aria-label="缩小">−</button><output id="llr-scale">100%</output>
       <button class="btn" type="button" id="llr-larger" aria-label="放大">＋</button>
       <button class="btn" type="button" id="llr-fit">适应全图</button>
-      <label class="check"><input type="checkbox" id="llr-main-only"> 只看主要收发流程</label>
+      <label class="check"><input type="checkbox" id="llr-main-only" checked> 只看主要收发流程</label>
       <button type="button" class="btn" id="llr-format">查看当前数据格式</button>
       <span class="g800-help">按住左键拖动平移 · 滚轮以鼠标位置为中心缩放 · 点击模块查看数据格式</span>
     </div>
@@ -1120,13 +1120,17 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <summary>LLR 寄存器仿真 · 参数与统计</summary>
       <form id="llr-register-form">
         <label>实验预设<select id="llr-preset"><option value="nack">丢帧后收到 NACK</option><option value="timeout">反馈持续丢失</option><option value="pcs">PCS 持续失锁</option><option value="init">初始化与上层来帧</option></select></label>
-        <div id="llr-register-fields"></div>
+        <label>仿真方向 <select id="llr-register-direction"><option value="A">A → B</option><option value="B">B → A</option></select></label>
+        <div id="llr-register-fields">
+          <fieldset id="llr-register-a"><legend>A 端 · 蓝色</legend></fieldset>
+          <fieldset id="llr-register-b"><legend>B 端 · 橙色</legend></fieldset>
+        </div>
         <button class="btn" type="submit">应用并查看仿真</button>
         <button class="btn" type="reset">恢复参数默认值</button>
       </form>
-      <p class="note">以 A → B 为观察方向。模式字段代表 A 的 TX 许可和 B 的 RX 许可。仿真使用两帧各 512 B，CtlOS 等待按 200 Gb/s 的目标间隔估算，动画按事件步进。CRC4 与增强 NACK 取决于扩展规范。</p>
+      <p class="note">发送端使用本端 TX 模式、窗口和定时器，接收端使用本端 RX 模式和 CtlOS 间隔。仿真使用两帧各 512 B，CtlOS 等待按 200 Gb/s 的目标间隔估算，动画按事件步进。CRC4 和增强 NACK 支持独立配置与显示，扩展位和重复发送波形当前采用基础格式。</p>
       <output id="llr-register-status" aria-live="polite"></output>
-      <div id="llr-register-stats" class="fine"></div>
+      <details><summary>查看 A / B 统计寄存器</summary><div id="llr-register-stats" class="fine"></div></details>
     </details>
     <div id="llr-scene" class="g800-stage llr-scene" aria-label="LLR 双向收发 3D 通路">
       <div class="llr-labels">

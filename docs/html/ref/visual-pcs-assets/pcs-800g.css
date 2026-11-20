@@ -333,6 +333,11 @@
 .llr-registers { border: 1px solid var(--rule); padding: .65rem; margin-block: .6rem; border-radius: .4rem; }
 .llr-registers summary { cursor: pointer; font-weight: 600; }
 .llr-registers form { margin-block: .65rem; }
-#llr-register-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: .5rem; margin-block: .65rem; }
+#llr-register-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr)); gap: .5rem; margin-block: .65rem; }
 #llr-register-fields label { display: grid; gap: .2rem; padding: .4rem; background: var(--panel); border: 1px solid var(--rule); font-size: .85rem; }
 #llr-register-fields input, #llr-register-fields select { width: 100%; }
+
+#llr-register-fields fieldset { min-width: 0; display: grid; gap: .35rem; border: 1px solid var(--rule); }
+#llr-register-a { border-top: 3px solid #357fc8 !important; }
+#llr-register-b { border-top: 3px solid #b46529 !important; }
+#llr-register-stats { overflow-x: auto; }
