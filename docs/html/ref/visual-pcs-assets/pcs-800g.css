@@ -303,3 +303,9 @@
 .pcs-eee-compare-card span { border: 0; background: none; padding: 0; }
 .pcs-eee-compare-card small { color: var(--muted); }
 .pcs-eee-compare-card.is-changed { border-color: var(--good); box-shadow: inset 0 -2px var(--good); }
+
+.llr-scene { height: clamp(220px, 34vh, 390px); }
+.llr-scene canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.llr-labels { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-evenly; z-index: 1; pointer-events: none; }
+.llr-labels > div { display: grid; grid-template-columns: 1fr 2fr 1fr; text-align: center; align-items: center; }
+.llr-labels b { justify-self: center; padding: .18rem .35rem; background: var(--panel); border: 1px solid var(--rule); border-radius: .25rem; font-size: clamp(.65rem, 1.2vw, .9rem); transform: translateY(-1.2em); }

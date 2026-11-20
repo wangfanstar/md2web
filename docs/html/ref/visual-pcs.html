@@ -700,6 +700,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <button type="button" class="btn" role="tab" id="tab-200g" aria-selected="true" aria-controls="lab-200g">200GBASE-R</button>
     <button type="button" class="btn" role="tab" id="tab-800g" aria-selected="false" aria-controls="lab-800g" tabindex="-1">800GBASE-R</button>
     <button type="button" class="btn" role="tab" id="tab-1600g" aria-selected="false" aria-controls="lab-1600g" tabindex="-1">1.6TBASE-R</button>
+    <button type="button" class="btn" role="tab" id="tab-llr" aria-selected="false" aria-controls="lab-llr" tabindex="-1">LLR</button>
   </div>
   <div role="tabpanel" id="lab-200g" aria-labelledby="tab-200g" tabindex="0">
   <div class="lab-head">
@@ -1098,6 +1099,24 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <h3 id="g1600-popup-title"></h3><p id="g1600-popup-note"></p><div id="g1600-popup-data" class="g800-inspect-body"></div>
     </dialog>
     <p class="fine">依据 IEEE P802.3dj/D2.0（未批准草案）第 175 条和第 176 条。16:8 SM-PMA 按 40 位符号四元组复用。AM 采用表 175–2 的标记和图 175–4 的映射，示例展示一个带 AM 的组。CDR、锁定时序及波形采用教学示意。</p>
+  </section>
+  <section role="tabpanel" id="lab-llr" aria-labelledby="tab-llr" hidden tabindex="0">
+    <div class="g800-controls">
+      <label for="llr-scenario">场景</label>
+      <select id="llr-scenario"><option value="init">LLR 初始化</option><option value="replay">丢包与重放</option></select>
+      <button type="button" class="btn" id="llr-play">播放</button>
+      <button type="button" class="btn" id="llr-next">下一步</button>
+      <button type="button" class="btn" id="llr-reset">重置</button>
+    </div>
+    <div id="llr-scene" class="g800-stage llr-scene" aria-label="LLR 双向收发 3D 通路">
+      <div class="llr-labels">
+        <div><b>A · TX LLR</b><b>A → B · 正向通路</b><b>B · RX LLR</b></div>
+        <div><b>A · RX LLR</b><b>B → A · 反向通路</b><b>B · TX LLR</b></div>
+      </div>
+    </div>
+    <ol id="llr-steps" class="pcs-fault-steps" aria-label="LLR 处理步骤"></ol>
+    <div id="llr-detail" class="g800-detail" aria-live="polite"></div>
+    <p class="note">示例从双方已协商 LLR 开始，跟踪 A 的 TX LLR 到 B 的 RX LLR。B 的反向数据发送可独立初始化。依据 UE 1.1 §5.1.3、§5.1.5–5.1.9、表 5–8。<a href="../../pdf/UE-Specification-1.1.pdf">本地规范</a></p>
   </section>
   <section class="panel pcs-link-fault" aria-labelledby="pcs-link-fault-title">
     <header><h3 id="pcs-link-fault-title">Local Fault / Remote Fault 产生流程</h3></header>
@@ -6361,6 +6380,7 @@ globalThis.PCS.openPtpPoint = function (xMII, tx) {
 </dialog>
 <script src="visual-pcs-assets/pcs-ue-demo.js"></script>
 <script src="visual-pcs-assets/pcs-signal-scene.js"></script>
+<script src="visual-pcs-assets/pcs-llr-lab.js"></script>
 <dialog class="opview" id="pcs-frame-boundary" aria-labelledby="pcs-frame-boundary-title">
   <div class="opv-inner">
     <header class="opv-head">
