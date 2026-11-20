@@ -729,22 +729,34 @@
   get('counter-scope').onchange = () => renderCounters(current()[10]);
   get('counter-search').oninput = () => renderCounters(current()[10]);
 
-  function updateStateOverlays(tx, rx, simulation) {
+  function updateStateOverlays(tx, simulation) {
     const sender = simulation?.sender || 'A';
     const receiver = simulation?.receiver || 'B';
+    const scenario = get('scenario').value;
     const isNegotiation = negotiating();
+    const txStates = { '等待回显': 'INIT', '收到 NACK': 'ADVANCE' };
+    const history = active().slice(0, index + 1);
+    const startsWithInit = scenario === 'init' || history[0][7] === 'INIT';
+    let rxState = startsWithInit ? 'OFF' : 'SEND_ACKS';
+    if (tx === 'LLR_OFF') rxState = '—';
+    for (const step of history) {
+      const type = step[4];
+      if (type === 4 || type === 1) rxState = 'SEND_ACKS';
+      else if (type === 2) rxState = 'NACK_SENT';
+      else if ((step[8] === '期望 10' && step[5] === 11) || step[10]?.badFcs) rxState = 'SEND_NACK';
+      else if (step[7] === 'REPLAY' && (!step[10] || step[10].wire)) rxState = 'SEND_ACKS';
+    }
     for (const endpoint of ['A', 'B']) {
       const prefix = 'state-' + endpoint.toLowerCase();
-      const local = isNegotiation ? (endpoint === 'A' ? tx : rx) : '';
       const states = {
-        tx: isNegotiation ? local : endpoint === sender ? tx : '',
-        rx: !isNegotiation && endpoint === receiver ? rx : ''
+        tx: isNegotiation ? 'LLR_OFF' : endpoint === sender ? txStates[tx] || tx : '—',
+        rx: isNegotiation ? 'OFF' : endpoint === receiver ? rxState : '—'
       };
       for (const [path, state] of Object.entries(states)) {
         const cell = get(prefix + '-' + path);
-        cell.textContent = state && state !== '—' ? state : '—';
-        cell.title = cell.textContent === '—' ? '本步无此方向的状态记录' : '';
-        cell.closest('span').classList.toggle('is-current', Boolean(state && state !== '—'));
+        cell.textContent = state;
+        cell.removeAttribute('title');
+        cell.closest('span').classList.toggle('is-current', state !== '—');
       }
     }
   }
@@ -755,7 +767,7 @@
     const simulation = current()[10];
     get('format').disabled = Boolean(simulation && !simulation.wire);
     renderCounters(simulation);
-    updateStateOverlays(tx, rx, simulation);
+    updateStateOverlays(tx, simulation);
     get('event').textContent = (index + 1) + ' / ' + active().length + ' · ' + (simulation ? note.split(' · ')[0] + ' · ' : '') + title;
     get('prev').disabled = index === 0;
     get('next').disabled = index === active().length - 1;
