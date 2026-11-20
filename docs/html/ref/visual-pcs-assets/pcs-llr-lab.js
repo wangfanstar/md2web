@@ -59,6 +59,14 @@
     main: [0, 2, 4, 7, 10, 13, 16, 17, 19],
     endpoint: [0, 19]
   };
+  const wireFormats = [
+    '发送 xMII 字节', '发送 xMII 字节', '66b 块', '66b 块',
+    '257b 转码块', '加扰后的 257b 块', '含 AM 的块流', 'RS(544,514) 码字',
+    'PCS lane 码流', 'PMA 物理通道比特', '物理线路信号', '解复用后的 PCS lane',
+    '对齐后的 PCS lane', 'FEC 校验后的消息符号', '移除 AM 后的块流',
+    '解扰后的 257b 块', '恢复后的 66b 块', '接收 xMII 字节',
+    '接收 xMII 字节', 'LLR 接收处理'
+  ];
   const spacing = 5.6;
   const extent = (stages.length - 1) * spacing / 2;
   const endpointColors = { a: 0x357fc8, b: 0xb46529, link: 0x62748c };
@@ -451,7 +459,7 @@
     } else signal.material.color.setHex(reverse ? 0xe2a41f : 0x22a579);
     const viewMode = get('view-mode').value;
     const selection = visibleStages[viewMode];
-    const summaries = selection ? stageSummaries() : null;
+    const summaries = stageSummaries();
     modules.forEach(({ mesh, label, summary }) => {
       const { stage, x } = mesh.userData;
       const slot = selection ? selection.indexOf(stage) : stage;
@@ -469,7 +477,7 @@
       label.style.left = (p.x * 50 + 50) + '%';
       label.classList.toggle('llr-hop-below', slot % 2 === 1);
       const summaryIndex = visibleStages.main.indexOf(stage);
-      summary.textContent = summaries && enabled && signal.visible ? summaries[summaryIndex] : '';
+      summary.textContent = selection && enabled && signal.visible ? summaries[summaryIndex] : '';
       label.style.top = (50 - p.y * 50) + '%';
     });
     get('scene').querySelectorAll('.llr-labels b').forEach((label, i) => {
@@ -477,8 +485,36 @@
       label.style.left = (50 + 50 * point.x) + '%';
       label.style.top = (50 - 50 * point.y) + '%';
     });
+    updatePacketCallout(viewMode, selection, summaries);
     renderer.render(scene, camera);
 
+  }
+
+  function updatePacketCallout(viewMode, selection, summaries) {
+    const callout = get('packet-callout');
+    const point = signal.position.clone().project(camera);
+    callout.hidden = !signal.visible || Math.abs(point.x) > 1 || Math.abs(point.y) > 1;
+    if (callout.hidden) return;
+    const [, name, reverse] = current();
+    const travel = (1 + signal.position.x / extent * (reverse ? -1 : 1)) / 2;
+    const slot = Math.min((selection || stages).length - 1,
+      Math.floor(travel * ((selection || stages).length - 1) + 1e-6));
+    const stage = selection ? selection[slot] : slot;
+    const preview = summaries[visibleStages.main.indexOf(stage)];
+    let format = stages[stage][0] + ' · ' + wireFormats[stage];
+    if (viewMode === 'endpoint') {
+      format = travel >= 1 ? '接收处理 · ' + summaries.at(-1) : '发送 LLR 数据 · ' + summaries[0];
+    } else if (preview) {
+      format = stages[stage][0] + ' · ' + preview;
+    }
+    if (isLostStep() && Math.abs(signal.position.x) < .01) format = '帧在链路中丢失';
+    const title = get('packet-name');
+    const detail = get('packet-format');
+    if (title.textContent !== name) title.textContent = name;
+    if (detail.textContent !== format) detail.textContent = format;
+    callout.style.setProperty('--llr-packet-x', (50 + 50 * point.x) + '%');
+    callout.style.top = (50 - 50 * point.y) + '%';
+    callout.classList.toggle('llr-packet-below', point.y > .62);
   }
 
   const bits = (value, width = 8) => Array.from({ length: width }, (_, i) => (value >> i) & 1).join('');
