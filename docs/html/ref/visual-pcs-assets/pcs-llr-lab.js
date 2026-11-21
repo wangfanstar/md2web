@@ -554,20 +554,48 @@
     return timeline;
   }
 
-  const runCases = () => {
+  const caseGroups = [
+    ['D', '常用收发与故障'],
+    ['N', 'LLDP 协商'],
+    ['I', '初始化与回显'],
+    ['R', '确认与重放'],
+    ['F', 'INIT / FLUSH 处理策略'],
+    ['B01 B02 B03', '序号与窗口判定'],
+    ['B04', '缓冲与发送准入'],
+    ['B05 B06 B07', '定时器与重放上限'],
+    ['B08', 'CtlOS 插入与仲裁'],
+    ['B09', 'CBFC 信用'],
+    ['B10', '双向收发与复位'],
+    ['组合回归', '组合回归']
+  ];
+  function caseMatches(result, prefixes) {
+    const code = result.name.split(' ')[0];
+    return prefixes.split(' ').some(prefix =>
+      prefix.length === 1 ? code.startsWith(prefix) : code === prefix);
+  }
+  const runCases = (play = true) => {
     const list = get('case-list');
+    const category = get('case-category');
     const selectedName = list.value;
     const results = window.LLRVerification.run(simulate);
-    list.replaceChildren();
-    for (const result of results) {
-      const option = new Option((result.error ? '失败' : '通过') + ' · ' + result.name, result.name);
-      list.add(option);
+    category.replaceChildren(...caseGroups.map(([key, title]) =>
+      new Option(title + '（' + results.filter(result => caseMatches(result, key)).length + '）', key)));
+    category.disabled = false;
+    const selectedResult = () => results.find(result => result.name === list.value);
+    function filterCases(preferredName) {
+      const filtered = results.filter(result => caseMatches(result, category.value));
+      list.replaceChildren(...filtered.map(result =>
+        new Option((result.error ? '失败' : '通过') + ' · ' + result.name, result.name)));
+      if (filtered.some(result => result.name === preferredName)) list.value = preferredName;
+      list.disabled = filtered.length === 0;
+      get('case-export').disabled = list.disabled;
     }
     const failures = results.filter(result => result.error);
     get('case-status').textContent = (results.length - failures.length) + ' / ' + results.length +
       ' 通过' + (failures.length ? ' · ' + failures[0].name + ' · ' + failures[0].error : '');
     const display = () => {
-      const result = results[list.selectedIndex];
+      const result = selectedResult();
+      if (!result) return;
       clearTimeout(refreshTimer);
       const scenario = get('scenario');
       const replayOption = scenario.querySelector('[value="verification"]');
@@ -592,11 +620,16 @@
     const normal = results.findIndex(result => result.preset === 'normal' && result.name.startsWith('D01 '));
     const selected = results.findIndex(result => result.name === selectedName);
     const fallback = failures.length ? results.indexOf(failures[0]) : Math.max(0, normal);
-    list.selectedIndex = selected >= 0 ? selected : fallback;
-    list.disabled = false;
-    get('case-export').disabled = false;
+    const initial = results[selected >= 0 ? selected : fallback];
+    category.value = caseGroups.find(([key]) => caseMatches(initial, key))[0];
+    filterCases(initial.name);
+    category.onchange = () => {
+      filterCases();
+      display();
+    };
     get('case-export').onclick = () => {
-      const result = results[list.selectedIndex];
+      const result = selectedResult();
+      if (!result) return;
       const report = { specification: 'UE 1.1', assumptions: '200 Gb/s，512 B，80 ns 反馈传输；同拍驻留/失锁到期优先，其次队列事件，最后重放超时。',
         results: results.map(({ trace, ...summary }) => summary), selected: result.name, trace: result.trace || [] };
       const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], {type:'application/json'}));
@@ -607,22 +640,28 @@
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     };
     list.onchange = display;
-    display();
-    if (get('scenario').value === 'verification') startPlayback();
+    if (play) {
+      display();
+      if (get('scenario').value === 'verification') startPlayback();
+    }
   };
-  get('run-cases').onclick = () => {
+  function loadCases(play) {
     const status = get('case-status');
     try {
       if (!window.LLRVerification?.run) {
         status.textContent = '用例脚本加载失败。请重新加载页面，离线使用时请保留 visual-pcs-assets 目录。';
         return;
       }
-      runCases();
+      runCases(play);
     } catch (error) {
       status.textContent = '用例运行失败 · ' + error.message;
       console.error(error);
     }
-  };
+  }
+  get('run-cases').onclick = () => loadCases(true);
+  get('case-picker').addEventListener('toggle', () => {
+    if (get('case-picker').open && get('case-category').disabled) loadCases(false);
+  });
   steps.registers = simulate();
   function applyRegisters(restart) {
     clearTimeout(refreshTimer);

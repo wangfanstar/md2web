@@ -1109,11 +1109,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <button class="btn" form="llr-register-form" type="submit">从头查看</button>
       <button class="btn" form="llr-register-form" type="reset">恢复参数默认值</button>
     </div>
-    <details class="llr-registers"><summary>标准仿真用例与边界验证</summary>
+    <details id="llr-case-picker" class="llr-registers"><summary>标准仿真用例与边界验证</summary>
       <button id="llr-run-cases" class="btn" type="button">运行用例</button>
       <button id="llr-case-export" class="btn" type="button" disabled>导出结果与当前轨迹</button>
       <output id="llr-case-status" aria-live="polite"></output>
-      <label>回放用例 <select id="llr-case-list" disabled><option>首次运行后可选择用例</option></select></label>
+      <label>用例大类 <select id="llr-case-category" disabled><option>加载用例</option></select></label>
+      <label>具体用例 <select id="llr-case-list" disabled><option>请选择大类</option></select></label>
       <p id="llr-case-description" class="fine"></p>
     </details>
     <output id="llr-register-status" aria-live="polite"></output>
@@ -6478,7 +6479,7 @@ globalThis.PCS.openPtpPoint = function (xMII, tx) {
 <script src="visual-pcs-assets/pcs-ue-demo.js"></script>
 <script src="visual-pcs-assets/pcs-signal-scene.js"></script>
 <script src="visual-pcs-assets/pcs-llr-verification.js?v=2"></script>
-<script src="visual-pcs-assets/pcs-llr-lab.js?v=4"></script>
+<script src="visual-pcs-assets/pcs-llr-lab.js?v=5"></script>
 <dialog class="opview" id="pcs-frame-boundary" aria-labelledby="pcs-frame-boundary-title">
   <div class="opv-inner">
     <header class="opv-head">
