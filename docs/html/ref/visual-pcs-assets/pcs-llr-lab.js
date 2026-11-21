@@ -278,12 +278,16 @@
     }
 
     function flush(reason) {
+      const pcsDown = Number.isFinite(pcsAt);
       queue.length = buffer.length = 0;
       replayAt = ageAt = pcsAt = Infinity;
       txState = 'FLUSH';
       step('FLUSH', reason + '。释放重放缓冲。');
-      step('FLUSH 期间上层来帧', policyText[tx.llr_flush_behavior],
-        { counts: tx.llr_flush_behavior === 'DISCARD' ? counters(sender, 'tx_discard') : [] });
+      const policy = tx.llr_flush_behavior;
+      step('FLUSH 期间上层来帧', policyText[policy] +
+        (policy === 'BEST_EFFORT' && pcsDown ? '，PCS 仍未锁定，链路无法承载该帧。' : '。'),
+        { upperFrame: policy, name: 'FLUSH · 上层来帧', wire: policy === 'BEST_EFFORT' && !pcsDown,
+          counts: policy === 'DISCARD' ? counters(sender, 'tx_discard') : [] });
       if (test?.resetState === 'FLUSH') {
         resetSession();
         return;
@@ -791,9 +795,13 @@
     const reverse = current()[2];
     const progress = motion.matches || (!running && elapsed === 0) ? 1 : Math.min(1, elapsed / (duration * .8));
     const simulation = current()[10];
-    signal.visible = !simulation || Boolean(simulation.wire);
+    signal.visible = !simulation || Boolean(simulation.wire || simulation.upperFrame);
     signal.position.set((reverse ? 1 : -1) * extent * (1 - 2 * progress), reverse ? -10 : 10, 1.8);
-    if (isLostStep()) {
+    if (simulation?.upperFrame && !simulation.wire) {
+      signal.position.x = reverse ? extent : -extent;
+      signal.position.y += (1 - progress) * 12;
+      signal.material.color.setHex(simulation.upperFrame === 'DISCARD' ? 0xd65a51 : 0xe2a41f);
+    } else if (isLostStep()) {
       const lossX = lossPosition(reverse);
       signal.position.x = reverse ? Math.max(lossX, signal.position.x) : Math.min(lossX, signal.position.x);
       signal.material.color.setHex(0xd65a51);
@@ -856,12 +864,17 @@
       format = current()[4] ? 'CtlOS 在链路中丢失' : '帧在链路中丢失';
     }
     if (current()[10]?.rxResult && travel >= 1) format = '接收处理 · ' + current()[10].rxResult;
+    const upperFrame = current()[10]?.upperFrame;
+    if (upperFrame) {
+      format = policyText[upperFrame];
+      if (upperFrame === 'BEST_EFFORT' && !current()[10].wire) format += ' · PCS 未锁定';
+    }
     const title = get('packet-name');
     const detail = get('packet-format');
     if (title.textContent !== name) title.textContent = name;
     if (detail.textContent !== format) detail.textContent = format;
     const sequence = get('packet-seq');
-    const sequenceText = negotiating() ? '' : sequenceLabel(current());
+    const sequenceText = negotiating() || upperFrame ? '' : sequenceLabel(current());
     if (sequence.textContent !== sequenceText) sequence.textContent = sequenceText;
     callout.style.setProperty('--llr-packet-x', (50 + 50 * point.x) + '%');
     callout.style.top = (50 - 50 * point.y) + '%';
@@ -912,6 +925,12 @@
 
   function stageSummaries() {
     const [, , , , type, seq, data] = current();
+    const upperFrame = current()[10]?.upperFrame;
+    if (upperFrame) {
+      return current()[10].wire
+        ? ['普通帧', '66b 块', '257b 块', 'RS(544,514)', '线路信号', '恢复数据', '还原 66b', 'xMII 字节', '普通帧']
+        : [policyText[upperFrame], '—', '—', '—', '—', '—', '—', '—', '—'];
+    }
     if (negotiating()) {
       return ['LLDP Options TLV', '66b 块', '257b 块', 'RS(544,514)', '线路信号',
         '已恢复符号', '还原 66b', 'xMII 字节', '解析 LLDP'];
@@ -960,7 +979,11 @@
       detail += '<p><strong>RX 结果 · ' + result + '</strong></p>';
       if (result !== '按序交付') detail += '<p>以下编码为发送端参考。</p>';
     }
-    if (current()[10] && !current()[10].wire) {
+    if (current()[10]?.upperFrame) {
+      if (current()[10].wire) {
+        detail += '<p>普通帧使用标准前导码。</p>' + byteView([0xfb, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0xd5]);
+      }
+    } else if (current()[10] && !current()[10].wire) {
       detail += '<p>本步显示本地状态转换。</p>';
     } else if (target && target.reverse !== reverse) {
       detail += '<p>该方向在本步没有演示信号。</p>';
@@ -1136,7 +1159,7 @@
         (Number.isFinite(simulation.pcsAt) ? simulation.pcsAt : '—') + '</p>') +
       (type ? '<div class="pcs-rx-bytes">' + bytes.map((b, i) => '<span>' + hex(b) + '<small>D' + i + '</small></span>').join('') +
         '</div>' + fieldDetails(type, seq, data) + '<p class="note">xMII：Lane 0 为控制字符 0x5C，D1 为消息类型。PCS：同步头 10，块类型 0x4B，O-code 0x6。</p>'
-        : simulation && !simulation.wire ? '' : '<p class="note">LLR-eligible 数据帧的 20 位 frame_seq 位于修改后的前导码。此步序号为 ' + sequenceLabel(current()) + '。</p>'));
+        : simulation && (!simulation.wire || simulation.upperFrame) ? '' : '<p class="note">LLR-eligible 数据帧的 20 位 frame_seq 位于修改后的前导码。此步序号为 ' + sequenceLabel(current()) + '。</p>'));
     const init = get('detail').querySelector('[data-llr-init]');
     if (init) init.onclick = () => { get('scenario').value = 'init'; reset(); };
     Array.from(get('steps').querySelectorAll('button')).forEach((button, i) =>
