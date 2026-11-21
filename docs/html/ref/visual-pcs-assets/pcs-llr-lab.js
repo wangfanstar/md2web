@@ -584,7 +584,8 @@
       status.textContent = '正在回放 ' + result.name + ' · ' + result.trace.length + ' 个事件';
       reset();
     };
-    list.selectedIndex = failures.length ? results.indexOf(failures[0]) : 0;
+    const normal = results.findIndex(result => result.preset === 'normal' && result.name.startsWith('D01 '));
+    list.selectedIndex = failures.length ? results.indexOf(failures[0]) : Math.max(0, normal);
     get('case-export').disabled = false;
     get('case-export').onclick = () => {
       const result = results[list.selectedIndex];
@@ -599,8 +600,21 @@
     };
     list.onchange = display;
     display();
+    if (get('scenario').value === 'verification') startPlayback();
   };
-  get('run-cases').onclick = runCases;
+  get('run-cases').onclick = () => {
+    const status = get('case-status');
+    try {
+      if (!window.LLRVerification?.run) {
+        status.textContent = '用例脚本加载失败。请重新加载页面，离线使用时请保留 visual-pcs-assets 目录。';
+        return;
+      }
+      runCases();
+    } catch (error) {
+      status.textContent = '用例运行失败 · ' + error.message;
+      console.error(error);
+    }
+  };
   steps.registers = simulate();
   function applyRegisters(restart) {
     clearTimeout(refreshTimer);
@@ -1172,12 +1186,15 @@
   get('reset').onclick = () => reset();
   get('prev').onclick = () => { pause(); select(Math.max(0, index - 1)); };
   get('next').onclick = () => { pause(); select(Math.min(index + 1, active().length - 1)); };
-  get('play').onclick = () => {
-    if (running) { pause(); return; }
+  function startPlayback() {
     if (elapsed >= duration) select(0);
     running = true;
     update();
     frame = requestAnimationFrame(tick);
+  }
+  get('play').onclick = () => {
+    if (running) pause();
+    else startPlayback();
   };
   new MutationObserver(() => {
     if (panel.hidden) pause();
