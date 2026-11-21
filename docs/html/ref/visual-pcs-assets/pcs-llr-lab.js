@@ -258,10 +258,10 @@
       feedbackPending = true;
       // Teaching scheduler uses an aligned idle CtlOS opportunity on the reverse stream.
       const byte = Math.ceil(Math.max(now * 25 + rx.ctlos_target_spacing, nextCtlSlot) / 8) * 8;
-      schedule(Math.ceil(byte / 25) + 80, () => feedback(byte));
+      schedule(Math.ceil(byte / 25), () => sendFeedback(byte));
     }
 
-    function feedback(byte) {
+    function sendFeedback(byte) {
       feedbackPending = false;
       const nack = rxState === 'SEND_NACK';
       if (rxState !== 'SEND_ACKS' && !nack) return;
@@ -270,31 +270,35 @@
       const seq = mod(expected - 1);
       const lost = preset === 'timeout';
       nextCtlSlot = byte + 400;
-      const counts = counters(receiver, 'tx_' + name.toLowerCase() + '_ctl_os');
       if (nack) rxState = 'NACK_SENT';
-      if (!lost) {
-        counts.push(...counters(sender, 'rx_' + name.toLowerCase() + '_ctl_os'));
-        const position = buffer.findIndex(frame => frame.seq === seq);
-        if (position < 0 && seq !== acknowledged) {
-          counts.push(...counters(sender, 'rx_ack_nack_seq_error'));
-        } else if (position >= 0) {
-          buffer.splice(0, position + 1);
-          acknowledged = seq;
-          retries = 0;
-          ageAt = buffer.length ? now + tx.data_age_timer_max : Infinity;
-          replayAt = buffer.length ? now + tx.replay_timer_max : Infinity;
-        }
-        if (nack) {
-          retries = 0;
-          replayAt = Infinity;
-          nackDuringReplay = txState === 'REPLAY';
-        }
+      step('插入 ' + name, '接收端在反向空闲槽插入 8 B CtlOS。',
+        { wire: true, backward: true, type, seq, name, lost, ctlByte: byte,
+          counts: counters(receiver, 'tx_' + name.toLowerCase() + '_ctl_os') });
+      if (!lost) schedule(now + 80, () => receiveFeedback(type, seq, byte));
+    }
+
+    function receiveFeedback(type, seq, byte) {
+      const nack = type === 2;
+      const name = nack ? 'NACK' : 'ACK';
+      const counts = counters(sender, 'rx_' + name.toLowerCase() + '_ctl_os');
+      const position = buffer.findIndex(frame => frame.seq === seq);
+      if (position < 0 && seq !== acknowledged) {
+        counts.push(...counters(sender, 'rx_ack_nack_seq_error'));
+      } else if (position >= 0) {
+        buffer.splice(0, position + 1);
+        acknowledged = seq;
+        retries = 0;
+        ageAt = buffer.length ? now + tx.data_age_timer_max : Infinity;
+        replayAt = buffer.length ? now + tx.replay_timer_max : Infinity;
       }
-      step(lost ? name + ' 在链路丢失' : nack ? '发送 NACK' : '累计 ACK 与释放',
-        '反向空闲 CtlOS 槽，距场景起点 ' + byte + ' B。' +
-        (lost ? '发送端未收到反馈。' : '累计确认至序号 ' + seq + '。'),
-        { wire: true, backward: true, type, seq, name, lost, counts });
-      if (lost) return;
+      if (nack) {
+        retries = 0;
+        replayAt = Infinity;
+        nackDuringReplay = txState === 'REPLAY';
+      }
+      step(nack ? '收到 NACK' : '累计 ACK 与释放',
+        '发送端收到反馈。累计确认序号字段为 ' + seq + '。',
+        { backward: true, type, seq, name, ctlByte: byte, counts });
       if (nack && buffer.length && txState === 'ADVANCE') beginReplay();
       else if (!nack && newFrames < 2 && txState === 'ADVANCE') schedule(now + 21, sendNew);
     }
@@ -911,6 +915,13 @@
     }
   }
 
+  function ctlSlotView(byte) {
+    if (byte === undefined) return '';
+    return '<figure class="llr-ctl-slot"><figcaption>反向 PCS 流 · 字节偏移</figcaption>' +
+      '<div><span>… Idle</span><strong>CtlOS · ' + byte + '–' + (byte + 7) +
+      ' B</strong><span>' + (byte + 8) + ' B · Idle …</span></div></figure>';
+  }
+
   function update() {
     const [title, signalName, reverse, note, type, seq, data, tx, rx, buffer] = current();
     const bytes = type ? wireData(type, seq, data).bytes : [];
@@ -929,6 +940,7 @@
           ? '<button type="button" class="btn" data-llr-init>进入 LLR 初始化</button>' : '')
       : '<p>' + (simulation?.sender || 'A') + ' · TX ' + tx + ' ｜ ' +
         (simulation?.receiver || 'B') + ' · RX ' + rx + ' ｜ ' + (simulation?.sender || 'A') + ' · 重放缓冲 ' + buffer + '</p>' +
+      ctlSlotView(simulation?.ctlByte) +
       (simulation?.cbfc ? '<p>CBFC（单 VC 教学计数） · S_VC_CC=' + simulation.creditSent +
         ' ｜ R_VC_CC=' + simulation.creditReceived + ' ｜ 已归还=' + simulation.creditReturned + '</p>' : '') +
       (simulation?.txSeq === undefined ? '' : '<p>tx_seq=' + simulation.txSeq +

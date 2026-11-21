@@ -386,3 +386,8 @@
 .llr-state-lower { bottom: 0; }
 .llr-state-card span { display: block; color: var(--muted); }
 .llr-state-card span.is-current { color: var(--ink); }
+
+.llr-ctl-slot { margin: .5rem 0; font-size: .8rem; }
+.llr-ctl-slot > div { display: flex; flex-wrap: wrap; gap: .2rem; }
+.llr-ctl-slot span, .llr-ctl-slot strong { padding: .2rem .45rem; border: 1px solid var(--rule); border-radius: .25rem; }
+.llr-ctl-slot strong { background: color-mix(in srgb, #357fc8 18%, var(--panel)); }
