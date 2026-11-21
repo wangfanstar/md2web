@@ -1109,6 +1109,13 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       <button class="btn" form="llr-register-form" type="submit">从头查看</button>
       <button class="btn" form="llr-register-form" type="reset">恢复参数默认值</button>
     </div>
+    <details class="llr-registers"><summary>标准仿真用例与边界验证</summary>
+      <button id="llr-run-cases" class="btn" type="button">运行用例</button>
+      <button id="llr-case-export" class="btn" type="button" disabled>导出结果与当前轨迹</button>
+      <output id="llr-case-status" aria-live="polite"></output>
+      <label>回放轨迹 <select id="llr-case-list"></select></label>
+      <p id="llr-case-description" class="fine"></p>
+    </details>
     <output id="llr-register-status" aria-live="polite"></output>
     <div class="llr-workspace">
       <div class="llr-visual">
@@ -6471,6 +6478,7 @@ globalThis.PCS.openPtpPoint = function (xMII, tx) {
 </dialog>
 <script src="visual-pcs-assets/pcs-ue-demo.js"></script>
 <script src="visual-pcs-assets/pcs-signal-scene.js"></script>
+<script src="visual-pcs-assets/pcs-llr-verification.js"></script>
 <script src="visual-pcs-assets/pcs-llr-lab.js"></script>
 <dialog class="opview" id="pcs-frame-boundary" aria-labelledby="pcs-frame-boundary-title">
   <div class="opv-inner">
