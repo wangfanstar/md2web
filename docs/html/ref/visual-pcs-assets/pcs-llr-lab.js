@@ -551,11 +551,12 @@
   }
 
   const runCases = () => {
-    const results = window.LLRVerification.run(simulate);
     const list = get('case-list');
+    const selectedName = list.value;
+    const results = window.LLRVerification.run(simulate);
     list.replaceChildren();
     for (const result of results) {
-      const option = new Option((result.error ? '失败' : '通过') + ' · ' + result.name, list.length);
+      const option = new Option((result.error ? '失败' : '通过') + ' · ' + result.name, result.name);
       list.add(option);
     }
     const failures = results.filter(result => result.error);
@@ -585,7 +586,10 @@
       reset();
     };
     const normal = results.findIndex(result => result.preset === 'normal' && result.name.startsWith('D01 '));
-    list.selectedIndex = failures.length ? results.indexOf(failures[0]) : Math.max(0, normal);
+    const selected = results.findIndex(result => result.name === selectedName);
+    const fallback = failures.length ? results.indexOf(failures[0]) : Math.max(0, normal);
+    list.selectedIndex = selected >= 0 ? selected : fallback;
+    list.disabled = false;
     get('case-export').disabled = false;
     get('case-export').onclick = () => {
       const result = results[list.selectedIndex];
