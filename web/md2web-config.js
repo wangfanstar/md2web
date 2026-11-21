@@ -64,29 +64,109 @@
 
   var recordsData=null, recordsIdentity='', recordsPending=false, recordsGeneration=0;
   function clearRecords(){recordsGeneration++;recordsData=null;recordsIdentity='';recordsPending=false;var host=query('[data-records-content]');if(host)host.textContent='';}
-  function renderRecords() {
-    var host=query('[data-records-content]');
-    if(!state.editable || recordsIdentity!==state.authFingerprint){host.textContent='';return;}
-    if(!recordsData)return;
-    var filter=query('[data-records-query]').value.trim().toLowerCase();
-    function table(title, columns, rows){
-      var filtered=rows.filter(function(row){return !filter || JSON.stringify(row).toLowerCase().indexOf(filter)>=0;});
-      var page=0, section=document.createElement('section'), heading=document.createElement('h3'), body=document.createElement('div'), more=document.createElement('button');
-      heading.textContent=title+'（'+filtered.length+'）';body.className='table-scroll';more.type='button';
-      function draw(){var part=filtered.slice(page*100,(page+1)*100);body.innerHTML='<table><thead><tr>'+columns.map(function(c){return '<th>'+escapeHtml(c[1])+'</th>';}).join('')+'</tr></thead><tbody>'+part.map(function(row){return '<tr>'+columns.map(function(c){var value=row[c[0]];if(c[0]==='last_at')value=formatTime(value);return '<td>'+escapeHtml(value)+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table>';more.textContent='第 '+(page+1)+' / '+Math.max(1,Math.ceil(filtered.length/100))+' 页 · 下一页';more.disabled=filtered.length<=100;}
-      more.onclick=function(){page=(page+1)%Math.ceil(filtered.length/100);draw();};section.appendChild(heading);section.appendChild(body);section.appendChild(more);host.appendChild(section);draw();
+  function recordPathCell(path) {
+    if (!path) return '—';
+    var parts = path.replace(/^\//, '').split('/');
+    if (parts.some(function (part) { return !part || part === '.' || part === '..'; }) && path !== '/') {
+      return escapeHtml(path);
     }
-    host.textContent='';var key=query('[data-records-sort]').value;
-    var audience=query('[data-records-audience]'), scope=audience?audience.value:'all';
-    function inScope(row){return scope==='all'||(scope==='anonymous'?!!row.anonymous:!!row.source);}
-    function rank(rows){return rows.slice().sort(function(a,b){return (Number(b[key])||0)-(Number(a[key])||0)||(Number(b.visits)||0)-(Number(a.visits)||0)||String(a.client_ip||a.username||'').localeCompare(String(b.client_ip||b.username||''));}).map(function(row,index){return Object.assign({rank:index+1},row);});}
-    var columns=[['rank','排名'],['username','用户'],['source','认证源'],['logins','登录次数'],['visits','访问次数'],['articles','文章总数'],['last_at','最近活动']];
-    table('IP 排行榜（按 IP 分类，含未登录访客）',[['rank','排名'],['client_ip','IP 地址']].concat(columns.slice(1)),rank((recordsData.ip_ranking||[]).filter(inScope)));
-    table('账号排行榜',columns,rank(recordsData.users.filter(function(row){return scope!=='anonymous';})));
-    var ips=recordsData.ips.filter(function(row){return scope==='all'||(scope==='anonymous'?!!row.anonymous:!row.anonymous);});
-    var uniqueIps=new Set(ips.map(function(row){return row.client_ip;}));
-    table('全部 IP 与用户记录 · '+uniqueIps.size+' 个 IP',[['client_ip','IP 地址'],['username','用户'],['source','认证源'],['path','访问页面 / 文章'],['action','事件'],['result','结果'],['count','次数'],['last_at','最近时间']],ips);
-    table('文章访问排行',[['path','文章'],['visits','访问次数'],['readers','阅读人数'],['last_at','最近阅读']],recordsData.articles);
+    var encoded = parts.map(encodeURIComponent).join('/');
+    var href = '';
+    if (/^md\/.+\.md$/i.test(path)) href = 'html/index_all.html#/' + encoded;
+    else if (path === '/') href = 'index.html';
+    else if (path.charAt(0) === '/' && /\.html?$/i.test(path)) href = './' + encoded;
+    if (!href) return escapeHtml(path);
+    var label = path === '/' || path === '/index.html' ? '站点首页' :
+      parts[parts.length - 1].replace(/\.md$/i, '');
+    return '<a href="' + escapeHtml(href) + '" target="_blank" rel="noopener" title="' +
+      escapeHtml(path) + '">' + escapeHtml(label) + '</a>' +
+      '<small class="record-path">' + escapeHtml(path) + '</small>';
+  }
+
+  var recordEvents = {
+    article_visit: '阅读文章', site_visit: '访问页面', login: '账号登录', admin_login: '管理员登录'
+  };
+
+  function renderRecords() {
+    var host = query('[data-records-content]');
+    if (!state.editable || recordsIdentity !== state.authFingerprint) { host.textContent = ''; return; }
+    if (!recordsData) return;
+    var terms = query('[data-records-query]').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    var view = query('[data-records-view]').value;
+    var scope = query('[data-records-audience]').value;
+    var event = query('[data-records-event]').value;
+    query('[data-records-detail-filters]').hidden = view !== 'details';
+    query('[data-records-rank-filter]').hidden = view !== 'ranking';
+    function matches(row) {
+      var searchable = [row.client_ip, row.username, row.source, row.path, recordEvents[row.action],
+        row.action, row.path === '/' || row.path === '/index.html' ? '站点首页' : ''].join(' ').toLowerCase();
+      return terms.every(function (term) { return searchable.indexOf(term) >= 0; });
+    }
+    function cell(row, key) {
+      var value = row[key];
+      if (key === 'path') return recordPathCell(value);
+      if (key === 'last_at') value = formatTime(value);
+      if (key === 'action') value = recordEvents[value] || value;
+      if (key === 'result' && value === 'ok') value = '成功';
+      return escapeHtml(value === null || value === undefined || value === '' ? '—' : value);
+    }
+    function table(title, columns, rows) {
+      var page = 0, pageSize = 50, pageCount = Math.ceil(rows.length / pageSize);
+      var section = document.createElement('section'), heading = document.createElement('h3');
+      var body = document.createElement('div'), controls = document.createElement('div');
+      heading.textContent = title + '（' + rows.length + ' 条）';
+      body.className = 'table-scroll';
+      controls.className = 'records-pagination';
+      controls.innerHTML = '<button type="button">上一页</button><span role="status"></span><button type="button">下一页</button>';
+      var previous = controls.firstElementChild, next = controls.lastElementChild;
+      function draw() {
+        if (!rows.length) { body.textContent = '没有符合条件的记录。'; return; }
+        var offset = page * pageSize;
+        body.innerHTML = '<table><thead><tr>' + columns.map(function (column) {
+          return '<th scope="col">' + escapeHtml(column[1]) + '</th>';
+        }).join('') + '</tr></thead><tbody>' + rows.slice(offset, offset + pageSize).map(function (row) {
+          return '<tr>' + columns.map(function (column) {
+            return '<td>' + cell(row, column[0]) + '</td>';
+          }).join('') + '</tr>';
+        }).join('') + '</tbody></table>';
+        controls.children[1].textContent = '第 ' + (page + 1) + ' / ' + pageCount + ' 页';
+        previous.disabled = page === 0;
+        next.disabled = page + 1 >= pageCount;
+      }
+      previous.onclick = function () { page--; draw(); };
+      next.onclick = function () { page++; draw(); };
+      section.appendChild(heading);
+      section.appendChild(body);
+      if (pageCount > 1) section.appendChild(controls);
+      host.appendChild(section);
+      draw();
+    }
+    host.textContent = '';
+    if (view === 'details') {
+      var rows = recordsData.ips.filter(function (row) {
+        return (scope === 'all' || (scope === 'anonymous' ? !!row.anonymous : !row.anonymous)) &&
+          (event === 'all' || event === row.action) && matches(row);
+      });
+      var ipCount = new Set(rows.map(function (row) { return row.client_ip; }).filter(Boolean)).size;
+      table('活动明细 · ' + ipCount + ' 个 IP', [['last_at', '最近活动'], ['username', '用户'],
+        ['client_ip', 'IP 地址'], ['action', '事件'], ['path', '访问页面 / 文章'],
+        ['count', '次数'], ['result', '结果'], ['source', '认证源']], rows);
+    } else if (view === 'articles') {
+      table('文章访问排行', [['path', '文章'], ['visits', '访问次数'], ['readers', '阅读人数'],
+        ['last_at', '最近阅读']], recordsData.articles.filter(matches));
+    } else {
+      var key = query('[data-records-sort]').value;
+      function rank(rows) {
+        return rows.slice().sort(function (a, b) {
+          return (Number(b[key]) || 0) - (Number(a[key]) || 0) || (Number(b.visits) || 0) - (Number(a.visits) || 0) ||
+            String(a.client_ip || a.username || '').localeCompare(String(b.client_ip || b.username || ''));
+        }).map(function (row, index) { return Object.assign({ rank: index + 1 }, row); }).filter(matches);
+      }
+      var columns = [['rank', '排名'], ['username', '用户'], ['source', '认证源'], ['logins', '登录次数'],
+        ['visits', '访问次数'], ['articles', '文章总数'], ['last_at', '最近活动']];
+      table('IP 排行榜', [columns[0], ['client_ip', 'IP 地址']].concat(columns.slice(1)), rank(recordsData.ip_ranking || []));
+      table('账号排行榜', columns, rank(recordsData.users));
+    }
   }
   function loadRecords(force){
     if(!state.editable)return;
@@ -97,8 +177,9 @@
   }
   if(query('[data-records-refresh]'))query('[data-records-refresh]').onclick=function(){loadRecords(true);};
   if(query('[data-records-query]'))query('[data-records-query]').oninput=renderRecords;
-  if(query('[data-records-sort]'))query('[data-records-sort]').onchange=renderRecords;
-  if(query('[data-records-audience]'))query('[data-records-audience]').onchange=renderRecords;
+  all('[data-records-view], [data-records-sort], [data-records-audience], [data-records-event]').forEach(function (control) {
+    control.onchange = renderRecords;
+  });
 
   function showPanels() {
     var fileMode = window.location.protocol === 'file:';

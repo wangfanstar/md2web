@@ -165,3 +165,8 @@ body.config-has-draft { padding-top:100px; }
 .ai-config-form p { grid-column:1/-1; margin:0; }
 [data-code-sync-row] { min-width:0; }
 [data-code-sync-row] > .row { grid-column:1/-1; }
+#panel-records .table-scroll { overflow-x: auto; }
+#panel-records thead { display: table-header-group; }
+#panel-records th { white-space: nowrap; }
+.record-path { display: block; color: var(--docs-muted); overflow-wrap: anywhere; }
+.records-pagination { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
