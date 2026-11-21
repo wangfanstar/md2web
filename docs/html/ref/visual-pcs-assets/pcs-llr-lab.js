@@ -563,20 +563,33 @@
       ' 通过' + (failures.length ? ' · ' + failures[0].name + ' · ' + failures[0].error : '');
     const display = () => {
       const result = results[list.selectedIndex];
-      steps.verification = simulate(result.preset, result.options);
+      clearTimeout(refreshTimer);
       const scenario = get('scenario');
-      if (!scenario.querySelector('[value="verification"]')) scenario.add(new Option('用例回放', 'verification'));
-      scenario.value = 'verification';
+      const replayOption = scenario.querySelector('[value="verification"]');
+      const status = get('register-status');
       get('case-description').textContent = result.name + ' · ' + result.check +
         (result.error ? ' · ' + result.error : '');
+      if (!result.trace?.length) {
+        if (scenario.value === 'verification') {
+          scenario.value = 'registers';
+          reset();
+        }
+        replayOption?.remove();
+        status.textContent = '此用例没有可回放的事件。';
+        return;
+      }
+      steps.verification = result.trace;
+      if (!replayOption) scenario.add(new Option('用例回放', 'verification'));
+      scenario.value = 'verification';
+      status.textContent = '正在回放 ' + result.name + ' · ' + result.trace.length + ' 个事件';
       reset();
     };
     list.selectedIndex = failures.length ? results.indexOf(failures[0]) : 0;
     get('case-export').disabled = false;
     get('case-export').onclick = () => {
       const result = results[list.selectedIndex];
-      const report = { specification: 'UE 1.1', assumptions: '200 Gb/s，512 B，80 ns 反馈传输；同拍驻留/失锁到期优先，其次队列事件，最后重放超时。', results,
-        selected: result.name, trace: steps.verification };
+      const report = { specification: 'UE 1.1', assumptions: '200 Gb/s，512 B，80 ns 反馈传输；同拍驻留/失锁到期优先，其次队列事件，最后重放超时。',
+        results: results.map(({ trace, ...summary }) => summary), selected: result.name, trace: result.trace || [] };
       const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], {type:'application/json'}));
       const link = document.createElement('a');
       link.href = url;
@@ -1043,11 +1056,22 @@
       else if ((step[8] === '期望 10' && step[5] === 11) || step[10]?.badFcs) rxState = 'SEND_NACK';
       else if (step[7] === 'REPLAY' && (!step[10] || step[10].wire)) rxState = 'SEND_ACKS';
     }
+    const portStates = {};
+    if (simulation) {
+      for (const row of history) {
+        const event = row[10];
+        (portStates[event.sender] ??= {}).tx = event.txState;
+        (portStates[event.receiver] ??= {}).rx = event.rxState;
+      }
+    }
     for (const endpoint of ['A', 'B']) {
       const prefix = 'state-' + endpoint.toLowerCase();
-      const states = {
+      const states = simulation ? {
+        tx: portStates[endpoint]?.tx ?? '—',
+        rx: portStates[endpoint]?.rx ?? '—'
+      } : {
         tx: isNegotiation ? 'LLR_OFF' : endpoint === sender ? txStates[tx] || tx : '—',
-        rx: isNegotiation ? 'OFF' : endpoint === receiver ? simulation?.rxState || rxState : '—'
+        rx: isNegotiation ? 'OFF' : endpoint === receiver ? rxState : '—'
       };
       for (const [path, state] of Object.entries(states)) {
         const cell = get(prefix + '-' + path);

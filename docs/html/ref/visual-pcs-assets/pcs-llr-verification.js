@@ -8,6 +8,7 @@ window.LLRVerification = {
         const result = { name: id + ' · ' + sender + ' 发', preset, options, check: criterion };
         try {
           const rows = simulate(preset, options);
+          result.trace = rows;
           const events = rows.map(row => row[10]);
           const total = (port, counter) => events.reduce((sum, event) =>
             sum + event.counter.split('|').filter(key => key === port + ' ' + counter).length, 0);
