@@ -612,7 +612,9 @@
         return;
       }
       steps.verification = result.trace;
-      if (!replayOption) scenario.add(new Option('用例回放', 'verification'));
+      const replayLabel = '用例回放 · ' + result.name;
+      if (replayOption) replayOption.textContent = replayLabel;
+      else scenario.add(new Option(replayLabel, 'verification'));
       scenario.value = 'verification';
       status.textContent = '正在回放 ' + result.name + ' · ' + result.trace.length + ' 个事件';
       reset();
@@ -640,10 +642,8 @@
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     };
     list.onchange = display;
-    if (play) {
-      display();
-      if (get('scenario').value === 'verification') startPlayback();
-    }
+    display();
+    if (play && get('scenario').value === 'verification') startPlayback();
   };
   function loadCases(play) {
     const status = get('case-status');
@@ -660,7 +660,9 @@
   }
   get('run-cases').onclick = () => loadCases(true);
   get('case-picker').addEventListener('toggle', () => {
-    if (get('case-picker').open && get('case-category').disabled) loadCases(false);
+    if (!get('case-picker').open) return;
+    if (get('case-category').disabled) loadCases(false);
+    else if (get('scenario').value !== 'verification') get('case-list').onchange();
   });
   steps.registers = simulate();
   function applyRegisters(restart) {
