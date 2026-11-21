@@ -1104,7 +1104,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <div class="g800-controls">
       <label for="llr-scenario">场景</label>
       <select id="llr-scenario"><option value="negotiation">LLDP 协商</option><option value="unsupported">LLDP 协商 · 对端无 UE TLV</option><option value="init" selected>LLR 初始化</option><option value="replay">丢包与重放</option><option value="registers">寄存器仿真</option></select>
-        <label>实验预设<select form="llr-register-form" id="llr-preset"><option value="nack">丢帧后收到 NACK</option><option value="normal">正常发包</option><option value="bad-fcs">错包重传</option><option value="timeout">反馈持续丢失</option><option value="pcs">PCS 持续失锁</option><option value="init">初始化与上层来帧</option></select></label>
+        <label>实验预设<select form="llr-register-form" id="llr-preset"><option value="nack">丢帧后收到 NACK</option><option value="normal">正常发包</option><option value="bad-fcs">错包重传</option><option value="timeout">反馈持续丢失</option><option value="pcs">PCS 持续失锁</option><option value="init">初始化与上层来帧</option><option value="init-fail">INIT 丢失</option><option value="wrap">20 位序号回绕</option><option value="poisoned">Poisoned FCS</option><option value="cbfc">LLR + CBFC 丢帧重放</option><option value="lldp">LLDP 版本与能力协商</option></select></label>
         <label>仿真方向 <select form="llr-register-form" id="llr-register-direction"><option value="A">A → B</option><option value="B">B → A</option></select></label>
       <button class="btn" form="llr-register-form" type="submit">从头查看</button>
       <button class="btn" form="llr-register-form" type="reset">恢复参数默认值</button>
@@ -1177,12 +1177,17 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
         </div>
         <form id="llr-register-form">
           <label>显示端口 <select id="llr-register-port"><option value="auto">当前发送端</option><option value="A">A 端</option><option value="B">B 端</option><option value="both">A / B 对照</option></select></label>
+          <fieldset id="llr-lldp-options" hidden>
+            <legend>LLDP Options TLV</legend>
+            <label>A 端 <select id="llr-lldp-a"><option value="v0">v0 · W=3</option><option value="v1">v1 · W=3</option><option value="off">v1 · W=0</option><option value="none">无 UE TLV</option></select></label>
+            <label>B 端 <select id="llr-lldp-b"><option value="v1">v1 · W=3</option><option value="v0">v0 · W=3</option><option value="off">v1 · W=0</option><option value="none">无 UE TLV</option></select></label>
+          </fieldset>
           <p id="llr-peer-summary" class="fine"></p>
           <div id="llr-register-fields">
             <fieldset id="llr-register-a"><legend>A 端 · 蓝色</legend></fieldset>
             <fieldset id="llr-register-b"><legend>B 端 · 橙色</legend></fieldset>
           </div>
-      <p class="note">有效参数会实时更新仿真。发送端使用本端 TX 模式、窗口和定时器，接收端使用本端 RX 模式和 CtlOS 间隔。仿真使用两帧各 512 B，CtlOS 等待按 200 Gb/s 的目标间隔估算，动画按事件步进。CRC4 和增强 NACK 支持独立配置与显示，扩展位和重复发送波形当前采用基础格式。</p>
+      <p class="note">有效参数会实时更新仿真。发送端使用本端 TX 模式、窗口和定时器，接收端使用本端 RX 模式和 CtlOS 间隔。仿真使用两帧各 512 B，CtlOS 等待按 200 Gb/s 的目标间隔估算，动画按事件步进。反向 CtlOS 使用对齐的空闲槽教学模型，时间为合成值。CBFC 预设用单 VC 演示信用增减和归还事件。CRC4 和增强 NACK 支持独立配置与显示，扩展位和重复发送波形当前采用基础格式。</p>
         </form>
         <div id="llr-stats-panel" hidden>
           <div class="g800-controls">

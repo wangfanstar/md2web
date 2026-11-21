@@ -128,12 +128,8 @@
     'rx_init_ctl_os rx_init_echo_ctl_os rx_ack_ctl_os rx_nack_ctl_os rx_ack_nack_seq_error rx_ok rx_poisoned rx_bad ' +
     'rx_expected_seq_good rx_expected_seq_poisoned rx_expected_seq_bad rx_missing_seq rx_duplicate_seq rx_replay'
   ).split(' ');
-  const unavailableCounters = new Set([
-    'tx_poisoned', 'rx_ack_nack_seq_error', 'rx_poisoned', 'rx_expected_seq_poisoned',
-    'rx_duplicate_seq'
-  ]);
   const stats = get('register-stats');
-  stats.innerHTML = '<table><caption>截至所选步骤的累计快照 · — 表示当前仿真未建模</caption>' +
+  stats.innerHTML = '<table><caption>截至所选步骤的累计快照 · — 表示当前场景无统计</caption>' +
     '<thead><tr><th scope="col">统计寄存器</th><th scope="col">A 端</th><th scope="col">B 端</th></tr></thead><tbody>' +
     counterNames.map(name => '<tr><th scope="row"><code>' + name + '</code></th><td>—</td><td>—</td></tr>').join('') +
     '</tbody></table>';
@@ -142,6 +138,7 @@
     const sender = get('register-direction').value;
     const receiver = sender === 'A' ? 'B' : 'A';
     const view = get('register-port').value;
+    get('lldp-options').hidden = get('preset').value !== 'lldp';
     const selected = view === 'auto' ? sender : view;
     ['A', 'B'].forEach(endpoint => {
       get('register-' + endpoint.toLowerCase()).hidden = selected !== 'both' && selected !== endpoint;
@@ -186,124 +183,261 @@
     BLOCK: '阻塞上层来帧', DISCARD: '丢弃上层来帧', BEST_EFFORT: '以普通非 LLR 帧发送'
   };
 
-  function simulate() {
+  function simulate(preset = get('preset').value) {
     const sender = get('register-direction').value;
     const receiver = sender === 'A' ? 'B' : 'A';
     const settings = endpoint => Object.fromEntries(controls[endpoint].map(input =>
       [input.name, input.type === 'number' ? input.valueAsNumber : input.value]));
     const tx = settings(sender);
     const rx = settings(receiver);
-    const config = { ...tx, llr_mode_local: rx.llr_mode_local, ctlos_target_spacing: rx.ctlos_target_spacing };
     const reverse = sender === 'B';
-    const orient = text => reverse ? text.replace(/\b[AB]\b/g, letter => letter === 'A' ? 'B' : 'A') : text;
-    const preset = get('preset').value;
-    const timeline = [];
-    const state = (title, time, note, tx, buffer = '空', counter = '') =>
-      timeline.push([title, title, reverse, time + ' ns · ' + orient(note), 0, 0, 0, tx, '—', buffer, { sender, receiver, counter: orient(counter) }]);
-    const signalStep = (row, time, counter, badFcs = false) =>
-      timeline.push([orient(row[0]), row[1], row[2] !== reverse, time + ' ns · ' + orient(row[3]), ...row.slice(4), { sender, receiver, wire: true, counter: orient(counter), lost: row === steps.replay[0], badFcs }]);
-    const policy = mode => policyText[mode] + '（' + mode + '）。';
-    const init = time => {
-      state('进入 INIT', time, policy(config.llr_init_behavior), 'INIT', '空',
-        config.llr_init_behavior === 'DISCARD' ? 'A tx_discard' : '');
-      signalStep(steps.init[0], time, config.llr_mode_local === 'ON' ? 'A tx_init_ctl_os|B rx_init_ctl_os' : 'A tx_init_ctl_os');
-      if (config.llr_mode_local === 'OFF') {
-        state('等待 INIT_ECHO', time, 'B 的 llr_mode_local 为 OFF，示例停在等待回显。', 'INIT');
-        return false;
+    const capacity = Math.min(tx.outstanding_seq_max, Math.floor(tx.outstanding_data_max / 512));
+    const mod = value => value & 0xfffff;
+    const timeline = [], queue = [], buffer = [];
+    let now = 0, txState = 'ADVANCE', rxState = 'SEND_ACKS';
+    let txSeq = preset === 'wrap' ? 0xfffff : 10;
+    let expected = txSeq, acknowledged = mod(txSeq - 1), retries = 0;
+    let replayAt = Infinity, ageAt = Infinity, pcsAt = Infinity;
+    let feedbackPending = false, nextCtlSlot = 0, nackDuringReplay = false;
+    let creditSent = 0, creditReceived = 0, creditReturned = 0;
+    const cbfc = preset === 'cbfc';
+    let newFrames = 0;
+    const counters = (endpoint, ...names) => names.map(name => endpoint + ' ' + name);
+    const schedule = (time, run) => queue.push({ time, run });
+    function step(title, note, event = {}) {
+      const { wire, backward, type = 0, seq = 0, data = 0, counts = [] } = event;
+      timeline.push([title, event.name || title, reverse !== Boolean(backward),
+        now + ' ns · ' + note, type, seq, data, txState,
+        rxState + ' · next_rx_seq=' + expected, buffer.map(frame => frame.seq).join('、') || '空',
+        { ...event, sender, receiver, wire, txState, rxState, retries, txSeq, expected, acknowledged,
+          replayAt, ageAt, pcsAt, cbfc, creditSent, creditReceived, creditReturned, counter: counts.join('|') }]);
+    }
+
+    function init() {
+      txState = 'INIT';
+      if (preset === 'init' || preset === 'init-fail') {
+        step('进入 INIT', policyText[tx.llr_init_behavior],
+          { counts: tx.llr_init_behavior === 'DISCARD' ? counters(sender, 'tx_discard') : [] });
       }
-      signalStep(steps.init[2], time + 40, 'B tx_init_echo_ctl_os|A rx_init_echo_ctl_os');
-      state('进入 ADVANCE', time + 80, 'A 收到有效回显。', 'ADVANCE');
-      return true;
-    };
-    if (config.llr_mode_remote === 'OFF') {
-      state('LLR_OFF', 0, 'A 的 llr_mode_remote 为 OFF，按普通以太网运行。', 'LLR_OFF');
-      return timeline;
-    }
-    if (preset === 'init' || config.llr_mode_local === 'OFF') {
-      init(0);
-      return timeline;
-    }
-    const capacity = Math.min(config.outstanding_seq_max, Math.floor(config.outstanding_data_max / 512));
-    if (capacity === 0 || (capacity < 2 && preset === 'nack')) {
-      state('等待窗口可用', 0, capacity === 0 ? '窗口容不下一帧 512 B。' :
-        '窗口只容得下一帧。帧 11 等待，无法用跳号触发 NACK。', 'ADVANCE',
-        capacity === 0 ? '空' : '10');
-      if (!capacity) return timeline;
-    }
-    const age = config.data_age_timer_max;
-    const wait = config.replay_timer_max;
-    const feedback = 80 + Math.ceil(config.ctlos_target_spacing / 25);
-    const flush = (time, reason) => {
-      state('FLUSH', time, reason + '。清空重放缓冲；' + policy(config.llr_flush_behavior), 'FLUSH', '空',
-        config.llr_flush_behavior === 'DISCARD' ? 'A tx_discard' : '');
-      if (config.re_init_on_discard === 'TRUE') init(time + 1);
-    };
-    const goodCounters = 'A tx_ok|B rx_ok|B rx_expected_seq_good';
-    const ackCounters = 'B tx_ack_ctl_os|A rx_ack_ctl_os';
-    const ack = (seq, note) => [
-      '累计 ACK 与释放', 'ACK · seq ' + seq, true, note,
-      1, seq, 0, 'ADVANCE', '期望 ' + (seq + 1), '空'
-    ];
-    if (preset === 'normal') {
-      const last = capacity > 1 && age > 21 ? 11 : 10;
-      signalStep(['正常发送帧 10', 'DATA · seq 10', false, 'B 收到期望的帧 10，FCS 校验通过，交付后期望帧 11。', 0, 10, 0, 'ADVANCE', '期望 11', '10'], 0, goodCounters);
-      if (last === 11) {
-        signalStep(['正常发送帧 11', 'DATA · seq 11', false, 'B 按序接收并交付帧 11。', 0, 11, 0, 'ADVANCE', '期望 12', '10、11'], 21, goodCounters);
+      const receivesInit = (preset === 'lldp' || rx.llr_mode_local === 'ON') && preset !== 'init-fail';
+      if (receivesInit) expected = txSeq;
+      step('发送 INIT', sender + ' 通告当前 tx_seq。',
+        { wire: true, type: 3, seq: txSeq, data: 0x4de1, name: 'INIT', lost: preset === 'init-fail',
+          counts: [...counters(sender, 'tx_init_ctl_os'), ...(receivesInit ? counters(receiver, 'rx_init_ctl_os') : [])] });
+      if (!receivesInit) {
+        step('等待 INIT_ECHO', '接收端未返回有效回显，发送端保持 INIT。');
+        return;
       }
-      if (feedback < age) {
-        signalStep(ack(last, 'B 确认已按序接收至帧 ' + last + '，A 释放已确认的重放缓冲。'), feedback, ackCounters);
+      now += 40;
+      rxState = 'SEND_ACKS';
+      step('回显 INIT_ECHO', receiver + ' 原样返回序号和 init_data。',
+        { wire: true, backward: true, type: 4, seq: expected, data: 0x4de1, name: 'INIT_ECHO',
+          counts: [...counters(receiver, 'tx_init_echo_ctl_os'), ...counters(sender, 'rx_init_echo_ctl_os')] });
+      now += 40;
+      txState = 'ADVANCE';
+      acknowledged = mod(txSeq - 1);
+      step('进入 ADVANCE', '有效回显已到达，发送窗口可用。');
+    }
+
+    function flush(reason) {
+      queue.length = buffer.length = 0;
+      replayAt = ageAt = pcsAt = Infinity;
+      txState = 'FLUSH';
+      step('FLUSH', reason + '。释放重放缓冲。');
+      step('FLUSH 期间上层来帧', policyText[tx.llr_flush_behavior],
+        { counts: tx.llr_flush_behavior === 'DISCARD' ? counters(sender, 'tx_discard') : [] });
+      if (tx.re_init_on_discard === 'TRUE') {
+        now++;
+        retries = 0;
+        init();
+      }
+    }
+
+    function scheduleFeedback() {
+      if (feedbackPending || rxState === 'NACK_SENT') return;
+      feedbackPending = true;
+      // Teaching scheduler uses an aligned idle CtlOS opportunity on the reverse stream.
+      const byte = Math.ceil(Math.max(now * 25 + rx.ctlos_target_spacing, nextCtlSlot) / 8) * 8;
+      schedule(Math.ceil(byte / 25) + 80, () => feedback(byte));
+    }
+
+    function feedback(byte) {
+      feedbackPending = false;
+      const nack = rxState === 'SEND_NACK';
+      if (rxState !== 'SEND_ACKS' && !nack) return;
+      const type = nack ? 2 : 1;
+      const name = nack ? 'NACK' : 'ACK';
+      const seq = mod(expected - 1);
+      const lost = preset === 'timeout';
+      nextCtlSlot = byte + 400;
+      const counts = counters(receiver, 'tx_' + name.toLowerCase() + '_ctl_os');
+      if (nack) rxState = 'NACK_SENT';
+      if (!lost) {
+        counts.push(...counters(sender, 'rx_' + name.toLowerCase() + '_ctl_os'));
+        const position = buffer.findIndex(frame => frame.seq === seq);
+        if (position < 0 && seq !== acknowledged) {
+          counts.push(...counters(sender, 'rx_ack_nack_seq_error'));
+        } else if (position >= 0) {
+          buffer.splice(0, position + 1);
+          acknowledged = seq;
+          retries = 0;
+          ageAt = buffer.length ? now + tx.data_age_timer_max : Infinity;
+          replayAt = buffer.length ? now + tx.replay_timer_max : Infinity;
+        }
+        if (nack) {
+          retries = 0;
+          replayAt = Infinity;
+          nackDuringReplay = txState === 'REPLAY';
+        }
+      }
+      step(lost ? name + ' 在链路丢失' : nack ? '发送 NACK' : '累计 ACK 与释放',
+        '反向空闲 CtlOS 槽，距场景起点 ' + byte + ' B。' +
+        (lost ? '发送端未收到反馈。' : '累计确认至序号 ' + seq + '。'),
+        { wire: true, backward: true, type, seq, name, lost, counts });
+      if (lost) return;
+      if (nack && buffer.length && txState === 'ADVANCE') beginReplay();
+      else if (!nack && newFrames < 2 && txState === 'ADVANCE') schedule(now + 21, sendNew);
+    }
+
+    function transmit(frame, replay) {
+      const counts = counters(sender, 'tx_ok');
+      const fault = replay ? '' : frame.fault;
+      if (cbfc && !replay) creditSent++;
+      if (fault === 'poisoned') counts[0] = sender + ' tx_poisoned';
+      if (replayAt === Infinity) replayAt = now + tx.replay_timer_max;
+      let rxResult = '按序交付';
+      if (fault === 'lost') {
+        rxResult = '接收端未收到';
       } else {
-        flush(age, '累计 ACK 返回前，数据驻留定时器到期');
+        const distance = mod(frame.seq - expected);
+        const badFcs = fault === 'bad-fcs';
+        const poisoned = fault === 'poisoned';
+        counts.push(...counters(receiver, badFcs ? 'rx_bad' : poisoned ? 'rx_poisoned' : 'rx_ok'));
+        if (distance === 0 && !badFcs) {
+          counts.push(...counters(receiver, poisoned ? 'rx_expected_seq_poisoned' : 'rx_expected_seq_good'));
+          if (poisoned) rxResult = '按序接收 · 标记 frame_bad';
+          if (cbfc) {
+            creditReceived++;
+            schedule(now + 100, () => {
+              creditReturned++;
+              step('CF_Update · 信用归还', '教学示例中接收队列出队，归还一个信用。', { backward: true });
+            });
+          }
+          if (rxState === 'NACK_SENT') counts.push(...counters(receiver, 'rx_replay'));
+          expected = mod(expected + 1);
+          rxState = 'SEND_ACKS';
+        } else {
+          rxResult = badFcs ? 'FCS 错误 · 丢弃' : distance < 0x80000 ? '序号缺口 · 丢弃' : '重复帧 · 丢弃';
+          counts.push(...counters(receiver, distance === 0 ? 'rx_expected_seq_bad' :
+            distance < 0x80000 ? 'rx_missing_seq' : 'rx_duplicate_seq'));
+          if (rxState === 'SEND_ACKS') rxState = 'SEND_NACK';
+        }
+        scheduleFeedback();
+      }
+      const title = replay ? '重放帧 ' + frame.seq : '发送帧 ' + frame.seq;
+      step(title, receiver + ' · ' + rxResult,
+        { wire: true, seq: frame.seq, name: (replay ? 'Replay' : 'DATA') + ' · seq ' + frame.seq,
+          lost: fault === 'lost', badFcs: fault === 'bad-fcs', replay, rxResult, counts });
+    }
+
+    function sendNew() {
+      if (newFrames >= 2 || buffer.length >= capacity || txState !== 'ADVANCE') return;
+      const fault = newFrames === 0 ? { nack: 'lost', cbfc: 'lost', 'bad-fcs': 'bad-fcs', poisoned: 'poisoned' }[preset] : '';
+      const frame = { seq: txSeq, fault };
+      txSeq = mod(txSeq + 1);
+      newFrames++;
+      buffer.push(frame);
+      if (ageAt === Infinity) ageAt = now + tx.data_age_timer_max;
+      transmit(frame, false);
+      if (newFrames < 2) schedule(now + 21, sendNew);
+    }
+
+    function beginReplay() {
+      txState = 'REPLAY';
+      nackDuringReplay = false;
+      replayAt = Infinity;
+      step('进入 REPLAY', '从未确认队首开始，保留原始序号。');
+      const frames = buffer.slice();
+      frames.forEach((frame, i) => schedule(now + 21 * (i + 1), () => {
+        if (!nackDuringReplay && buffer.includes(frame)) transmit(frame, true);
+      }));
+      schedule(now + 21 * frames.length, () => {
+        if (!nackDuringReplay) retries++;
+        txState = 'ADVANCE';
+        step('重放完成', 'TX 退出 REPLAY。', { counts: counters(sender, 'tx_replay') });
+        if (nackDuringReplay && buffer.length) beginReplay();
+        else if (newFrames < 2 && buffer.length < capacity) schedule(now + 21, sendNew);
+      });
+    }
+
+    if (preset === 'lldp') {
+      const versions = Object.fromEntries(['A', 'B'].map(endpoint =>
+        [endpoint, get('lldp-' + endpoint.toLowerCase()).value]));
+      const wanted = value => value === 'v0' || value === 'v1';
+      const enabled = wanted(versions.A) && wanted(versions.B);
+      const advertise = (endpoint, confirmed) => {
+        const version = versions[endpoint];
+        if (version === 'none') return '无 UE Options TLV';
+        const e = confirmed && enabled ? (version === 'v0' ? 1 : 3) : 0;
+        return (version === 'off' ? 'v1' : version) + ' · W=' + (wanted(version) ? 3 : 0) + ' · E=' + e;
+      };
+      txState = 'LLR_OFF';
+      rxState = 'OFF';
+      step('交换 LLDP 意愿', 'A ' + advertise('A', false) + ' ｜ B ' + advertise('B', false));
+      now += 80;
+      step('交换 LLDP 启用状态', 'A ' + advertise('A', true) + ' ｜ B ' + advertise('B', true));
+      now += 80;
+      if (enabled) {
+        txSeq = expected = 0;
+        init();
+      } else {
+        step('继续普通以太网', '双方未同时启用 LLR。');
       }
       return timeline;
     }
-    const badFcs = preset === 'bad-fcs';
-    const hasSecondFrame = capacity > 1 && age > 21;
-    const pcsLost = preset === 'pcs';
-    if (pcsLost) {
-      state('PCS_status = FALSE', 0, '链路失锁，缓冲中仍有未确认帧。', 'ADVANCE', capacity === 1 ? '10' : '10、11');
+    if (tx.llr_mode_remote === 'OFF') {
+      txState = 'LLR_OFF';
+      rxState = rx.llr_mode_local === 'OFF' ? 'OFF' : '—';
+      step('LLR_OFF', '发送端使用普通以太网流程。');
+      return timeline;
+    }
+    if (preset === 'init' || preset === 'init-fail' || rx.llr_mode_local === 'OFF') {
+      txSeq = expected = 0;
+      rxState = 'OFF';
+      init();
+      return timeline;
+    }
+    if (preset === 'pcs') {
+      pcsAt = tx.pcs_lost_status_timer_max;
+      step('PCS_status = FALSE', '链路持续失锁。');
+    } else if (!capacity) {
+      step('等待窗口可用', '未确认窗口容不下一帧 512 B。');
     } else {
-      if (badFcs) {
-        signalStep(['帧 10 的 FCS 错误', 'DATA · seq 10 · Bad FCS', false,
-          'B 收到期望序号 10，但 FCS 校验失败，丢弃该帧并保持 next_rx_seq=10。',
-          0, 10, 0, 'ADVANCE', 'FCS 错误 · 期望 10', '10'],
-        0, 'A tx_ok|B rx_bad|B rx_expected_seq_bad', true);
+      sendNew();
+      if (capacity === 1) step('等待窗口可用', '下一帧等待累计确认释放窗口。');
+    }
+    // The event budget limits the preview only. It never triggers FLUSH.
+    while (timeline.length < 80) {
+      queue.sort((a, b) => a.time - b.time);
+      const job = queue[0];
+      const timer = txState === 'ADVANCE' ? replayAt : Infinity;
+      now = Math.min(job?.time ?? Infinity, timer, ageAt, pcsAt);
+      if (!Number.isFinite(now)) break;
+      if (now === pcsAt || now === ageAt) {
+        flush(now === pcsAt ? 'PCS 失锁定时器到期' : '数据驻留定时器到期');
+        break;
+      }
+      if (job?.time === now) {
+        queue.shift().run();
+      } else if (tx.replay_ct_max !== 255 && retries >= tx.replay_ct_max) {
+        flush('重放定时器到期且已达到连续重放上限');
+        break;
       } else {
-        signalStep(steps.replay[0], 0, 'A tx_ok');
+        step('重放定时器到期', '发送端仍有未确认帧。');
+        beginReplay();
       }
-      if (hasSecondFrame) signalStep(steps.replay[1], 21, 'A tx_ok|B rx_ok|B rx_missing_seq');
     }
-    const deadline = pcsLost ? Math.min(age, config.pcs_lost_status_timer_max) : age;
-    const canNack = !pcsLost && (badFcs || (preset === 'nack' && capacity > 1));
-    const firstOpportunity = !pcsLost && hasSecondFrame ? 21 : 0;
-    let time = Math.max(firstOpportunity, canNack ? Math.min(wait, feedback) : wait);
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (time >= deadline) {
-        flush(deadline, pcsLost && deadline === config.pcs_lost_status_timer_max ? 'PCS 失锁定时器到期' : '数据驻留定时器到期');
-        return timeline;
-      }
-      const nack = attempt === 0 && canNack && feedback <= wait;
-      if (!nack && config.replay_ct_max !== 255 && attempt >= config.replay_ct_max) {
-        flush(time, '重放定时器到期且已达到连续重放上限');
-        return timeline;
-      }
-      if (nack) signalStep(steps.replay[2], time, 'B tx_nack_ctl_os|A rx_nack_ctl_os');
-      else state('重放定时器到期', time, '未及时收到反馈，启动重放。', 'REPLAY', capacity === 1 ? '10' : '10、11');
-      if (!pcsLost) {
-        signalStep(steps.replay[3], time, 'A tx_ok|B rx_ok|B rx_expected_seq_good|B rx_replay' +
-          (capacity === 1 ? '|A tx_replay' : ''));
-        if (capacity > 1 && time + 21 < deadline) signalStep(steps.replay[4], time + 21, 'A tx_ok|A tx_replay|B rx_ok|B rx_expected_seq_good');
-      }
-      if (!pcsLost && (preset === 'nack' || badFcs) && time + feedback < age) {
-        if (capacity > 1) signalStep(steps.replay[5], time + feedback, 'B tx_ack_ctl_os|A rx_ack_ctl_os');
-        else signalStep(ack(10, '收到累计 ACK(10)，释放帧 10。'), time + feedback, ackCounters);
-        return timeline;
-      }
-      time += Math.max(wait, 42);
-    }
-    if (deadline <= time) flush(deadline, pcsLost && deadline === config.pcs_lost_status_timer_max ? 'PCS 失锁定时器到期' : '数据驻留定时器到期');
-    else if (config.replay_ct_max === 3) flush(time, '重放定时器到期且已达到连续重放上限');
-    else state('仿真预览结束', time, '已显示前三轮重放机会。', 'ADVANCE', '未确认');
+    if (timeline.length >= 80) step('预览结束', '已达到动画事件显示上限。');
     return timeline;
   }
 
@@ -482,9 +616,14 @@
     signal.visible = !simulation || Boolean(simulation.wire);
     signal.position.set((reverse ? 1 : -1) * extent * (1 - 2 * progress), reverse ? -10 : 10, 1.8);
     if (isLostStep()) {
-      signal.position.x = reverse ? Math.max(0, signal.position.x) : Math.min(0, signal.position.x);
+      const lossX = lossPosition(reverse);
+      signal.position.x = reverse ? Math.max(lossX, signal.position.x) : Math.min(lossX, signal.position.x);
       signal.material.color.setHex(0xd65a51);
-    } else signal.material.color.setHex(reverse ? 0xe2a41f : 0x22a579);
+    } else {
+      const result = current()[10];
+      const discarded = result?.rxResult?.includes('丢弃');
+      signal.material.color.setHex(discarded ? 0xd65a51 : result?.replay ? 0x8c67d4 : reverse ? 0xe2a41f : 0x22a579);
+    }
     const viewMode = get('view-mode').value;
     const selection = visibleStages[viewMode];
     const summaries = stageSummaries();
@@ -535,8 +674,10 @@
     } else if (preview) {
       format = stages[stage][0] + ' · ' + preview;
     }
-    if (isLostStep() && Math.abs(signal.position.x) < .01) format = '帧在链路中丢失';
-    if (current()[10]?.badFcs && travel >= 1) format = '接收处理 · FCS 错误，丢弃';
+    if (isLostStep() && Math.abs(signal.position.x - lossPosition(reverse)) < .01) {
+      format = current()[4] ? 'CtlOS 在链路中丢失' : '帧在链路中丢失';
+    }
+    if (current()[10]?.rxResult && travel >= 1) format = '接收处理 · ' + current()[10].rxResult;
     const title = get('packet-name');
     const detail = get('packet-format');
     if (title.textContent !== name) title.textContent = name;
@@ -583,6 +724,10 @@
     return text;
   }
 
+  function lossPosition(reverse) {
+    return get('view-mode').value === 'all' ? (10 * spacing - extent) * (reverse ? -1 : 1) : 0;
+  }
+
   function isLostStep() {
     return Boolean(current()[10]?.lost) || (get('scenario').value === 'replay' && index === 0);
   }
@@ -600,7 +745,7 @@
     return [start + ' …', block, '4 × 66b → 257b', '514 + 30 符号',
       lost ? '帧在此丢失' : '线路信号',
       ...(lost ? ['未收到', '—', '—', '—']
-        : ['恢复 514 符号', block, start + ' …', current()[10]?.badFcs ? 'FCS 错误 · 丢弃' : sequenceField(type) + '=' + sequenceHex(seq)])];
+        : ['恢复 514 符号', block, start + ' …', current()[10]?.rxResult || sequenceField(type) + '=' + sequenceHex(seq)])];
   }
   const byteView = bytes => '<div class="pcs-rx-bytes">' + bytes.map((value, i) =>
     '<span>' + hex(value) + '<small>Lane ' + i + ' · C=' + Number(i === 0) + '</small></span>').join('') + '</div>';
@@ -632,6 +777,11 @@
     const path = reverse ? 'B → A' : 'A → B';
     let detail = '<p><b>当前方向 ' + path + '</b> · ' + note + '</p>';
     if (target) detail += '<p>' + target.description + '</p>';
+    const result = current()[10]?.rxResult;
+    if (result && (!target || target.stage > 10)) {
+      detail += '<p><strong>RX 结果 · ' + result + '</strong></p>';
+      if (result !== '按序交付') detail += '<p>以下编码为发送端参考。</p>';
+    }
     if (current()[10] && !current()[10].wire) {
       detail += '<p>本步显示本地状态转换。</p>';
     } else if (target && target.reverse !== reverse) {
@@ -643,7 +793,7 @@
       const { bytes, blockType, blockBits } = wireData(type, seq, data);
       detail += fieldDetails(type, seq, data);
       if (isLostStep() && target?.stage > 10) {
-        detail += '<p>接收端未收到这一帧。</p>';
+        detail += '<p>接收端未收到该信号。</p>';
         get('format-body').innerHTML = detail;
         if (!formatDialog.open) formatDialog.showModal();
         return;
@@ -702,7 +852,7 @@
       ['A', 'B'].forEach((endpoint, column) => {
         const cell = row.cells[column + 1];
         const entry = counts.get(endpoint + ' ' + name);
-        cell.textContent = simulation && !unavailableCounters.has(name) ? entry?.count || 0 : '—';
+        cell.textContent = simulation ? entry?.count || 0 : '—';
         if (!entry) return;
         changed = changed || entry.delta > 0;
         const link = document.createElement('button');
@@ -750,7 +900,7 @@
       const prefix = 'state-' + endpoint.toLowerCase();
       const states = {
         tx: isNegotiation ? 'LLR_OFF' : endpoint === sender ? txStates[tx] || tx : '—',
-        rx: isNegotiation ? 'OFF' : endpoint === receiver ? rxState : '—'
+        rx: isNegotiation ? 'OFF' : endpoint === receiver ? simulation?.rxState || rxState : '—'
       };
       for (const [path, state] of Object.entries(states)) {
         const cell = get(prefix + '-' + path);
@@ -779,6 +929,14 @@
           ? '<button type="button" class="btn" data-llr-init>进入 LLR 初始化</button>' : '')
       : '<p>' + (simulation?.sender || 'A') + ' · TX ' + tx + ' ｜ ' +
         (simulation?.receiver || 'B') + ' · RX ' + rx + ' ｜ ' + (simulation?.sender || 'A') + ' · 重放缓冲 ' + buffer + '</p>' +
+      (simulation?.cbfc ? '<p>CBFC（单 VC 教学计数） · S_VC_CC=' + simulation.creditSent +
+        ' ｜ R_VC_CC=' + simulation.creditReceived + ' ｜ 已归还=' + simulation.creditReturned + '</p>' : '') +
+      (simulation?.txSeq === undefined ? '' : '<p>tx_seq=' + simulation.txSeq +
+        ' ｜ next_rx_seq=' + simulation.expected + ' ｜ acked_seq=' + simulation.acknowledged +
+        ' ｜ replay_ct=' + simulation.retries + '</p><p>到期时间（ns） · 重放 ' +
+        (Number.isFinite(simulation.replayAt) ? simulation.replayAt : '—') + ' ｜ 驻留 ' +
+        (Number.isFinite(simulation.ageAt) ? simulation.ageAt : '—') + ' ｜ PCS ' +
+        (Number.isFinite(simulation.pcsAt) ? simulation.pcsAt : '—') + '</p>') +
       (type ? '<div class="pcs-rx-bytes">' + bytes.map((b, i) => '<span>' + hex(b) + '<small>D' + i + '</small></span>').join('') +
         '</div>' + fieldDetails(type, seq, data) + '<p class="note">xMII：Lane 0 为控制字符 0x5C，D1 为消息类型。PCS：同步头 10，块类型 0x4B，O-code 0x6。</p>'
         : simulation && !simulation.wire ? '' : '<p class="note">LLR-eligible 数据帧的 20 位 frame_seq 位于修改后的前导码。此步序号为 ' + sequenceLabel(current()) + '。</p>'));
