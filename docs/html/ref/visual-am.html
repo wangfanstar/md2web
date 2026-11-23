@@ -13,7 +13,7 @@
 <section><h2>同一报文流的时间对照</h2><label>AM 相位 <select id="phase"><option value="ipg">IPG 内补偿</option><option value="before">紧邻 SFD 之前</option><option value="inside">帧内插入</option></select></label>
 <div id="timeline"></div><p id="effect"></p>
 <p>每格代表一条逻辑 PCS lane 的块周期。100G 的 20 条逻辑 lane 各为 5.15625 Gb/s，66 位对应 12.8 ns。25.78125 Gb/s 物理 lane 上传送 66 位用时 2.56 ns。图中压缩 AM 周期，只比较一次插入的相位。</p></section>
-<section><h2>参考面穿越动画</h2><p>上轨为基准，下轨为所选 AM 相位。金色表示含 SFD 的起始块，线框表示基准 SFD，中央蓝线表示观察参考面。</p>
+<section><h2>参考面穿越动画</h2><p>上、下两排立体模块分别为 TX 和 RX。中间上轨为基准，下轨为所选 AM 相位。金色表示含 SFD 的起始块，线框表示基准 SFD，中央蓝线表示观察参考面。</p>
 <div id="ctrl"><button id="btnPlay">暂停</button><button id="btnReset">重播</button></div>
 <canvas id="c"></canvas>
 <div id="legend" class="panel">
@@ -81,6 +81,37 @@
   const root = new THREE.Group();
   scene.add(root);
 
+  // TX / RX modules share the camera and move with the timing tracks.
+  const moduleMeshes = [];
+  const buttons = Array.from(document.querySelectorAll('.rail button'));
+  modules.forEach((items, row) => {
+    const y = row ? -3.35 : 4.1;
+    items.forEach(([name], i) => {
+      const label = document.createElement('canvas');
+      label.width = 256; label.height = 72;
+      const ctx = label.getContext('2d');
+      ctx.fillStyle = name.includes('AM') ? '#904329' : row ? '#28516c' : '#28635d';
+      ctx.fillRect(0, 0, 256, 72);
+      ctx.fillStyle = '#fff'; ctx.font = '28px sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(name, 128, 36, 244);
+      const face = new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(label)});
+      const side = new THREE.MeshStandardMaterial({color:row ? 0x315375 : 0x33685e});
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(2.05,.64,.55), [side,side,side,side,face,side]);
+      mesh.position.set((i-3.5)*2.2,y,0);
+      mesh.rotation.x=.16;
+      mesh.userData.button=buttons[row*8+i];
+      root.add(mesh); moduleMeshes.push(mesh);
+    });
+  });
+  let press;
+  canvas.addEventListener('pointerdown', e => {press=[e.clientX,e.clientY];});
+  canvas.addEventListener('pointerup', e => {
+    if (!press || Math.hypot(e.clientX-press[0],e.clientY-press[1])>5) return;
+    const r=canvas.getBoundingClientRect(), ray=new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(2*(e.clientX-r.left)/r.width-1,1-2*(e.clientY-r.top)/r.height),camera);
+    const hit=ray.intersectObjects(moduleMeshes)[0]; if(hit) hit.object.userData.button.click();
+  });
   // 地面网格，增加 3D 纵深感
   const grid = new THREE.GridHelper(60, 60, 0x1b2638, 0x121a28);
   grid.position.y = -4.2;
@@ -187,6 +218,7 @@
     const w = canvas.clientWidth, h = canvas.clientHeight;
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
+    camera.position.z = Math.max(16, 23 / camera.aspect);
     camera.updateProjectionMatrix();
   }
   window.addEventListener('resize', resize);
