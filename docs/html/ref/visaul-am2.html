@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>100G 下 1588 时间戳偏差动画：20 虚拟 lane 对齐 12.16 ns / AM 插入 12.80 ns</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0f16; overflow: hidden;
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif; color: #d8e0ea; }
+  #c { position: fixed; inset: 0; }
+  .panel { position: fixed; background: rgba(12,18,28,0.88); border: 1px solid #243246;
+    border-radius: 8px; padding: 12px 14px; font-size: 13px; line-height: 1.7; }
+  h2 { margin: 0 0 8px; font-size: 15px; color: #fff; }
+  button { background: #1c2a3d; color: #d8e0ea; border: 1px solid #334a68; padding: 6px 12px;
+    border-radius: 5px; cursor: pointer; margin: 2px 4px 2px 0; font-size: 13px; }
+  button:hover { background: #26395a; }
+  button.on { background: #2f6fb0; border-color: #4a8fd0; color: #fff; }
+  #top { top: 14px; left: 14px; width: 440px; }
+  #readout { top: 14px; right: 14px; width: 340px; font-family: Consolas, monospace; font-size: 13px; }
+  #readout .big { font-size: 22px; color: #ffd166; }
+  #readout .dim { color: #7f8fa6; }
+  #legend { bottom: 14px; left: 14px; font-size: 12px; }
+  #note { bottom: 14px; right: 14px; width: 340px; font-size: 12px; color: #aab6c8; }
+  #note b { color: #fff; }
+  .sw { display: inline-block; width: 12px; height: 12px; margin: 0 6px 0 10px; vertical-align: middle; border-radius: 2px; }
+  #hint { bottom: 14px; left: 50%; transform: translateX(-50%); color: #7f8fa6; font-size: 12px; white-space: nowrap; }
+  .ok { color: #7fd6a0; } .bad { color: #ff7d7d; } .warn { color: #ffd166; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="top" class="panel">
+  <h2>100G 下的 1588 时间戳偏差动画</h2>
+  <button id="mA">A：AM 插入 +12.80 ns</button>
+  <button id="mB" class="on">B：20 虚拟 lane 对齐 +12.16 ns</button>
+  <div style="margin-top:6px;">
+    <button id="btnPlay">暂停</button>
+    <button id="btnReset">重播</button>
+  </div>
+</div>
+
+<div id="readout" class="panel"></div>
+
+<div id="legend" class="panel">
+  <div><span class="sw" style="background:#2f6fb0"></span>报文数据
+  <span class="sw" style="background:#ffc857"></span>PTP SFD（已到达）
+  <span class="sw" style="background:#ff9d5c"></span>等待对齐
+  <span class="sw" style="background:#ff4d4d"></span>AM 插入段
+  <span class="sw" style="background:#4a5568"></span>未输出的合并流</div>
+  <div style="color:#7f8fa6">青色竖线为参考面（当前 PHC 时刻）；灰色虚线为理想 SFD 1035.84 ns；上方 20 行为虚拟 lane，下方粗条为合并后的流</div>
+</div>
+
+<div id="note" class="panel">
+  <b>计算依据</b><br>
+  A：$20 \times 64\ \text{bit} \div 100\ \text{Gb/s} = 12.8\ \text{ns}$<br>
+  B：取表 90A-1 中 100G 的 PCS lane 分发/合并项 12.16 ns，作为 20 条 lane 的最大偏斜。<br>
+  <span style="color:#7f8fa6">动画为示意：lane 偏斜按线性分布，只保证最大值与表值一致。</span>
+</div>
+
+<div id="hint" class="panel">拖拽鼠标旋转视角</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script>
+(function () {
+  // ---------- 参数 ----------
+  const TI = 1035.84;          // 理想 SFD 时刻（ns）
+  const BLK = 2.56;            // 66-bit 块时长（ns）
+  const NL = 20;               // 虚拟 lane 数
+  const SKEW = 12.16;          // 最大偏斜（模式 B）
+  const AMW = 12.80;           // AM 插入量（模式 A）
+  const K = 0.55;              // 世界单位 / ns
+  const T_START = 1028, SPAN = 24;   // 参考时刻扫描范围
+  const SPD = 3;               // 扫描速度（ns / s），一圈约 8 s
+  const K_MIN = -6, K_MAX = 12;      // 每条流显示的块范围
+  const LY = i => 3.5 - i * 0.28;    // 虚拟 lane 的纵坐标（从上到下）
+  const YM = -3.2;                   // 合并流纵坐标
+  const YA = 0.4;                    // 模式 A 单流纵坐标
+  const fmt = v => v.toFixed(2);
+  const clamp = v => Math.max(0, Math.min(1, v));
+  const ease = t => t * t * (3 - 2 * t);
+
+  let mode = 'B', playing = true, elapsed = 0, rotX = 0, rotY = 0;
+
+  // ---------- 渲染器与场景 ----------
+  const canvas = document.getElementById('c');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setClearColor(0x0b0f16, 1);
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x0b0f16, 28, 55);
+  const cam = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
+  cam.position.set(0, 0.6, 15);
+  cam.lookAt(0, -0.4, 0);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+  const dl = new THREE.DirectionalLight(0xffffff, 0.8);
+  dl.position.set(4, 8, 10);
+  scene.add(dl);
+
+  const root = new THREE.Group();
+  scene.add(root);
+
+  const grid = new THREE.GridHelper(60, 60, 0x1b2638, 0x121a28);
+  grid.position.y = -4.6;
+  root.add(grid);
+
+  // ---------- 工具 ----------
+  function textSprite(text, color, w) {
+    w = w || 2.4;
+    const c = document.createElement('canvas');
+    c.width = 512; c.height = 128;
+    const g = c.getContext('2d');
+    g.fillStyle = 'rgba(8,12,20,0.9)';
+    g.fillRect(4, 4, 504, 120);
+    g.strokeStyle = color; g.lineWidth = 4;
+    g.strokeRect(4, 4, 504, 120);
+    g.fillStyle = color;
+    g.font = 'bold 40px "Microsoft YaHei", sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(text, 256, 64);
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(c), transparent: true, depthTest: false
+    }));
+    s.scale.set(w, w / 4, 1);
+    s.renderOrder = 10;
+    return s;
+  }
+  function mat(color, emis) {
+    return new THREE.MeshStandardMaterial({
+      color, emissive: color, emissiveIntensity: emis === undefined ? 0.25 : emis,
+      roughness: 0.45, metalness: 0.1, transparent: true, opacity: 1
+    });
+  }
+
+  const BW = BLK * K * 0.86;   // 块宽
+  const blockGeo = new THREE.BoxGeometry(BW, 0.2, 0.22);
+  const bigGeo = new THREE.BoxGeometry(BW, 0.5, 0.3);
+  const planeGeo = new THREE.BoxGeometry(0.06, 9.6, 0.06);
+
+  // ---------- 参考面 ----------
+  const refLine = new THREE.Mesh(planeGeo, new THREE.MeshBasicMaterial({ color: 0x4dd0ff }));
+  refLine.position.set(0, 0.2, 0.2);
+  root.add(refLine);
+  const refGlow = new THREE.Mesh(new THREE.BoxGeometry(0.5, 9.6, 0.02),
+    new THREE.MeshBasicMaterial({ color: 0x4dd0ff, transparent: true, opacity: 0.1, depthWrite: false }));
+  refGlow.position.set(0, 0.2, 0);
+  root.add(refGlow);
+  const refTag = textSprite('参考面（当前 PHC）', '#4dd0ff', 3.2);
+  refTag.position.set(0, 5.2, 0);
+  root.add(refTag);
+
+  // 理想 SFD 线
+  const idealLine = new THREE.Mesh(new THREE.BoxGeometry(0.03, 9, 0.03),
+    new THREE.MeshBasicMaterial({ color: 0x9fb4cc, transparent: true, opacity: 0.45 }));
+  root.add(idealLine);
+  const idealTag = textSprite('理想 SFD 1035.84', '#9fb4cc', 3.0);
+  root.add(idealTag);
+
+  // ---------- 模式 B：20 条虚拟 lane ----------
+  const groupB = new THREE.Group();
+  root.add(groupB);
+
+  const lanes = [];
+  for (let i = 0; i < NL; i++) {
+    const s = SKEW * i / (NL - 1);      // 该 lane 的偏斜
+    const row = { s, y: LY(i), blocks: [], sfd: null, tag: null, track: null };
+    // 轨道线（底色）
+    row.track = new THREE.Mesh(new THREE.BoxGeometry(18, 0.02, 0.02),
+      new THREE.MeshBasicMaterial({ color: 0x1d2a3c }));
+    row.track.position.set(0, row.y, -0.05);
+    groupB.add(row.track);
+    for (let k = K_MIN; k <= K_MAX; k++) {
+      const isS = k === 0;
+      const m = new THREE.Mesh(isS ? bigGeo : blockGeo,
+        mat(isS ? 0xffc857 : 0x2f6fb0, isS ? 0.6 : 0.15));
+      m.position.y = row.y;
+      groupB.add(m);
+      row.blocks.push({ mesh: m, k, isS });
+      if (isS) row.sfd = m;
+    }
+    row.tag = textSprite('VL' + (i + 1), '#8fa3bd', 1.2);
+    row.tag.position.set(-9.4, row.y, 0);
+    groupB.add(row.tag);
+    lanes.push(row);
+  }
+
+  // 合并流（粗条）
+  const mergedRow = { blocks: [] };
+  const mergedTrack = new THREE.Mesh(new THREE.BoxGeometry(18, 0.04, 0.04),
+    new THREE.MeshBasicMaterial({ color: 0x1d2a3c }));
+  mergedTrack.position.set(0, YM, -0.05);
+  groupB.add(mergedTrack);
+  for (let k = K_MIN; k <= K_MAX; k++) {
+    const isS = k === 0;
+    const m = new THREE.Mesh(isS ? bigGeo : blockGeo, mat(isS ? 0xffc857 : 0x2f6fb0, 0.2));
+    m.position.y = YM;
+    groupB.add(m);
+    mergedRow.blocks.push({ mesh: m, k, isS });
+    if (isS) mergedRow.sfd = m;
+  }
+  const mergedTag = textSprite('合并后的流', '#8fa3bd', 2.4);
+  mergedTag.position.set(-9.2, YM + 0.7, 0);
+  groupB.add(mergedTag);
+  const mergedNote = textSprite('等最慢 lane 到齐后输出', '#ff9d5c', 3.4);
+  mergedNote.position.set(4.6, YM + 0.85, 0);
+  groupB.add(mergedNote);
+
+  const laneTitle = textSprite('20 条虚拟 lane（PCS 分发后）', '#ff9d5c', 4.0);
+  laneTitle.position.set(4.2, LY(0) + 0.8, 0);
+  groupB.add(laneTitle);
+
+  // ---------- 模式 A：单条流 + AM 插入 ----------
+  const groupA = new THREE.Group();
+  root.add(groupA);
+  const streamA = [];
+  for (let k = K_MIN; k <= K_MAX; k++) {
+    const isS = k === 0;
+    const m = new THREE.Mesh(isS ? bigGeo : blockGeo, mat(isS ? 0xffc857 : 0x2f6fb0, isS ? 0.6 : 0.15));
+    m.position.y = YA;
+    groupA.add(m);
+    streamA.push({ mesh: m, k, isS });
+  }
+  const amMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 0.9, 0.4), mat(0xff4d4d, 0.7));
+  amMesh.position.y = YA;
+  groupA.add(amMesh);
+  const amTag = textSprite('AM 插入段 12.80 ns', '#ff7d7d', 3.2);
+  amTag.position.y = YA + 1.2;
+  groupA.add(amTag);
+  const aTitle = textSprite('单条合并流：AM 占用 20 × 64 bit', '#ff7d7d', 4.4);
+  aTitle.position.set(0, YA + 2.4, 0);
+  groupA.add(aTitle);
+
+  // ---------- 状态与界面 ----------
+  const readout = document.getElementById('readout');
+
+  function setMode(m) {
+    mode = m;
+    document.getElementById('mA').classList.toggle('on', m === 'A');
+    document.getElementById('mB').classList.toggle('on', m === 'B');
+    groupA.visible = m === 'A';
+    groupB.visible = m === 'B';
+    idealLine.position.y = m === 'A' ? YA : -0.4;
+    idealLine.scale.y = m === 'A' ? 0.25 : 1;
+    idealTag.position.set(0, m === 'A' ? YA - 1.4 : -5.3, 0);
+    elapsed = 0;
+  }
+  document.getElementById('mA').onclick = () => setMode('A');
+  document.getElementById('mB').onclick = () => setMode('B');
+  document.getElementById('btnPlay').onclick = e => {
+    playing = !playing;
+    e.target.textContent = playing ? '暂停' : '播放';
+  };
+  document.getElementById('btnReset').onclick = () => { elapsed = 0; };
+
+  // ---------- 模式 B 更新 ----------
+  function updateB(tNow) {
+    const mergeT = TI + SKEW;               // 合并输出时刻（1048.00）
+    const merged = tNow >= mergeT;
+    let arrived = 0;
+
+    // 理想 SFD 线位置（相对参考面）
+    idealLine.position.set((TI - tNow) * K, -0.4, 0.1);
+    idealTag.position.x = (TI - tNow) * K;
+
+    lanes.forEach(row => {
+      const passed = tNow >= TI + row.s;
+      if (passed) arrived++;
+      row.blocks.forEach(b => {
+        const t = TI + row.s + b.k * BLK;
+        const x = (t - tNow) * K;
+        b.mesh.position.x = x;
+        b.mesh.visible = Math.abs(x) < 9.6;
+        if (b.isS) {
+          // 已过线但未合并：橙色等待；合并后：黄色
+          const waiting = passed && !merged;
+          b.mesh.material.color.setHex(waiting ? 0xff9d5c : 0xffc857);
+          b.mesh.material.emissive.setHex(waiting ? 0xff9d5c : 0xffc857);
+          b.mesh.material.emissiveIntensity = passed ? 1.0 : 0.4;
+        }
+      });
+      row.tag.visible = true;
+    });
+
+    // 合并流
+    mergedRow.blocks.forEach(b => {
+      const t = mergeT + b.k * BLK;
+      const x = (t - tNow) * K;
+      b.mesh.position.x = x;
+      b.mesh.visible = Math.abs(x) < 9.6;
+      const flash = Math.abs(tNow - mergeT) < 0.6 ? 1.2 : 0.5;
+      if (b.isS) {
+        b.mesh.material.emissiveIntensity = merged ? flash : 0.1;
+        b.mesh.material.opacity = merged ? 1 : 0.35;
+      } else {
+        b.mesh.material.opacity = merged ? 1 : 0.3;
+        b.mesh.material.emissiveIntensity = merged ? 0.3 : 0.05;
+      }
+    });
+
+    // 读数
+    const dev = merged ? SKEW : 0;
+    readout.innerHTML = `
+      <div>模式 B：20 虚拟 lane 分发/合并</div>
+      <div>参考面 PHC：<span class="warn">${fmt(tNow)} ns</span></div>
+      <div>已到达 SFD 的 lane：<span class="warn">${arrived} / ${NL}</span></div>
+      <div>合并流 SFD：${merged
+        ? `<span class="bad">${fmt(mergeT)} ns（已输出）</span>`
+        : `<span class="dim">等待中</span>`}</div>
+      <div>偏差：<span class="big">${dev >= 0 ? '+' : ''}${fmt(dev)} ns</span></div>
+      <div class="dim" style="margin-top:6px;">最慢的 VL20 偏斜 12.16 ns，合并时整体对齐到它</div>`;
+  }
+
+  // ---------- 模式 A 更新 ----------
+  function updateA(tNow) {
+    const ins = AMW * ease(clamp((tNow - 1033) / 5));   // AM 段逐步占位
+    const posOf = k => {
+      const t = TI + k * BLK;
+      return (k >= 0 ? t + ins : t) - tNow;
+    };
+    streamA.forEach(b => {
+      const x = posOf(b.k) * K;
+      b.mesh.position.x = x;
+      b.mesh.visible = Math.abs(x) < 9.6;
+    });
+    // AM 段位于 [TI, TI + ins]
+    const x0 = (TI - tNow) * K, x1 = (TI + ins - tNow) * K;
+    amMesh.scale.x = Math.max(0.001, (x1 - x0));
+    amMesh.position.x = (x0 + x1) / 2;
+    amMesh.visible = ins > 0.01;
+    amMesh.material.emissiveIntensity = 0.5 + 0.4 * Math.sin(performance.now() * 0.006);
+    amTag.position.x = (x0 + x1) / 2;
+
+    const actual = TI + ins;
+    readout.innerHTML = `
+      <div>模式 A：AM 插入</div>
+      <div>参考面 PHC：<span class="warn">${fmt(tNow)} ns</span></div>
+      <div>理想 SFD：<span class="warn">${fmt(TI)} ns</span></div>
+      <div>实际 SFD：<span class="bad">${fmt(actual)} ns</span></div>
+      <div>偏差：<span class="big">+${fmt(ins)} ns</span></div>
+      <div class="dim" style="margin-top:6px;">20 × 64 bit ÷ 100 Gb/s = 12.80 ns</div>`;
+  }
+
+  // ---------- 拖拽 ----------
+  let dragging = false, lastX = 0, lastY = 0;
+  canvas.addEventListener('pointerdown', e => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
+  window.addEventListener('pointerup', () => dragging = false);
+  window.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    rotY += (e.clientX - lastX) * 0.004;
+    rotX += (e.clientY - lastY) * 0.003;
+    rotX = Math.max(-0.5, Math.min(0.5, rotX));
+    lastX = e.clientX; lastY = e.clientY;
+  });
+
+  function resize() {
+    const w = window.innerWidth, h = window.innerHeight;
+    renderer.setSize(w, h, false);
+    cam.aspect = w / h;
+    cam.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------- 主循环 ----------
+  let last = performance.now();
+  function frame(now) {
+    const dt = (now - last) / 1000; last = now;
+    if (playing) elapsed += dt;
+    const tNow = T_START + ((elapsed * SPD) % SPAN);
+
+    if (mode === 'A') updateA(tNow); else updateB(tNow);
+
+    refGlow.material.opacity = 0.08 + 0.05 * Math.sin(now * 0.005);
+    root.rotation.y = rotY + Math.sin(now * 0.0003) * 0.06;
+    root.rotation.x = rotX;
+
+    renderer.render(scene, cam);
+    requestAnimationFrame(frame);
+  }
+
+  setMode('B');
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
