@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>100G 下 1588 时间戳偏差动画：20 虚拟 lane 对齐 12.16 ns / AM 插入 12.80 ns</title>
+<title>100GBASE-R · AM 插入与 PCS 通道重组</title>
 <style>
   html, body { margin: 0; height: 100%; background: #0b0f16; overflow: hidden;
     font-family: "Microsoft YaHei", "PingFang SC", sans-serif; color: #d8e0ea; }
@@ -30,9 +30,9 @@
 <canvas id="c"></canvas>
 
 <div id="top" class="panel">
-  <h2>100G 下的 1588 时间戳偏差动画</h2>
-  <button id="mA">A：AM 插入 +12.80 ns</button>
-  <button id="mB" class="on">B：20 虚拟 lane 对齐 +12.16 ns</button>
+  <h2>100GBASE-R · AM 插入与 PCS 通道重组</h2>
+  <button id="mA">A：SFD 前插入 AM</button>
+  <button id="mB" class="on">B：接收端去偏斜与重组</button>
   <div style="margin-top:6px;">
     <button id="btnPlay">暂停</button>
     <button id="btnReset">重播</button>
@@ -43,35 +43,35 @@
 
 <div id="legend" class="panel">
   <div><span class="sw" style="background:#2f6fb0"></span>报文数据
-  <span class="sw" style="background:#ffc857"></span>PTP SFD（已到达）
+  <span class="sw" style="background:#ffc857"></span>含 SFD 的块
   <span class="sw" style="background:#ff9d5c"></span>等待对齐
   <span class="sw" style="background:#ff4d4d"></span>AM 插入段
   <span class="sw" style="background:#4a5568"></span>未输出的合并流</div>
-  <div style="color:#7f8fa6">青色竖线为参考面（当前 PHC 时刻）；灰色虚线为理想 SFD 1035.84 ns；上方 20 行为虚拟 lane，下方粗条为合并后的流</div>
+  <div style="color:#7f8fa6">青线为扫描时刻；灰线为示例基准 SFD 1035.84 ns；上方 20 行为虚拟 lane，下方粗条为合并后的流</div>
 </div>
 
 <div id="note" class="panel">
-  <b>计算依据</b><br>
-  A：$20 \times 64\ \text{bit} \div 100\ \text{Gb/s} = 12.8\ \text{ns}$<br>
-  B：取表 90A-1 中 100G 的 PCS lane 分发/合并项 12.16 ns，作为 20 条 lane 的最大偏斜。<br>
-  <span style="color:#7f8fa6">动画为示意：lane 偏斜按线性分布，只保证最大值与表值一致。</span>
+  <b>IEEE 802.3 Clause 82 · 经典 100GBASE-R PCS</b><br>
+  A：每条 lane 每 16 383 个普通块插一个 66 位 AM；20 条并行 lane 同时占用 12.80 ns。PCS 通过 Idle 调整补偿开销，保留帧数据。<br>
+  B：AM 锁定后，观察一轮数据的重组。聚合块间隔 0.64 ns，首末块相隔 19 × 0.64 = 12.16 ns。<br>
+  <span style="color:#7f8fa6">本例另设 4 ns 通道传播偏斜。时间轴以块起点表示含 SFD 的块；实际时间戳还需计入块内位置和参考面修正。</span>
 </div>
 
 <div id="hint" class="panel">拖拽鼠标旋转视角</div>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="visual-pcs-assets/three.min.js"></script>
 <script>
 (function () {
   // ---------- 参数 ----------
   const TI = 1035.84;          // 理想 SFD 时刻（ns）
-  const BLK = 2.56;            // 66-bit 块时长（ns）
+  const BLK = 0.64;            // 66-bit 块时长（ns）
   const NL = 20;               // 虚拟 lane 数
-  const SKEW = 12.16;          // 最大偏斜（模式 B）
-  const AMW = 12.80;           // AM 插入量（模式 A）
+  const SKEW = 4;          // 最大偏斜（模式 B）
+  const AMW = NL * BLK;           // AM 插入量（模式 A）
   const K = 0.55;              // 世界单位 / ns
   const T_START = 1028, SPAN = 24;   // 参考时刻扫描范围
   const SPD = 3;               // 扫描速度（ns / s），一圈约 8 s
-  const K_MIN = -6, K_MAX = 12;      // 每条流显示的块范围
+  const K_MIN = -6, K_MAX = 24;      // 每条流显示的块范围
   const LY = i => 3.5 - i * 0.28;    // 虚拟 lane 的纵坐标（从上到下）
   const YM = -3.2;                   // 合并流纵坐标
   const YA = 0.4;                    // 模式 A 单流纵坐标
@@ -145,7 +145,7 @@
     new THREE.MeshBasicMaterial({ color: 0x4dd0ff, transparent: true, opacity: 0.1, depthWrite: false }));
   refGlow.position.set(0, 0.2, 0);
   root.add(refGlow);
-  const refTag = textSprite('参考面（当前 PHC）', '#4dd0ff', 3.2);
+  const refTag = textSprite('当前扫描时刻', '#4dd0ff', 3.2);
   refTag.position.set(0, 5.2, 0);
   root.add(refTag);
 
@@ -170,15 +170,17 @@
     row.track.position.set(0, row.y, -0.05);
     groupB.add(row.track);
     for (let k = K_MIN; k <= K_MAX; k++) {
-      const isS = k === 0;
+      const isS = k === 0 && i === 0;
       const m = new THREE.Mesh(isS ? bigGeo : blockGeo,
         mat(isS ? 0xffc857 : 0x2f6fb0, isS ? 0.6 : 0.15));
       m.position.y = row.y;
       groupB.add(m);
+      m.scale.x = NL;
+      m.scale.y = isS ? 0.45 : 1;
       row.blocks.push({ mesh: m, k, isS });
       if (isS) row.sfd = m;
     }
-    row.tag = textSprite('VL' + (i + 1), '#8fa3bd', 1.2);
+    row.tag = textSprite('VL' + i, '#8fa3bd', 1.2);
     row.tag.position.set(-9.4, row.y, 0);
     groupB.add(row.tag);
     lanes.push(row);
@@ -226,7 +228,7 @@
   const amTag = textSprite('AM 插入段 12.80 ns', '#ff7d7d', 3.2);
   amTag.position.y = YA + 1.2;
   groupA.add(amTag);
-  const aTitle = textSprite('单条合并流：AM 占用 20 × 64 bit', '#ff7d7d', 4.4);
+  const aTitle = textSprite('聚合时间轴：每条 lane 同时插入一个 AM', '#ff7d7d', 4.4);
   aTitle.position.set(0, YA + 2.4, 0);
   groupA.add(aTitle);
 
@@ -266,15 +268,15 @@
       const passed = tNow >= TI + row.s;
       if (passed) arrived++;
       row.blocks.forEach(b => {
-        const t = TI + row.s + b.k * BLK;
+        const t = TI + row.s + b.k * AMW;
         const x = (t - tNow) * K;
-        b.mesh.position.x = x;
+        b.mesh.position.x = x + AMW * K / 2;
         b.mesh.visible = Math.abs(x) < 9.6;
-        if (b.isS) {
+        if (b.k === 0) {
           // 已过线但未合并：橙色等待；合并后：黄色
           const waiting = passed && !merged;
-          b.mesh.material.color.setHex(waiting ? 0xff9d5c : 0xffc857);
-          b.mesh.material.emissive.setHex(waiting ? 0xff9d5c : 0xffc857);
+          b.mesh.material.color.setHex(waiting ? 0xff9d5c : (b.isS ? 0xffc857 : 0x2f6fb0));
+          b.mesh.material.emissive.setHex(waiting ? 0xff9d5c : (b.isS ? 0xffc857 : 0x2f6fb0));
           b.mesh.material.emissiveIntensity = passed ? 1.0 : 0.4;
         }
       });
@@ -285,7 +287,7 @@
     mergedRow.blocks.forEach(b => {
       const t = mergeT + b.k * BLK;
       const x = (t - tNow) * K;
-      b.mesh.position.x = x;
+      b.mesh.position.x = x + BLK * K / 2;
       b.mesh.visible = Math.abs(x) < 9.6;
       const flash = Math.abs(tNow - mergeT) < 0.6 ? 1.2 : 0.5;
       if (b.isS) {
@@ -298,28 +300,29 @@
     });
 
     // 读数
-    const dev = merged ? SKEW : 0;
+    const dev = Math.min(SKEW, Math.max(0, tNow - TI));
     readout.innerHTML = `
       <div>模式 B：20 虚拟 lane 分发/合并</div>
-      <div>参考面 PHC：<span class="warn">${fmt(tNow)} ns</span></div>
-      <div>已到达 SFD 的 lane：<span class="warn">${arrived} / ${NL}</span></div>
+      <div>扫描时刻：<span class="warn">${fmt(tNow)} ns</span></div>
+      <div>本轮数据块已到达的 lane：<span class="warn">${arrived} / ${NL}</span></div>
       <div>合并流 SFD：${merged
         ? `<span class="bad">${fmt(mergeT)} ns（已输出）</span>`
         : `<span class="dim">等待中</span>`}</div>
-      <div>偏差：<span class="big">${dev >= 0 ? '+' : ''}${fmt(dev)} ns</span></div>
-      <div class="dim" style="margin-top:6px;">最慢的 VL20 偏斜 12.16 ns，合并时整体对齐到它</div>`;
+      <div>示例位移：<span class="big">${dev >= 0 ? '+' : ''}${fmt(dev)} ns</span></div>
+      <div class="dim" style="margin-top:6px;">本例 VL0 携带 SFD；VL19 晚到 4 ns，同轮块按 VL0 至 VL19 重组</div>`;
   }
 
   // ---------- 模式 A 更新 ----------
   function updateA(tNow) {
-    const ins = AMW * ease(clamp((tNow - 1033) / 5));   // AM 段逐步占位
+    idealLine.position.x = idealTag.position.x = (TI - tNow) * K;
+    const ins = AMW;
     const posOf = k => {
       const t = TI + k * BLK;
       return (k >= 0 ? t + ins : t) - tNow;
     };
     streamA.forEach(b => {
       const x = posOf(b.k) * K;
-      b.mesh.position.x = x;
+      b.mesh.position.x = x + BLK * K / 2;
       b.mesh.visible = Math.abs(x) < 9.6;
     });
     // AM 段位于 [TI, TI + ins]
@@ -333,10 +336,10 @@
     const actual = TI + ins;
     readout.innerHTML = `
       <div>模式 A：AM 插入</div>
-      <div>参考面 PHC：<span class="warn">${fmt(tNow)} ns</span></div>
+      <div>扫描时刻：<span class="warn">${fmt(tNow)} ns</span></div>
       <div>理想 SFD：<span class="warn">${fmt(TI)} ns</span></div>
       <div>实际 SFD：<span class="bad">${fmt(actual)} ns</span></div>
-      <div>偏差：<span class="big">+${fmt(ins)} ns</span></div>
+      <div>示例位移：<span class="big">+${fmt(ins)} ns</span></div>
       <div class="dim" style="margin-top:6px;">20 × 64 bit ÷ 100 Gb/s = 12.80 ns</div>`;
   }
 
