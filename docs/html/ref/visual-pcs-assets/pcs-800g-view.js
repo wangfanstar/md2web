@@ -64,7 +64,7 @@
       [12, y, 10, '解扰', flow], [13, y, 10, '逆转码', flow]
     );
   }
-  const pitch = 16;
+  const pitch = 19;
   const x = stages.map((_, i) => (i - (stages.length - 1) / 2) * pitch);
   const SPAN = x[x.length - 1] - x[0];
   const ST = { lanes: 6, mux: 7, link: 8, demux: 9, align: 10, fec: 11, rx: 16 };
@@ -898,6 +898,20 @@
 
   function buildStageBand() {
     if (stageBand) return;
+    // Direction spans the horizontal processing chain; Flow 0/1 keep their own colors.
+    const halfPitch = (x[1] - x[0]) / 2;
+    for (const [first, last, color] of [[0, 7, 0x1687bc], [9, x.length - 1, 0xd78429]]) {
+      const width = x[last] - x[first] + halfPitch * 1.8;
+      const center = (x[last] + x[first]) / 2;
+      const backdrop = new T.Mesh(new T.PlaneGeometry(width, BAND * 2 + 8),
+        new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.13, depthWrite: false, side: T.DoubleSide }));
+      backdrop.position.set(center, 0, -10);
+      scene.add(backdrop);
+      const rail = new T.Mesh(new T.BoxGeometry(width, 0.55, 0.35),
+        new T.MeshBasicMaterial({ color }));
+      rail.position.set(center, BAND + 4, -9.8);
+      scene.add(rail);
+    }
     stageBand = new T.Mesh(new T.PlaneGeometry(3.6, BAND * 2 + 10),
       new T.MeshBasicMaterial({
         color: new T.Color(theme.ink), transparent: true, opacity: 0.05, depthWrite: false
@@ -942,7 +956,7 @@
     const sig = stage + ':' + focusMode;
     if (stageBadge.dataset.sig === sig) return;
     stageBadge.dataset.sig = sig;
-    stageBadge.innerHTML = '<b>' + (stage + 1) + ' / ' + stages.length + '</b>' +
+    stageBadge.innerHTML = '<span>' + (stage < 8 ? 'TX 发送' : stage > 8 ? 'RX 接收' : '物理链路') + '</span><b>' + (stage + 1) + ' / ' + stages.length + '</b>' +
       '<span>' + stages[stage][0] + '</span>' + (focusMode ? '<i>聚焦</i>' : '');
     stageBadge.setAttribute('aria-pressed', focusMode ? 'true' : 'false');
     stageBadge.classList.toggle('is-focus', focusMode);
@@ -961,7 +975,7 @@
     box.position.set(x[index] + offset * pitch, y, -4.3);
     box.userData.operation = operation;
     box.add(new T.LineSegments(new T.EdgesGeometry(geometry),
-      new T.LineBasicMaterial({ color: moduleColors().edge })));
+      new T.LineBasicMaterial({ color: index < 8 ? 0x1687bc : index > 8 ? 0xd78429 : moduleColors().edge })));
     box.userData.stage = index;
     box.userData.flow = flow;
     scene.add(box);
