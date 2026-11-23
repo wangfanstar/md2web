@@ -4,12 +4,12 @@
 <style>
 *{box-sizing:border-box}body{margin:0;background:#101b29;color:#edf3f9;font:16px/1.55 system-ui,sans-serif}main{max-width:1160px;margin:auto;padding:24px}h1{font-size:clamp(22px,4vw,36px);margin:0}p{color:#c2d0df}nav,.tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:16px 0}button,select{background:#22364b;border:1px solid #7890a5;color:inherit;padding:7px 12px;border-radius:6px;font:inherit}button{cursor:pointer}button[aria-pressed=true]{background:#14605e;border-color:#5bd4c8}button:focus-visible,select:focus-visible{outline:3px solid #ffcc6b}.scroll{overflow:auto;background:#162637;border-radius:10px;padding:18px}.scene{min-width:760px;display:grid;grid-template-columns:repeat(20,1fr);gap:5px;perspective:1100px;padding:8px 4px}.lane{text-align:center;font:14px monospace;color:#b7c9d8}.track{height:160px;position:relative;background:linear-gradient(90deg,transparent 44%,#435d72 45% 55%,transparent 56%);margin:10px 0;transform-style:preserve-3d}.block{position:absolute;left:10%;width:76%;height:20px;background:#3681aa;box-shadow:3px 4px #1e475f,inset 0 2px #ffffff60;border-radius:2px;transform:rotateY(-14deg) rotateX(12deg);font:bold 11px/20px monospace;color:white}.sfd{background:#edbf59;color:#332815;box-shadow:3px 4px #876726}.am{background:#c95855;box-shadow:3px 4px #773634}.selected{color:#ffdb84;font-weight:bold}.result{font-size:19px;color:#ffdb84}input[type=range]{width:min(450px,65vw)}small{color:#9eb4c7}a{color:#8cd6ed}
 </style></head><body><main><h1>100GBASE-R · PCS 时间实验</h1>
-<nav aria-label="实验场景"><button id="distribution" aria-pressed="true">分发与合并 · 12.16 ns</button><button id="marker" aria-pressed="false">AM 插入 · 12.80 ns</button></nav>
+<nav aria-label="AM 事件"><button id="distribution" aria-pressed="true">本轮无 AM</button><button id="marker" aria-pressed="false">本轮前插入 AM</button></nav>
 <div class="tools"><label>含 SFD 的块所在 lane <select id="choice"></select></label><button id="play">暂停</button><button id="restart">重播</button></div>
-<h2 id="stage"></h2><div class="scroll"><small>PCS lane 编号 · 黄色为含 SFD 的块</small><div class="scene" id="scene"></div></div>
+<h2 id="stage"></h2><div class="scroll"><small>20 条并行 PCS lane 在聚合时间轴上的读出顺序 · 黄色为含 SFD 的块，红色为 AM</small><div class="scene" id="scene"></div></div>
 <div class="tools"><label for="progress">动画进度</label><input type="range" id="progress" min="0" max="1000" value="0"><output id="clock"></output></div>
 <p id="formula" class="result"></p><p id="explain"></p>
-<details open><summary>如何对应 IEEE 802.3cx-2023 Annex 90A</summary><p>Table 90A-1 列出每个发送或接收端口潜在的时间戳精度影响。这里选取 Clause 82 的 20 条 PCS lane。聚合编码速率为 103.125 Gb/s，一个 66 位块占 0.64 ns；单条 lane 为 5.15625 Gb/s，同一个块占 12.80 ns。</p>
+<p>固定「本轮无 AM」，将 Lane 0 切换为 Lane 19，读出位置从 0 变为 12.16 ns。保持 Lane 19，再插入 AM，位置变为 24.96 ns。这是同一示例时间轴上两个位置之差；实际 PTP 误差还取决于测量参考面和已实施的补偿。</p><details open><summary>如何对应 IEEE 802.3cx-2023 Annex 90A</summary><p>Table 90A-1 列出每个发送或接收端口潜在的时间戳精度影响。这里选取 Clause 82 的 20 条 PCS lane。聚合编码速率为 103.125 Gb/s，一个 66 位块占 0.64 ns；单条 lane 为 5.15625 Gb/s，同一个块占 12.80 ns。</p>
 <p>90A.4、90A.7 描述 TX 分发与 RX 合并的固有延迟如何互补。按 90.7.1 建模时，TX 采用最大分发延迟，RX 采用最小合并延迟。图中去掉固定流水线延迟和介质传播时间，以块起点代表含 SFD 的块，便于比较不同 lane 的相位。</p>
 <p>90A.5 讨论 AM、码字标记及 Idle 增删。90A.5.1 和 90A.5.2 分别给出发送与接收示例，TimeSync Client 可用 TX_NUM_BIT_CHANGE 或 RX_NUM_BIT_CHANGE 计入测量点之前的变化。PCS 通过 Idle 调整平衡长期速率，保留报文数据。</p></details>
 <script>
@@ -29,32 +29,27 @@ choice.value='19';
 let markers=false, playing=true, phase=0;
 const duration=3*round, clamp=n=>Math.max(0,Math.min(1,n));
 function draw(){
-  const k=Number(choice.value), t=(markers ? 2*round : duration)*phase;
-  const tx=(laneCount-1-k)*slot, rx=k*slot;
+  const k=Number(choice.value);
+  const eventDelay=markers ? round : 0;
+  const t=duration*phase;
+  const serialTime=t-eventDelay;
+  const offset=eventDelay+k*slot;
   byId('clock').textContent=t.toFixed(2)+' ns';
   progress.value=Math.round(phase*1000);
-  byId('stage').textContent=markers?(t<round?'一组 AM 并行发送':'AM 后的报文块通过同一组 lane'):(t<(laneCount-1)*slot?'TX · 轮流收集一组块':t<2*round?'20 条 lane · 并行传送':'RX · 按原顺序输出');
+  byId('stage').textContent=serialTime<0?'AM 组占用一轮':serialTime<round?'聚合时间轴 · 按 lane 编号依次读出':'本轮读出完成';
   rows.forEach(({lane,data,am},i)=>{
     lane.classList.toggle('selected',i===k);
     data.classList.toggle('sfd',i===k);
     data.textContent=i===k?'SFD':i;
-    am.hidden=!markers || t>=round;
-    am.style.top=(130*clamp(t/round))+'px';
-    const start=i*slot, release=(laneCount-1)*slot;
-    let y;
-    if(markers){
-      data.hidden=t<round;
-      y=130*clamp((t-round)/round);
-    }else{
-      data.hidden=t<start || t>=2*round+i*slot+slot;
-      // 所有块在收齐后一起进入并行段；RX 按 lane 序号逐块放行。
-      y=108*clamp((t-release)/(2*round-release))+22*clamp((t-2*round-i*slot)/slot);
-    }
-    data.style.top=y+'px';
+    am.hidden=serialTime>=0;
+    am.style.top=(125*clamp(t/round))+'px';
+    data.hidden=serialTime<0;
+    const movement=clamp((serialTime-i*slot)/slot);
+    data.style.top=(125*movement)+'px';
+    data.style.opacity=movement===1 && i!==k?'0.45':'1';
   });
-  byId('formula').textContent=markers?'20 × 0.64 ns = 12.80 ns，相当于每条 lane 上一个完整块的时间。':
-    'Lane '+k+'：TX 等待 '+(19-k)+' × 0.64 = '+tx.toFixed(2)+' ns；RX 等待 '+k+' × 0.64 = '+rx.toFixed(2)+' ns。';
-  byId('explain').textContent=markers?'每条 lane 在 16 383 个普通块之后插入一个 66 位 AM。本例中测量点紧随 AM 组，其所在块相对无插入情形后移一轮。':'比较 Lane 0 和 Lane 19：第一个块在 TX 等其余块收齐，最后一个块在 RX 等其余块先输出。20 个位置之间共有 19 个间隔，两段固有等待相加始终为 12.16 ns。';
+  byId('formula').textContent='AM 占位 '+eventDelay.toFixed(2)+' ns ＋ Lane '+k+' 的轮内相位 '+(k*slot).toFixed(2)+' ns ＝ '+offset.toFixed(2)+' ns';
+  byId('explain').textContent='以无 AM 时 Lane 0 开始读出为 0 ns。含 SFD 的块在 '+offset.toFixed(2)+' ns 开始读出。'+(t<offset?'当前尚未轮到该块。':'当前已到达该块的读出位置。');
 }
 function mode(isMarker){
   markers=isMarker;phase=0;
