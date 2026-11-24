@@ -1332,6 +1332,8 @@
       var nd = camera.position.distanceTo(dies[n].center);
       if (nd < best) { best = nd; near = n; }
     }
+    // Keep the panorama open while the search form has keyboard focus.
+    if (dies[focusIndex].level === 0 && moduleSearchForm.matches(':focus-within')) return;
     focusIndex = near;
 
     for (var i = 0; i < dies.length; i++) {
@@ -1731,6 +1733,12 @@
   var moduleSearchStatus = document.getElementById('moduleSearchStatus');
   var moduleSearchResults = document.getElementById('moduleSearchResults');
   var moduleSearchForm = document.getElementById('moduleSearchForm');
+  moduleSearchForm.addEventListener('pointerdown', function (event) {
+    event.stopPropagation();
+  });
+  moduleSearchForm.addEventListener('pointerup', function (event) {
+    event.stopPropagation();
+  });
   moduleSearchForm.addEventListener('submit', function (event) {
     event.preventDefault();
     var first = moduleSearchResults.firstElementChild;
