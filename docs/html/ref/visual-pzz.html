@@ -395,6 +395,38 @@
     return mesh;
   }
 
+  // Bake the stationary outlines in each independently visible detail layer.
+  function batchOutlines(group) {
+    var vertices = [];
+    group.children.slice().forEach(function (line) {
+      if (!line.isLineSegments || line.material !== edgeMat) return;
+      var points = line.geometry.attributes.position;
+      for (var i = 0; i < points.count; i++) {
+        vertices.push(points.getX(i) + line.position.x,
+                      points.getY(i) + line.position.y,
+                      points.getZ(i) + line.position.z);
+      }
+      group.remove(line);
+    });
+    if (!vertices.length) return;
+    var geometry = new T.BufferGeometry();
+    geometry.setAttribute('position', new T.Float32BufferAttribute(vertices, 3));
+    group.add(new T.LineSegments(geometry, edgeMat));
+  }
+
+  // Overview blocks share geometry and lighting, with a color per instance.
+  function batchOverviewBlocks(group) {
+    var blocks = group.children.filter(function (obj) { return obj.geometry === unit; });
+    var batch = new T.InstancedMesh(unit, mat(0xffffff), blocks.length);
+    blocks.forEach(function (block, i) {
+      block.updateMatrix();
+      batch.setMatrixAt(i, block.matrix);
+      batch.setColorAt(i, block.material.color);
+      group.remove(block);
+    });
+    group.add(batch);
+  }
+
   var arrowMatCache = Object.create(null);
   function arrowMat(color) {
     var key = String(color);
@@ -1168,6 +1200,9 @@
     addLabel('FC / credit', 'MIRX 反压', g2pitx, pStart + 1 * (pW + pGap), 3.3, 10, index, 2, 'tiny');
     arrow(g2pitx, 0, 2.2, 3.8, modX, 2.2, -5.7, C.flowNoc);
     addLabel('Modify 子功能', null, g2pitx, 0, 6.4, 1.5, index, 2, 'tiny');
+
+    batchOverviewBlocks(g0);
+    [g0, g1, g2maci, g2mmu, g2mirx, g2pitx].forEach(batchOutlines);
 
     labelMode = null;
 
