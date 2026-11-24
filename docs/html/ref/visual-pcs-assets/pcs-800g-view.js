@@ -4,7 +4,7 @@
   const byId = id => document.getElementById(id);
   const get = key => byId('g800-' + key);
   const value = key => +get(key).value;
-  const rates = ['200g', '800g', '1600g', 'llr'];
+  const rates = ['200g', '800g', '1600g', 'llr', 'cbfc'];
   const tabs = rates.map(rate => byId('tab-' + rate));
   const panels = rates.map(rate => byId('lab-' + rate));
   const motion = matchMedia('(prefers-reduced-motion: reduce)');

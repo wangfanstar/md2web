@@ -701,6 +701,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <button type="button" class="btn" role="tab" id="tab-800g" aria-selected="false" aria-controls="lab-800g" tabindex="-1">800GBASE-R</button>
     <button type="button" class="btn" role="tab" id="tab-1600g" aria-selected="false" aria-controls="lab-1600g" tabindex="-1">1.6TBASE-R</button>
     <button type="button" class="btn" role="tab" id="tab-llr" aria-selected="false" aria-controls="lab-llr" tabindex="-1">LLR</button>
+    <button type='button' class='btn' role='tab' id='tab-cbfc' aria-selected='false' aria-controls='lab-cbfc' tabindex='-1'>CBFC</button>
   </div>
   <div role="tabpanel" id="lab-200g" aria-labelledby="tab-200g" tabindex="0">
   <div class="lab-head">
@@ -1100,6 +1101,51 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     </dialog>
     <p class="fine">依据 IEEE P802.3dj/D2.0（未批准草案）第 175 条和第 176 条。16:8 SM-PMA 按 40 位符号四元组复用。AM 采用表 175–2 的标记和图 175–4 的映射，示例展示一个带 AM 的组。CDR、锁定时序及波形采用教学示意。</p>
   </section>
+  <section role="tabpanel" id="lab-cbfc" aria-labelledby="tab-cbfc" hidden tabindex="0">
+    <h3>CBFC · 从信用检查到缓冲释放</h3>
+    <p>UE 1.1 §5.2.5.6、§5.2.12.1。示例从信用协商完成开始，VC 1 与端口的额度均为 4，每帧消耗 3 个信用单位。</p>
+    <div style="display:flex;align-items:center;gap:1em;padding:2em 1em;background:#182d40;color:white;border-radius:10px">
+      <b style="background:#23547a;padding:1em;box-shadow:4px 5px #102235">A · TX<br>VC 1 队列</b>
+      <div style="flex:1;position:relative;height:4em;border-bottom:2px solid #81b8ca"><b id="cb-token" style="position:absolute;white-space:nowrap;transform:translateX(-50%);color:#ffe098"></b></div>
+      <b style="background:#256254;padding:1em;box-shadow:4px 5px #123a32">B · RX<br>VC 1 缓冲</b>
+    </div>
+    <h4 id="cb-step"></h4><p id="cb-count"></p>
+    <button class="btn" id="cb-play">播放</button> <button class="btn" id="cb-next">下一步</button> <button class="btn" id="cb-reset">重播</button>
+  </section>
+  <script>
+  (() => {
+    const el=id=>document.getElementById(id);
+    const steps=[
+      ['检查额度：4 个可用信用足够发送第一帧。','检查',0,0,0,0],
+      ['A 选择第一帧，端口与 VC 同时记入 3 个信用。','帧 1 →',3,3,0,0],
+      ['B 接收第一帧。A 仅余 1 个信用，第二帧留在发送队列。','等待信用',3,3,0,0],
+      ['B 排空第一帧，累计释放 3 个信用，向 A 返回 8 字节控制有序集。','← CF_Update',3,3,3,0],
+      ['A 收到更新：累计释放值 3 减去上次记录 0，归还 3 个信用。','信用恢复',0,3,3,3],
+      ['A 再次通过信用检查，发送第二帧。','帧 2 →',3,6,3,3]
+    ];
+    let index=0,timer;
+    function draw(){
+      const [note,token,used,consumed,freed,seen]=steps[index];
+      el('cb-step').textContent=(index+1)+' / '+steps.length+' · '+note;
+      el('cb-count').textContent='A 可用 '+(4-used)+' ｜ S_P_CU / S_VC_CU = '+used+' ｜ S_VC_CC = '+consumed+' ｜ B R_VC_CF = '+freed+' ｜ A S_VC_CF = '+seen;
+      const box=el('cb-token');
+      box.getAnimations().forEach(a=>a.cancel());
+      box.textContent=token;
+      box.style.left='50%';
+      if([1,3,5].includes(index)){
+        const reverse=index===3;
+        box.animate([{left:reverse?'85%':'15%'},{left:reverse?'15%':'85%'}],{duration:1500,fill:'forwards'});
+      }
+    }
+    function stop(){clearInterval(timer);timer=null;el('cb-play').textContent='播放';}
+    function next(){if(index<steps.length-1) index++;draw();if(index===steps.length-1)stop();}
+    el('cb-play').onclick=()=>{if(timer){stop();return;}if(index===steps.length-1){index=0;draw();}timer=setInterval(next,2200);el('cb-play').textContent='暂停';};
+    el('cb-next').onclick=()=>{stop();next();};
+    el('cb-reset').onclick=()=>{stop();index=0;draw();};
+    new MutationObserver(()=>{if(el('lab-cbfc').hidden)stop();}).observe(el('lab-cbfc'),{attributes:true,attributeFilter:['hidden']});
+    draw();
+  })();
+  </script>
   <section role="tabpanel" id="lab-llr" aria-labelledby="tab-llr" hidden tabindex="0">
     <div class="g800-controls">
       <label for="llr-scenario">场景</label>
