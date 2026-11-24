@@ -7,6 +7,11 @@
 <meta name="description" content="PZZ 51.2T 交换芯片内部模块 3D 架构：全景看 4 个 chiplet，放大看 HPP / CPP / MACW / MMU；固定图层可查看 29 个内部子系统、21 个流控模块与 43 条 PFC/CBFC/credit 链路、CPP/HPP 16 条报文转发路径动画（本 DIE / 跨 DIE / AUX / HPP / CPP / Mirror 分类）、10 类报文路径、mermaid 架构图、port/TM/HPP 映射与 85 个模块索引。">
 <link rel="stylesheet" href="visual-pcs-assets/fonts.css">
 <link rel="stylesheet" href="visual-pzz-assets/visual-pzz.css">
+<style>
+  #moduleSearch { width: 100%; color: var(--ink); cursor: text; }
+  #moduleSearchStatus { display: block; color: var(--muted); font-size: .8rem; }
+  #moduleSearchResults { max-height: 14rem; overflow-y: auto; }
+</style>
 </head>
 <body>
 <div class="app">
@@ -34,6 +39,10 @@
       </div>
 
       <p class="side-title">模块索引</p>
+      <input class="chip" id="moduleSearch" type="search" aria-label="搜索模块名称"
+             placeholder="搜索模块名称" autocomplete="off" disabled>
+      <small id="moduleSearchStatus" role="status"></small>
+      <div class="chips" id="moduleSearchResults"></div>
       <div class="chips">
         <button type="button" class="chip" id="chipSubsys">子系统架构<small>pzz_all.md · 29 个子系统</small></button>
         <button type="button" class="chip" id="chipFlow">流控链路<small>AQM · PFC · CBFC · TM</small></button>
@@ -1711,6 +1720,34 @@
     atlasRoot.position.x -= center.x;
     atlasRoot.position.z -= center.z;
   }
+
+  var moduleSearch = document.getElementById('moduleSearch');
+  var moduleSearchStatus = document.getElementById('moduleSearchStatus');
+  var moduleSearchResults = document.getElementById('moduleSearchResults');
+  moduleSearch.disabled = false;
+  moduleSearch.addEventListener('input', function () {
+    moduleSearchResults.textContent = '';
+    moduleSearchStatus.textContent = '';
+    var query = moduleSearch.value.trim().toLowerCase();
+    if (!query) return;
+
+    buildAtlas();
+    var count = 0;
+    atlasCards.forEach(function (card, index) {
+      if (card.data.name.toLowerCase().indexOf(query) < 0) return;
+      count++;
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'chip';
+      button.textContent = card.data.name;
+      button.addEventListener('click', function () {
+        if (viewMode !== 'atlas') enterAtlas();
+        openAtlasModule(index);
+      });
+      moduleSearchResults.appendChild(button);
+    });
+    moduleSearchStatus.textContent = count ? '找到 ' + count + ' 个模块' : '未找到匹配的模块';
+  });
 
   function showAtlasCards(only) {
     for (var i = 0; i < atlasCards.length; i++) {
