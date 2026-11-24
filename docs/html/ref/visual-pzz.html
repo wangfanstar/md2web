@@ -1752,8 +1752,8 @@
       button.className = 'chip';
       button.textContent = card.data.name;
       button.addEventListener('click', function () {
-        if (viewMode !== 'atlas') enterAtlas();
-        openAtlasModule(index);
+        if (viewMode === 'atlas') openAtlasModule(index);
+        else enterAtlas(index);
         moduleSearch.value = '';
         moduleSearchResults.textContent = '';
         moduleSearchStatus.textContent = '';
@@ -4177,6 +4177,9 @@
     if (idx < 0 || idx >= atlasCards.length) return;
     closeAtlasModule(true);
     atlasSelected = idx;
+    hideHoverCard();
+    atlasLabels.forEach(function (label) { label.el.style.display = 'none'; });
+    dirty = true;
     var card = atlasCards[idx];
 
     showAtlasCards(-1);
@@ -4230,8 +4233,9 @@
     updateBackButton();
   }
 
-  function enterAtlas() {
+  function enterAtlas(moduleIndex) {
     hideInfoCard();
+    hideHoverCard();
     leaveMap();
     leavePath();
     leaveDiagram();
@@ -4245,16 +4249,20 @@
     viewMode = 'atlas';
     atlasSelected = -1;
     atlasHover = -1;
-    showAtlasCards();
     chipRoot.visible = false;
     atlasRoot.visible = true;
     setChip(null);
     var ac = document.getElementById('chipAtlas');
     if (ac) ac.classList.add('on');
     labels.forEach(function (L) { L.el.style.display = 'none'; });
-    flyTo(new T.Vector3(0, 0, 0), 185, new T.Vector3(0, 1.0, 0.78));
-    updateBackButton();
-    if (viewMode === 'atlas') draw();
+    if (moduleIndex === undefined) {
+      showAtlasCards();
+      flyTo(new T.Vector3(0, 0, 0), 185, new T.Vector3(0, 1.0, 0.78));
+      updateBackButton();
+    } else {
+      openAtlasModule(moduleIndex);
+    }
+    draw();
   }
 
   function exitAtlas() {
