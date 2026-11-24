@@ -1158,7 +1158,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <h3>CBFC · 初始化、正常运行与异常恢复</h3>
     <p>按 UE 1.1 §5.2 逐步执行：端口复位与 LLDP 初始化（§5.2.8）、信用检查与 CF/CC 更新（§5.2.5）、VC 移除（§5.2.8.5）与异常恢复（§5.2.5.7.4、§5.2.9）。修改参数或切换 VC 会从本轮初始状态重新计算。</p>
     <div class="cb-phase" id="cb-phase" aria-label="CBFC 阶段"></div>
-    <p><label>场景大类 <select id="cb-group"></select></label>　<label>仿真用例 <select id="cb-case"></select></label>　<label>观察 VC <input id="cb-vc" type="number" min="0" max="31" value="1"></label></p>
+    <div class="g800-controls" style="display:flex;flex-wrap:wrap;align-items:center;gap:.5rem"><label>场景大类 <select id="cb-group"></select></label> <label>仿真用例 <select id="cb-case"></select></label> <label>观察 VC <input id="cb-vc" type="number" min="0" max="31" value="1"></label> <div role="group" aria-label="仿真播放" style="display:flex;flex-wrap:wrap;gap:.35rem"><button class="btn" id="cb-play">播放</button> <button class="btn" id="cb-next">下一步</button> <button class="btn" id="cb-reset">重播</button></div></div>
     <p class="note" id="cb-desc"></p>
     <fieldset><legend>A · 发送与准入</legend>
     <label>额度模式 <select id="cb-mode"><option value="vc">S_VC_CL[1]（逐 VC）</option><option value="port">S_P_CL（端口共享）</option></select></label>
@@ -1182,7 +1182,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
       </div>
     </div><p class="note">VC 状态：<b>BE</b> 尽力而为 · <b>Want</b> 接收端申请无损 · <b>RTS</b> 发送端就绪 · <b>RTR</b> 接收端就绪 · <b>无损</b> 可按信用发送。方格右下数字为 S_VC_CU，点击方格切换观察 VC。</p>
     <div id="cb-map"></div><h4 id="cb-step"></h4>
-    <button class="btn" id="cb-play">播放</button> <button class="btn" id="cb-next">下一步</button> <button class="btn" id="cb-reset">重播</button><p class="note">图中状态名描述当前仿真动作；寄存器面板显示所选 VC 与报文编码。</p></div><aside class="cb-registers"><h3>寄存器状态 · <span id="cb-active-vc"></span></h3><div id="cb-registers"></div></aside></div>
+    <p class="note">图中状态名描述当前仿真动作；寄存器面板显示所选 VC 与报文编码。</p></div><aside class="cb-registers"><h3>寄存器状态 · <span id="cb-active-vc"></span></h3><div id="cb-registers"></div></aside></div>
   </section>
   <script src="visual-pcs-assets/pcs-cbfc-lab.js"></script>
   <section role="tabpanel" id="lab-llr" aria-labelledby="tab-llr" hidden tabindex="0">
