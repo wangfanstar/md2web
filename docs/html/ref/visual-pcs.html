@@ -1129,7 +1129,30 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     .cb-table tr.cb-changed td{background:color-mix(in srgb,var(--am) 18%,transparent)}
     .cb-table tr.cb-changed .cb-d{color:var(--ink);font-weight:700}
     .cb-msg caption{color:var(--ink)}
+    .cb-stage{background:var(--scene-bg);border:1px solid var(--rule);border-radius:10px;padding:.55rem .65rem}
+    .cb-stage-head{display:flex;justify-content:space-between;gap:1em;font-family:var(--f-display);font-size:.8rem;margin-bottom:.2rem}
+    .cb-stage-head b{display:flex;align-items:baseline;gap:.4rem}
+    .cb-stage-head .is-tx{color:#126ba7}
+    .cb-stage-head .is-rx{color:#2f8a4c}
+    .cb-stage-head small{font-family:var(--f-mono);font-weight:400;font-size:.72rem;color:var(--muted)}
+    .cb-world{position:relative;height:clamp(260px,32vw,400px);overflow:hidden;border-radius:6px}
+    .cb-world canvas{display:block;width:100%;height:100%}
+    .cb3d-labels{position:absolute;inset:0;pointer-events:none;z-index:2}
+    .cb3d-lbl{position:absolute;left:0;top:0;white-space:nowrap;font-family:var(--f-mono);font-size:10px;color:var(--ink);background:color-mix(in srgb,var(--panel) 80%,transparent);border:1px solid color-mix(in srgb,var(--rule) 70%,transparent);border-radius:4px;padding:1px 5px;backdrop-filter:blur(4px)}
+    .cb3d-lbl.is-title{font-family:var(--f-display);font-weight:700;font-size:11px;background:transparent;border:0;padding:0}
+    .cb3d-lbl.is-packet{background:color-mix(in srgb,var(--am) 88%,transparent);color:var(--ink);border-color:var(--am);font-weight:700}
+    .cb3d-lbl.is-packet[data-kind="data"]{background:color-mix(in srgb,#2f9fd8 84%,transparent);border-color:#2f9fd8}
+    .cb3d-lbl.is-packet[data-kind="cc"]{background:color-mix(in srgb,#8d72c9 84%,transparent);border-color:#8d72c9;color:#fff}
+    .cb3d-lbl.is-packet[data-kind="lldp"]{background:color-mix(in srgb,#2f8a4c 84%,transparent);border-color:#2f8a4c;color:#fff}
+    .cb3d-lbl.is-packet[data-kind="loss"]{background:color-mix(in srgb,var(--bad) 86%,transparent);border-color:var(--bad);color:#fff}
+    .cb-stage-foot{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;margin-top:.35rem;font-family:var(--f-mono);font-size:.72rem;color:var(--muted)}
+    .cb-stage-foot #cb-token{color:var(--ink)}
+    .cb-stage-foot #cb-token[data-dir="out"]{color:#126ba7}
+    .cb-stage-foot #cb-token[data-dir="back"]{color:#2f8a4c}
+    .cb-stage-foot .cb-sp{flex:1}
+    .cb-stage-foot .btn{min-height:26px;padding:1px 8px;font-size:.75rem}
     @media(max-width:1080px){.cb-layout{grid-template-columns:1fr}.cb-registers{max-height:none}}
+    @media(max-width:760px){.cb-world{height:260px}.cb-stage-foot small{display:none}}
     </style>
     <div class="cb-layout"><div>
     <h3>CBFC · 初始化、正常运行与异常恢复</h3>
@@ -1144,11 +1167,19 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <fieldset><legend>B · 接收缓冲参数（双方已协商）</legend>
     <label>CreditSize 字节 <select id="cb-unit"><option>32</option><option selected>64</option><option>128</option><option>256</option></select></label>
     <label>PktOvhd 字节 <input id="cb-over" type="number" min="0" max="255" value="0"></label></fieldset>
-    <p>UE 1.1 §5.2.5–5.2.9。NumVCs = 32；CC/CU/CL 为 20 位、CF 为 15 位循环计数器，定时器以离散事件表示；每步高亮变化的寄存器。</p><div style="background:#162639;color:#fff;padding:.9rem;border-radius:10px">
-      <div style="display:flex;justify-content:space-between;gap:1em"><b style="color:#8fd4ff">A · TX 队列<br><small id="cb-tx-state"></small></b><b style="color:#8de6be">B · RX 缓冲<br><small id="cb-rx-state"></small></b></div>
-      <div id="cb-world" style="height:clamp(190px,24vw,300px);position:relative"></div>
-      <b id="cb-token"></b><div>蓝轨 A → B　绿轨 B → A</div>
-      <small>拖动旋转 · 滚轮缩放</small> <button class="btn" id="cb-camera">复位视角</button>
+    <p>UE 1.1 §5.2.5–5.2.9。NumVCs = 32；CC/CU/CL 为 20 位、CF 为 15 位循环计数器，定时器以离散事件表示；每步高亮变化的寄存器。</p><div class="cb-stage">
+      <div class="cb-stage-head">
+        <b class="is-tx">A · 发送端<small id="cb-tx-state"></small></b>
+        <b class="is-rx">B · 接收端<small id="cb-rx-state"></small></b>
+      </div>
+      <div id="cb-world" class="cb-world" aria-label="CBFC 三维链路：A 发送端、B 接收端、数据轨与反馈轨"></div>
+      <div class="cb-stage-foot">
+        <b id="cb-token"></b>
+        <span>蓝轨 A → B（数据 / CC_Update） · 绿轨 B → A（CF_Update / LLDP）</span>
+        <span class="cb-sp"></span>
+        <small>拖动平移 · 右键旋转 · 滚轮朝光标缩放 · 双击复位</small>
+        <button class="btn" id="cb-camera" type="button">复位视角</button>
+      </div>
     </div><p class="note">VC 状态：<b>BE</b> 尽力而为 · <b>Want</b> 接收端申请无损 · <b>RTS</b> 发送端就绪 · <b>RTR</b> 接收端就绪 · <b>无损</b> 可按信用发送。方格右下数字为 S_VC_CU，点击方格切换观察 VC。</p>
     <div id="cb-map"></div><h4 id="cb-step"></h4>
     <button class="btn" id="cb-play">播放</button> <button class="btn" id="cb-next">下一步</button> <button class="btn" id="cb-reset">重播</button><p class="note">图中状态名描述当前仿真动作；寄存器面板显示所选 VC 与报文编码。</p></div><aside class="cb-registers"><h3>寄存器状态 · <span id="cb-active-vc"></span></h3><div id="cb-registers"></div></aside></div>

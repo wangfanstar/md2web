@@ -203,7 +203,9 @@
 
   function tokenBox(text, dir) {
     const box = el('token');
+    if (!box) return;
     box.textContent = 'VC ' + activeVC + ' · ' + text;
+    box.dataset.dir = dir > 0 ? 'out' : dir < 0 ? 'back' : '';
     box.dispatchEvent(new CustomEvent('cb-transfer', { detail: dir }));
   }
 
@@ -353,6 +355,28 @@
     tokenBox(token, dir);
     el('next').disabled = index >= events.length;
     if (activeInput()) activeInput().value = activeVC;
+    const world = document.getElementById('cb-world');
+    if (world) {
+      const c = cfg();
+      lastDetail = {
+          op: current || 'view',
+          vc: activeVC,
+          phase,
+          token,
+          dir,
+          used: S.cu[activeVC],
+          limit: c.mode === 'port' ? S.pcl : S.cl[activeVC],
+          portUsed: c.mode === 'port' ? S.pcu : null,
+          portLimit: c.mode === 'port' ? S.pcl : null,
+          buf: R.buf[activeVC],
+          cc: S.cc[activeVC],
+          cfS: S.cf[activeVC],
+          cfR: R.cf[activeVC],
+        inflight: !!inflight[activeVC],
+        blocked: phase === 'wait'
+      };
+      world.dispatchEvent(new CustomEvent('cb-step', { detail: lastDetail }));
+    }
   }
 
   function reset() {
@@ -737,6 +761,7 @@
   }
 
   let currentCase = null;
+  let lastDetail = null;
 
   function next() {
     if (index >= events.length) return;
@@ -770,6 +795,12 @@
   }
 
   function build() {
+    const world = document.getElementById('cb-world');
+    if (world) {
+      world.addEventListener('cb-sync', () => {
+        if (lastDetail) world.dispatchEvent(new CustomEvent('cb-step', { detail: lastDetail }));
+      });
+    }
     Object.keys(cases).forEach(name => el('group').add(new Option(name, name)));
     el('group').onchange = categories;
     el('case').onchange = preset;
