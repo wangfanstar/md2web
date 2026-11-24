@@ -315,7 +315,7 @@
         if (!laneNear && L.main !== l1HoverName) show = false;
       }
       if (show) {
-        L.anchor.getWorldPosition(tmpV);
+        tmpV.setFromMatrixPosition(L.anchor.matrixWorld);
         var dist = camera.position.distanceTo(tmpV);
         if (L.minor && dist > 215) show = false;
         tmpV.project(camera);
@@ -661,7 +661,15 @@
   var detailMode = 'maci';
 
   // package substrate
-  var chipRoot = new T.Group();
+  function createViewRoot() {
+    var root = new T.Group();
+    root.updateMatrixWorld = function (force) {
+      if (this.visible) T.Group.prototype.updateMatrixWorld.call(this, force);
+    };
+    return root;
+  }
+
+  var chipRoot = createViewRoot();
   scene.add(chipRoot);
 
   box(112, 1.4, 112, 0, -2.4, 0, PAL.pkg, chipRoot, { edges: true });
@@ -1578,7 +1586,7 @@
    * module atlas（pzz_chip_ref：每个 md 文档一个 3D 模块）
    * ------------------------------------------------------------------ */
   var viewMode = 'chip';
-  var atlasRoot = new T.Group();
+  var atlasRoot = createViewRoot();
   atlasRoot.visible = false;
   scene.add(atlasRoot);
 
@@ -1717,7 +1725,7 @@
   /* ------------------------------------------------------------------ *
    * 端口 / TM / HPP 映射板
    * ------------------------------------------------------------------ */
-  var mapRoot = new T.Group();
+  var mapRoot = createViewRoot();
   mapRoot.visible = false;
   scene.add(mapRoot);
   var mapBuilt = false;
@@ -1816,7 +1824,7 @@
       var L = mapLabels[i];
       var show = (viewMode === 'map');
       if (show) {
-        L.anchor.getWorldPosition(v);
+        v.setFromMatrixPosition(L.anchor.matrixWorld);
         v.project(camera);
         if (v.z < -1 || v.z > 1) show = false;
         else {
@@ -1852,7 +1860,7 @@
   /* ------------------------------------------------------------------ *
    * 报文路径（来自 packet_path.html）
    * ------------------------------------------------------------------ */
-  var pathRoot = new T.Group();
+  var pathRoot = createViewRoot();
   pathRoot.visible = false;
   scene.add(pathRoot);
   var pathBuilt = false;
@@ -2060,7 +2068,7 @@
       var L = pathLabels[i];
       var show = (viewMode === 'path');
       if (show) {
-        L.anchor.getWorldPosition(v);
+        v.setFromMatrixPosition(L.anchor.matrixWorld);
         v.project(camera);
         if (v.z < -1 || v.z > 1) show = false;
         else {
@@ -2112,7 +2120,7 @@
   /* ------------------------------------------------------------------ *
    * Mermaid 架构图（mermaid_code/*.md）
    * ------------------------------------------------------------------ */
-  var diagramRoot = new T.Group();
+  var diagramRoot = createViewRoot();
   diagramRoot.visible = false;
   scene.add(diagramRoot);
   var diagramLabels = [];
@@ -2308,7 +2316,7 @@
       var L = diagramLabels[i];
       var show = (viewMode === 'diagram');
       if (show) {
-        L.anchor.getWorldPosition(v);
+        v.setFromMatrixPosition(L.anchor.matrixWorld);
         v.project(camera);
         if (v.z < -1 || v.z > 1) show = false;
         else {
@@ -2346,7 +2354,7 @@
   /* ------------------------------------------------------------------ *
    * 子系统地图（pzz_all.md：全部 29 个内部子系统）
    * ------------------------------------------------------------------ */
-  var subsysRoot = new T.Group();
+  var subsysRoot = createViewRoot();
   subsysRoot.visible = false;
   scene.add(subsysRoot);
 
@@ -2549,7 +2557,7 @@
       var L = subsysLabels[i];
       var show = (viewMode === 'subsys');
       if (show) {
-        L.anchor.getWorldPosition(v);
+        v.setFromMatrixPosition(L.anchor.matrixWorld);
         v.project(camera);
         if (v.z < -1 || v.z > 1) show = false;
         else {
@@ -2650,7 +2658,7 @@
   /* ------------------------------------------------------------------ *
    * 流控链路（flowcontrol_pzz.md：AQM / PFC / CBFC / TM / credit）
    * ------------------------------------------------------------------ */
-  var flowRoot = new T.Group();
+  var flowRoot = createViewRoot();
   flowRoot.visible = false;
   scene.add(flowRoot);
 
@@ -3022,7 +3030,7 @@
       var L = flowLabels[i];
       var show = (viewMode === 'flow');
       if (show) {
-        L.anchor.getWorldPosition(v);
+        v.setFromMatrixPosition(L.anchor.matrixWorld);
         v.project(camera);
         if (v.z < -1 || v.z > 1) show = false;
         else {
@@ -3049,7 +3057,7 @@
   /* ------------------------------------------------------------------ *
    * 报文转发路径（CPP ingress→egress + HPP 业务面，动画演示）
    * ------------------------------------------------------------------ */
-  var routeRoot = new T.Group();
+  var routeRoot = createViewRoot();
   routeRoot.visible = false;
   scene.add(routeRoot);
 
@@ -4007,7 +4015,7 @@
       var L = routeLabels[i];
       var show = (viewMode === 'route');
       if (show) {
-        L.anchor.getWorldPosition(v);
+        v.setFromMatrixPosition(L.anchor.matrixWorld);
         v.project(camera);
         if (v.z < -1 || v.z > 1) show = false;
         else {
@@ -4092,7 +4100,7 @@
       if (show && L.detail && atlasSelected < 0) show = false;
       if (show && L.grp && atlasSelected >= 0) show = false;
       if (show) {
-        L.anchor.getWorldPosition(v);
+        v.setFromMatrixPosition(L.anchor.matrixWorld);
         v.project(camera);
         if (v.z < -1 || v.z > 1) {
           show = false;
@@ -5185,7 +5193,23 @@
     updatePathToken(now);
     updateFlowTokens(now);
     updateRouteAnim(now);
+    // On playback-only frames the graph layout and parent transforms are fixed.
+    var playbackOnly = noUpdate && !dirty && (viewMode === 'flow' || viewMode === 'path' || viewMode === 'route');
+    if (playbackOnly) {
+      if (viewMode === 'flow') {
+        flowTokens.forEach(function (rec) {
+          if (rec.token.visible) rec.token.updateMatrixWorld();
+        });
+      } else if (viewMode === 'path' && pathToken) {
+        pathToken.updateMatrixWorld();
+      } else if (viewMode === 'route' && routeToken) {
+        routeToken.updateMatrixWorld();
+        routeTrail.forEach(function (token) { token.updateMatrixWorld(); });
+      }
+    }
+    scene.matrixWorldAutoUpdate = !playbackOnly;
     renderer.render(scene, camera);
+    scene.matrixWorldAutoUpdate = true;
     if (labelsNeedUpdate()) {
       if (viewMode === 'chip') updateLabels();
       else if (viewMode === 'atlas') updateAtlasLabels();
