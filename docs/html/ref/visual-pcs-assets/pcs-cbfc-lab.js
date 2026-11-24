@@ -203,13 +203,8 @@
 
   function tokenBox(text, dir) {
     const box = el('token');
-    box.getAnimations().forEach(a => a.cancel());
     box.textContent = 'VC ' + activeVC + ' · ' + text;
-    box.style.left = '50%';
-    if (dir) {
-      box.animate([{ left: dir > 0 ? '15%' : '85%' }, { left: dir > 0 ? '85%' : '15%' }],
-        { duration: 1000, fill: 'forwards' });
-    }
+    box.dispatchEvent(new CustomEvent('cb-transfer', { detail: dir }));
   }
 
   function describeTx(event) {

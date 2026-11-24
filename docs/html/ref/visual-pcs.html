@@ -1144,12 +1144,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <fieldset><legend>B · 接收缓冲参数（双方已协商）</legend>
     <label>CreditSize 字节 <select id="cb-unit"><option>32</option><option selected>64</option><option>128</option><option>256</option></select></label>
     <label>PktOvhd 字节 <input id="cb-over" type="number" min="0" max="255" value="0"></label></fieldset>
-    <p>UE 1.1 §5.2.5–5.2.9。NumVCs = 32；CC/CU/CL 为 20 位、CF 为 15 位循环计数器，定时器以离散事件表示；每步高亮变化的寄存器。</p><div style="display:flex;align-items:center;gap:1em;padding:2em 1em;background:#182d40;color:white;border-radius:10px">
-      <b style="background:#23547a;padding:1em;box-shadow:4px 5px #102235">A · TX<br>VC 队列<br><small id="cb-tx-state"></small></b>
-      <div style="flex:1;position:relative;height:4em;border-bottom:2px solid #81b8ca"><b id="cb-token" style="position:absolute;white-space:nowrap;transform:translateX(-50%);color:#ffe098"></b></div>
-      <b style="background:#256254;padding:1em;box-shadow:4px 5px #123a32">B · RX<br>VC 缓冲<br><small id="cb-rx-state"></small></b>
-    </div>
-    <p class="note">VC 状态：<b>BE</b> 尽力而为 · <b>Want</b> 接收端申请无损 · <b>RTS</b> 发送端就绪 · <b>RTR</b> 接收端就绪 · <b>无损</b> 可按信用发送。方格右下数字为 S_VC_CU，点击方格切换观察 VC。</p>
+    <p>UE 1.1 §5.2.5–5.2.9。NumVCs = 32；CC/CU/CL 为 20 位、CF 为 15 位循环计数器，定时器以离散事件表示；每步高亮变化的寄存器。</p><div style="background:#162639;color:#fff;padding:.9rem;border-radius:10px">
+      <div style="display:flex;justify-content:space-between;gap:1em"><b style="color:#8fd4ff">A · TX 队列<br><small id="cb-tx-state"></small></b><b style="color:#8de6be">B · RX 缓冲<br><small id="cb-rx-state"></small></b></div>
+      <div id="cb-world" style="height:clamp(190px,24vw,300px);position:relative"></div>
+      <b id="cb-token"></b><div>蓝轨 A → B　绿轨 B → A</div>
+      <small>拖动旋转 · 滚轮缩放</small> <button class="btn" id="cb-camera">复位视角</button>
+    </div><p class="note">VC 状态：<b>BE</b> 尽力而为 · <b>Want</b> 接收端申请无损 · <b>RTS</b> 发送端就绪 · <b>RTR</b> 接收端就绪 · <b>无损</b> 可按信用发送。方格右下数字为 S_VC_CU，点击方格切换观察 VC。</p>
     <div id="cb-map"></div><h4 id="cb-step"></h4>
     <button class="btn" id="cb-play">播放</button> <button class="btn" id="cb-next">下一步</button> <button class="btn" id="cb-reset">重播</button><p class="note">图中状态名描述当前仿真动作；寄存器面板显示所选 VC 与报文编码。</p></div><aside class="cb-registers"><h3>寄存器状态 · <span id="cb-active-vc"></span></h3><div id="cb-registers"></div></aside></div>
   </section>
@@ -1532,6 +1532,7 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
 
 <script src="visual-pcs-assets/three.min.js"></script>
 <script src="visual-pcs-assets/OrbitControls.js"></script>
+<script src="visual-pcs-assets/pcs-cbfc-scene.js"></script>
 <script>
 /* ---- model.js ---- */
 /* Pure model of the 200GBASE-R lane picture: PCS-to-SerDes mapping, RX demux
