@@ -2,285 +2,669 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>AM 插入对 PTP 报文时间戳的影响（3D 对比）</title>
+<title>AM 插入与 1588 时间戳误差 · 3D 综合演示</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#0b111b;color:#deebf4;font:15px/1.65 system-ui,sans-serif}main{max-width:1180px;margin:auto;padding:24px clamp(12px,3vw,40px)}section{background:#111e2d;border:1px solid #324359;border-radius:12px;padding:18px;margin:16px 0}h1,h2{line-height:1.25;margin:.35em 0}h2{font-size:20px}p{color:#b4c7d6}a{color:#80d6ec}button,select{font:inherit;background:#203449;color:#ecf7ff;border:1px solid #506780;border-radius:5px;padding:4px 9px;cursor:pointer}button:focus-visible,select:focus-visible{outline:3px solid #ffcf67}.rail{display:flex;align-items:center;gap:8px;overflow:auto;padding:10px 4px 16px}.rail button{flex:1 0 auto;box-shadow:3px 5px 0 #0a1019;transform:skewY(-2deg)}.rail button[aria-pressed=true]{background:#78432a;border-color:#ffba76}output{display:block;color:#ffdc9e}#timeline{overflow:auto;padding:10px 0}.row{display:grid;grid-template-columns:6em repeat(15,minmax(41px,1fr));gap:3px;min-width:745px;margin:4px 0}.row i{text-align:center;background:#304258;border-radius:3px;font:12px/28px monospace}.row .am{background:#a54640}.row .sfd{background:#f5c65b;color:#211900}.row .payload{background:#295a81}#c{width:100%;height:clamp(240px,35vw,390px);display:block;touch-action:none}#ctrl{display:flex;gap:6px;margin-bottom:6px}.sw{display:inline-block;width:10px;height:10px;margin-left:8px}#legend{font-size:12px}
+  html, body { margin: 0; height: 100%; background: #0b0f16; overflow: hidden;
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif; color: #d8e0ea; }
+  #c { position: fixed; inset: 0; }
+  .panel { position: fixed; background: rgba(12,18,28,0.88); border: 1px solid #243246;
+    border-radius: 8px; padding: 12px 14px; font-size: 13px; line-height: 1.6; }
+  .hidden { display: none !important; }
+  h2 { margin: 0 0 8px; font-size: 15px; color: #fff; }
+  h3 { margin: 10px 0 6px; font-size: 14px; color: #fff; }
+  button { background: #1c2a3d; color: #d8e0ea; border: 1px solid #334a68; padding: 5px 10px;
+    border-radius: 5px; cursor: pointer; margin: 2px 4px 2px 0; font-size: 13px; }
+  button:hover { background: #26395a; }
+  button.on { background: #2f6fb0; border-color: #4a8fd0; color: #fff; }
+  .ok { color: #7fd6a0; } .bad { color: #ff7d7d; } .warn { color: #ffd166; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 4px; font-size: 12px; margin-left: 6px; }
+  .tag.ok { background: #1f4d36; color: #7fd6a0; }
+  .tag.bad { background: #5a2424; color: #ff9d9d; }
+  .tag.warn { background: #5a4a1a; color: #ffd166; }
+  .sw { display: inline-block; width: 12px; height: 12px; margin: 0 6px 0 10px; vertical-align: middle; border-radius: 2px; }
+  .lg { display: flex; align-items: center; margin: 3px 0; font-size: 12px; }
+  .lg .sw { margin: 0 8px 0 0; }
+
+  /* 模式切换栏 */
+  #modeBar { top: 14px; left: 50%; transform: translateX(-50%); padding: 6px 8px; white-space: nowrap; z-index: 5; }
+  #modeBar button { font-size: 14px; padding: 6px 14px; }
+
+  /* 模块一 */
+  #tabs { top: 64px; left: 14px; width: 400px; }
+  #info { top: 220px; left: 14px; width: 400px; max-height: calc(100% - 300px); overflow: auto; }
+  #info table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  #info td { padding: 4px 6px; border-bottom: 1px solid #1d2a3c; font-size: 13px; vertical-align: top; }
+  #info td.k { color: #8fa3bd; width: 42%; }
+  #info td.v { font-family: Consolas, monospace; font-size: 13px; }
+  #info ol { margin: 6px 0 0 18px; padding: 0; }
+  #info li { margin: 3px 0; }
+  #live { top: 64px; right: 14px; width: 340px; font-family: Consolas, monospace; font-size: 13px; line-height: 1.7; }
+  #legend { bottom: 14px; left: 14px; font-size: 12px; }
+
+  /* 模块二 */
+  #side2 { top: 64px; left: 14px; width: 440px; max-height: calc(100% - 78px); overflow: auto; }
+  #side2 table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  #side2 th, #side2 td { padding: 4px 5px; border-bottom: 1px solid #1d2a3c; text-align: right; font-family: Consolas, monospace; }
+  #side2 th { color: #8fa3bd; font-weight: normal; font-family: "Microsoft YaHei", sans-serif; }
+  #side2 td:first-child, #side2 th:first-child { text-align: left; }
+  #side2 tr.row { cursor: pointer; }
+  #side2 tr.row:hover td { background: #17243a; }
+  #side2 tr.row.sel td { background: #1f3550; color: #fff; }
+  .na { color: #5d6b80; }
+  #live2 { top: 64px; right: 14px; width: 320px; }
+  #live2 .big { font-family: Consolas, monospace; font-size: 22px; color: #ffd166; }
+  #notes2 { bottom: 14px; right: 14px; width: 320px; font-size: 12px; color: #aab6c8; }
+  #notes2 b { color: #fff; }
+
+  #hint { bottom: 14px; left: 50%; transform: translateX(-50%); color: #7f8fa6; font-size: 12px; white-space: nowrap; }
 </style>
 </head>
 <body>
-<main><header><a href="visual-pcs.html">← Visual PCS</a><h1>AM 插入与 PTP 时间戳</h1><p>跟踪同一帧的 SFD、帧尾和下一帧起点，观察 AM 占用的时隙如何由 IPG 中的 Idle 补回。</p></header>
-<section><h2>链路处理位置</h2><p>100GBASE-R · Clause 82 PCS。点击模块查看该位置与时间戳的关系。</p><div id="chain"></div><output id="moduleInfo"></output></section>
-<section><h2>同一报文流的时间对照</h2><label>AM 相位 <select id="phase"><option value="ipg">IPG 内补偿</option><option value="before">紧邻 SFD 之前</option><option value="inside">帧内插入</option></select></label>
-<div id="timeline"></div><p id="effect"></p>
-<p>每格代表一条逻辑 PCS lane 的块周期。100G 的 20 条逻辑 lane 各为 5.15625 Gb/s，66 位对应 12.8 ns。25.78125 Gb/s 物理 lane 上传送 66 位用时 2.56 ns。图中压缩 AM 周期，只比较一次插入的相位。</p></section>
-<section><h2>参考面穿越动画</h2><p>上、下两排立体模块分别为 TX 和 RX。中间上轨为基准，下轨为所选 AM 相位。金色表示含 SFD 的起始块，线框表示基准 SFD，中央蓝线表示观察参考面。</p>
-<div id="ctrl"><button id="btnPlay">暂停</button><button id="btnReset">重播</button></div>
 <canvas id="c"></canvas>
-<div id="legend" class="panel">
-  <span class="sw" style="background:#3a4250"></span>IDLE 空闲块
-  <span class="sw" style="background:#2f6fb0"></span>其他报文数据块
-  <span class="sw" style="background:#ffc857"></span>PTP SFD
-  <span class="sw" style="background:#f0b060"></span>PTP 报文数据块
-  <span class="sw" style="background:#ff4d4d"></span>AM 对齐标记
-  <span class="sw" style="background:#9fb4cc;opacity:.5"></span>理想位置（幽灵）
+
+<!-- 模式切换 -->
+<div id="modeBar" class="panel">
+  <button id="m1" class="on">模块一：AM 插入场景</button>
+  <button id="m2">模块二：各速率误差对比</button>
 </div>
 
-</section><section><h2>从观察点换算到 PTP 参考面</h2><p>以发送方向为例，若 PHC 在 MAC 边界记录时间，而目标参考面位于其下游，则换算需要加上两者间的发送延迟。接收方向应按参考面和采样点的先后关系确定符号。补偿量取决于 AM 相位、lane 映射与实际流水线。</p><p>RX 通过 AM 识别 lane 并进行 deskew。启用 RS-FEC 的 PHY 还需考虑码字映射与编解码延迟。200G/400G 的转码、AM 组及 FEC 顺序见 <a href="visual-pcs.html">Visual PCS 的高速通路</a>。</p></section></main>
-<script src="visual-pcs-assets/three.min.js"></script>
+<!-- ============ 模块一 ============ -->
+<div id="tabs" class="panel view1">
+  <h2>AM 插入三种典型场景 · 1588 时间戳数值推演</h2>
+  <button class="sc on" data-k="1">场景 1：替换 IPG 空闲</button>
+  <button class="sc" data-k="2">场景 2：插入数据中间</button>
+  <button class="sc" data-k="3">场景 3：多 lane 偏斜</button>
+  <div style="margin-top:6px;">
+    <button id="btnPlay">暂停</button>
+    <button id="btnReset">重播</button>
+  </div>
+</div>
+<div id="info" class="panel view1"></div>
+<div id="live" class="panel view1">
+  <h3>实时读数（参考面）</h3>
+  <div id="liveBody"></div>
+</div>
+<div id="legend" class="panel view1">
+  <div><span class="sw" style="background:#3a4250"></span>IDLE
+  <span class="sw" style="background:#2f6fb0"></span>其他报文数据
+  <span class="sw" style="background:#ffc857"></span>PTP SFD
+  <span class="sw" style="background:#f0b060"></span>PTP 数据
+  <span class="sw" style="background:#ff4d4d"></span>AM
+  <span class="sw" style="background:#9fb4cc;opacity:.5"></span>理想 SFD 位置</div>
+  <div style="color:#7f8fa6">自上而下为 Lane0 ~ Lane3；青色竖线为时间戳参考面；每块 2.56 ns</div>
+</div>
+
+<!-- ============ 模块二 ============ -->
+<div id="side2" class="panel view2 hidden">
+  <h2>不同速率的 1588 时间戳误差（802.3cx 表 90A-1）</h2>
+  <div style="color:#8fa3bd;font-size:12px;margin-bottom:6px;">单位 ns，每个端口单方向。点击速率按钮或表格行可以高亮对应速率。</div>
+  <div id="speedBtns"></div>
+  <h3>误差数据表</h3>
+  <table id="tbl"></table>
+  <h3>可验算：100G 的 AM 项</h3>
+  <div>20 个 AM，每个 64 bit 有效内容，共 1280 bit。<br>
+    在 100 Gb/s 下：1280 bit ÷ 100 Gb/s = <span class="bad">12.8 ns</span></div>
+</div>
+<div id="live2" class="panel view2 hidden">
+  <h3>当前选中</h3>
+  <div id="liveBody2"></div>
+  <div style="margin-top:8px;">
+    <div class="lg"><span class="sw" style="background:#ff4d4d"></span>AM/CWM 插入或删除</div>
+    <div class="lg"><span class="sw" style="background:#ffc857"></span>单次 Idle 插入或删除</div>
+    <div class="lg"><span class="sw" style="background:#4dd0ff"></span>PCS lane 分发/合并</div>
+    <div class="lg"><span class="sw" style="background:#7fd6a0"></span>DDMP 选择不一致</div>
+    <div class="lg"><span class="sw" style="background:#5d6b80"></span>不适用（N/A）</div>
+  </div>
+</div>
+<div id="notes2" class="panel view2 hidden">
+  <b>误差的特点</b><br>
+  1. 概率低、幅度大：100G 约每 209.7 μs 才有一次 AM 事件，只有 DDMP 落在 AM 之后、Idle 还没补回来的时间段内，报文才会受影响。<br>
+  2. 表现为偶发离群点，不是固定偏差。用平均值看起来正常，max |TE| 或 cTE 测试会出现尖峰。<br>
+  3. 两端各自独立：即使本端避开了 AM，对端接收时也可能删除自己的 Idle 和 AM，误差仍可能出现在对端。<br>
+  <span style="color:#7f8fa6">红色虚线平面为 5 ns 参考线（Class D 量级）；Class C 的 30 ns 超出图的量程。</span>
+</div>
+
+<div id="hint" class="panel">拖拽鼠标旋转视角</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script>
 (function () {
-  const GAP=.62, SPEED=3, START_X=6, PLANE_X=0;
-  const COLORS={I:0x3a4250,D:0x2f6fb0,S:0xffc857,P:0xf0b060,A:0xff4d4d};
-  const base=['D','I','I','S','P1','P2','P3','P4','T','I','I','I','S2','D','D'];
-  const phase=document.querySelector('#phase');
-  function stream(){
-    const slots=base.slice();
-    if(phase.value==='ipg') slots[2]='A';
-    else {slots.splice(9,1);slots.splice(phase.value==='before'?3:6,0,'A');}
-    return slots;
-  }
-  const IDEAL_SFD=base.indexOf('S');
-  const names={I:'Idle',S:'SFD',S2:'SFD₂',T:'帧尾',A:'AM'};
-  function updateDiagram(){
-    const actual=stream();
-    document.querySelector('#timeline').innerHTML=[base,actual].map((arr,i)=>
-      '<div class="row"><b>'+['基准','含 AM'][i]+'</b>'+arr.map(t=>'<i class="'+(t==='A'?'am':t.startsWith('S')?'sfd':t==='I'?'':'payload')+'">'+(names[t]||t)+'</i>').join('')+'</div>').join('');
-    document.querySelector('#effect').textContent=['S','T','S2'].map((t,i)=>['本帧 SFD','本帧帧尾','下一帧 SFD'][i]+' 偏移 '+((actual.indexOf(t)-base.indexOf(t))*12.8)+' ns').join(' ｜ ');
-  }
-  const modules=[
-    [['MAC / RS','产生帧、前导码与 IPG，MAC 边界可采样 PHC。'],['xMII','向 PCS 传递数据及 Idle 控制字符。'],['64B/66B','编码起始块、数据块和终止块。'],['Idle 调整','利用允许增删的 Idle 为周期 AM 提供带宽。'],['加扰','扰码处理后进行 lane 分发。'],['lane 分发','依次把块分配到逻辑 PCS lane。'],['AM 插入','每条逻辑 lane 的相邻 AM 之间有 16383 个普通块。'],['PMA / PMD','复用到物理通道并发送至介质。']],
-    [['介质 / PMD','接收来自不同物理路径的信号。'],['PMA','恢复信号并解复用。'],['块锁定','确定接收块边界。'],['AM 锁定','根据 AM 识别 lane。'],['deskew / 重排','缓冲较早到达的 lane，恢复相对顺序。'],['AM 移除','去掉 AM，恢复 PCS 块流。'],['解扰 / 解码','恢复 xMII 字节与控制信息。'],['RS / MAC','识别接收帧，并按参考面换算接收时间。']]
-  ];
-  modules.forEach((items,row)=>{
-    const rail=document.createElement('div');rail.className='rail';rail.textContent=row?'RX →':'TX →';
-    items.forEach(([name,info])=>{const btn=document.createElement('button');btn.textContent=name;btn.onclick=()=>{
-      document.querySelectorAll('.rail button').forEach(b=>b.setAttribute('aria-pressed',String(b===btn)));
-      document.querySelector('#moduleInfo').textContent=name+' · '+info;
-    };rail.append(btn);});document.querySelector('#chain').append(rail);
-  });
-  document.querySelectorAll('.rail button')[6].click();updateDiagram();
-  function kind(t){return t.startsWith('P')?'P':t.startsWith('S')?'S':COLORS[t]?t:'D';}
-  // ---------- 场景 ----------
+  // =====================================================================
+  // 公共：渲染器、文字精灵、尺寸
+  // =====================================================================
   const canvas = document.getElementById('c');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setClearColor(0x0b0f16, 1);
 
-  const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x0b0f16, 30, 60);
+  function textSprite(lines, color, w) {
+    w = w || 2.8;
+    const c = document.createElement('canvas');
+    c.width = 512; c.height = 160;
+    const g = c.getContext('2d');
+    g.fillStyle = 'rgba(8,12,20,0.9)';
+    g.fillRect(4, 4, 504, 152);
+    g.strokeStyle = color; g.lineWidth = 5;
+    g.strokeRect(4, 4, 504, 152);
+    g.fillStyle = color;
+    g.font = 'bold 42px "Microsoft YaHei", sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    lines.forEach((ln, i) => g.fillText(ln, 256, lines.length === 1 ? 80 : 50 + i * 56));
+    const tex = new THREE.CanvasTexture(c);
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+    s.scale.set(w, w * 160 / 512, 1);
+    s.renderOrder = 10;
+    return s;
+  }
 
-  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
-  camera.position.set(0, 1.5, 19);
-  camera.lookAt(0, 0.4, 0);
+  let rotY = 0, rotX = 0;
+  let dragging = false, lastX = 0, lastY = 0, moved = 0;
+  let mode = 1;
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-  const dl = new THREE.DirectionalLight(0xffffff, 0.8);
-  dl.position.set(4, 8, 10);
-  scene.add(dl);
+  function resize() {
+    const w = window.innerWidth, h = window.innerHeight;
+    renderer.setSize(w, h, false);
+    cam1.aspect = w / h; cam1.updateProjectionMatrix();
+    cam2.aspect = w / h; cam2.updateProjectionMatrix();
+  }
 
-  const root = new THREE.Group();
-  scene.add(root);
+  // 两个场景、两台相机
+  const scene1 = new THREE.Scene();
+  scene1.fog = new THREE.Fog(0x0b0f16, 35, 70);
+  const cam1 = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
+  cam1.position.set(0, 2.6, 22); cam1.lookAt(0, -0.6, 0);
 
-  // TX / RX modules share the camera and move with the timing tracks.
-  const moduleMeshes = [];
-  const buttons = Array.from(document.querySelectorAll('.rail button'));
-  modules.forEach((items, row) => {
-    const y = row ? -3.35 : 4.1;
-    items.forEach(([name], i) => {
-      const label = document.createElement('canvas');
-      label.width = 256; label.height = 72;
-      const ctx = label.getContext('2d');
-      ctx.fillStyle = name.includes('AM') ? '#904329' : row ? '#28516c' : '#28635d';
-      ctx.fillRect(0, 0, 256, 72);
-      ctx.fillStyle = '#fff'; ctx.font = '28px sans-serif';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(name, 128, 36, 244);
-      const face = new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(label)});
-      const side = new THREE.MeshStandardMaterial({color:row ? 0x315375 : 0x33685e});
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(2.05,.64,.55), [side,side,side,side,face,side]);
-      mesh.position.set((i-3.5)*2.2,y,0);
-      mesh.rotation.x=.16;
-      mesh.userData.button=buttons[row*8+i];
-      root.add(mesh); moduleMeshes.push(mesh);
-    });
+  const scene2 = new THREE.Scene();
+  scene2.fog = new THREE.Fog(0x0b0f16, 30, 60);
+  const cam2 = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
+  cam2.position.set(0, 6.5, 17); cam2.lookAt(0, 1.2, 0);
+
+  [scene1, scene2].forEach(s => {
+    s.add(new THREE.AmbientLight(0xffffff, 0.6));
+    const d = new THREE.DirectionalLight(0xffffff, 0.8);
+    d.position.set(4, 8, 10);
+    s.add(d);
   });
-  let press;
-  canvas.addEventListener('pointerdown', e => {press=[e.clientX,e.clientY];});
-  canvas.addEventListener('pointerup', e => {
-    if (!press || Math.hypot(e.clientX-press[0],e.clientY-press[1])>5) return;
-    const r=canvas.getBoundingClientRect(), ray=new THREE.Raycaster();
-    ray.setFromCamera(new THREE.Vector2(2*(e.clientX-r.left)/r.width-1,1-2*(e.clientY-r.top)/r.height),camera);
-    const hit=ray.intersectObjects(moduleMeshes)[0]; if(hit) hit.object.userData.button.click();
-  });
-  // 地面网格，增加 3D 纵深感
-  const grid = new THREE.GridHelper(60, 60, 0x1b2638, 0x121a28);
-  grid.position.y = -4.2;
-  root.add(grid);
 
-  // 参考面（时间戳打点位置）
-  const planeGeo = new THREE.PlaneGeometry(0.06, 9);
-  const planeMat = new THREE.MeshBasicMaterial({ color: 0x4dd0ff, transparent: true, opacity: 0.85 });
-  const refPlane = new THREE.Mesh(planeGeo, planeMat);
-  refPlane.position.set(PLANE_X, -0.4, 0);
-  root.add(refPlane);
+  const root1 = new THREE.Group(); scene1.add(root1);
+  const root2 = new THREE.Group(); scene2.add(root2);
 
-  const glowGeo = new THREE.PlaneGeometry(0.8, 9.5);
+  // =====================================================================
+  // 模块一：AM 插入三种场景
+  // =====================================================================
+  const BLOCK_NS = 2.56;
+  const PHC_BASE = 1000.00;
+  const GAP = 0.72;
+  const SPEED = 1.4;
+  const START_X = 9;
+  const PLANE_X = 0;
+  const LANE_Y = [1.6, 0.55, -0.5, -1.55];
+  const COL = { I: 0x3a4250, D: 0x2f6fb0, S: 0xffc857, P: 0xf0b060, A: 0xff4d4d };
+
+  const tAt = slot => PHC_BASE + slot * BLOCK_NS;
+  const fmt = v => v.toFixed(2);
+  const rep = (ty, n) => Array(n).fill(ty);
+
+  const CLEAN = [...rep('I',4), ...rep('D',8), 'I','I', 'S', ...rep('P',10), ...rep('I',4), ...rep('D',12)];
+  const IDEAL = CLEAN.indexOf('S');
+  const S1 = CLEAN.slice(); S1[12] = 'A';
+  const S2 = [...rep('I',4), ...rep('D',4), 'A', ...rep('D',4), 'I','I', 'S',
+              ...rep('P',10), ...rep('I',3), ...rep('D',12)];
+
+  const SC = {
+    1: {
+      name: '场景 1：AM 替换 IPG 空闲块',
+      tag: ['不影响 1588', 'ok'],
+      streams: [S1, S1, S1, S1], offs: [0, 0, 0, 0],
+      rows: [
+        ['理想 SFD（无 AM）', fmt(tAt(IDEAL)) + ' ns（第 14 槽）'],
+        ['实际 SFD（Lane0）', fmt(tAt(IDEAL)) + ' ns（第 14 槽）'],
+        ['时间戳偏差', '<span class="ok">0.00 ns</span>']
+      ],
+      steps: [
+        'AM 出现在第 12 槽，该位置是 IPG 中的 IDLE。',
+        'AM 直接替换该 IDLE，线上槽数不变，无需删除报文数据。',
+        'SFD 仍在第 14 槽，T14 = 1035.84 ns，偏差为 0。'
+      ]
+    },
+    2: {
+      name: '场景 2：AM 插入报文数据中间',
+      tag: ['影响 1588（本题答案）', 'bad'],
+      streams: [S2, S2, S2, S2], offs: [0, 0, 0, 0],
+      rows: [
+        ['理想 SFD（无 AM）', fmt(tAt(IDEAL)) + ' ns（第 14 槽）'],
+        ['实际 SFD（Lane0）', fmt(tAt(15)) + ' ns（第 15 槽）'],
+        ['时间戳偏差', '<span class="bad">+2.56 ns（1 块）</span>']
+      ],
+      steps: [
+        'AM 落在数据槽中间，前后都没有 IDLE 可替换。',
+        'AM 占用一个槽，其后数据整体后移 1 槽。',
+        'SFD 从第 14 槽移到第 15 槽，T15 = 1038.40 ns，偏差 +2.56 ns。',
+        'PTP 报文之后，在 IPG 中删除一个 IDLE 回收时延，后续报文恢复。'
+      ]
+    },
+    3: {
+      name: '场景 3：多 lane 偏斜下的 AM 对齐',
+      tag: ['固定偏置，可标定', 'warn'],
+      streams: [S1, S1, S1, S1], offs: [0, 2, 4, 6],
+      rows: [
+        ['各 lane 原始 SFD', 'L0 1035.84 / L1 1040.96<br>L2 1046.08 / L3 1051.20 ns'],
+        ['各 lane 原始偏斜', '0.00 / 5.12 / 10.24 / 15.36 ns'],
+        ['去偏斜后 Lane0 参考时刻', fmt(tAt(IDEAL)) + ' ns'],
+        ['去偏斜后残差', '<span class="ok">0.00 ns（理想标定）</span>']
+      ],
+      steps: [
+        'AM 在各 lane 的同一序号出现，但各 lane 物理路径不同，到达有偏斜。',
+        '最大偏斜 6 × 2.56 = 15.36 ns，远低于 802.3 偏斜容限（约 180 ns，以原文为准）。',
+        '接收端利用 AM 做去偏斜（deskew），把各 lane 对齐到同一参考点。',
+        '标定补偿正确时残差接近 0；标定误差才会变成残余偏差。'
+      ]
+    }
+  };
+
+  // 参考面
+  const refPlane1 = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.07, 4.6),
+    new THREE.MeshBasicMaterial({ color: 0x4dd0ff, transparent: true, opacity: 0.9 })
+  );
+  refPlane1.position.set(PLANE_X, 0, 0.1);
+  root1.add(refPlane1);
   const glowMat = new THREE.MeshBasicMaterial({ color: 0x4dd0ff, transparent: true, opacity: 0.12, depthWrite: false });
-  const glow = new THREE.Mesh(glowGeo, glowMat);
-  glow.position.set(PLANE_X, -0.4, -0.01);
-  root.add(glow);
+  const glow = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 5.0), glowMat);
+  root1.add(glow);
 
-  // 块几何体（共享）
-  const blockGeo = new THREE.BoxGeometry(GAP * 0.78, 0.5, 0.5);
-  const ghostGeo = new THREE.BoxGeometry(GAP * 0.78, 0.8, 0.8);
-  const edgeGeo = new THREE.EdgesGeometry(ghostGeo);
+  const grid1 = new THREE.GridHelper(60, 60, 0x1b2638, 0x121a28);
+  grid1.position.y = -4.2;
+  root1.add(grid1);
 
-  function makeMat(type) {
+  function makeMat(ty) {
     return new THREE.MeshStandardMaterial({
-      color: COLORS[type],
-      emissive: COLORS[type],
-      emissiveIntensity: 0.15,
-      roughness: 0.45,
-      metalness: 0.1
+      color: COL[ty], emissive: COL[ty], emissiveIntensity: 0.15, roughness: 0.45, metalness: 0.1
     });
   }
+  const blockGeo = new THREE.BoxGeometry(GAP * 0.78, 0.5, 0.5);
+  const ghostGeo = new THREE.BoxGeometry(GAP * 0.78, 4.4, 0.8);
+  const edgeGeo = new THREE.EdgesGeometry(ghostGeo);
+  const slotX = (slot, scroll) => START_X + slot * GAP - scroll;
 
-  // 构建一组（一个 case）：两条 lane，每条都是同一序列
-  function buildCase(stream, yBase, labelColor) {
-    const group = new THREE.Group();
-    group.position.y = yBase;
-    root.add(group);
-
-    const lanes = [];
-    const laneOffsets = [0];
-    laneOffsets.forEach(dy => {
-      const blocks = stream.map(t => {
-        const m = new THREE.Mesh(blockGeo, makeMat(t));
-        m.position.y = dy;
-        group.add(m);
-        return { mesh: m, type: t };
+  const built = {};
+  Object.keys(SC).forEach(k => {
+    const cfg = SC[k];
+    const g = new THREE.Group();
+    g.visible = false;
+    root1.add(g);
+    const lanes = cfg.streams.map((stream, li) => {
+      const off = cfg.offs[li];
+      const blocks = stream.map((ty, i) => {
+        const m = new THREE.Mesh(blockGeo, makeMat(ty));
+        m.position.y = LANE_Y[li];
+        g.add(m);
+        return { mesh: m, type: ty, slot: i + off };
       });
-      lanes.push({ dy, blocks });
+      const sfdSlot = stream.indexOf('S') + off;
+      const label = textSprite(['L' + li + ' SFD', fmt(tAt(sfdSlot)) + ' ns'], '#ffc857');
+      label.position.y = LANE_Y[li] + 0.65;
+      g.add(label);
+      return { blocks, label, sfdSlot, off, stream };
     });
-
-    // 理想 SFD 位置的幽灵（线框）
     const ghost = new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({
-      color: 0x9fb4cc, transparent: true, opacity: 0.45
+      color: 0x9fb4cc, transparent: true, opacity: 0.5
     }));
-    ghost.position.y = 0;
-    group.add(ghost);
+    g.add(ghost);
+    built[k] = { group: g, lanes, ghost, cfg };
+  });
 
-    return { group, lanes, stream, ghost, labelColor };
+  // 柱状示意（模块一右下角）
+  const barGroup = new THREE.Group();
+  barGroup.position.set(6.8, -3.6, 1.5);
+  root1.add(barGroup);
+  const barDefs = [
+    { c: 0x7fd6a0, h: 0.5, label: ['场景1', '0 ns'] },
+    { c: 0xff7d7d, h: 1.4, label: ['场景2', '+2.56 ns'] },
+    { c: 0xffd166, h: 3.2, label: ['场景3', '≤180 ns'] }
+  ];
+  const barMeshes = barDefs.map((d, i) => {
+    const m = new THREE.Mesh(
+      new THREE.BoxGeometry(0.6, d.h, 0.6),
+      new THREE.MeshStandardMaterial({ color: d.c, emissive: d.c, emissiveIntensity: 0.25, roughness: 0.4 })
+    );
+    m.position.set(i * 1.0, d.h / 2 - 4.2 + 0.05, 0);
+    barGroup.add(m);
+    const sp = textSprite(d.label, '#' + d.c.toString(16).padStart(6, '0'), 2.2);
+    sp.position.set(i * 1.0, d.h - 3.2, 0);
+    barGroup.add(sp);
+    return m;
+  });
+  const barNote = textSprite(['柱高示意（非线性）'], '#7f8fa6', 3.2);
+  barNote.position.set(1.0, -2.9, 0);
+  barGroup.add(barNote);
+
+  let current = 1, playing = true, elapsed = 0;
+
+  function renderInfo() {
+    const s = SC[current];
+    document.getElementById('info').innerHTML =
+      `<h3>${s.name}<span class="tag ${s.tag[1]}">${s.tag[0]}</span></h3>
+       <table>${s.rows.map(r => `<tr><td class="k">${r[0]}</td><td class="v">${r[1]}</td></tr>`).join('')}</table>
+       <b>推演步骤</b>
+       <ol>${s.steps.map(x => `<li>${x}</li>`).join('')}</ol>`;
   }
 
-  const caseA=buildCase(base.map(kind),2.6,'');
-  const caseB=buildCase(stream().map(kind),-1.6,'');
-  phase.onchange=()=>{updateDiagram();const blocks=stream().map(kind);
-    caseB.lanes.forEach(l=>l.blocks.forEach((b,i)=>{b.type=blocks[i];b.mesh.material.color.setHex(COLORS[b.type]);b.mesh.material.emissive.setHex(COLORS[b.type]);}));elapsed=0;};
-  // 分隔标题（用 3D 平面色带区分两组）
-  function addBand(y, color) {
-    const g = new THREE.PlaneGeometry(40, 2.1);
-    const m = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.05, depthWrite: false });
-    const b = new THREE.Mesh(g, m);
-    b.position.set(0, y, -0.2);
-    root.add(b);
+  function liveHTML(k, scroll) {
+    const cfg = SC[k];
+    const slotAt = (scroll - START_X) / GAP;
+    let rows = `<div>参考面 PHC 时刻：<span class="warn">${fmt(tAt(slotAt))} ns</span></div>`;
+    rows += `<div style="color:#7f8fa6">当前穿过参考面的槽：${slotAt.toFixed(1)}</div>`;
+    cfg.streams.forEach((stream, li) => {
+      const off = cfg.offs[li];
+      const sfdSlot = stream.indexOf('S') + off;
+      const passed = scroll >= START_X + sfdSlot * GAP;
+      const raw = tAt(sfdSlot);
+      const dev = raw - tAt(IDEAL);
+      let s = `Lane${li}：`;
+      if (!passed) {
+        s += `<span style="color:#7f8fa6">SFD 未到达参考面</span>`;
+      } else {
+        const cls = Math.abs(dev) < 0.005 ? 'ok' : 'bad';
+        s += `SFD <span class="${cls}">${fmt(raw)} ns</span>　偏差 <span class="${cls}">${dev >= 0 ? '+' : ''}${fmt(dev)} ns</span>`;
+        if (k === 3 || k === '3') s += `　去偏斜后 <span class="ok">${fmt(raw - off * BLOCK_NS)} ns</span>`;
+      }
+      rows += `<div>${s}</div>`;
+    });
+    return rows;
   }
-  addBand(2.6, 0x7fd6a0);
-  addBand(-1.6, 0xff7d7d);
 
-  // ---------- 动画 ----------
-  const totalBlocks = caseA.stream.length;
-  const loopLen = (START_X + (totalBlocks - 1) * GAP + 2) / (SPEED * GAP) + 1.0;
-
-  let playing = true;
-  let elapsed = 0;
-  let last = performance.now();
-
+  function setScene(k) {
+    current = k;
+    Object.keys(built).forEach(key => built[key].group.visible = (+key === k));
+    document.querySelectorAll('.sc').forEach(b => b.classList.toggle('on', +b.dataset.k === k));
+    elapsed = 0;
+    renderInfo();
+  }
+  document.querySelectorAll('.sc').forEach(b => b.addEventListener('click', () => setScene(+b.dataset.k)));
   document.getElementById('btnPlay').onclick = e => {
     playing = !playing;
     e.target.textContent = playing ? '暂停' : '播放';
   };
   document.getElementById('btnReset').onclick = () => { elapsed = 0; };
 
-  // 视角拖拽旋转
-  let dragging = false, lastX = 0, lastY = 0, rotY = 0, rotX = 0;
-  canvas.addEventListener('pointerdown', e => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
-  window.addEventListener('pointerup', () => dragging = false);
+  function updateScene1(b, scroll) {
+    b.lanes.forEach(lane => {
+      lane.blocks.forEach(bl => {
+        const x = slotX(bl.slot, scroll);
+        bl.mesh.position.x = x;
+        bl.mesh.visible = Math.abs(x) < 9.5;
+        const near = Math.abs(x - PLANE_X) < GAP * 0.55;
+        const mat = bl.mesh.material;
+        if (bl.type === 'S') mat.emissiveIntensity = near ? 1.3 : 0.3;
+        else if (bl.type === 'A') mat.emissiveIntensity = near ? 1.1 : 0.35;
+        else if (bl.type === 'P') mat.emissiveIntensity = near ? 0.6 : 0.15;
+        else mat.emissiveIntensity = 0.12;
+        const sc = bl.type === 'A' ? 1.3 : 1;
+        bl.mesh.scale.set(1, sc, sc);
+      });
+      const lx = slotX(lane.sfdSlot, scroll);
+      lane.label.position.x = lx;
+      lane.label.visible = Math.abs(lx) < 9.5;
+    });
+    const gx = slotX(IDEAL, scroll);
+    b.ghost.position.x = gx;
+    b.ghost.visible = Math.abs(gx) < 9.5;
+  }
+
+  // =====================================================================
+  // 模块二：各速率误差对比（表 90A-1）
+  // =====================================================================
+  const SPEEDS = ['25G', '40G', '50G', '100G', '200G', '400G'];
+  const TYPES = [
+    { k: 'am',   name: 'AM/CWM 插入或删除',   color: 0xff4d4d, hex: '#ff4d4d' },
+    { k: 'idle', name: '单次 Idle 插入或删除', color: 0xffc857, hex: '#ffc857' },
+    { k: 'lane', name: 'PCS lane 分发/合并',   color: 0x4dd0ff, hex: '#4dd0ff' },
+    { k: 'ddmp', name: 'DDMP 选择不一致',      color: 0x7fd6a0, hex: '#7fd6a0' }
+  ];
+  const DATA = {
+    am:   [10.24, 6.4, 5.12, 12.8, 2.56, 2.56],
+    idle: [1.28, 1.6, 1.28, 0.64, 0.32, 0.16],
+    lane: [null, 4.8, 3.84, 12.16, null, null],
+    ddmp: [0.32, 0.2, 0.16, 0.08, 0.04, 0.02]
+  };
+  const SH = 0.3;   // 世界单位 / ns
+
+  const grid2 = new THREE.GridHelper(40, 40, 0x1b2638, 0x121a28);
+  grid2.position.y = -0.01;
+  root2.add(grid2);
+
+  const refPlane2 = new THREE.Mesh(
+    new THREE.PlaneGeometry(20, 9),
+    new THREE.MeshBasicMaterial({ color: 0xff7d7d, transparent: true, opacity: 0.08, side: THREE.DoubleSide, depthWrite: false })
+  );
+  refPlane2.rotation.x = -Math.PI / 2;
+  refPlane2.position.y = 5 * SH;
+  root2.add(refPlane2);
+  const refEdge = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.PlaneGeometry(20, 9)),
+    new THREE.LineDashedMaterial({ color: 0xff7d7d, dashSize: 0.3, gapSize: 0.2 })
+  );
+  refEdge.rotation.x = -Math.PI / 2;
+  refEdge.position.y = 5 * SH;
+  refEdge.computeLineDistances();
+  root2.add(refEdge);
+
+  const barGeo2 = new THREE.BoxGeometry(0.9, 1, 0.9);
+  barGeo2.translate(0, 0.5, 0);
+  const naGeo = new THREE.BoxGeometry(0.9, 0.08, 0.9);
+  const SX = i => (i - (SPEEDS.length - 1) / 2) * 2.2;
+  const TZ = j => (j - (TYPES.length - 1) / 2) * 1.7;
+
+  const bars = [];
+  TYPES.forEach((T, ti) => {
+    SPEEDS.forEach((sp, si) => {
+      const v = DATA[T.k][si];
+      const x = SX(si), z = TZ(ti);
+      const mat = new THREE.MeshStandardMaterial({
+        color: v === null ? 0x3a4250 : T.color,
+        emissive: v === null ? 0x000000 : T.color,
+        emissiveIntensity: 0.25, roughness: 0.4, metalness: 0.1,
+        transparent: true, opacity: 1
+      });
+      const mesh = new THREE.Mesh(v === null ? naGeo : barGeo2, mat);
+      mesh.position.set(x, 0, z);
+      root2.add(mesh);
+      let label;
+      if (v !== null) {
+        label = textSprite([fmt(v) + ' ns'], T.hex, 1.9);
+      } else {
+        label = textSprite(['N/A'], '#5d6b80', 1.2);
+      }
+      label.position.set(x, v === null ? 0.35 : 0, z);
+      root2.add(label);
+      bars.push({ mesh, mat, v, si, ti, label });
+    });
+  });
+
+  SPEEDS.forEach((sp, si) => {
+    const s = textSprite([sp], '#d8e0ea', 1.8);
+    s.position.set(SX(si), -0.9, TZ(TYPES.length - 1) + 1.6);
+    root2.add(s);
+  });
+  TYPES.forEach((T, ti) => {
+    const s = textSprite([T.name], T.hex, 4.2);
+    s.position.set(-9.8, 0.6, TZ(ti));
+    root2.add(s);
+  });
+  const refLabel = textSprite(['5 ns 参考线'], '#ff7d7d', 2.4);
+  refLabel.position.set(8.8, 5 * SH + 0.4, -4.5);
+  root2.add(refLabel);
+
+  let selected = null;
+  let startTime2 = 0;
+
+  function renderSpeedButtons() {
+    const box = document.getElementById('speedBtns');
+    box.innerHTML = '';
+    const all = document.createElement('button');
+    all.textContent = '全部';
+    all.className = selected === null ? 'on' : '';
+    all.onclick = () => { selected = null; refreshUI2(); };
+    box.appendChild(all);
+    SPEEDS.forEach((sp, i) => {
+      const b = document.createElement('button');
+      b.textContent = sp;
+      b.className = selected === i ? 'on' : '';
+      b.onclick = () => { selected = (selected === i) ? null : i; refreshUI2(); };
+      box.appendChild(b);
+    });
+  }
+
+  function renderTable() {
+    let h = '<tr><th>速率</th>' + TYPES.map(T => `<th>${T.name.replace('插入或删除', '').replace('选择不一致', '不一致')}</th>`).join('') + '</tr>';
+    SPEEDS.forEach((sp, si) => {
+      const cls = 'row' + (selected === si ? ' sel' : '');
+      h += `<tr class="${cls}" data-si="${si}"><td>${sp}</td>` + TYPES.map(T => {
+        const v = DATA[T.k][si];
+        if (v === null) return '<td class="na">不适用</td>';
+        const c = v >= 5 ? 'bad' : (v >= 1 ? 'warn' : 'ok');
+        return `<td class="${c}">${fmt(v)}</td>`;
+      }).join('') + '</tr>';
+    });
+    const tbl = document.getElementById('tbl');
+    tbl.innerHTML = h;
+    tbl.querySelectorAll('tr.row').forEach(tr => {
+      tr.onclick = () => {
+        const si = +tr.dataset.si;
+        selected = (selected === si) ? null : si;
+        refreshUI2();
+      };
+    });
+  }
+
+  function renderLive2() {
+    const box = document.getElementById('liveBody2');
+    if (selected === null) {
+      let best = { v: -1 };
+      bars.forEach(b => { if (b.v !== null && b.v > best.v) best = { v: b.v, si: b.si, ti: b.ti }; });
+      box.innerHTML = `
+        <div>全部速率中最大单项</div>
+        <div class="big">${fmt(best.v)} ns</div>
+        <div>${SPEEDS[best.si]} · ${TYPES[best.ti].name}</div>
+        <div style="color:#7f8fa6;margin-top:6px;">点击速率按钮查看单速率的明细</div>`;
+    } else {
+      const items = TYPES.map(T => ({ T, v: DATA[T.k][selected] })).filter(o => o.v !== null);
+      const top = items.reduce((a, b) => (b.v > a.v ? b : a));
+      box.innerHTML = `
+        <div>速率 <b>${SPEEDS[selected]}</b> 的最大单项</div>
+        <div class="big">${fmt(top.v)} ns</div>
+        <div>${top.T.name}</div>
+        <div style="color:#7f8fa6;margin-top:6px;">
+          ${items.map(o => `${o.T.name.split(' ')[0]}：${fmt(o.v)} ns`).join('<br>')}
+        </div>`;
+    }
+  }
+
+  function refreshUI2() {
+    renderSpeedButtons();
+    renderTable();
+    renderLive2();
+  }
+
+  function pick(e) {
+    const r = canvas.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((e.clientX - r.left) / r.width) * 2 - 1,
+      -((e.clientY - r.top) / r.height) * 2 + 1
+    );
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(mouse, cam2);
+    const hit = ray.intersectObjects(bars.map(b => b.mesh), false)[0];
+    if (hit) {
+      const b = bars.find(x => x.mesh === hit.object);
+      selected = (selected === b.si) ? null : b.si;
+      refreshUI2();
+    }
+  }
+
+  function updateBars2(now) {
+    const grow = Math.min(1, Math.max(0, (now - startTime2) / 1600));
+    const ease = 1 - Math.pow(1 - grow, 3);
+    bars.forEach(b => {
+      const hl = (selected === null || selected === b.si);
+      if (b.v === null) {
+        b.mat.opacity = hl ? 0.6 : 0.12;
+        return;
+      }
+      b.mesh.scale.y = Math.max(0.01, b.v * SH * ease);
+      b.label.position.y = b.mesh.scale.y + 0.45;
+      b.mat.opacity = hl ? 1 : 0.15;
+      b.mat.emissiveIntensity = hl ? (b.v > 5 ? 0.55 : 0.3) : 0.05;
+      b.label.material.opacity = hl ? 1 : 0.2;
+    });
+  }
+
+  // =====================================================================
+  // 模式切换、交互、主循环
+  // =====================================================================
+  const HINTS = { 1: '拖拽鼠标旋转视角', 2: '拖拽旋转 · 点击柱子选择速率' };
+
+  function setMode(m) {
+    mode = m;
+    document.getElementById('m1').classList.toggle('on', m === 1);
+    document.getElementById('m2').classList.toggle('on', m === 2);
+    document.querySelectorAll('.view1').forEach(el => el.classList.toggle('hidden', m !== 1));
+    document.querySelectorAll('.view2').forEach(el => el.classList.toggle('hidden', m !== 2));
+    document.getElementById('hint').textContent = HINTS[m];
+    if (m === 2) { startTime2 = performance.now(); refreshUI2(); }
+  }
+  document.getElementById('m1').onclick = () => setMode(1);
+  document.getElementById('m2').onclick = () => setMode(2);
+
+  canvas.addEventListener('pointerdown', e => {
+    dragging = true; lastX = e.clientX; lastY = e.clientY; moved = 0;
+  });
+  window.addEventListener('pointerup', e => {
+    dragging = false;
+    if (mode === 2 && moved < 5) pick(e);
+  });
   window.addEventListener('pointermove', e => {
     if (!dragging) return;
+    moved += Math.abs(e.clientX - lastX) + Math.abs(e.clientY - lastY);
     rotY += (e.clientX - lastX) * 0.005;
     rotX += (e.clientY - lastY) * 0.003;
     rotX = Math.max(-0.6, Math.min(0.6, rotX));
     lastX = e.clientX; lastY = e.clientY;
   });
-
-  function resize() {
-    const w = canvas.clientWidth, h = canvas.clientHeight;
-    renderer.setSize(w, h, false);
-    camera.aspect = w / h;
-    camera.position.z = Math.max(16, 23 / camera.aspect);
-    camera.updateProjectionMatrix();
-  }
   window.addEventListener('resize', resize);
   resize();
 
-  function updateCase(c, scroll, time) {
-    // 方块位置
-    c.lanes.forEach(lane => {
-      lane.blocks.forEach((b, i) => {
-        const x = START_X + i * GAP - scroll;
-        b.mesh.position.x = x;
-        b.mesh.visible = x > -START_X && x < START_X + 4;
-
-        // 穿过参考面时高亮
-        const near = Math.abs(x - PLANE_X) < GAP * 0.6;
-        const mat = b.mesh.material;
-        if (b.type === 'S') {
-          mat.emissiveIntensity = near ? 1.2 : 0.25;
-        } else if (b.type === 'A') {
-          mat.emissiveIntensity = near ? 1.0 : 0.3;
-        } else if (b.type === 'P') {
-          mat.emissiveIntensity = near ? 0.6 : 0.15;
-        } else {
-          mat.emissiveIntensity = 0.12;
-        }
-        if (b.type === 'A') {
-          b.mesh.scale.y = 1.25;
-          b.mesh.scale.z = 1.25;
-        } else {
-          b.mesh.scale.set(1, 1, 1);
-        }
-      });
-    });
-
-    // 幽灵：理想 SFD 位置（相对于流起点，基于 case A 的理想序号）
-    c.ghost.position.x = START_X + IDEAL_SFD * GAP - scroll;
-    c.ghost.visible = c.ghost.position.x > -START_X && c.ghost.position.x < START_X + 4;
-  }
-
+  let last = performance.now();
   function frame(now) {
-    const dt = (now - last) / 1000;
-    last = now;
-    if (playing) elapsed += dt;
+    const dt = (now - last) / 1000; last = now;
+    const sway = Math.sin(now * 0.0004) * 0.07;
 
-    // 循环
-    if (elapsed > loopLen) elapsed = 0;
-
-    const scroll = elapsed * SPEED * GAP;
-    updateCase(caseA, scroll, elapsed);
-    updateCase(caseB, scroll, elapsed);
-
-    // 视角：拖拽 + 轻微自动摆动
-    const sway = Math.sin(now * 0.0004) * 0.08;
-    root.rotation.y = rotY;
-    root.rotation.x = rotX;
-
-    // 参考面脉动
-    glowMat.opacity = 0.09 + 0.06 * Math.sin(now * 0.005);
-
-    renderer.render(scene, camera);
+    if (mode === 1) {
+      if (playing) elapsed += dt;
+      const cur = built[current];
+      const loopLen = (START_X + (cur.cfg.streams[0].length + 4) * GAP) / (SPEED * GAP) + 1.0;
+      if (elapsed > loopLen) elapsed = 0;
+      const scroll = elapsed * SPEED * GAP;
+      updateScene1(cur, scroll);
+      document.getElementById('liveBody').innerHTML = liveHTML(current, scroll);
+      glowMat.opacity = 0.09 + 0.06 * Math.sin(now * 0.005);
+      barMeshes.forEach((m, i) => { m.material.emissiveIntensity = (i + 1 === current) ? 0.8 : 0.2; });
+      root1.rotation.y = rotY + sway;
+      root1.rotation.x = rotX;
+      renderer.render(scene1, cam1);
+    } else {
+      updateBars2(now);
+      root2.rotation.y = rotY + sway;
+      root2.rotation.x = rotX;
+      renderer.render(scene2, cam2);
+    }
     requestAnimationFrame(frame);
   }
+
+  setScene(1);
+  refreshUI2();
+  setMode(1);
   requestAnimationFrame(frame);
 })();
 </script>
