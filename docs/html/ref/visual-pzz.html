@@ -8,7 +8,9 @@
 <link rel="stylesheet" href="visual-pcs-assets/fonts.css">
 <link rel="stylesheet" href="visual-pzz-assets/visual-pzz.css">
 <style>
-  #moduleSearch { width: 100%; color: var(--ink); cursor: text; }
+  #moduleSearchForm { pointer-events: auto; margin-top: 6px; }
+  .module-search-row { display: flex; gap: 4px; }
+  #moduleSearch { min-width: 0; flex: 1; color: var(--ink); cursor: text; }
   #moduleSearchStatus { display: block; color: var(--muted); font-size: .8rem; }
   #moduleSearchResults { max-height: 14rem; overflow-y: auto; }
 </style>
@@ -39,10 +41,6 @@
       </div>
 
       <p class="side-title">模块索引</p>
-      <input class="chip" id="moduleSearch" type="search" aria-label="搜索模块名称"
-             placeholder="搜索模块名称" autocomplete="off" disabled>
-      <small id="moduleSearchStatus" role="status"></small>
-      <div class="chips" id="moduleSearchResults"></div>
       <div class="chips">
         <button type="button" class="chip" id="chipSubsys">子系统架构<small>pzz_all.md · 29 个子系统</small></button>
         <button type="button" class="chip" id="chipFlow">流控链路<small>AQM · PFC · CBFC · TM</small></button>
@@ -94,6 +92,14 @@
       <div class="hud">
         <div class="hud-title" id="hudTitle">芯片全景</div>
         <div class="hud-sub" id="hudSub">4 个 chiplet/die · 64 pipe · 512 业务口 + 8 AUX</div>
+        <form id="moduleSearchForm" role="search" hidden>
+          <div class="module-search-row">
+            <input class="chip" id="moduleSearch" type="search" aria-label="搜索模块名称" placeholder="搜索模块名称" autocomplete="off" required>
+            <button class="btn" type="submit">搜索</button>
+          </div>
+          <small id="moduleSearchStatus" role="status"></small>
+          <div class="chips" id="moduleSearchResults"></div>
+        </form>
       </div>
       <div class="zoom">
         <button class="zbtn" id="btnIn" type="button" aria-label="放大">+</button>
@@ -1724,7 +1730,12 @@
   var moduleSearch = document.getElementById('moduleSearch');
   var moduleSearchStatus = document.getElementById('moduleSearchStatus');
   var moduleSearchResults = document.getElementById('moduleSearchResults');
-  moduleSearch.disabled = false;
+  var moduleSearchForm = document.getElementById('moduleSearchForm');
+  moduleSearchForm.addEventListener('submit', function (event) {
+    event.preventDefault();
+    var first = moduleSearchResults.firstElementChild;
+    if (first) first.click();
+  });
   moduleSearch.addEventListener('input', function () {
     moduleSearchResults.textContent = '';
     moduleSearchStatus.textContent = '';
@@ -1743,8 +1754,12 @@
       button.addEventListener('click', function () {
         if (viewMode !== 'atlas') enterAtlas();
         openAtlasModule(index);
+        moduleSearch.value = '';
+        moduleSearchResults.textContent = '';
+        moduleSearchStatus.textContent = '';
       });
-      moduleSearchResults.appendChild(button);
+      if (card.data.name.toLowerCase() === query) moduleSearchResults.prepend(button);
+      else moduleSearchResults.appendChild(button);
     });
     moduleSearchStatus.textContent = count ? '找到 ' + count + ' 个模块' : '未找到匹配的模块';
   });
@@ -5031,6 +5046,8 @@
                    '存储调度 · Metadata · SOP 对齐 · Modify（对齐/TRIM/MOD）· MIRX 输出'];
 
   function updateHud() {
+    moduleSearchForm.hidden = !((viewMode === 'chip' && dies[focusIndex].level === 0) ||
+                                (viewMode === 'atlas' && atlasSelected < 0));
     if (viewMode === 'route') {
       var routes = window.PZZ_ROUTES || [];
       var rr = routes[routeIdx];
