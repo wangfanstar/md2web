@@ -13,9 +13,36 @@
   function render(note, token, direction) {
     el('step').textContent = index + ' / ' + events.length + ' · ' + note;
     const {used, consumed, seen, received, freed, buffered} = state;
-    el('count').textContent = '每帧 ' + cost() + ' 信用 ｜ A：可用 ' + (+el('limit').value-used) +
-      '，S_P_CU = S_VC_CU[1] = ' + used + '，S_VC_CC = ' + consumed + '，S_VC_CF = ' + seen +
-      ' ｜ B：R_VC_CC = ' + received + '，R_VC_CF = ' + freed + '，缓冲占用 ' + buffered;
+    const event = events[index-1];
+    const sending = (event==='tx' || event==='retry') && state.inFlight;
+    const txState = sending ? '发送数据' : event==='cf' ? '处理信用反馈' : event==='cc' ? '发送同步' :
+      event==='be' ? '尽力发送' : state.blocked && used+cost()>+el('limit').value ? '等待信用' : '就绪';
+    const rxState = {drain:'释放缓冲',cf:'通告信用',miss:'通告信用',timer:'周期更新',cc:'校正计数',be:'接收数据'}[event]
+      || (event==='rx' && !state.blocked ? '接收数据' : buffered ? '缓存有帧' : '等待数据');
+    el('tx-state').textContent=txState;
+    el('rx-state').textContent=rxState;
+    const port = el('mode').value==='port';
+    const limit = +el('limit').value;
+    const sections = [
+      ['已协商参数', {CreditSize:el('unit').value+' B',PktOvhd:el('over').value+' B',
+        TotalCredits:port?limit:0,'VC_CreditLimit[1]':port?'未指定':limit}],
+      ['A · 发送寄存器',{S_P_CL:port?limit:0,S_P_CU:used,'S_VC_CL[1]':port?'按端口准入':limit,
+        'S_VC_CU[1]':used,'S_VC_CC[1]':consumed,'S_VC_CF[1]':seen}],
+      ['B · 接收寄存器',{'R_VC_CC[1]':received,'R_VC_CF[1]':freed}],
+      ['当前用例',{'帧长度':el('size').value+' B','每帧信用':cost(),'A 可用信用':limit-used,'B 缓冲占用':buffered,
+        'CF_max_timer':event==='timer'?'到期':'按用例触发'}]
+    ];
+    const panel=el('registers');
+    panel.replaceChildren();
+    for(const [title,fields] of sections){
+      const heading=document.createElement('h4'), list=document.createElement('dl');
+      heading.textContent=title;
+      for(const [name,value] of Object.entries(fields)){
+        const key=document.createElement('dt'), data=document.createElement('dd');
+        key.textContent=name; data.textContent=value; list.append(key,data);
+      }
+      panel.append(heading,list);
+    }
     const box = el('token');
     box.getAnimations().forEach(a => a.cancel());
     box.textContent = token;

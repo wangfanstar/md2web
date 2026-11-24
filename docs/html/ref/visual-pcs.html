@@ -1102,6 +1102,14 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <p class="fine">依据 IEEE P802.3dj/D2.0（未批准草案）第 175 条和第 176 条。16:8 SM-PMA 按 40 位符号四元组复用。AM 采用表 175–2 的标记和图 175–4 的映射，示例展示一个带 AM 的组。CDR、锁定时序及波形采用教学示意。</p>
   </section>
   <section role="tabpanel" id="lab-cbfc" aria-labelledby="tab-cbfc" hidden tabindex="0">
+    <style>
+    .cb-layout{display:grid;grid-template-columns:minmax(0,2fr) minmax(270px,1fr);gap:1.2rem;align-items:start}
+    .cb-registers{border:1px solid var(--rule);border-radius:8px;padding:0 1rem 1rem}
+    .cb-registers dl{display:grid;grid-template-columns:1fr auto;gap:.2em 1em;font-variant-numeric:tabular-nums}
+    .cb-registers dd{margin:0;text-align:right}.cb-registers dt{font-family:monospace}
+    @media(max-width:850px){.cb-layout{grid-template-columns:1fr}}
+    </style>
+    <div class="cb-layout"><div>
     <h3>CBFC · 从信用检查到缓冲释放</h3>
     <p>选择用例后逐步比较 A 的已用信用和 B 的累计释放值。修改参数会从本轮初始状态重新计算。</p>
     <p><label>场景大类 <select id="cb-group"></select></label>　<label>仿真用例 <select id="cb-case"></select></label></p>
@@ -1113,12 +1121,12 @@ svg.fig .amk { stroke: var(--ink); stroke-width: 1; }
     <label>CreditSize 字节 <select id="cb-unit"><option>32</option><option selected>64</option><option>128</option><option>256</option></select></label>
     <label>PktOvhd 字节 <input id="cb-over" type="number" min="0" max="255" value="0"></label></fieldset>
     <p>UE 1.1 §5.2.5.6–7。示例只跟踪 VC 1，定时器到期以离散事件表示。计数器按事件更新。</p><div style="display:flex;align-items:center;gap:1em;padding:2em 1em;background:#182d40;color:white;border-radius:10px">
-      <b style="background:#23547a;padding:1em;box-shadow:4px 5px #102235">A · TX<br>VC 1 队列</b>
+      <b style="background:#23547a;padding:1em;box-shadow:4px 5px #102235">A · TX<br>VC 1 队列<br><small id="cb-tx-state"></small></b>
       <div style="flex:1;position:relative;height:4em;border-bottom:2px solid #81b8ca"><b id="cb-token" style="position:absolute;white-space:nowrap;transform:translateX(-50%);color:#ffe098"></b></div>
-      <b style="background:#256254;padding:1em;box-shadow:4px 5px #123a32">B · RX<br>VC 1 缓冲</b>
+      <b style="background:#256254;padding:1em;box-shadow:4px 5px #123a32">B · RX<br>VC 1 缓冲<br><small id="cb-rx-state"></small></b>
     </div>
-    <h4 id="cb-step"></h4><p id="cb-count"></p>
-    <button class="btn" id="cb-play">播放</button> <button class="btn" id="cb-next">下一步</button> <button class="btn" id="cb-reset">重播</button>
+    <h4 id="cb-step"></h4>
+    <button class="btn" id="cb-play">播放</button> <button class="btn" id="cb-next">下一步</button> <button class="btn" id="cb-reset">重播</button><p class="note">图中状态名描述当前仿真动作。</p></div><aside class="cb-registers"><h3>寄存器状态 · VC 1</h3><div id="cb-registers"></div></aside></div>
   </section>
   <script src="visual-pcs-assets/pcs-cbfc-lab.js"></script>
   <section role="tabpanel" id="lab-llr" aria-labelledby="tab-llr" hidden tabindex="0">
