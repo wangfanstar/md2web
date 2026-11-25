@@ -42,8 +42,22 @@
 </head>
 <body>
 
-<h1>AM 插入 &amp; PCS 分发合并 · 4 Lane 对比</h1>
-<div class="sub">上方：理想情况（无误差）｜ 下方：可切换的误差情况。两路使用同一条 DDMP 时间基准，DDMP 过参考面时打戳。</div>
+<style>
+.lesson,details.expert{width:min(1050px,100%)}.lesson{background:#101b2b;border:1px solid #32445a;border-radius:14px;padding:clamp(14px,4vw,36px);line-height:1.55}.lesson h1{color:#f3f6fc;background:none;-webkit-text-fill-color:currentColor;letter-spacing:0;font-size:clamp(21px,4vw,32px)}.lesson button,.lesson select{font:inherit}.lesson nav{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.lesson button:disabled{opacity:.5}.film{overflow-x:auto}.strip{min-width:535px;position:relative;padding:8px 0}.rail{position:relative;height:45px;margin:4px 0;background:repeating-linear-gradient(90deg,#192739 0 calc(12.5% - 1px),#47566a 0 12.5%)}.tile{position:absolute;top:5px;width:calc(12.5% - 6px);margin-left:3px;text-align:center;padding:4px 0;border-radius:4px;background:#345675;color:white;transition:left .55s ease,opacity .45s}.tile.idle{background:#233041;border:1px dashed #8494a8}.tile.sfd{background:#af8aec;color:#141323;font-weight:700}.tile.marker{background:#ffb568;color:#302113}.measure{height:22px;position:relative}.measure i{position:absolute;height:22px;border-left:2px dashed #c6a2ff;transform-origin:top left}.lesson output{display:block;color:#fdd99e;font-variant-numeric:tabular-nums}.expert summary{cursor:pointer;padding:12px 0}.expert canvas{vertical-align:top}
+</style>
+<section class="lesson">
+<h1>插入一个 AM，哪一帧会晚到？</h1>
+<p>把每一格看作一次放行机会。紫色 SFD 是这一帧的起点，时钟在它经过时打戳。先只盯住紫块，看它前面多了几格。</p>
+<label>AM 放在哪里 <select id="lesson-case"><option value="before">紧挨 SFD 之前</option><option value="inside">帧中，D2 之前</option><option value="idle">占用前面的 Idle 空格</option></select></label>
+<div class="film"><div class="strip">
+<small>原来 · 从左到右经过同一个打戳点</small><div class="rail" id="original"></div>
+<div class="measure"><i id="guide"></i></div>
+<div class="rail" id="changed"></div><small>本次 · 橙色 AM 占一格，D1–D3 是同一帧的数据</small>
+</div></div>
+<nav><button id="prev-event">上一步</button><button id="next-event">下一步</button><button id="auto-event">自动播放</button></nav>
+<strong id="event-title"></strong><p id="event-note" aria-live="polite"></p><output id="event-time"></output>
+</section>
+<details class="expert"><summary>展开四条 Lane 连续流、逐时隙播放与历史打戳</summary><div class="sub">上方：理想情况（无误差）｜ 下方：可切换的误差情况。两路使用同一条 DDMP 时间基准，DDMP 过参考面时打戳。</div>
 
 <div class="tag" style="color:#8bd3a0">▲ 理想情况（无 AM 插入、无 PCS 分发偏移）</div>
 <div id="sfd-comparison" style="position:relative;width:min(1200px,100%)"><canvas id="top" width="1200" height="250"></canvas>
@@ -76,6 +90,61 @@
   <span class="dot" style="background:#c77dff"></span>1588 SFD 所在块（DDMP 示例）
 </div>
 
+</details>
+<script>
+(() => {
+  const get=id=>document.getElementById(id);
+  const base=['Idle','SFD','D1','D2','D3','Idle','下一帧'];
+  const unit=1.4, origin=1000;
+  let step=0,timer;
+  function tiles(host,values){
+    return values.map((name,i)=>{
+      const tile=document.createElement('span');
+      tile.className='tile '+({Idle:'idle',SFD:'sfd',AM:'marker'}[name]||'');
+      tile.textContent=name;tile.style.left=i*12.5+'%';
+      host.append(tile);return tile;
+    });
+  }
+  tiles(get('original'),base);
+  const moving=tiles(get('changed'),base.concat('AM'));
+  function draw(){
+    const mode=get('lesson-case').value;
+    const at={before:1,inside:3,idle:0}[mode];
+    const positions=base.map((_,i)=>i);
+    if(step && mode!=='idle'){
+      for(let i=at;i<base.length;i++)positions[i]++;
+      if(step===2)positions[6]=6;
+    }
+    moving.forEach((tile,i)=>{
+      const hidden=i===7?!step:step && ((mode==='idle' && i===0)||(step===2 && mode!=='idle' && i===5));
+      tile.style.opacity=hidden?'0':'1';
+      tile.style.left=12.5*(i===7?at:positions[i])+'%';
+    });
+    const delta=positions[1]-1;
+    const dx=get('changed').clientWidth*delta/8;
+    const guide=get('guide');
+    guide.style.left='18.75%';guide.style.height=Math.hypot(dx,22)+'px';
+    guide.style.transform='rotate('+(-Math.atan2(dx,22))+'rad)';
+    get('event-title').textContent=['① 找到同一个 SFD','② 放入 AM，再数一遍','③ 查看下一帧'][step];
+    get('event-note').textContent=!step?'上下两行完全相同。SFD 前面都有一个 Idle。':step===2?
+      (mode==='idle'?'前面的空格已吸收 AM，两行的下一帧仍在同一列。':'后面的 Idle 腾出一格，下一帧回到原列。本帧已打出的时间戳保持原值。'):
+      {before:'SFD 前从一格变为两格，所以本帧晚一格。',inside:'紫块仍在第二列。D2 和 D3 各晚一格，但本帧开始的时间已经确定。',idle:'AM 占用了原先的空格。紫块前面仍只有一格。'}[mode];
+    get('event-time').textContent='每格 1.40 ns（教学时标）　原打戳 '+(origin+unit).toFixed(2)+' ns → 本次 '+(origin+positions[1]*unit).toFixed(2)+' ns　差值 +'+(delta*unit).toFixed(2)+' ns';
+    get('prev-event').disabled=step===0;get('next-event').disabled=step===2;
+  }
+  function stop(){clearInterval(timer);timer=null;get('auto-event').textContent='自动播放';}
+  get('prev-event').onclick=()=>{stop();step--;draw();};
+  get('next-event').onclick=()=>{stop();step++;draw();};
+  get('lesson-case').onchange=()=>{stop();step=0;draw();};
+  get('auto-event').onclick=()=>{
+    if(timer){stop();return;}
+    if(step===2)step=0;
+    draw();get('auto-event').textContent='暂停';
+    timer=setInterval(()=>{step++;draw();if(step===2)stop();},1800);
+  };
+  window.addEventListener('resize',draw);draw();
+})();
+</script>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
@@ -493,6 +562,7 @@
 
   // ---------- 主循环 ----------
   function frame() {
+    if (!document.querySelector('.expert').open) { requestAnimationFrame(frame); return; }
     if (playing) tick += speedK;
     if (playing) {
       stepFlow(FT);
