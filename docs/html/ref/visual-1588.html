@@ -46,10 +46,10 @@
 <div class="sub">上方：理想情况（无误差）｜ 下方：可切换的误差情况。两路使用同一条 DDMP 时间基准，DDMP 过参考面时打戳。</div>
 
 <div class="tag" style="color:#8bd3a0">▲ 理想情况（无 AM 插入、无 PCS 分发偏移）</div>
-<canvas id="top" width="1200" height="250"></canvas>
+<div id="sfd-comparison" style="position:relative;width:min(1200px,100%)"><canvas id="top" width="1200" height="250"></canvas>
 
 <div class="tag" id="botTag" style="color:#7ff9ff">▼ 误差情况</div>
-<canvas id="bot" width="1200" height="250"></canvas>
+<canvas id="bot" width="1200" height="250"></canvas><canvas id="sfd-links" aria-hidden="true" style="position:absolute;inset:0;width:100%;height:100%;background:none;border:0;box-shadow:none;pointer-events:none"></canvas></div>
 
 <div class="bar">
   <button id="play" class="on">⏸ 暂停</button>
@@ -279,6 +279,7 @@
       return LY(lane) + (MID - LY(lane)) * e;
     };
 
+    f.sfdPoints = new Map();
     // 时隙：AM 竖带 / DDMP 标记 / 数据块 / Idle
     for (const col of f.cols) {
       if (col.am) {
@@ -297,6 +298,7 @@
         const x = laneX(f, col, lane);
         if (x < 20 || x > W + 20) continue;
         const y = colY(lane, x);
+        f.sfdPoints.set(col.k, {x, y});
         ctx.save();
         ctx.shadowColor = '#c77dff'; ctx.shadowBlur = 18; ctx.fillStyle = '#c77dff';
         ctx.beginPath();
@@ -449,22 +451,44 @@
       return `<h3 style="color:${color}">${title}</h3><div>等待首个 DDMP 打戳…</div>`;
     }
     const hl = Math.abs(s.te) > REF_NS ? '#ff6b9a' : '#ffffff';
-    const hist = st.hist.map(h => sgn(h.te)).join('　');
+    const hist = st.hist.map(h => `#${h.k}　${h.tTrue.toFixed(3)} → ${h.ts.toFixed(3)} ns　Δ ${sgn(h.te)} ns`).join('<br>');
     return `
       <h3 style="color:${color}">${title}　<span style="color:#5d7096;font-weight:normal">${scn.name}</span></h3>
       <table>
         <tr><td>DDMP 序号</td><td class="r">#${s.k}</td>
             <td>所在 lane</td><td class="r" style="color:${COL[s.lane]}">Lane${s.lane}</td></tr>
-        <tr><td>真实时刻 t_true</td><td class="r" colspan="3">${s.tTrue.toFixed(3)} ns</td></tr>
-        <tr><td>打出时间戳 ts</td><td class="r" colspan="3" style="color:${color}">${s.ts.toFixed(3)} ns</td></tr>
-        <tr><td>TE = ts − t_true</td><td class="r" colspan="3" style="color:${hl}">${sgn(s.te)} ns</td></tr>
+        <tr><td>调整前基准打戳</td><td class="r" colspan="3">${s.tTrue.toFixed(3)} ns</td></tr>
+        <tr><td>当前场景打戳</td><td class="r" colspan="3" style="color:${color}">${s.ts.toFixed(3)} ns</td></tr>
+        <tr><td>当前 − 基准</td><td class="r" colspan="3" style="color:${hl}">${sgn(s.te)} ns</td></tr>
       </table>
-      <div class="hist">最近 3 次 TE：${hist} ns</div>`;
+      <div class="hist">最近 3 次打戳对照<br>${hist}</div>`;
   }
 
   function renderCards() {
     $('cardTop').innerHTML = cardHTML('上 · 理想', '#8bd3a0', IDEAL, FT.st);
     $('cardBot').innerHTML = cardHTML('下 · 误差', SCN[botIdx].color, SCN[botIdx], FB.st);
+  }
+
+  function drawSfdLinks() {
+    const overlay = $('sfd-links');
+    const bounds = overlay.getBoundingClientRect();
+    const width = Math.round(bounds.width), height = Math.round(bounds.height);
+    if (!width || !height) return;
+    if (overlay.width !== width) overlay.width = width;
+    if (overlay.height !== height) overlay.height = height;
+    const ctx = overlay.getContext('2d');
+    ctx.clearRect(0, 0, width, height);
+    const top = $('top').getBoundingClientRect(), bottom = $('bot').getBoundingClientRect();
+    ctx.strokeStyle = 'rgba(206,155,255,.7)';
+    ctx.setLineDash([5, 5]);
+    for (const [id, a] of FT.sfdPoints) {
+      const b = FB.sfdPoints.get(id);
+      if (!b) continue;
+      ctx.beginPath();
+      ctx.moveTo(top.left-bounds.left+a.x*top.width/W,top.top-bounds.top+a.y*top.height/FH);
+      ctx.lineTo(bottom.left-bounds.left+b.x*bottom.width/W,bottom.top-bounds.top+b.y*bottom.height/FH);
+      ctx.stroke();
+    }
   }
 
   // ---------- 主循环 ----------
@@ -480,6 +504,7 @@
     }
     drawFlow(FT, '数据流 · 理想（无 AM 插入、无 PCS 偏移）');
     drawFlow(FB, '数据流 · ' + SCN[botIdx].name);
+    drawSfdLinks();
     drawScope();
     requestAnimationFrame(frame);
   }
