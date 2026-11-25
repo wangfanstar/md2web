@@ -130,7 +130,14 @@
   $('speed').oninput = e => speedK = parseFloat(e.target.value);
   $('phase').oninput = e => phase = parseInt(e.target.value, 10);
 
+  document.getElementById('step').onclick = () => {
+    if (playing) document.getElementById('play').click();
+    stepFlow(FT, SLOT);
+    stepFlow(FB, SLOT);
+  };
+
   function updateTag() {
+    document.getElementById('am-note').textContent = SCN[botIdx].note || '';
     $('botTag').textContent = '▼ 误差情况：' + SCN[botIdx].name;
   }
 
