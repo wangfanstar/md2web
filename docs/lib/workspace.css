@@ -742,11 +742,25 @@ body.media-viewer-open {
 
 .md-editor-text {
   background: transparent;
-  caret-color: #1f2937;
+  caret-animation: manual;
+  caret-color: #1d4ed8;
   color: transparent;
   outline: none;
   overflow: auto;
   resize: none;
+  z-index: 1;
+}
+
+@media (forced-colors: active) {
+  .md-editor-highlight {
+    visibility: hidden;
+  }
+
+  .md-editor-text {
+    background: Canvas;
+    caret-color: CanvasText;
+    color: CanvasText;
+  }
 }
 
 .md-editor-text::selection {
