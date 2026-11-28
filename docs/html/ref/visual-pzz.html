@@ -7,13 +7,6 @@
 <meta name="description" content="PZZ 51.2T 交换芯片内部模块 3D 架构：全景看 4 个 chiplet，放大看 HPP / CPP / MACW / MMU；固定图层可查看 29 个内部子系统、21 个流控模块与 43 条 PFC/CBFC/credit 链路、CPP/HPP 16 条报文转发路径动画（本 DIE / 跨 DIE / AUX / HPP / CPP / Mirror 分类）、10 类报文路径、mermaid 架构图、port/TM/HPP 映射与 85 个模块索引。">
 <link rel="stylesheet" href="visual-pcs-assets/fonts.css">
 <link rel="stylesheet" href="visual-pzz-assets/visual-pzz.css">
-<style>
-  #moduleSearchForm { pointer-events: auto; margin-top: 6px; }
-  .module-search-row { display: flex; gap: 4px; }
-  #moduleSearch { min-width: 0; flex: 1; color: var(--ink); cursor: text; }
-  #moduleSearchStatus { display: block; color: var(--muted); font-size: .8rem; }
-  #moduleSearchResults { max-height: 14rem; overflow-y: auto; }
-</style>
 </head>
 <body>
 <div class="app">
@@ -76,7 +69,7 @@
       <p class="side-note">
         <b>操作：</b>左键按住拖动平移视图，右键拖动旋转，滚轮 / 双指缩放；点击 die 或模块卡片进入下一层。<br>
         左侧「固定图层」可锁定当前层级：锁定后缩放只改变远近，不会自动切换视图；选「自动」恢复按缩放切换。<br>
-        「端口映射」按 HPP0-3 / MAC0-15 / TM0-7 展示 port-id 对应关系，点击 MAC/TM 查看 mi_id、mc_id 与端口范围。<br>
+        「端口映射」按 HPP0-3 / MAC0-15 / TM0-7 展示 port-id 对应关系，点击 MAC/TM 查看 mi_id、mc_id 与端口范围；每个 MAC 下的二级行是 MIRX block（HPP 48-63，`block = 63 - local_pipe`），点击可看覆盖端口与 `mirx show ... pkt-cnt block N hmirx` 查询命令。<br>
         「子系统」按 pzz_all.md 展示 29 个子系统的 3D 架构与流程阶段，点击卡片查看需求特性与接口。<br>
         「流控链路」绘制 MACW / MACI / MIRX / AQM / TM / MITX 之间的 PFC、CBFC、credit 与统计链路，可按类型过滤；点击模块查看交互与查询命令。<br>
         「转发路径」按 入口身份 / Ingress HPP·CPP / 本 DIE Fabric / Cross-DIE·Egress / 出口 五段展示全部模块，支持 本 DIE / 跨 DIE、AUX / HPP / CPP / Mirror 分类高亮；默认显示全部路径箭头，点击箭头高亮该路径并显示信息，点击模块可查看统计/状态查询命令（CPP 取自 CppPacketIngree2Egress.png）。<br>
@@ -92,14 +85,6 @@
       <div class="hud">
         <div class="hud-title" id="hudTitle">芯片全景</div>
         <div class="hud-sub" id="hudSub">4 个 chiplet/die · 64 pipe · 512 业务口 + 8 AUX</div>
-        <form id="moduleSearchForm" role="search" hidden>
-          <div class="module-search-row">
-            <input class="chip" id="moduleSearch" type="search" aria-label="搜索模块名称" placeholder="搜索模块名称" autocomplete="off" required>
-            <button class="btn" type="submit">搜索</button>
-          </div>
-          <small id="moduleSearchStatus" role="status"></small>
-          <div class="chips" id="moduleSearchResults"></div>
-        </form>
       </div>
       <div class="zoom">
         <button class="zbtn" id="btnIn" type="button" aria-label="放大">+</button>
@@ -175,6 +160,20 @@
         <div class="l1l-row aux"><b>⑤ AUX / 主机</b><span>AUX MAC / PCIe / CPIS ↔ CPP 入向 / 出向</span></div>
         <div class="l1l-row ucie"><b>跨 DIE</b><span>PITX / CPP Ingress → UCIe E / Spare UCIe S</span></div>
       </div>
+
+      <aside class="atlas-card" id="atlasCard" hidden aria-live="polite">
+        <div class="tag" id="atlasTag"></div>
+        <h3 id="atlasTitle"></h3>
+        <div class="atlas-block">
+          <b>关键作用</b>
+          <p id="atlasRole"></p>
+        </div>
+        <div class="atlas-block">
+          <b>主要功能</b>
+          <ul id="atlasFuncs"></ul>
+        </div>
+        <div class="atlas-foot" id="atlasFoot"></div>
+      </aside>
     </section>
 
     <div class="path-picker side-picker" id="pathPicker" hidden>
@@ -187,6 +186,7 @@
 <script src="visual-pcs-assets/three.min.js"></script>
 <script src="visual-pcs-assets/OrbitControls.js"></script>
 <script src="visual-pzz-assets/visual-pzz-modules.js"></script>
+<script src="visual-pzz-assets/visual-pzz-module-info.js"></script>
 <script src="visual-pzz-assets/visual-pzz-subsystems.js"></script>
 <script src="visual-pzz-assets/visual-pzz-flow.js"></script>
 <script src="visual-pzz-assets/visual-pzz-routes.js"></script>
@@ -226,13 +226,22 @@
   var renderer;
   try {
     renderer = new T.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    if (renderer.debug) renderer.debug.checkShaderErrors = false;
   } catch (err) {
     host.innerHTML = '<p class="fatal">当前浏览器环境不支持 WebGL。</p>';
     return;
   }
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  var LOW_POWER = ((navigator.hardwareConcurrency || 8) <= 4) ||
+                  ((navigator.deviceMemory || 8) <= 4);
+  var BASE_DPR = Math.min(window.devicePixelRatio || 1, LOW_POWER ? 1.0 : 1.25);
+  var qualityScale = LOW_POWER ? 0.9 : 1;
+  renderer.setPixelRatio(BASE_DPR * qualityScale);
   if ('outputEncoding' in renderer) renderer.outputEncoding = T.sRGBEncoding;
   host.prepend(renderer.domElement);
+  function applyQualityScale() {
+    renderer.setPixelRatio(BASE_DPR * qualityScale);
+    dirty = true;
+  }
 
   var scene = new T.Scene();
   scene.background = new T.Color(PAL.bg);
@@ -1284,12 +1293,14 @@
     new T.Vector3(0, 5.0, -15)
   ];
   var flowPulses = [];
-  for (var pi = 0; pi < DIE_POS.length; pi++) {
-    var dot = new T.Mesh(new T.SphereGeometry(0.5, 10, 8),
-      new T.MeshBasicMaterial({ color: 0x3b6fe0, transparent: true, opacity: 0.85 }));
-    dot.visible = false;
-    chipRoot.add(dot);
-    flowPulses.push({ mesh: dot, die: pi, phase: pi * 0.23 });
+  if (!LOW_POWER && !reduced) {
+    for (var pi = 0; pi < DIE_POS.length; pi++) {
+      var dot = new T.Mesh(new T.SphereGeometry(0.5, 10, 8),
+        new T.MeshBasicMaterial({ color: 0x3b6fe0, transparent: true, opacity: 0.85 }));
+      dot.visible = false;
+      chipRoot.add(dot);
+      flowPulses.push({ mesh: dot, die: pi, phase: pi * 0.23 });
+    }
   }
 
   var tmpPulse = new T.Vector3();
@@ -1332,8 +1343,6 @@
       var nd = camera.position.distanceTo(dies[n].center);
       if (nd < best) { best = nd; near = n; }
     }
-    // Keep the panorama open while the search form has keyboard focus.
-    if (dies[focusIndex].level === 0 && moduleSearchForm.matches(':focus-within')) return;
     focusIndex = near;
 
     for (var i = 0; i < dies.length; i++) {
@@ -1567,6 +1576,7 @@
    * ------------------------------------------------------------------ */
   var raycaster = new T.Raycaster();
   var pointer = new T.Vector2();
+  var lastPointerMoveAt = 0;
   var downAt = null;
   var pickables = [];
   for (var p = 0; p < dies.length; p++) {
@@ -1729,49 +1739,6 @@
     atlasRoot.position.z -= center.z;
   }
 
-  var moduleSearch = document.getElementById('moduleSearch');
-  var moduleSearchStatus = document.getElementById('moduleSearchStatus');
-  var moduleSearchResults = document.getElementById('moduleSearchResults');
-  var moduleSearchForm = document.getElementById('moduleSearchForm');
-  moduleSearchForm.addEventListener('pointerdown', function (event) {
-    event.stopPropagation();
-  });
-  moduleSearchForm.addEventListener('pointerup', function (event) {
-    event.stopPropagation();
-  });
-  moduleSearchForm.addEventListener('submit', function (event) {
-    event.preventDefault();
-    var first = moduleSearchResults.firstElementChild;
-    if (first) first.click();
-  });
-  moduleSearch.addEventListener('input', function () {
-    moduleSearchResults.textContent = '';
-    moduleSearchStatus.textContent = '';
-    var query = moduleSearch.value.trim().toLowerCase();
-    if (!query) return;
-
-    buildAtlas();
-    var count = 0;
-    atlasCards.forEach(function (card, index) {
-      if (card.data.name.toLowerCase().indexOf(query) < 0) return;
-      count++;
-      var button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'chip';
-      button.textContent = card.data.name;
-      button.addEventListener('click', function () {
-        if (viewMode === 'atlas') openAtlasModule(index);
-        else enterAtlas(index);
-        moduleSearch.value = '';
-        moduleSearchResults.textContent = '';
-        moduleSearchStatus.textContent = '';
-      });
-      if (card.data.name.toLowerCase() === query) moduleSearchResults.prepend(button);
-      else moduleSearchResults.appendChild(button);
-    });
-    moduleSearchStatus.textContent = count ? '找到 ' + count + ' 个模块' : '未找到匹配的模块';
-  });
-
   function showAtlasCards(only) {
     for (var i = 0; i < atlasCards.length; i++) {
       var c = atlasCards[i];
@@ -1855,23 +1822,53 @@
             'local pipe / MAC = ' + m + '，8 个 channel → port ' + (m * 8) + '~' + (m * 8 + 7) + '（本 chiplet）',
             '全局 port-id = chiplet×128 + ' + m + '×8 + channel',
             'mi_id = ' + Math.floor(m / 2) + '，mmu_port = port % 16，mc_port = channel % 4',
+            'MIRX block = 63 - local_pipe = 63 - ' + m + ' = ' + (63 - m) + '（HPP 48~63）',
             'mc_id：ch0~3 = ' + row.low + '，ch4~7 = ' + row.high
           ]
         };
         mapPicks.push(mesh);
         addMapLabel(mapRoot, 'MAC' + m, 'port ' + (m * 8) + '-' + (m * 8 + 7), x, 2.9, z, 'tiny');
+
+        /* 端口映射二级：每个 MAC（= local pipe）对应一个 MIRX block（HPP 48~63，反序） */
+        var mx = x - 6 + k * 4;
+        var mirxBlock = 63 - m;
+        var mirx = box(3.4, 0.7, 2.0, mx, 0.55, 11.2, C.mmu, mapRoot);
+        mirx.userData.info = {
+          title: 'MIRX ' + mirxBlock,
+          sub: 'HPP' + h + ' · MAC' + m + ' · local pipe ' + m,
+          lines: [
+            'MIRX block = 63 - local_pipe = 63 - ' + m + ' = ' + mirxBlock + '（HPP 48~63，与 pipe 反序）',
+            '本 block 覆盖 port ' + (m * 8) + '~' + (m * 8 + 7) + '，channel = port % 8（0~7）',
+            'CLI：mirx show chiplet ' + h + ' pkt-cnt block ' + m + ' hmirx  → 打印 block ' + mirxBlock,
+            '同 pipe 出口侧 MITX block = local pipe = ' + m
+          ]
+        };
+        mapPicks.push(mirx);
+        arrow(mapRoot, x, 1.4, z + 2.1, mx, 1.0, 10.2, 0x64748b, { radius: 0.07, headRadius: 0.22 });
       }
+
+      /* 每个 HPP 一条 MIRX 二级行标签：4 个 MAC 对应 4 个 block（反序） */
+      addMapLabel(mapRoot,
+        'MIRX ' + (63 - h * 4) + '-' + (63 - (h * 4 + 3)),
+        'block = 63 - MAC#', x, 1.7, 12.9, 'tiny');
     }
 
     var cards = [
       { x: -22, title: 'port 换算', sub: 'port = (chiplet×16 + local_pipe)×8 + channel' },
-      { x: 0, title: 'MMU 编号', sub: 'mi_id = (port%128)/16 · mmu_port = port%16' },
+      { x: 0, title: 'MMU / MIRX 编号', sub: 'mi_id = (port%128)/16 · mmu_port = port%16',
+        lines: [
+          'mi_id = (port%128)/16 · mmu_port = port%16',
+          'HPP MIRX block = 63 - local_pipe（48~63，与 pipe 反序）',
+          'CLI block N = local_pipe = 63 - MIRX block',
+          'mirx show chiplet <C> pkt-cnt block <N> hmirx',
+          'block 范围：UMI 0~47 / HPP 48~63 / CPP 64~68'
+        ] },
       { x: 22, title: 'TM / HPP', sub: 'HPP0-3 × 4 MAC · TM0-7（每 HPP 2 个）' }
     ];
     for (var c = 0; c < cards.length; c++) {
       var cd = cards[c];
       var card = box(19, 0.8, 6, cd.x, 0.6, 20, TINT.mmu, mapRoot);
-      card.userData.info = { title: cd.title, sub: '端口映射', lines: [cd.sub] };
+      card.userData.info = { title: cd.title, sub: '端口映射', lines: cd.lines || [cd.sub] };
       mapPicks.push(card);
       addMapLabel(mapRoot, cd.title, cd.sub, cd.x, 2.6, 20, 'tiny');
     }
@@ -3144,6 +3141,7 @@
   var routeAllVisual = null;
   var routeAllGroups = [];
   var routeAllPicks = [];
+  var routeAllMatCache = {};
 
   var ROUTE_STAGES = [
     { id: 'entry', name: '入口身份', short: '入口身份', en: '① ENTRY',
@@ -3668,6 +3666,7 @@
     routeAllVisual = null;
     routeAllGroups = [];
     routeAllPicks = [];
+    routeAllMatCache = {};
   }
 
   function buildAllRouteVisual() {
@@ -3685,7 +3684,11 @@
       }
       if (pts.length < 2) continue;
       var color = routeCategoryColor(route.category);
-      var mat = new T.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.62, depthWrite: false });
+      var mat = routeAllMatCache[color];
+      if (!mat) {
+        mat = new T.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.62, depthWrite: false });
+        routeAllMatCache[color] = mat;
+      }
       var g = new T.Group();
       routeAllVisual.add(g);
       var path = new T.CurvePath();
@@ -3695,13 +3698,13 @@
         var mid = new T.Vector3((a.x + b.x) / 2, 5.9 + Math.min(3.4, d * 0.03), (a.z + b.z) / 2);
         path.add(new T.QuadraticBezierCurve3(a, mid, b));
       }
-      var tube = new T.Mesh(new T.TubeGeometry(path, Math.max(40, (pts.length - 1) * 12), 0.22, 6, false), mat);
+      var tube = new T.Mesh(new T.TubeGeometry(path, Math.max(24, (pts.length - 1) * 8), 0.2, 4, false), mat);
       g.add(tube);
-      for (var ci = 0; ci < path.curves.length; ci++) {
-        var seg = path.curves[ci];
-        var cone = new T.Mesh(new T.ConeGeometry(0.46, 1.15, 9), mat);
-        cone.position.copy(seg.getPoint(0.76));
-        cone.quaternion.setFromUnitVectors(UP, seg.getTangent(0.76).normalize());
+      if (path.curves.length) {
+        var lastSeg = path.curves[path.curves.length - 1];
+        var cone = new T.Mesh(new T.ConeGeometry(0.5, 1.2, 8), mat);
+        cone.position.copy(lastSeg.getPoint(0.8));
+        cone.quaternion.setFromUnitVectors(UP, lastSeg.getTangent(0.8).normalize());
         g.add(cone);
       }
       routeAllGroups.push({ group: g, mat: mat, routeIndex: ri });
@@ -3716,21 +3719,15 @@
     for (var i = 0; i < routeAllGroups.length; i++) {
       var entry = routeAllGroups[i];
       var route = routes[entry.routeIndex];
-      if (!route || !routeClassMatches(route)) {
-        entry.group.visible = false;
-        continue;
-      }
-      var selected = (routeIdx === entry.routeIndex);
-      entry.group.visible = !selected;
-      var opacity = routeIdx < 0 ? 0.62 : 0.17;
+      var visible = !!(route && routeClassMatches(route)) && routeIdx < 0;
+      entry.group.visible = visible;
+      if (!visible) continue;
       entry.group.traverse(function (o) {
-        if (o.material && o.material.opacity !== undefined) o.material.opacity = opacity;
+        if (o.material && o.material.opacity !== undefined) o.material.opacity = 0.62;
       });
-      if (!selected) {
-        entry.group.traverse(function (o) {
-          if (o.isMesh) routeAllPicks.push({ mesh: o, routeIndex: entry.routeIndex });
-        });
-      }
+      entry.group.traverse(function (o) {
+        if (o.isMesh) routeAllPicks.push({ mesh: o, routeIndex: entry.routeIndex });
+      });
     }
   }
 
@@ -4181,13 +4178,161 @@
     return atlasRoot.localToWorld(v);
   }
 
+  var ATLAS_GROUP_ROLE = {
+    serdes: '以太网/SerDes 链路层功能，负责高速串行传输与链路可靠性。',
+    hpp: 'HPP 报文解析、查表、转发与出口改包。',
+    maci: 'MAC 与 HPP PIPE 之间的通道适配、缓存与流控。',
+    mmu: 'MMU 缓存管理、AQM、队列调度与组播 Fabric。',
+    tm: 'TM 队列管理、调度、整形与丢弃策略。',
+    ucie: '跨 DIE 互联、UCIe 桥接与备用链路。',
+    pcie: 'Host PCIe 接口、DMA 搬运与中断。',
+    soc: 'SoC 控制、时钟复位、中断与辅助功能。'
+  };
+
+  var ATLAS_GROUP_FUNCS = {
+    serdes: ['高速串行/并行转换', '以太网 MAC/PCS/FEC', '链路重传/流控', '链路状态与统计'],
+    hpp: ['报文解析/VLAN', 'L2/L3/ACL 查表', '入口/出口改包', '队列与镜像'],
+    maci: ['MAC 接口适配', 'FlexFIFO/通道缓存', 'PFC/CBFC 流控', '统计/镜像/环回'],
+    mmu: ['缓存/阈值管理', 'AQM/WRED/ECN', '队列调度', 'MC Fabric'],
+    tm: ['QC 队列管理', 'SCH 调度', 'POL 整形/丢弃', '反压与统计'],
+    ucie: ['跨 DIE 打包/解包', 'UCIe 链路', '备用链路', '错误与统计'],
+    pcie: ['Host PCIe 接口', 'DMA 搬运', '中断', '配置空间'],
+    soc: ['时钟/复位', '中断/看门狗', '配置与辅助', '状态监控']
+  };
+
+  var ATLAS_KEY_INFO = [
+    { re: /CBFC/i, role: '基于 credit 的无损流控，消除接收端缓存拥塞导致的丢包。',
+      funcs: ['维护 S_VC_CC / S_VC_CF / S_P_CU / S_VC_CL', 'CC_Update / CF_Update 周期同步', '无损 VC 映射与 credit limit', 'PFC/CBFC 反压与统计'] },
+    { re: /LLR/i, role: '链路级重传，检测丢包并恢复，保证无损链路可靠。',
+      funcs: ['TX 序列号分配与报文缓存', 'RX 序列号连续性检查', '重传请求/确认与 CtlOS 握手', '端口间缓存共享'] },
+    { re: /SerDes/i, role: '112G 高速串行物理接口，完成串并转换并承载 ETH 数据。',
+      funcs: ['串-并 / 并-串转换', 'CMU 时钟管理', '自适应均衡与链路训练', '链路状态/统计'] },
+    { re: /^ETH$/i, role: '以太网接口子系统，完成 MAC/PCS、流控与重传。',
+      funcs: ['MAC 数据适配', 'RX 丢包/通道缓存', 'RX weave/schedule', 'TX schedule', 'CBFC / LLR'] },
+    { re: /PITX/i, role: 'HPP 上行存储调度与报文修改。',
+      funcs: ['HPP buffer 存储调度', 'Metadata 保序', 'SOP 对齐', 'TRIM / MOD'] },
+    { re: /PETX/i, role: 'HPP 出口组包与 MACi 发送适配。',
+      funcs: ['报文/Metadata 调度', 'SRAM 地址管理', 'MACi 反压响应', '带宽统计'] },
+    { re: /PIRX|PERX/i, role: 'HPP 入口/出口通道适配与队列确定。',
+      funcs: ['入口 FIFO / Header 汇聚', '目标 TM/QID 确定', 'AQM GUR/SH/HR 判定', '出口改包/端口适配'] },
+    { re: /MACI/i, role: 'MAC 与 HPP PIPE 之间的通道适配。',
+      funcs: ['FlexFIFO / 通道缓存', 'VC/CoS 分类', 'PFC/CBFC 流控', 'Mirror / Loopback'] },
+    { re: /Parser/i, role: '报文头解析与 metadata 生成。',
+      funcs: ['以太网/ARP/IPv4/IPv6', 'UDP/TCP', 'VLAN/隧道', 'UDF/GPU ID'] },
+    { re: /ACL/i, role: 'ACL/TCAM 策略匹配与动作执行。',
+      funcs: ['IACL / EACL', 'Meter/SFlow/IPFIX', 'permit/deny/redirect', '规则计数'] },
+    { re: /AQM/i, role: '主动队列管理与拥塞控制。',
+      funcs: ['WRED / ECN', 'TRIM 中断', 'lossless 流控', 'AUX WRED'] }
+  ];
+
+  var ATLAS_GENERIC_SUB = /^(功能详述|功能概述|概述|简介|接口描述|配置|寄存器|编程手册|测试|testcases?|environment|overview|configuration|use for|reset|requirements?|目录|references?|general overview|《.*》|附录|详细设计)/i;
+
+  function atlasReadableSub(s) {
+    var t = String(s || '').replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+    return t;
+  }
+
+  function atlasGroupNameOf(module) {
+    var groups = window.PZZ_GROUPS || [];
+    for (var i = 0; i < groups.length; i++) {
+      if (groups[i].id === module.group) return groups[i].name;
+    }
+    return module.group || '';
+  }
+
+  function atlasModuleInfo(module, groupName) {
+    var summary = String(module.summary || '').replace(/\s+/g, ' ').trim();
+    var group = module.group || 'soc';
+    var groupRole = ATLAS_GROUP_ROLE[group] || '芯片功能模块。';
+    var groupFuncs = ATLAS_GROUP_FUNCS[group] || [];
+    var sentences = summary.split(/[。；;.]/).map(function (s) { return s.trim(); }).filter(Boolean);
+    var override = window.PZZ_MODULE_INFO && window.PZZ_MODULE_INFO[module.id];
+    var key = null;
+    for (var ki = 0; ki < ATLAS_KEY_INFO.length; ki++) {
+      if (ATLAS_KEY_INFO[ki].re.test(module.name)) { key = ATLAS_KEY_INFO[ki]; break; }
+    }
+
+    var role;
+    if (override && override.role) {
+      role = override.role;
+    } else {
+      role = sentences[0] || groupRole;
+      if (role.length < 12 || /本文档|本文是|本文主要|设计文档|实现说明|This document/i.test(role)) {
+        role = groupRole;
+      }
+      if (key) role = key.role;
+    }
+
+    var funcs = [];
+    function addFunc(v, keepRaw) {
+      var t = keepRaw ? String(v || '').replace(/\s+/g, ' ').trim() : atlasReadableSub(v);
+      if (!t || t.length < 2 || ATLAS_GENERIC_SUB.test(t)) return;
+      if (/本文|文档|描述|设计说明|实现说明/.test(t)) return;
+      if (t.length > 72) t = t.slice(0, 71) + '…';
+      var low = t.toLowerCase();
+      for (var fi = 0; fi < funcs.length; fi++) {
+        if (funcs[fi].toLowerCase() === low) return;
+      }
+      funcs.push(t);
+    }
+
+    var hasOverride = false;
+    if (override && override.funcs && override.funcs.length) {
+      override.funcs.forEach(function (v) { addFunc(v, true); });
+      hasOverride = funcs.length >= 3;
+    } else if (key) {
+      key.funcs.forEach(function (v) { addFunc(v, true); });
+    }
+    var subs = module.subs || [];
+    if (!hasOverride && (!key || funcs.length < 4)) {
+      for (var si = 0; si < subs.length && funcs.length < 6; si++) addFunc(subs[si]);
+      for (var sj = 1; sj < sentences.length && funcs.length < 6; sj++) addFunc(sentences[sj]);
+    }
+    for (var gi = 0; gi < groupFuncs.length && funcs.length < 4; gi++) addFunc(groupFuncs[gi]);
+
+    return {
+      role: role.length > 220 ? role.slice(0, 219) + '…' : role,
+      funcs: funcs.slice(0, 6),
+      groupName: groupName || group,
+      subCount: subs.length
+    };
+  }
+
+  function showAtlasCard(module, groupName) {
+    var el = document.getElementById('atlasCard');
+    if (!el) return;
+    var info = atlasModuleInfo(module, groupName);
+    document.getElementById('atlasTag').textContent = '模块总览 · ' + info.groupName;
+    document.getElementById('atlasTitle').textContent = module.name;
+    document.getElementById('atlasRole').textContent = info.role;
+    var ul = document.getElementById('atlasFuncs');
+    ul.innerHTML = '';
+    for (var i = 0; i < info.funcs.length; i++) {
+      var li = document.createElement('li');
+      li.textContent = info.funcs[i];
+      ul.appendChild(li);
+    }
+    if (!info.funcs.length) {
+      var empty = document.createElement('li');
+      empty.textContent = '暂无功能摘要（见 pzz_chip_ref 文档）。';
+      ul.appendChild(empty);
+    }
+    document.getElementById('atlasFoot').textContent =
+      '子模块 ' + info.subCount + ' 个 · 点击「返回模块总览」查看全部模块';
+    el.hidden = false;
+    document.body.classList.add('atlas-detail');
+  }
+
+  function hideAtlasCard() {
+    var el = document.getElementById('atlasCard');
+    if (el) el.hidden = true;
+    document.body.classList.remove('atlas-detail');
+  }
+
   function openAtlasModule(idx) {
     if (idx < 0 || idx >= atlasCards.length) return;
     closeAtlasModule(true);
     atlasSelected = idx;
-    hideHoverCard();
-    atlasLabels.forEach(function (label) { label.el.style.display = 'none'; });
-    dirty = true;
     var card = atlasCards[idx];
 
     showAtlasCards(-1);
@@ -4216,12 +4361,15 @@
       addAtlasLabel(atlasDetail, subs[i], null, cx, 3.4, cz, 'tiny', { detail: true });
     }
 
+    showAtlasCard(card.data, groupName);
+
     var target = atlasWorld(card);
     flyTo(target, 70, new T.Vector3(0, 1.05, 0.85));
     updateBackButton();
   }
 
   function closeAtlasModule(silent) {
+    hideAtlasCard();
     if (atlasDetail) {
       atlasRoot.remove(atlasDetail);
       atlasDetail = null;
@@ -4241,9 +4389,8 @@
     updateBackButton();
   }
 
-  function enterAtlas(moduleIndex) {
+  function enterAtlas() {
     hideInfoCard();
-    hideHoverCard();
     leaveMap();
     leavePath();
     leaveDiagram();
@@ -4257,20 +4404,16 @@
     viewMode = 'atlas';
     atlasSelected = -1;
     atlasHover = -1;
+    showAtlasCards();
     chipRoot.visible = false;
     atlasRoot.visible = true;
     setChip(null);
     var ac = document.getElementById('chipAtlas');
     if (ac) ac.classList.add('on');
     labels.forEach(function (L) { L.el.style.display = 'none'; });
-    if (moduleIndex === undefined) {
-      showAtlasCards();
-      flyTo(new T.Vector3(0, 0, 0), 185, new T.Vector3(0, 1.0, 0.78));
-      updateBackButton();
-    } else {
-      openAtlasModule(moduleIndex);
-    }
-    draw();
+    flyTo(new T.Vector3(0, 0, 0), 185, new T.Vector3(0, 1.0, 0.78));
+    updateBackButton();
+    if (viewMode === 'atlas') draw();
   }
 
   function exitAtlas() {
@@ -4552,7 +4695,7 @@
       labels.forEach(function (L) { L.el.style.display = 'none'; });
       atlasLabels.forEach(function (L) { L.el.style.display = 'none'; });
       setChip(null);
-      flyTo(new T.Vector3(0, 2, 3), 150, new T.Vector3(0, 1.0, 0.82));
+      flyTo(new T.Vector3(0, 2, 5), 162, new T.Vector3(0, 1.0, 0.82));
       setLayerButtons();
       draw();
       return;
@@ -4726,11 +4869,52 @@
     return alias[name] ? (table[alias[name]] || null) : null;
   }
 
+  function resolveAtlasModuleInfo(info) {
+    if (!info) return null;
+    var table = window.PZZ_MODULE_INFO || {};
+    var alias = window.PZZ_MODULE_ALIAS || {};
+    var key = info.id || info.title || '';
+    if (table[key]) return table[key];
+    if (alias[key] && table[alias[key]]) return table[alias[key]];
+    return null;
+  }
+
   function showInfoCard(info) {
     hideHoverCard();
     infoTag.textContent = info.sub || '子模块';
     infoTitle.textContent = info.title || '';
     infoList.innerHTML = '';
+    if (viewMode === 'chip') {
+      var mod = resolveAtlasModuleInfo(info);
+      if (mod) {
+        if (mod.role) {
+          var rowRole = document.createElement('li');
+          rowRole.className = 'io';
+          var kRole = document.createElement('span');
+          kRole.className = 'io-k';
+          kRole.textContent = '关键作用';
+          var vRole = document.createElement('span');
+          vRole.className = 'io-v';
+          vRole.textContent = mod.role;
+          rowRole.appendChild(kRole);
+          rowRole.appendChild(vRole);
+          infoList.appendChild(rowRole);
+        }
+        if (mod.funcs && mod.funcs.length) {
+          var rowFn = document.createElement('li');
+          rowFn.className = 'io';
+          var kFn = document.createElement('span');
+          kFn.className = 'io-k';
+          kFn.textContent = '主要功能';
+          var vFn = document.createElement('span');
+          vFn.className = 'io-v';
+          vFn.textContent = mod.funcs.slice(0, 4).join('；');
+          rowFn.appendChild(kFn);
+          rowFn.appendChild(vFn);
+          infoList.appendChild(rowFn);
+        }
+      }
+    }
     var io = resolveModuleIO(info);
     if (io) {
       var ioRows = [['输入', io.input], ['输出', io.output], ['本地处理', io.proc]];
@@ -4969,6 +5153,10 @@
     if (viewMode === 'flow') setFlowHover(-1);
   });
   renderer.domElement.addEventListener('pointermove', function (e) {
+    if (downAt) return;
+    var moveNow = performance.now();
+    if (moveNow - lastPointerMoveAt < 24) return;
+    lastPointerMoveAt = moveNow;
     dirty = true;
     if (viewMode !== 'chip' && l1HoverName) { l1HoverName = ''; dirty = true; }
     if (viewMode === 'route') {
@@ -5062,8 +5250,6 @@
                    '存储调度 · Metadata · SOP 对齐 · Modify（对齐/TRIM/MOD）· MIRX 输出'];
 
   function updateHud() {
-    moduleSearchForm.hidden = !((viewMode === 'chip' && dies[focusIndex].level === 0) ||
-                                (viewMode === 'atlas' && atlasSelected < 0));
     if (viewMode === 'route') {
       var routes = window.PZZ_ROUTES || [];
       var rr = routes[routeIdx];
@@ -5178,8 +5364,8 @@
       if ('map' !== lastHudKey) {
         lastHudKey = 'map';
         lodBadge.textContent = '固定 · 端口映射';
-        hudTitle.textContent = '端口 / TM / HPP 映射';
-        hudSub.textContent = 'HPP0-3 · MAC0-15 · TM0-7 · port 0-127（每 chiplet，全局 +chiplet×128）';
+        hudTitle.textContent = '端口 / TM / HPP / MIRX 映射';
+        hudSub.textContent = 'HPP0-3 · MAC0-15 · TM0-7 · MIRX block 63-48 · port 0-127（每 chiplet，全局 +chiplet×128）';
       }
       setScaleText();
       return;
@@ -5196,10 +5382,12 @@
           hudSub.textContent = (amSum ? amSum + '… · ' : '') + '子模块 ' + am.subs.length + ' 个';
         } else if (atlasHover >= 0 && atlasCards[atlasHover]) {
           var ah = atlasCards[atlasHover].data;
-          var ahSum = (ah.summary || '').slice(0, 70);
+          var ahInfo = atlasModuleInfo(ah, atlasGroupNameOf(ah));
+          var ahFn = ahInfo.funcs.slice(0, 3).join('；');
           lodBadge.textContent = (pinned === 'atlas' ? '固定 · ' : '') + '模块总览';
           hudTitle.textContent = ah.name;
-          hudSub.textContent = (ahSum ? ahSum + '… · ' : '') + '点击进入子模块';
+          hudSub.textContent = '关键作用：' + ahInfo.role +
+            (ahFn ? ' · 功能：' + ahFn : '') + ' · 点击进入';
         } else {
           lodBadge.textContent = (pinned === 'atlas' ? '固定 · ' : '') + '模块总览';
           hudTitle.textContent = 'pzz_chip_ref 模块索引';
@@ -5241,6 +5429,12 @@
   resize();
 
   var last = performance.now();
+  var lastDrawAt = 0;
+  var lastLabelAt = 0;
+  var labelPending = false;
+  var perfDrawMs = 0;
+  var perfDrawN = 0;
+  var ANIM_INTERVAL = 1000 / 30;
 
   function labelsNeedUpdate() {
     var lv = (dies[focusIndex] && dies[focusIndex].level) || 0;
@@ -5280,7 +5474,9 @@
     scene.matrixWorldAutoUpdate = !playbackOnly;
     renderer.render(scene, camera);
     scene.matrixWorldAutoUpdate = true;
-    if (labelsNeedUpdate()) {
+    if (labelsNeedUpdate()) labelPending = true;
+    var labelNow = performance.now();
+    if (labelPending && (labelNow - lastLabelAt >= 30 || !viewAnimates())) {
       if (viewMode === 'chip') updateLabels();
       else if (viewMode === 'atlas') updateAtlasLabels();
       else if (viewMode === 'map') updateMapLabels();
@@ -5291,6 +5487,8 @@
       else updateDiagramLabels();
       labelCamPos.copy(camera.position);
       labelCamQuat.copy(camera.quaternion);
+      labelPending = false;
+      lastLabelAt = labelNow;
     }
     updateBackButton();
   }
@@ -5306,13 +5504,14 @@
       for (var vi = 0; vi < dies.length; vi++) {
         if (dies[vi].level > 0) return false;
       }
-      return true;
+      return flowPulses.length > 0;
     }
     return false;
   }
 
   function frame(now) {
     requestAnimationFrame(frame);
+    if (document.hidden) return;
     last = now;
 
     if (tween) {
@@ -5327,8 +5526,26 @@
 
     var anim = viewAnimates();
     if (!dirty && !anim) return;
+    // 动画帧限到 30fps；交互/相机移动仍按需全速绘制
+    if (!dirty && anim && now - lastDrawAt < ANIM_INTERVAL) return;
+    var t0 = performance.now();
     draw(true);
+    var dt = performance.now() - t0;
     dirty = false;
+    lastDrawAt = now;
+
+    // 自适应分辨率：CPU 帧耗时偏高时自动降低渲染倍率
+    perfDrawMs += dt;
+    perfDrawN++;
+    if (perfDrawN >= 45) {
+      var avg = perfDrawMs / perfDrawN;
+      var oldScale = qualityScale;
+      if (avg > 15 && qualityScale > 0.7) qualityScale = Math.max(0.7, qualityScale - 0.1);
+      else if (avg < 7 && qualityScale < 1) qualityScale = Math.min(1, qualityScale + 0.05);
+      if (oldScale !== qualityScale) applyQualityScale();
+      perfDrawMs = 0;
+      perfDrawN = 0;
+    }
   }
 
   // initial framing (also renders one frame when rAF is throttled)
@@ -5395,7 +5612,8 @@
     },
     state: function () {
       return { viewMode: viewMode, pinned: pinned, dirty: dirty,
-               animates: viewAnimates(), tween: !!tween, autoRotate: controls.autoRotate };
+               animates: viewAnimates(), tween: !!tween, autoRotate: controls.autoRotate,
+               qualityScale: qualityScale, dpr: renderer.getPixelRatio(), lowPower: LOW_POWER };
     },
     diagram: {
       root: diagramRoot,

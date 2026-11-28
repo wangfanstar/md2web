@@ -130,7 +130,7 @@ code, .mono { font-family: var(--f-mono); }
   position: absolute; left: 0; top: 0; white-space: nowrap; pointer-events: none;
   font-family: var(--f-display); font-size: 13px; font-weight: 600; color: var(--ink);
   text-shadow: 0 1px 0 color-mix(in srgb, var(--panel) 80%, transparent);
-  transform: translate(-50%, -100%); will-change: transform;
+  transform: translate(-50%, -100%);
 }
 .lbl small {
   display: block; font-family: var(--f-mono); font-weight: 500;
@@ -147,7 +147,7 @@ code, .mono { font-family: var(--f-mono); }
   background: color-mix(in srgb, var(--panel) 82%, transparent);
   border: 1px solid var(--rule); border-radius: 5px;
   padding: 2px 5px; box-shadow: 0 1px 4px rgba(0,0,0,.14);
-  transition: opacity .15s ease;
+  text-shadow: none; transition: opacity .15s ease;
 }
 .lbl.l0tag small { display: none; }
 .lbl.l1tag {
@@ -211,6 +211,32 @@ code, .mono { font-family: var(--f-mono); }
   text-transform: uppercase; color: var(--accent);
 }
 .info-card h3 { font-size: 1.02rem; margin: 3px 0 4px; }
+.atlas-card {
+  position: absolute; left: clamp(12px, 2vw, 22px); bottom: clamp(12px, 2vw, 20px);
+  width: min(430px, 52vw); max-height: 48vh; overflow: auto; z-index: 6;
+  padding: 12px 14px 13px; border-radius: 10px; background: var(--panel);
+  border: 1px solid var(--rule); box-shadow: var(--shadow);
+}
+.atlas-card .tag {
+  font-family: var(--f-mono); font-size: .66rem; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--accent);
+}
+.atlas-card h3 { font-size: 1rem; margin: 2px 0 7px; }
+.atlas-block { margin-top: 7px; }
+.atlas-block b {
+  display: block; font-family: var(--f-display); font-size: .64rem;
+  letter-spacing: .08em; color: var(--muted); text-transform: uppercase;
+}
+.atlas-block p {
+  margin: 3px 0 0; font-size: .78rem; line-height: 1.55; color: var(--ink-2);
+}
+.atlas-block ul { margin: 4px 0 0; padding-left: 16px; display: grid; gap: 3px; }
+.atlas-block li { font-size: .74rem; line-height: 1.45; color: var(--ink-2); }
+.atlas-foot {
+  margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--rule);
+  font-family: var(--f-mono); font-size: .62rem; color: var(--muted);
+}
+body.atlas-detail .hud { display: none; }
 .hover-card {
   position: fixed; z-index: 9; width: min(290px, 72vw);
   padding: 9px 11px 10px; border-radius: 8px; background: var(--panel);
@@ -438,6 +464,10 @@ code, .mono { font-family: var(--f-mono); }
   .hud { top: 214px; }
   .info-card { top: 214px; left: 10px; right: 10px; width: auto; max-height: 40vh; z-index: 7; }
   .hover-card { width: min(240px, 62vw); }
+  .atlas-card {
+    left: 10px; right: auto; width: min(360px, calc(100vw - 20px));
+    bottom: calc(42vh + 10px); max-height: 34vh;
+  }
   .main { padding-bottom: 0; }
   body.l1-mode .side { display: none; }
   body.l1-mode .hud { display: none; }
